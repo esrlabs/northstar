@@ -1,0 +1,72 @@
+// Copyright (c) 2020 E.S.R.Labs. All rights reserved.
+//
+// NOTICE:  All information contained herein is, and remains
+// the property of E.S.R.Labs and its suppliers, if any.
+// The intellectual and technical concepts contained herein are
+// proprietary to E.S.R.Labs and its suppliers and may be covered
+// by German and Foreign Patents, patents in process, and are protected
+// by trade secret or copyright law.
+// Dissemination of this information or reproduction of this material
+// is strictly forbidden unless prior written permission is obtained
+// from E.S.R.Labs.
+
+#![deny(clippy::all)]
+
+use anyhow::{anyhow, Error, Result};
+use log::info;
+use std::{path::PathBuf, str::FromStr};
+use structopt::StructOpt;
+
+#[derive(Debug)]
+enum Format {
+    Text,
+    Json,
+}
+
+impl FromStr for Format {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "json" => Ok(Format::Json),
+            "text" | "txt" => Ok(Format::Text),
+            _ => Err(anyhow!("Invalid format {}", s)),
+        }
+    }
+}
+
+#[derive(Debug, StructOpt)]
+#[structopt(about = "Northstar CLI")]
+enum Opt {
+    /// Pack Northstar containers
+    Pack {
+        /// Container source dir
+        #[structopt(short, long)]
+        dir: PathBuf,
+        #[structopt(short, long)]
+        out: PathBuf,
+    },
+    /// Unpack Northstar containers
+    Unpack {
+        /// Container source dir
+        #[structopt(short, long)]
+        dir: PathBuf,
+        #[structopt(short, long)]
+        out: PathBuf,
+    },
+    /// Print information about a northstart container
+    Inspect {
+        /// Container to inspect
+        #[structopt(short, long)]
+        container: PathBuf,
+        /// Output format
+        #[structopt(short, long)]
+        format: Format,
+    },
+}
+
+fn main() -> Result<()> {
+    env_logger::init();
+    let opt = Opt::from_args();
+    info!("{:#?}", opt);
+    todo!();
+}

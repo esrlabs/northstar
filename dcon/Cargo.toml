@@ -1,0 +1,17 @@
+[package]
+name = "dcon"
+version = "0.1.0"
+authors = ["Felix Obenhuber <felix.obenhuber@esrlabs.com>"]
+edition = "2018"
+
+[dependencies]
+ansi_term = "0.12.1"
+anyhow = "1.0.31"
+clap = "2.33.0"
+directories = "2.0.2"
+env_logger = "0.7.1"
+log = "0.4.8"
+prettytable-rs = "0.8.0"
+rustyline = "6.0.0"
+rustyline-derive = "0.3.0"
+strsim = "0.10.0"
