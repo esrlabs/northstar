@@ -1,14 +1,20 @@
-begin
-  # require '../north_test_environment/rakefile.rb'
-rescue LoadError
-  # not using custom rakescript
-end
-
 LEVEL_WARN = 1
 LEVEL_INFO = 2
 LEVEL_DEBUG = 3
 LEVEL_TRACE = 4
 VERBOSITY = LEVEL_DEBUG
+
+def shell(cmd, verbose = false)
+  if verbose
+    Rake.sh cmd
+  else
+    _stdout_str, error_str, status = Open3.capture3(cmd)
+    unless status.success?
+      warn error_str
+      raise 'did not work'
+    end
+  end
+end
 
 def debug(content)
   require 'colored'
