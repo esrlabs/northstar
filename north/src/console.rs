@@ -1,14 +1,16 @@
-// Copyright (c) 2020 E.S.R.Labs. All rights reserved.
+// Copyright (c) 2019 - 2020 ESRLabs
 //
-// NOTICE:  All information contained herein is, and remains
-// the property of E.S.R.Labs and its suppliers, if any.
-// The intellectual and technical concepts contained herein are
-// proprietary to E.S.R.Labs and its suppliers and may be covered
-// by German and Foreign Patents, patents in process, and are protected
-// by trade secret or copyright law.
-// Dissemination of this information or reproduction of this material
-// is strictly forbidden unless prior written permission is obtained
-// from E.S.R.Labs.
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
 
 use crate::{Event, EventTx, Name, State, TerminationReason, SETTINGS};
 use anyhow::{anyhow, Context, Result};
@@ -34,7 +36,7 @@ pub async fn init(tx: &EventTx) -> Result<()> {
     let rx = serve().await?;
     let tx = tx.clone();
     task::spawn(async move {
-        while let Some((line, tx_reply)) = rx.recv().await {
+        while let Ok((line, tx_reply)) = rx.recv().await {
             tx.send(Event::Console(line, tx_reply)).await;
         }
     });
@@ -356,7 +358,7 @@ async fn serve() -> Result<sync::Receiver<(String, sync::Sender<String>)>> {
                     while let Some(Ok(line)) = lines.next().await {
                         let line = line.trim();
                         tx.send((line.into(), tx_reply.clone())).await;
-                        if let Some(reply) = rx_reply.recv().await {
+                        if let Ok(reply) = rx_reply.recv().await {
                             if let Err(e) = writer.write_all(reply.as_bytes()).await {
                                 warn!("Error on console connection {:?}: {}", peer, e);
                                 break;

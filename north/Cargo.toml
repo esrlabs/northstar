@@ -5,40 +5,42 @@ authors = ["ESRLabs"]
 edition = "2018"
 build = "build.rs"
 default-run = "north"
+license = "Apache-2.0"
+license-file = "LICENSE.md"
 
 [[bin]]
 name = "north"
 
 [dependencies]
-anyhow = "1.0.28"
-async-std = { version = "1.5.0", features = ["attributes", "unstable"] }
-async-trait = "0.1.29"
-base64 = "0.12.0"
+anyhow = "1.0.31"
+async-std = { version = "1.6.2", features = ["attributes", "unstable"] }
+async-trait = "0.1.36"
+base64 = "0.12.3"
 bitflags = "1.2.1"
 config = "0.10.1"
 floating-duration = "0.1.2"
-futures = { version = "0.3.4", features = ["std", "async-await"], default-features = false }
+futures = { version = "0.3.5", features = ["std", "async-await"], default-features = false }
 hex = "0.4.2"
 itertools = "0.9.0"
 lazy_static = "1.4.0"
-libc = "0.2.69"
+libc = "0.2.71"
 log = "0.4.8"
 logd-logger = { git = "https://github.com/flxo/logd-logger.git" }
 nix = "0.17.0"
 north_common = { path = "../north_common" }
 prettytable-rs = { version = "0.8.0", default-features = false }
-regex = "1.3.6"
+regex = "1.3.9"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.50"
-serde_yaml = "0.8.11"
-structopt = "0.3.12"
+serde_json = "1.0.56"
+serde_yaml = "0.8.13"
+structopt = "0.3.15"
 structure = "0.1.2"
 subprocess = "0.2.4"
 tempfile = "3.1.0"
 url = "2.1.1"
 uuid = { version = "0.8.1", features = [ "v4"] }
 walkdir = "2.3"
-zip = "0.5.5"
+zip = "0.5.6"
 
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
 pretty-bytes = "0.2.2"
