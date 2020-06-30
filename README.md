@@ -1,23 +1,28 @@
-# Northstart
+# Minimal and secure containers for edge computing
 
-`Northstar` is a isolated process supervisor.
+Northstar is an open source technology for securly running self sufficient sandboxed containers in a ressource constraint environment. It offers a runtime that monitors isolated containers. In addition it provides tooling to create and manage those containers.
+
+At its core, Northstar makes extensive use of sandboxing to isolate applications from the rest of the system while at the same time orchestrating efficient startup and secure update scenarios. Such applications run inside Northstar-containers and only rely on system services and ressource containers provided by the Northstar-platform. Similar sandboxing techniques were selected and used as are found in Docker and other containerization approaches to reach maximum isolation. To build the most efficient and robust solution, Northstar is completely developed in Rust, a language designed to afford the performance of C++ while at the same time guaranteeing memory safety.
 
 ## Getting started
 
 Developing with north requires some tooling. A good starting point is installing `Rust` via `https://rustup.rs`.
-Next run `bootstrap.rb` to add additional tools and libraries.
 
-### MacOS
+### Install Rust nightly toolchain
 
-TODO
+```shell
+rustup toolchain install nightly
+```
 
-### Linux
+### Setup ruby env
 
-TODO
+Next run `rake setup_environment` to add additional tools and libraries.
 
-### Android
+### install grcov
 
-TODO
+```shell
+cargo install grcov
+```
 
 ## Checks & Tests
 
@@ -34,21 +39,3 @@ Generate a report of the unit tests code coverage with the following command:
 ```shell
 rake coverage
 ```
-
-### Prerequisites
-
-#### Rust nightly toolchain
-
-```shell
-rustup toolchain install nightly
-```
-
-Or see <https://github.com/rust-lang/rustup#working-with-nightly-rust> for details.
-
-#### install grcov
-
-```shell
-cargo install grcov
-```
-
-More information on <https://github.com/mozilla/grcov>
