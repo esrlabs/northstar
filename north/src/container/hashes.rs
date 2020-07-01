@@ -40,8 +40,8 @@ impl Hashes {
     pub fn from_str(file: &str) -> Result<Hashes, Error> {
         // sha256 of signature.yaml
         let mut hasher = sha2::Sha256::new();
-        hasher.input(file.as_bytes());
-        let _digest = format!("{:x}", hasher.result());
+        hasher.update(file.as_bytes());
+        let _digest = format!("{:x}", hasher.finalize());
 
         let mut docs = file.split("---");
 
@@ -166,6 +166,6 @@ signature: +lUTeD1YQDAmZTa32Ni1EhztzpaOgN329kNbWEo5NA+hbKRQjIaP6jXffHWSL3x/glZ54
         s.fs_verity_hash,
         "39d01c334d0800e39674005ff52238160b36078dd44839cfefa89f1d12cc3cfa"
     );
-    assert_eq!(s.fs_verity_offset, 4435968);
+    assert_eq!(s.fs_verity_offset, 4_435_968);
     Ok(())
 }
