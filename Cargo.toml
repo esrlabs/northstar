@@ -2,7 +2,6 @@
 
 members = [
     "dcon",
-    "downloader",
     "north",
     "north_common",
     "sextant",

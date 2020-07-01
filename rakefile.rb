@@ -63,13 +63,6 @@ namespace :north do
   end
 end
 
-namespace :downloader do
-  desc 'Build Downloader'
-  task :build do
-    sh 'cargo build --bin downloader'
-  end
-end
-
 task :clean do
   sh 'cargo clean'
 end
