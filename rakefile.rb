@@ -1,20 +1,10 @@
+# frozen_string_literal: true
+
 LEVEL_WARN = 1
 LEVEL_INFO = 2
 LEVEL_DEBUG = 3
 LEVEL_TRACE = 4
 VERBOSITY = LEVEL_DEBUG
-
-def shell(cmd, verbose = false)
-  if verbose
-    Rake.sh cmd
-  else
-    _stdout_str, error_str, status = Open3.capture3(cmd)
-    unless status.success?
-      warn error_str
-      raise 'did not work'
-    end
-  end
-end
 
 def debug(content)
   require 'colored'
@@ -47,12 +37,11 @@ def check_gem(gem)
                 "#{gem} is required. Please install it using \"gem install #{gem}\".")
 end
 
-required_gems = ['colored',
-                 'fileutils',
-                 'rbnacl',
-                 'yaml',
-                 'rubyzip'
-                ]
+required_gems = %w[colored
+                   fileutils
+                   rbnacl
+                   yaml
+                   rubyzip]
 
 desc 'checking local environment'
 task :check_environment do
@@ -63,7 +52,7 @@ end
 desc 'setup build environment'
 task :setup_environment do
   required_gems.each do |gem|
-    shell "gem install #{gem}" unless installed?("gem list -i #{gem}")
+    sh "gem install #{gem}" unless installed?("gem list -i #{gem}")
   end
 end
 
@@ -123,4 +112,3 @@ task :coverage do
   sh "grcov ./target/debug/ -s north_common/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/north"
   info "Code coverage report for north in: ./#{cov_dir}/north/index.html"
 end
-

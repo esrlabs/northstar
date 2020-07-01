@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 
 def info(content)
   require 'colored'
@@ -36,6 +37,7 @@ def shell(cmd, verbose = false)
   if verbose
     Rake.sh cmd
   else
+    require 'open3'
     _stdout_str, error_str, status = Open3.capture3(cmd)
     unless status.success?
       warn error_str
@@ -176,13 +178,13 @@ def create_npk(input, key_name, key, fstype, zip)
     manifest = IO.binread("#{input}/manifest.yaml")
     manifest_hash = sha256(manifest)
     fs_hash = sha256(IO.binread(fsimg))
-    hashes = +"""manifest.yaml:
+    hashes = +''"manifest.yaml:
   hash: #{hex(manifest_hash)}
 fs.img:
   hash: #{hex(fs_hash)}
   verity-hash: #{hex(verity_hash)}
   verity-offset: #{filesystem_size}
-"""
+"''
 
     # Sign hashes
     signing_key = RbNaCl::SigningKey.new(key)
@@ -237,9 +239,9 @@ def create_containers(
   packages = {}
 
   Dir.glob("#{container_sources}/**/*")
-      .filter { |f| File.exist?(f + '/manifest.yaml') }
-      .sort
-      .each do |src_dir|
+     .filter { |f| File.exist?(f + '/manifest.yaml') }
+     .sort
+     .each do |src_dir|
     Dir.glob("#{src_dir}/root-*").each do |arch_dir|
       # Load manifest
       manifest = YAML.load_file("#{src_dir}/manifest.yaml")
