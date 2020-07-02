@@ -58,10 +58,17 @@ task :setup_environment do
   end
 end
 
-namespace :north do
-  desc 'Build North'
-  task :build do
+namespace :build do
+  desc 'Build North runtime'
+  task :north do
     sh 'cargo build --release --bin north'
+  end
+
+  desc 'Build everything'
+  task :all do
+    sh 'cargo build --release --bin north'
+    sh 'cargo build --release --bin dcon'
+    sh 'cargo build --release --bin sextant'
   end
 
   desc 'Build example'
@@ -76,7 +83,7 @@ namespace :north do
     end
 
     apps = %w[cpueater hello]
-    # apps = %w[cpueater crashing datarw hello memeater]
+    # TODO: add missing examples [crashing datarw memeater]
     # Compile the container binaries for each target and copy into the container sources
     # if the container source directory exists
     CONTAINER_SOURCES = "#{EXAMPLE_DIR}/res/container"
