@@ -253,34 +253,21 @@ def create_containers(
      .each do |src_dir|
     packages += create_one_container(src_dir, registry, signing_key, signing_key_name)
   end
+  Dir.glob("#{registry}/*.yaml").each do |f|
+    rm f
+  end
 
   # Create version list
   packages.each do |p|
-    File.open("#{registry}/packages-#{p.architecture}.yaml", 'w') do |f|
-      f.write "{ 'name' => #{p.name}, 'version' => #{p.version} }"
+    File.open("#{registry}/packages-#{p.architecture}.yaml", 'a') do |f|
+      f.puts "{ 'name' => #{p.name}, 'version' => #{p.version} }"
     end
   end
 end
 
-  # ../north_test_environment/res/container/hello
-  # -> Cargo.toml
-  # -> manifest.yaml
-  # -> root
-  #  --> someconfig.toml
-  # -> root-aarch64-linux-android
-  #  --> hello
-  # -> root-x86_64-apple-darwin
-  #  --> hello
-  # -> root-x86_64-unknown-linux
-  #  --> hello
-  # -> src
-  #  --> main.rs
-
 def create_one_container(src_dir, registry, signing_key, signing_key_name)
-  puts "using src dir: #{src_dir}"
   packages = []
   Dir.glob("#{src_dir}/root-*").each do |arch_dir|
-    puts "inside arch-dir: #{arch_dir}"
     arch = arch_dir.gsub(%r{.*/root-}, '')
     # Load manifest
     manifest = YAML.load_file("#{src_dir}/manifest.yaml")

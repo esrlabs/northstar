@@ -75,7 +75,7 @@ namespace :north do
       warn "Cannot update container binaries for target x86_64-apple-darwin on #{RUBY_PLATFORM}"
     end
 
-    apps = %w[hello]
+    apps = %w[cpueater hello]
     # apps = %w[cpueater crashing datarw hello memeater]
     # Compile the container binaries for each target and copy into the container sources
     # if the container source directory exists

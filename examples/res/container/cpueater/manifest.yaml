@@ -1,0 +1,7 @@
+name: cpueater
+version: 0.0.1
+init: /cpueater
+env: [[THREADS, 4]]
+cgroups:
+  cpu:
+    shares: 100
