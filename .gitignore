@@ -3,3 +3,4 @@ target
 download_dir/
 remote/
 .vscode/
+examples/res/container/*/root-*

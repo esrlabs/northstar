@@ -1,0 +1,9 @@
+[package]
+name = "hello"
+version = "0.1.0"
+authors = ["Felix Obenhuber <felix.obenhuber@esrlabs.com>"]
+edition = "2018"
+
+[dependencies]
+
+[workspace]

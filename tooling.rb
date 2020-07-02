@@ -1,5 +1,15 @@
 # frozen_string_literal: true
 
+require 'yaml'
+require 'tmpdir'
+require 'open3'
+require 'securerandom'
+require 'digest'
+require 'rbnacl' # gem install rbnacl
+require 'base64'
+require 'zip' # gem install rubyzip
+require 'fileutils'
+
 def info(content)
   require 'colored'
   puts("#{'INFO'.green}: #{content}")
@@ -9,16 +19,16 @@ end
 # NPK
 #---------------------------------------------------------------------------------
 
-def unhex(s)
-  [s.gsub(' ', '')].pack('H*')
+def unhex(input)
+  [input.gsub(' ', '')].pack('H*')
 end
 
-def hex(s)
-  s.unpack('H*').first
+def hex(input)
+  input.unpack('H*').first
 end
 
-def sha256(d)
-  RbNaCl::Hash.sha256(d)
+def sha256(input)
+  RbNaCl::Hash.sha256(input)
 end
 
 def round_to_multiple(number, size)
@@ -219,65 +229,88 @@ fs.img:
   end
 end
 
+class PackageInfo
+  attr_accessor :architecture, :name, :version
+  def initialize(arch, name, version)
+    @architecture = arch
+    @name = name
+    @version = version
+  end
+end
+
 def create_containers(
   registry,
   container_sources,
   key_directory,
   signing_key_name
 )
-  require 'yaml'
-  require 'tmpdir'
-  require 'open3'
-  require 'securerandom'
-  require 'digest'
-  require 'rbnacl' # gem install rbnacl
-  require 'base64'
-  require 'zip' # gem install rubyzip
-  require 'fileutils'
-
-  signing_key = IO.binread(key_directory + signing_key_name + '.key')
-  packages = {}
+  signing_key = IO.binread("#{File.join(key_directory, signing_key_name)}.key")
+  packages = []
 
   Dir.glob("#{container_sources}/**/*")
-     .filter { |f| File.exist?(f + '/manifest.yaml') }
+     .filter { |d| File.exist?(File.join(d, 'manifest.yaml')) }
      .sort
      .each do |src_dir|
-    Dir.glob("#{src_dir}/root-*").each do |arch_dir|
-      # Load manifest
-      manifest = YAML.load_file("#{src_dir}/manifest.yaml")
-      name = manifest['name']
-      version = manifest['version']
-      arch = arch_dir.gsub(%r{.*/root-}, '')
-      info "Packing #{src_dir} (#{arch})"
-
-      Dir.mktmpdir do |tmpdir|
-        # Copy root
-        root = "#{src_dir}/root"
-        FileUtils.cp_r(root, tmpdir, :verbose => false) if Dir.exist? "#{src_dir}/root"
-        FileUtils.mkdir_p("#{tmpdir}/root", :verbose => false) unless Dir.exist? "#{tmpdir}/root"
-
-        # Copy arch specific root
-        Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, "#{tmpdir}/root", :verbose => false) }
-
-        # Write manifest
-        manifest['arch'] = arch
-        open("#{tmpdir}/manifest.yaml", 'w') { |f| f.puts(manifest.to_yaml) }
-
-        # Remove existing containers
-        Dir.glob("#{registry}/#{name}-#{arch}-*").each { |c| FileUtils.rm(c, :verbose => false) }
-
-        # Pack npk
-        npk = "#{registry}/#{name}-#{arch}-#{version}.npk"
-        create_npk(tmpdir, signing_key_name, signing_key, 'squashfs', npk)
-
-        packages[arch] = [] unless packages[arch]
-        packages[arch] << { 'name' => name, 'version' => version }
-      end
-    end
+    packages += create_one_container(src_dir, registry, signing_key, signing_key_name)
   end
 
   # Create version list
-  packages.each.each do |arch, v|
-    File.open("#{registry}/packages-#{arch}.yaml", 'w') { |f| f.puts v.to_yaml }
+  packages.each do |p|
+    File.open("#{registry}/packages-#{p.architecture}.yaml", 'w') do |f|
+      f.write "{ 'name' => #{p.name}, 'version' => #{p.version} }"
+    end
   end
+end
+
+  # ../north_test_environment/res/container/hello
+  # -> Cargo.toml
+  # -> manifest.yaml
+  # -> root
+  #  --> someconfig.toml
+  # -> root-aarch64-linux-android
+  #  --> hello
+  # -> root-x86_64-apple-darwin
+  #  --> hello
+  # -> root-x86_64-unknown-linux
+  #  --> hello
+  # -> src
+  #  --> main.rs
+
+def create_one_container(src_dir, registry, signing_key, signing_key_name)
+  puts "using src dir: #{src_dir}"
+  packages = []
+  Dir.glob("#{src_dir}/root-*").each do |arch_dir|
+    puts "inside arch-dir: #{arch_dir}"
+    arch = arch_dir.gsub(%r{.*/root-}, '')
+    # Load manifest
+    manifest = YAML.load_file("#{src_dir}/manifest.yaml")
+    name = manifest['name']
+    version = manifest['version']
+    info "Packing #{src_dir} (#{arch})"
+
+    Dir.mktmpdir do |tmpdir|
+      # Copy root
+      root = "#{src_dir}/root"
+      FileUtils.cp_r(root, tmpdir, :verbose => false) if Dir.exist? "#{src_dir}/root"
+      FileUtils.mkdir_p("#{tmpdir}/root", :verbose => false) unless Dir.exist? "#{tmpdir}/root"
+
+      # Copy arch specific root
+      Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, "#{tmpdir}/root", :verbose => false) }
+
+      # Write manifest
+      manifest['arch'] = arch
+      File.open("#{tmpdir}/manifest.yaml", 'w') { |f| f.write(manifest.to_yaml) }
+
+      # Remove existing containers
+      Dir.glob("#{registry}/#{name}-#{arch}-*").each { |c| FileUtils.rm(c, :verbose => false) }
+
+      # Pack npk
+      npk = "#{registry}/#{name}-#{arch}-#{version}.npk"
+      create_npk(tmpdir, signing_key_name, signing_key, 'squashfs', npk)
+
+      packages << PackageInfo.new(arch, name, version)
+
+    end
+  end
+  packages
 end

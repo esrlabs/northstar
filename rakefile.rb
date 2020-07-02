@@ -6,6 +6,8 @@ LEVEL_DEBUG = 3
 LEVEL_TRACE = 4
 VERBOSITY = LEVEL_DEBUG
 
+EXAMPLE_DIR = `pwd`.strip + '/examples'
+
 def debug(content)
   require 'colored'
   puts("DEBUG: #{content}") unless VERBOSITY < LEVEL_DEBUG
@@ -59,7 +61,41 @@ end
 namespace :north do
   desc 'Build North'
   task :build do
-    sh 'cargo build --bin north'
+    sh 'cargo build --release --bin north'
+  end
+
+  desc 'Build example'
+  task :example do
+    require 'os'
+    require './tooling.rb'
+    targets = %w[aarch64-linux-android x86_64-unknown-linux-gnu]
+    if OS.mac?
+      targets << 'x86_64-apple-darwin'
+    else
+      warn "Cannot update container binaries for target x86_64-apple-darwin on #{RUBY_PLATFORM}"
+    end
+
+    apps = %w[hello]
+    # apps = %w[cpueater crashing datarw hello memeater]
+    # Compile the container binaries for each target and copy into the container sources
+    # if the container source directory exists
+    CONTAINER_SOURCES = "#{EXAMPLE_DIR}/res/container"
+    targets.each do |target_arch|
+      apps.each do |app|
+        app_dir = "#{EXAMPLE_DIR}/res/container/#{app}"
+        cd app_dir do
+          sh "cross build --release --bin #{app} --target #{target_arch}"
+        end
+        target_dir = "#{app_dir}/root-#{target_arch}"
+        mkdir_p target_dir unless Dir.exist?(target_dir)
+        cp "#{app_dir}/target/#{target_arch}/release/#{app}", target_dir
+      end
+    end
+
+    KEY_DIRECTORY = "#{EXAMPLE_DIR}/keys"
+    REGISTRY = `pwd`.strip + '/target/north/registry'
+    mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
+    create_containers(REGISTRY, CONTAINER_SOURCES, KEY_DIRECTORY, 'north')
   end
 end
 
