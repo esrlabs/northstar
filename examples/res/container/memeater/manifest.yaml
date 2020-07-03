@@ -1,0 +1,8 @@
+name: memeater
+version: 0.0.1
+init: /memeater
+on_exit:
+  restart: 3
+cgroups:
+  mem:
+    limit: 100000000

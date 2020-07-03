@@ -12,15 +12,22 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use std::time::Duration;
+
 fn main() {
-    let hello = std::env::var("HELLO").unwrap_or_else(|_| "unknown".into());
-    let version = std::env::var("VERSION").unwrap_or_else(|_| "unknown".into());
-    println!("Hello again {} from version {}!", hello, version);
-    for i in 0..u64::MAX {
-        println!(
-            "...and hello again #{} {} from version {}...",
-            i, hello, version
-        );
-        std::thread::sleep(std::time::Duration::from_secs(1));
+    logd_logger::builder()
+        .parse_filters("crashing")
+        .tag("crashing")
+        .init();
+
+    let mut n = 10;
+    loop {
+        if n == 0 {
+            log::error!("BOOM!");
+            panic!("BOOM");
+        }
+        log::warn!("Crashing in {} seconds", n);
+        std::thread::sleep(Duration::from_secs(1));
+        n -= 1;
     }
 }
