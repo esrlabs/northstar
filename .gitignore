@@ -4,3 +4,4 @@ download_dir/
 remote/
 .vscode/
 examples/res/container/*/root-*
+.DS_Store
