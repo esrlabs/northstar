@@ -4,6 +4,20 @@ Northstar is an open source technology for securly running self sufficient sandb
 
 At its core, Northstar makes extensive use of sandboxing to isolate applications from the rest of the system while at the same time orchestrating efficient startup and secure update scenarios. Such applications run inside Northstar-containers and only rely on system services and ressource containers provided by the Northstar-platform. Similar sandboxing techniques were selected and used as are found in Docker and other containerization approaches to reach maximum isolation. To build the most efficient and robust solution, Northstar is completely developed in Rust, a language designed to afford the performance of C++ while at the same time guaranteeing memory safety.
 
+## Supported Sandboxing features
+
+* limited read/write access: a container can only access it's own data
+* restrict memory usage of a container
+* restrict CPU usage
+* limitation of network communication
+* containerized applications can only use whitelisted syscalls
+
+## Integrity features
+
+* secure update of verified packages
+* secure boot
+* verification on each read access prevents manipulation
+
 ## Getting started
 
 Developing with north requires some tooling. A good starting point is installing `Rust` via `https://rustup.rs`.
