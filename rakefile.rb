@@ -112,13 +112,13 @@ end
 
 desc 'Check'
 task :check do
-  sh 'docker info' or raise 'docker is not running'
+  sh 'docker info >/dev/null' or raise 'docker is not running'
   sh 'cargo +nightly fmt -- --color=always --check'
-  %w[x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-linux-android].each do |target|
+  %w[x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-linux-android].each do |target|
     sh "cross check --target #{target}"
     sh "cross clippy --target #{target}"
+    sh 'cross test'
   end
-  sh 'cargo test'
 end
 
 desc 'Format code with nightly cargo fmt'

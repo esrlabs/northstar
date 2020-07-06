@@ -2,6 +2,8 @@
 
 members = [
     "dcon",
+    "minijail/minijail",
+    "minijail/minijail-sys",
     "north",
     "north_common",
     "sextant",
