@@ -30,7 +30,7 @@ lazy_static::lazy_static! {
         if let Some(config) = opt.config {
             settings.merge(config::File::with_name(&config)).expect("Failed to read configuration");
         } else {
-            let config = Path::new("res/north.toml");
+            let config = Path::new("north.toml");
             if config.is_file() {
                 settings.merge(config::File::with_name(&config.display().to_string())).expect("Failed to read configuration");
             } else {

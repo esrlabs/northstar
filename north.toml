@@ -1,0 +1,4 @@
+debug = true
+container_dirs= [ "target/north/registry" ]
+run_dir = "target/north/run"
+data_dir = "target/north/data"
