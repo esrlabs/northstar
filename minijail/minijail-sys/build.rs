@@ -4,6 +4,8 @@
 
 use std::env;
 
+// TODO: Generate syscall table for aarch64-unknown-linux-gnu
+
 fn main() {
     let current_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Failed to get CARGO_CFG_TARGET_OS");
