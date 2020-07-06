@@ -34,7 +34,7 @@ def check_program(existence_check, warning)
 end
 
 def check_gem(gem)
-  puts "checking: #{gem}..."
+  puts "shecking: #{gem}..."
   check_program("gem list -i #{gem}",
                 "#{gem} is required. Please install it using \"gem install #{gem}\".")
 end
@@ -56,6 +56,7 @@ task :setup_environment do
   required_gems.each do |gem|
     sh "gem install #{gem}" unless installed?("gem list -i #{gem}")
   end
+  sh 'cd docker && ./build.sh'
 end
 
 namespace :build do
@@ -111,18 +112,11 @@ end
 
 desc 'Check'
 task :check do
+  sh 'docker info' or raise 'docker is not running'
   sh 'cargo +nightly fmt -- --color=always --check'
-  supported_targets = %w[x86_64-unknown-linux-gnu x86_64-apple-darwin]
-  supported_targets_with_android = %w[x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-linux-android]
-  # check if targets are installed
-  installed = `rustup target list --installed`.split("\n")
-  supported_targets.each do |target|
-    unless installed.include?(target)
-      raise "missing \"#{target}\", install with \"rustup target add #{target}\""
-    end
-  end
-  supported_targets.each do |target|
-    sh "cargo clippy --target #{target}"
+  %w[x86_64-unknown-linux-gnu x86_64-apple-darwin aarch64-linux-android].each do |target|
+    sh "cross check --target #{target}"
+    sh "cross clippy --target #{target}"
   end
   sh 'cargo test'
 end

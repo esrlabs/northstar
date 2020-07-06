@@ -1,0 +1,11 @@
+FROM rustembedded/cross:aarch64-linux-android-0.2.0
+
+RUN rm -r /android-ndk
+
+COPY android-ndk.sh /
+RUN /android-ndk.sh
+
+ENV PATH=/android-ndk/bin:$PATH
+ENV CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=aarch64-linux-android28-clang
+ENV CC_aarch64_linux_android=aarch64-linux-android28-clang
+ENV CXX_aarch64_linux_android=aarch64-linux-android28-clang++
