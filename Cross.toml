@@ -1,5 +1,8 @@
-[target.x86_64-unknown-linux-gnu]
-image = "north/x86_64-unknown-linux-gnu:0.2.0"
-
 [target.aarch64-linux-android]
 image = "north/aarch64-linux-android:0.2.0"
+
+[target.aarch64-unknown-linux-gnu]
+image = "north/aarch64-unknown-linux-gnu:0.2.0"
+
+[target.x86_64-unknown-linux-gnu]
+image = "north/x86_64-unknown-linux-gnu:0.2.0"
