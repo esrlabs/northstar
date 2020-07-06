@@ -34,7 +34,7 @@ def check_program(existence_check, warning)
 end
 
 def check_gem(gem)
-  puts "shecking: #{gem}..."
+  info "Checking for #{gem}..."
   check_program("gem list -i #{gem}",
                 "#{gem} is required. Please install it using \"gem install #{gem}\".")
 end
@@ -45,18 +45,30 @@ required_gems = %w[colored
                    yaml
                    rubyzip]
 
-desc 'checking local environment'
+desc 'Check local environment'
 task :check_environment do
+  # TODO: This looks incomplete
   check_program('cargo --version', 'Rust is required. Please install Rust')
   required_gems.each { |gem| check_gem(gem) }
 end
 
-desc 'setup build environment'
+desc 'Setup build environment'
 task :setup_environment do
+  require 'os'
+
   required_gems.each do |gem|
     sh "gem install #{gem}" unless installed?("gem list -i #{gem}")
   end
-  sh 'cd docker && ./build.sh'
+  sh 'cargo install --path dcon'
+  sh 'cargo install --version 0.2.0 cross'
+  if OS.linux?
+    system 'sudo apt install squashfs-tools'
+  elsif OS.mac?
+    system 'brew install squashfs'
+  end
+  sh "cd docker && docker build -t north/aarch64-linux-android:0.2.0 -f Dockerfile.aarch64-linux-android ."
+  sh "cd docker && docker build -t north/aarch64-unknown-linux-gnu:0.2.0 -f Dockerfile.aarch64-unknown-linux-gnu ."
+  sh "cd docker && docker build -t north/x86_64-unknown-linux-gnu:0.2.0 -f Dockerfile.x64_64-unknown-linux-gnu ."
 end
 
 namespace :build do
@@ -67,13 +79,11 @@ namespace :build do
 
   desc 'Build everything'
   task :all do
-    sh 'cargo build --release --bin north'
-    sh 'cargo build --release --bin dcon'
-    sh 'cargo build --release --bin sextant'
+    sh 'cargo build --release'
   end
 
-  desc 'Build example'
-  task :example do
+  desc 'Build examples'
+  task :examples do
     require 'os'
     require './tooling.rb'
     targets = %w[
@@ -118,7 +128,7 @@ end
 desc 'Check'
 task :check do
   require 'os'
-  sh 'docker info >/dev/null' or raise 'docker is not running'
+  check_program("docker info >/dev/null", "Docker is needed to run the check task")
   sh 'cargo +nightly fmt -- --color=always --check'
   targets = %w[
     aarch64-linux-android
