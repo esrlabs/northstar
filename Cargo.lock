@@ -974,7 +974,6 @@ dependencies = [
  "async-trait",
  "base64 0.12.3",
  "bitflags",
- "bytes",
  "config",
  "floating-duration",
  "futures",
@@ -984,6 +983,7 @@ dependencies = [
  "libc",
  "log",
  "logd-logger",
+ "minijail",
  "nix",
  "north_common",
  "pretty-bytes",
@@ -996,7 +996,6 @@ dependencies = [
  "sha2",
  "structopt",
  "structure",
- "subprocess",
  "tempfile",
  "url",
  "uuid",
@@ -1656,16 +1655,6 @@ checksum = "e0c0529f2429c8bb5878688fffab7f700087f4bd47906e6acf03fd7361f77aca"
 dependencies = [
  "proc-macro-hack 0.4.2",
  "quote 0.3.15",
-]
-
-[[package]]
-name = "subprocess"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5109e3c3215ce5339ca9766a6db7f39144ccc7d9bad53b96d65cfb14ae6c2985"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]

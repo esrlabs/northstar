@@ -12,21 +12,22 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{container::Container, Event, EventTx, TerminationReason};
+use crate::{
+    container::Container, Event, EventTx, TerminationReason, SETTINGS, SYSTEM_GID, SYSTEM_UID,
+};
 use anyhow::{anyhow, Context, Result};
-use async_std::{fs, path, prelude::*, sync, task};
+use async_std::{fs, prelude::*, sync, task};
 use futures::{future::FutureExt, select, StreamExt};
-use itertools::Itertools;
 use log::*;
 use nix::{
     sys::{signal, signal::Signal, wait, wait::WaitStatus},
     unistd::Pid,
 };
-use std::{ffi::OsString, future::Future, time, time::Duration};
-use subprocess::Popen;
+use std::{future::Future, time, time::Duration};
 
-const ENV_VERSION: &str = "VERSION";
 const ENV_DATA: &str = "DATA";
+const ENV_NAME: &str = "NAME";
+const ENV_VERSION: &str = "VERSION";
 
 #[derive(Debug)]
 pub enum ExitStatus {
@@ -37,10 +38,10 @@ pub enum ExitStatus {
 #[derive(Debug)]
 pub struct Process {
     pid: u32,
+    jail: minijail::Minijail,
     termination_reason: Option<TerminationReason>,
     started: time::Instant,
     event_tx: EventTx,
-    process: Popen, // This is None if the process is terminated
     exit: Option<sync::Receiver<i32>>,
     tmpdir: tempfile::TempDir,
 }
@@ -55,21 +56,21 @@ impl Process {
     }
 
     pub async fn spawn(container: &Container, event_tx: EventTx) -> Result<Process> {
+        let root: std::path::PathBuf = container.root.clone().into();
         let manifest = &container.manifest;
-        let name = &manifest.name;
-        let version = &manifest.version;
         let tmpdir = tempfile::TempDir::new()
-            .with_context(|| format!("Failed to create tmpdir for {}", name))?;
+            .with_context(|| format!("Failed to create tmpdir for {}", manifest.name))?;
 
-        // Prepare env for process
-        let mut env = vec![
-            (ENV_VERSION.to_string(), version.to_string()),
-            // The container get's a env variable with the location of it's rw data directory
-            (ENV_DATA.to_string(), target::data(&container)),
-        ];
-        if let Some(e) = &manifest.env {
-            env.extend(e.iter().cloned());
-        }
+        let mut jail = minijail::Minijail::new()?;
+
+        jail.log_to_fd(
+            1,
+            if SETTINGS.debug {
+                minijail::LogPriority::Trace
+            } else {
+                minijail::LogPriority::Info
+            },
+        );
 
         // Dump seccom config to process tmpdir
         if let Some(ref seccomp) = container.manifest.seccomp {
@@ -77,78 +78,70 @@ impl Process {
             let mut f = fs::File::create(&seccomp_config)
                 .await
                 .context("Failed to create seccomp configuraiton")?;
-            for (k, v) in seccomp {
-                f.write_all(format!("{}: {}\n", k, v).as_bytes())
-                    .await
-                    .context("Failed to write seccomp configuraiton")?;
-            }
+            let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
+            f.write_all(s.as_bytes())
+                .await
+                .context("Failed to write seccomp configuraiton")?;
+
+            // Temporary disabled
+            // Must be called before parse_seccomp_filters
+            // jail.log_seccomp_filter_failures();
+            // let p: std::path::PathBuf = seccomp_config.into();
+            // jail.parse_seccomp_filters(p.as_path())
+            //     .context("Failed parse seccomp config")?;
+            // jail.use_seccomp_filter();
         }
 
-        // Spawn process
-        let cwd = target::cwd(&container).map(OsString::from);
-        let tmpdir_path: path::PathBuf = tmpdir.path().to_path_buf().into();
-        let argv = target::argv(&container, &tmpdir_path.as_path()).await?;
+        jail.change_uid(SYSTEM_UID);
+        jail.change_gid(SYSTEM_GID);
+        jail.namespace_pids();
+        jail.namespace_vfs();
+        jail.no_new_privs();
+        jail.enter_chroot(&root.as_path())?;
+        let mounts = &["/dev", "/proc", "/system"];
+        for mount in mounts {
+            let path = std::path::PathBuf::from(mount);
+            jail.mount_bind(&path.as_path(), &path.as_path(), false)?;
+        }
+        let data: std::path::PathBuf = container.data.clone().into();
+        jail.mount_bind(
+            &data.as_path(),
+            &std::path::PathBuf::from("/data").as_path(),
+            true,
+        )?;
+
+        let cmd = manifest.init.clone();
+
+        let args = if let Some(ref args) = manifest.args {
+            args.iter().map(|a| a.as_str()).collect()
+        } else {
+            vec![]
+        };
+
+        let mut env = manifest.env.clone().unwrap_or_default();
+        env.push((ENV_DATA.to_string(), "/data".to_string())); // TODO OSX
+        env.push((ENV_NAME.to_string(), manifest.name.to_string()));
+        env.push((ENV_VERSION.to_string(), manifest.version.to_string()));
+        let env = env
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<String>>();
+        let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
+
         let started = time::Instant::now();
-        debug!(
-            "Spawning {:?} {:?}",
-            env.iter().map(|(k, v)| format!("{}={}", k, v)).join(" "),
-            argv.iter().join(" "),
-        );
-        let config = subprocess::PopenConfig {
-            cwd,
-            env: Some(
-                env.iter()
-                    .map(|(k, v)| (OsString::from(k), OsString::from(v)))
-                    .collect(),
-            ),
-            #[cfg(target_os = "android")]
-            stdout: subprocess::Redirection::Pipe,
-            #[cfg(target_os = "android")]
-            stderr: subprocess::Redirection::Merge,
-            ..Default::default()
-        };
 
-        #[cfg(target_os = "android")]
-        let mut process = subprocess::Popen::create(&argv, config)
-            .with_context(|| format!("Failed to spawn {:?}", argv))?;
-        #[cfg(not(target_os = "android"))]
-        let process = subprocess::Popen::create(&argv, config)
-            .with_context(|| format!("Failed to spawn {:?}", argv))?;
-
-        let pid = match process.pid() {
-            Some(pid) => pid,
-            None => {
-                let error = format!("Failed to get PID for spawned {}:{}", name, version);
-                event_tx.send(Event::Error(anyhow!(error.clone()))).await;
-                return Err(anyhow!(error));
-            }
-        };
-
-        // Setup logwrapper if running on android
-        #[cfg(target_os = "android")]
-        {
-            if let Some(stdout) = process.stdout.take() {
-                let buffer = container
-                    .manifest
-                    .log
-                    .as_ref()
-                    .and_then(|l| l.buffer.clone())
-                    .unwrap_or(north_common::manifest::LogBuffer::Main);
-                let tag = container
-                    .manifest
-                    .log
-                    .as_ref()
-                    .and_then(|l| l.tag.clone())
-                    .unwrap_or_else(|| container.manifest.name.clone());
-                target::logwrap(stdout, buffer, pid, &tag).await?;
-            }
-        }
+        let pid = jail.run(
+            &std::path::PathBuf::from(cmd.as_path()),
+            &[0, 1, 2],
+            &args,
+            &env,
+        )? as u32;
 
         let (exit_tx, exit_rx) = sync::channel::<i32>(1);
 
         let process = Process {
             pid,
-            process,
+            jail,
             started,
             event_tx: event_tx.clone(),
             termination_reason: None,
@@ -167,12 +160,12 @@ impl Process {
         time_to_kill: Duration,
         termination_reason: Option<TerminationReason>,
     ) -> Result<impl Future<Output = ExitStatus>> {
-        self.process
-            .terminate()
-            .with_context(|| format!("Failed to terminate {}", self.pid))?;
+        let pid = self.pid;
+
+        signal::kill(Pid::from_raw(pid as i32), Some(Signal::SIGTERM))
+            .with_context(|| format!("Failed to SIGTERM {}", self.pid))?;
 
         let tx = self.event_tx.clone();
-        let pid = self.pid;
 
         self.termination_reason = termination_reason;
 
@@ -264,197 +257,5 @@ impl Process {
                 .send(Event::Exit(name.to_string(), exit_code))
                 .await;
         });
-    }
-}
-
-#[cfg(not(target_os = "android"))]
-mod target {
-    use crate::{container::Container, SETTINGS};
-    use anyhow::{Context, Result};
-    use async_std::path::{Path, PathBuf};
-
-    pub fn data(container: &Container) -> String {
-        if SETTINGS.global_data_dir {
-            SETTINGS.data_dir.display().to_string()
-        } else {
-            container.data.display().to_string()
-        }
-    }
-
-    pub fn cwd(_: &Container) -> Option<PathBuf> {
-        None
-    }
-
-    pub async fn argv(container: &Container, _: &Path) -> Result<Vec<String>> {
-        let init = container
-            .manifest
-            .init
-            .strip_prefix("/")
-            .with_context(|| format!("Malformed init: {:?}", container.manifest.init))?;
-        let init = container.root.join(&init).display().to_string();
-        Ok(vec![init])
-    }
-}
-
-#[cfg(target_os = "android")]
-mod target {
-    use crate::{container::Container, SETTINGS};
-    use anyhow::{Context, Result};
-    use async_std::{
-        path::{Path, PathBuf},
-        task,
-    };
-    use bytes::BufMut;
-    use log::warn;
-    use north_common::manifest;
-    use std::{io, io::BufRead, os::unix::net::UnixDatagram, time};
-
-    const MINIJAIL: &str = "/system/bin/minijailng";
-
-    pub fn data(_: &Container) -> String {
-        "/data".into()
-    }
-
-    pub fn cwd(container: &Container) -> Option<PathBuf> {
-        Some(container.root.clone())
-    }
-
-    pub async fn argv(container: &Container, tmpdir: &Path) -> Result<Vec<String>> {
-        let mut cmd = if PathBuf::from(MINIJAIL).exists().await {
-            #[derive(Default)]
-            struct Argv(Vec<String>);
-            impl Argv {
-                pub fn push<T: ToString>(&mut self, arg: T) {
-                    self.0.push(arg.to_string())
-                }
-                pub fn extend<T>(&mut self, args: T)
-                where
-                    T: std::iter::IntoIterator,
-                    T::Item: ToString,
-                {
-                    self.0.extend(args.into_iter().map(|e| e.to_string()));
-                }
-            }
-
-            let mut cmd = Argv::default();
-
-            let name = container.manifest.name.clone();
-
-            cmd.push(MINIJAIL);
-            // HACK: have minijail create network namespace and IP
-            //       bridge name is hardcoded
-            if !SETTINGS.disable_network_namespaces {
-                let ns = &uuid::Uuid::new_v4().to_string()[..16];
-                cmd.push(format!("-E{},nstbr1", ns));
-            }
-
-            // Don't use LD_PRELOAD
-            cmd.push("-Tstatic");
-
-            // Enter a pid namespace
-            cmd.push("-p");
-
-            // Set the no_new_privilges flag to avoid privilge escalation
-            cmd.push("-n");
-
-            // Enter a vfs namespace
-            cmd.push("-v");
-
-            // UTS hostname
-            cmd.push(format!("--uts={}", name));
-
-            // UID/GID mapping, all procs run as system user
-            cmd.extend(&["-u", "1000"]);
-            cmd.extend(&["-g", "1000"]);
-
-            // Enable seccomp filter logging
-            cmd.push("-L");
-
-            // Add seccomp
-            if container.manifest.seccomp.is_some() {
-                cmd.push("-n");
-                cmd.extend(&[
-                    "-S".to_string(),
-                    tmpdir.join("seccomp").display().to_string(),
-                ]);
-            }
-
-            // Bind mounts
-            cmd.extend(&["-b", "/system,/system"]);
-            cmd.extend(&["-b", "/proc,/proc"]);
-            cmd.extend(&["-b", "/dev,/dev"]);
-
-            // Mount data dir rw
-            cmd.extend(&["-b", &format!("{},/data,1", container.data.display())]);
-
-            // Chroot
-            cmd.push("-C");
-            cmd.push(container.root.display());
-            cmd.push(container.manifest.init.display());
-            cmd.0
-        } else {
-            warn!("Cannot find {:?}!", MINIJAIL);
-            let init = container
-                .manifest
-                .init
-                .strip_prefix("/")
-                .with_context(|| format!("Malformed init: {:?}", container.manifest.init))?;
-            let init = container.root.join(&init);
-            vec![init.display().to_string()]
-        };
-
-        if let Some(ref args) = container.manifest.args {
-            cmd.extend(args.iter().map(String::to_string));
-        }
-
-        Ok(cmd)
-    }
-
-    pub async fn logwrap<T: io::Read + Send + 'static>(
-        read: T,
-        buffer_id: manifest::LogBuffer,
-        pid: u32,
-        tag: &str,
-    ) -> Result<()> {
-        let socket = UnixDatagram::unbound().context("Failed to create socket")?;
-        let tag = tag.to_string();
-        socket
-            .connect("/dev/socket/logdw")
-            .context("Failed to open logdw socket")?;
-        let mut lines = io::BufReader::new(read).lines();
-        let tag_len = tag.bytes().len();
-        let buffer_id = match buffer_id {
-            manifest::LogBuffer::Main => 0,
-            manifest::LogBuffer::Custom(n) => n,
-        };
-
-        let mut buffer = bytes::BytesMut::with_capacity(1024);
-
-        task::spawn_blocking(move || {
-            while let Some(Ok(line)) = lines.next() {
-                let message_len = line.bytes().len();
-                buffer.reserve(12 + tag_len + message_len);
-
-                let timestamp = time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap();
-                buffer.put_u8(buffer_id);
-                buffer.put_u16_le(pid as u16);
-                buffer.put_u32_le(timestamp.as_secs() as u32);
-                buffer.put_u32_le(timestamp.subsec_nanos());
-                buffer.put_u8(3); // Debug
-                buffer.put(tag.as_bytes());
-                buffer.put_u8(0);
-                buffer.put(line.as_bytes());
-                buffer.put_u8(0);
-                if socket.send(&buffer).is_err() {
-                    warn!("Logger error on pid {}", pid);
-                    break;
-                }
-                buffer.clear();
-            }
-        });
-
-        Ok(())
     }
 }
