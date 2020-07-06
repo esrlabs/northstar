@@ -301,10 +301,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
+name = "cpueater"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logd-logger",
+]
+
+[[package]]
 name = "cpuid-bool"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d375c433320f6c5057ae04a04376eef4d04ce2801448cf8863a78da99107be4"
+
+[[package]]
+name = "crashing"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logd-logger",
+]
 
 [[package]]
 name = "crc32fast"
@@ -407,6 +423,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "datarw"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logd-logger",
+ "serde_json",
 ]
 
 [[package]]
@@ -701,6 +726,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hello"
+version = "0.1.0"
+
+[[package]]
 name = "hermit-abi"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -862,6 +891,14 @@ name = "memchr"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3728d817d99e5ac407411fa471ff9800a778d88a24685968b36824eaf4bee400"
+
+[[package]]
+name = "memeater"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logd-logger",
+]
 
 [[package]]
 name = "memoffset"

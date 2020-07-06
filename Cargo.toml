@@ -2,6 +2,11 @@
 
 members = [
     "dcon",
+    "examples/container/cpueater",
+    "examples/container/crashing",
+    "examples/container/datarw",
+    "examples/container/hello",
+    "examples/container/memeater",
     "minijail/minijail",
     "minijail/minijail-sys",
     "north",

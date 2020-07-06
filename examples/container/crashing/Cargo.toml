@@ -1,5 +1,5 @@
 [package]
-name = "memeater"
+name = "crashing"
 version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2018"
@@ -7,5 +7,3 @@ edition = "2018"
 [dependencies]
 logd-logger = { git = "https://github.com/flxo/logd-logger.git" }
 log = "0.4.8"
-
-[workspace]
