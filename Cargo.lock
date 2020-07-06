@@ -873,6 +873,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "minijail"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "minijail-sys",
+]
+
+[[package]]
+name = "minijail-sys"
+version = "0.0.11"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
