@@ -112,14 +112,18 @@ end
 
 desc 'Check'
 task :check do
+  require 'os'
   sh 'docker info >/dev/null' or raise 'docker is not running'
   sh 'cargo +nightly fmt -- --color=always --check'
-  %w[
+  targets = %w[
       aarch64-linux-android
       aarch64-unknown-linux-gnu
-      x86_64-apple-darwin
+      
       x86_64-unknown-linux-gnu
-    ].each do |target|
+    ]
+  targets << 'x86_64-apple-darwin' if OS.mac?
+
+  targets.each do |target|
     sh "cross check --target #{target}"
     sh "cross clippy --target #{target}"
     sh 'cross test'
