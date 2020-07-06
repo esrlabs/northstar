@@ -5,5 +5,3 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
-
-[workspace]

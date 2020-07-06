@@ -8,5 +8,3 @@ edition = "2018"
 logd-logger = { git = "https://github.com/flxo/logd-logger.git" }
 log = "0.4.8"
 serde_json = "1.0.56"
-
-[workspace]
