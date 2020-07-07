@@ -36,10 +36,13 @@ def round_to_multiple(number, size)
   remainder == 0 ? number : number + size - remainder
 end
 
+# TODO: Make the dir creation target specific
 ADD_DIRECTORIES = [['/tmp', 444],
                    ['/proc', 444],
                    ['/dev', 444],
                    ['/sys', 444],
+                   ['/lib', 444],
+                   ['/lib64', 444],
                    ['/system', 444],
                    ['/data', 777]].freeze
 
@@ -134,6 +137,7 @@ def create_npk(input, key_name, key, fstype, zip)
     # Create filesystem image
     if fstype == 'squashfs'
       require 'os'
+      # TODO: The compression algorithm should be target and not host specific!
       squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
       pseudofiles = ADD_DIRECTORIES.map { |d| "-p '#{d[0]} d #{d[1]} 1000 1000'" }.join(' ')
       shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
