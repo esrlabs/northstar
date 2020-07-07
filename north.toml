@@ -1,4 +1,18 @@
 debug = true
+
+[directories]
 container_dirs= [ "target/north/registry" ]
 run_dir = "target/north/run"
 data_dir = "target/north/data"
+
+[cgroups]
+memory = "/sys/fs/cgroup/memory/north"
+cpu = "/sys/fs/cgroup/cpu/north"
+
+[devices]
+unshare_root = "/"
+unshare_fstype = "ext4"
+loop_control = "/dev/loop-control"
+loop_dev = "/dev/loop"
+device_mapper = "/dev/mapper/control"
+device_mapper_dev = "/dev/dm-"

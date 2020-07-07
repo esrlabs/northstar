@@ -41,11 +41,6 @@ use std::{
     time,
 };
 
-#[cfg(target_os = "android")]
-static DM_PATH: &str = "/dev/block/dm-";
-#[cfg(not(target_os = "android"))]
-static DM_PATH: &str = "/dev/dm-";
-
 const MANIFEST: &str = "manifest.yaml";
 const FS_IMAGE: &str = "fs.img";
 const SIGNATURE: &str = "signature.yaml";
@@ -131,6 +126,8 @@ async fn install_internal(
 ) -> Result<(Name, Version)> {
     let start = time::Instant::now();
 
+    info!("Loading {}", npk.display());
+
     let file =
         std::fs::File::open(&npk).with_context(|| format!("Failed to open {}", npk.display()))?;
     let reader = std::io::BufReader::new(file);
@@ -178,7 +175,7 @@ async fn install_internal(
         if instances > 1 {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
-        let root = SETTINGS.run_dir.join(&manifest.name);
+        let root = SETTINGS.directories.run_dir.join(&manifest.name);
 
         if !root.exists().await {
             info!("Creating mountpoint {}", root.display());
@@ -203,7 +200,7 @@ async fn install_internal(
         )
         .await?;
 
-        let data = SETTINGS.data_dir.join(&manifest.name);
+        let data = SETTINGS.directories.data_dir.join(&manifest.name);
         if !data.exists().await {
             fs::create_dir_all(&data)
                 .await
@@ -225,9 +222,9 @@ async fn install_internal(
         }
 
         let data = if SETTINGS.global_data_dir {
-            SETTINGS.data_dir.clone()
+            SETTINGS.directories.data_dir.clone()
         } else {
-            SETTINGS.data_dir.join(&manifest.name)
+            SETTINGS.directories.data_dir.join(&manifest.name)
         };
 
         let container = Container {
@@ -360,6 +357,11 @@ async fn losetup(
         .await
         .context("Failed to acquire free loopdev")?;
 
+    debug!(
+        "Using loop device {}",
+        loop_device.path().await.unwrap().display()
+    );
+
     loop_device
         .attach_file(fs, fs_offset, lo_size, true, true)
         .context("Failed to attach loopback")?;
@@ -385,7 +387,7 @@ async fn veritysetup(
     verity_hash: &str,
     size: u64,
 ) -> Result<PathBuf> {
-    debug!("Creating device");
+    debug!("Creating device {}", dev);
     let start = time::Instant::now();
     let dm_device = dm
         .device_create(
@@ -424,7 +426,11 @@ async fn veritysetup(
         .await
         .context("Failed to suspend device")?;
 
-    let dm_dev = PathBuf::from(format!("{}{}", DM_PATH, dm_device.id() & 0xFF));
+    let dm_dev = PathBuf::from(format!(
+        "{}{}",
+        SETTINGS.devices.device_mapper_dev,
+        dm_device.id() & 0xFF
+    ));
     debug!("Waiting for device {}", dm_dev.display());
     while !dm_dev.exists().await {
         task::sleep(std::time::Duration::from_millis(1)).await;

@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::SETTINGS;
 use anyhow::{anyhow, Context, Result};
 use async_std::task;
 use nix::libc::{c_ulong, ioctl as nix_ioctl};
@@ -43,11 +44,6 @@ pub const DM_TARGET_MSG_CMD: ::libc::c_uint = 14;
 
 /// Indicator to send IOCTL to DM
 const DM_IOCTL: u8 = 0xfd;
-/// Control path for user space to pass IOCTL to kernel DM
-#[cfg(not(target_os = "android"))]
-const DM_CTL_PATH: &str = "/dev/mapper/control";
-#[cfg(target_os = "android")]
-const DM_CTL_PATH: &str = "/dev/device-mapper";
 /// Major version
 const DM_VERSION_MAJOR: u32 = 4;
 /// Minor version
@@ -146,7 +142,7 @@ impl Dm {
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .open(DM_CTL_PATH)
+            .open(&SETTINGS.devices.device_mapper)
             .context("Failed to open device mapper")?;
         Ok(Dm { file })
     }

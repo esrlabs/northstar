@@ -89,7 +89,7 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
 
-        let root = SETTINGS.run_dir.join(&manifest.name);
+        let root = SETTINGS.directories.run_dir.join(&manifest.name);
 
         if root.exists().await {
             debug!("Removing {}", root.display());
@@ -129,9 +129,9 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
         }
 
         let data = if SETTINGS.global_data_dir {
-            SETTINGS.data_dir.clone()
+            SETTINGS.directories.data_dir.clone()
         } else {
-            SETTINGS.data_dir.join(&manifest.name)
+            SETTINGS.directories.data_dir.join(&manifest.name)
         };
 
         if !data.exists().await {

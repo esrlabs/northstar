@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{Event, EventTx};
+use crate::{Event, EventTx, SETTINGS};
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::{
     fs,
@@ -26,8 +26,6 @@ use log::{debug, warn};
 use north_common::manifest;
 use std::time::Duration;
 
-const CGROUP_MEM_MOUNT_POINT: &str = "/dev/memcg/north";
-const CGROUP_CPU_MOUNT_POINT: &str = "/dev/cpuctl/north";
 const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
 const OOM_CONTROL: &str = "memory.oom_control";
 const UNDER_OOM: &str = "under_oom 1";
@@ -78,7 +76,7 @@ impl CGroup for CGroupMem {
 
 impl CGroupMem {
     pub async fn new(name: &str, cgroup: &manifest::CGroupMem, tx: EventTx) -> Result<CGroupMem> {
-        let path = PathBuf::from(CGROUP_MEM_MOUNT_POINT).join(name);
+        let path = SETTINGS.cgroups.memory.join(name);
         create(&path).await?;
 
         // Configure memory limit
@@ -153,7 +151,7 @@ impl CGroup for CGroupCpu {
 
 impl CGroupCpu {
     pub async fn new(name: &str, cgroup: &manifest::CGroupCpu) -> Result<CGroupCpu> {
-        let path = PathBuf::from(CGROUP_CPU_MOUNT_POINT).join(name);
+        let path = SETTINGS.cgroups.cpu.join(name);
         create(&path).await?;
 
         // Configure cpu shares

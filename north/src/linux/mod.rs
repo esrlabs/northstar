@@ -45,8 +45,8 @@ pub mod mount {
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub async fn setup() -> Result<()> {
+    use crate::SETTINGS;
     use anyhow::Context;
-    use async_std::path::PathBuf;
 
     log::debug!("Entering mount namespace");
     let r = unsafe { libc::unshare(libc::CLONE_NEWNS) };
@@ -57,23 +57,22 @@ pub async fn setup() -> Result<()> {
         ));
     }
 
-    let data = PathBuf::from("/data");
-
-    if data.exists().await {
-        // Set mount propagation to PRIVATE on /data
-        // Mounting with MS_PRIVATE fails on Android on
-        // a non private tree.
-        mount::mount(
-            &PathBuf::from("/"),
-            &PathBuf::from("/data"),
-            "ext4",
-            mount::MountFlags::PRIVATE,
-            None,
+    // Set mount propagation to PRIVATE on /data
+    // Mounting with MS_PRIVATE fails on Android on
+    // a non private tree.
+    mount::mount(
+        &SETTINGS.devices.unshare_root,
+        &SETTINGS.devices.unshare_root,
+        &SETTINGS.devices.unshare_fstype,
+        mount::MountFlags::PRIVATE,
+        None,
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to set mount propagation type to private on {}",
+            SETTINGS.devices.unshare_root.display()
         )
-        .await
-        .context("Failed to set mount propagation type to private on /data")?;
-    } else {
-        log::warn!("Cannot set mount propagation because it's not implememented for your target");
-    }
+    })?;
     Ok(())
 }

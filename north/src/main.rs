@@ -89,14 +89,24 @@ async fn main() -> Result<()> {
     let (tx, rx) = sync::channel::<Event>(1000);
     let mut state = State::new(tx.clone());
 
-    fs::create_dir_all(&SETTINGS.run_dir)
+    fs::create_dir_all(&SETTINGS.directories.run_dir)
         .await
-        .with_context(|| format!("Failed to create {}", SETTINGS.run_dir.display()))?;
-    fs::create_dir_all(&SETTINGS.data_dir)
+        .with_context(|| {
+            format!(
+                "Failed to create {}",
+                SETTINGS.directories.run_dir.display()
+            )
+        })?;
+    fs::create_dir_all(&SETTINGS.directories.data_dir)
         .await
-        .with_context(|| format!("Failed to create {}", SETTINGS.data_dir.display()))?;
+        .with_context(|| {
+            format!(
+                "Failed to create {}",
+                SETTINGS.directories.data_dir.display()
+            )
+        })?;
 
-    for d in &SETTINGS.container_dirs {
+    for d in &SETTINGS.directories.container_dirs {
         container::install_all(&mut state, d).await?;
     }
 
