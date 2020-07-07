@@ -98,7 +98,11 @@ impl Process {
         jail.namespace_vfs();
         jail.no_new_privs();
         jail.enter_chroot(&root.as_path())?;
-        let mounts = &["/dev", "/proc", "/system"];
+        #[cfg(target_os = "android")]
+        let mounts = &["/sys", "/dev", "/proc", "/system"];
+        #[cfg(target_os = "linux")]
+        let mounts = &["/sys", "/dev", "/proc", "/lib", "/lib64"];
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         for mount in mounts {
             let path = std::path::PathBuf::from(mount);
             jail.mount_bind(&path.as_path(), &path.as_path(), false)?;
