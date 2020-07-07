@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::SETTINGS;
 use anyhow::{anyhow, Context, Result};
 use async_std::{
     fs,
@@ -27,12 +28,6 @@ const LOOP_SET_DIRECT_IO: u16 = 0x4C08;
 const LOOP_FLAG_READ_ONLY: u32 = 0x01;
 const LOOP_FLAG_AUTOCLEAR: u32 = 0x04;
 const LOOP_CTL_GET_FREE: u16 = 0x4C82;
-const LOOP_CONTROL: &str = "/dev/loop-control";
-
-#[cfg(not(target_os = "android"))]
-const LOOP_PREFIX: &str = "/dev/loop";
-#[cfg(target_os = "android")]
-const LOOP_PREFIX: &str = "/dev/block/loop";
 
 #[derive(Debug)]
 pub struct LoopControl {
@@ -45,7 +40,7 @@ impl LoopControl {
             dev_file: fs::OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(LOOP_CONTROL)
+                .open(&SETTINGS.devices.loop_control)
                 .await?,
         })
     }
@@ -58,7 +53,7 @@ impl LoopControl {
         if result < 0 {
             Err(anyhow!(std::io::Error::last_os_error()))
         } else {
-            Ok(LoopDevice::open(&format!("{}{}", LOOP_PREFIX, result)).await?)
+            Ok(LoopDevice::open(&format!("{}{}", SETTINGS.devices.loop_dev, result)).await?)
         }
     }
 }
@@ -95,6 +90,7 @@ impl LoopDevice {
         read_only: bool,
         auto_clear: bool,
     ) -> Result<()> {
+        log::debug!("Attaching");
         // Attach the file
         unsafe {
             if ioctl(
@@ -107,7 +103,8 @@ impl LoopDevice {
             }
         }
 
-        // Set offset for backing_file
+        // Set offset and limit for backing_file
+        log::debug!("Setting offset {} and limit {}", offset, sizelimit);
         let mut info: loop_info64 = Default::default();
         info.lo_offset = offset;
         info.lo_sizelimit = sizelimit;

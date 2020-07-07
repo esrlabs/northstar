@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use async_std::path::PathBuf;
-use itertools::Itertools;
 use std::{fmt, path::Path};
 use structopt::StructOpt;
 
@@ -34,39 +33,102 @@ lazy_static::lazy_static! {
             if config.is_file() {
                 settings.merge(config::File::with_name(&config.display().to_string())).expect("Failed to read configuration");
             } else {
-                panic!("Failed to find default configuration res/north.toml");
+                panic!("Failed to find default configuration north.toml");
             }
         }
 
         // Read environment
         settings.merge(config::Environment::with_prefix("NORTH")).expect("Failed to read environment");
 
-        let container_dirs = opt.container_dir.unwrap_or_else(|| {
-            let dir: Vec<String> = settings.get("container_dirs").expect("Missing container directories in configuration");
-            dir.iter().map(PathBuf::from).collect()
-        });
-        let run_dir = opt.run_dir.unwrap_or_else(|| {
-            let dir: String = settings.get("run_dir").expect("Missing run dir in configuration");
-            PathBuf::from(dir)
-        });
-        let data_dir = opt.data_dir.unwrap_or_else(|| {
-            let dir: String = settings.get("data_dir").expect("Missing data dir in configuration");
-            PathBuf::from(dir)
-        });
+        let debug = opt.debug || settings.get("debug").unwrap_or(false);
+
         let console_address = opt.console_address.unwrap_or_else(|| {
             settings.get("console_address").unwrap_or_else(|_| DEFAULT_CONSOLE_ADDRESS.into())
         });
-        let disable_network_namespaces = opt.disable_network_namespaces || settings.get("disable_network_namespaces").unwrap_or(false);
-        let global_data_dir = opt.disable_network_namespaces || settings.get("global_data_dir").unwrap_or(false);
+        let global_data_dir = opt.global_data_dir || settings.get("global_data_dir").unwrap_or(false);
+
+
+        let container_dirs = opt.container_dir.unwrap_or_else(|| {
+            let dir: Vec<String> = settings.get("directories.container_dirs").expect("Missing directories.container_dirs in configuration");
+            dir.iter().map(PathBuf::from).collect()
+        });
+        let run_dir = opt.run_dir.unwrap_or_else(|| {
+            let dir: String = settings.get("directories.run_dir").expect("Missing directories.run_dir in configuration");
+            PathBuf::from(dir)
+        });
+        let data_dir = opt.data_dir.unwrap_or_else(|| {
+            let dir: String = settings.get("directories.data_dir").expect("Missing directories.data_dir in configuration");
+            PathBuf::from(dir)
+        });
+
+
+        let cgroup_memory = opt.cgroup_memory.unwrap_or_else(|| {
+            let dir: String = settings.get("cgroups.memory")
+                .expect("Missing cgroups.memory in configuration");
+            PathBuf::from(dir)
+        });
+
+        let cgroup_cpu = opt.cgroup_cpu.unwrap_or_else(|| {
+            let dir: String = settings.get("cgroups.cpu")
+                .expect("Missing cgroup.cpu in configuration");
+            PathBuf::from(dir)
+        });
+
+
+        let unshare_root = opt.unshare_root.unwrap_or_else(|| {
+            let dir: String = settings.get("devices.unshare_root")
+                .expect("Missing devices.unshare_root in configuration");
+            PathBuf::from(dir)
+        });
+
+        let unshare_fstype = opt.unshare_fstype.unwrap_or_else(|| {
+            settings.get("devices.unshare_fstype")
+                .expect("Missing unshare_fstype in configuration")
+        });
+
+        let device_mapper = opt.device_mapper.unwrap_or_else(|| {
+            let dm: String = settings.get("devices.device_mapper")
+                .expect("Missing devices.device_mapper in configuration");
+            PathBuf::from(dm)
+        });
+
+        let device_mapper_dev = opt.device_mapper_dev.unwrap_or_else(|| {
+            settings.get("devices.device_mapper_dev")
+                .expect("Missing devices.device_mapper_dev in configuration")
+        });
+
+        let loop_control = opt.loop_control.unwrap_or_else(|| {
+            let lc: String = settings.get("devices.loop_control")
+                .expect("Missing devices.loop_control in configuration");
+            PathBuf::from(lc)
+        });
+
+        let loop_dev = opt.loop_dev.unwrap_or_else(|| {
+            settings.get("devices.loop_dev")
+                .expect("Missing devices.loop_dev in configuration")
+        });
 
         Settings {
-            debug: opt.debug,
-            container_dirs,
-            run_dir,
-            data_dir,
+            debug,
+            directories: Directories {
+                container_dirs,
+                run_dir,
+                data_dir,
+            },
             console_address,
-            disable_network_namespaces,
             global_data_dir,
+            cgroups: CGroups {
+                memory: cgroup_memory,
+                cpu: cgroup_cpu,
+            },
+            devices: Devices {
+                unshare_root,
+                unshare_fstype,
+                device_mapper,
+                device_mapper_dev,
+                loop_control,
+                loop_dev,
+            }
         }
     };
 }
@@ -98,46 +160,84 @@ struct CliOptions {
     #[structopt(long)]
     pub console_address: Option<String>,
 
-    /// Do not use and setup networknamespaces
-    #[structopt(long)]
-    pub disable_network_namespaces: bool,
-
     /// Share the rw data location between containers. Do not setup
     /// a dedicated data dir per container.
     #[structopt(long)]
     pub global_data_dir: bool,
+
+    /// Parent mountpoint of north path. North needs to set private mount propagation
+    /// on the parent mount of the north runtime dir. This mountpoint varies
+    #[structopt(long)]
+    pub unshare_root: Option<PathBuf>,
+
+    /// File system of the fs mounted on unshare_root
+    #[structopt(long)]
+    pub unshare_fstype: Option<String>,
+
+    /// CGroups Memory dir. This can be a subdir of the root memory cgroup.
+    /// The directory is created if it does not exist.
+    /// This groups acts as the toplevel north memory cgroup.
+    #[structopt(long)]
+    pub cgroup_memory: Option<PathBuf>,
+
+    /// CGroups CPU dir. This can be a subdir of the root memory cgroup.
+    /// The directory is created if it does not exist.
+    /// This groups acts as the toplevel north cpu cgroup.
+    #[structopt(long)]
+    pub cgroup_cpu: Option<PathBuf>,
+
+    /// Device mapper control file e.g /dev/mapper/control
+    #[structopt(long)]
+    pub device_mapper: Option<PathBuf>,
+
+    /// Device mapper dev prefix e.g /dev/mapper/dm-
+    #[structopt(long)]
+    pub device_mapper_dev: Option<String>,
+
+    /// Loopback control file e.g /dev/loop-control
+    #[structopt(long)]
+    pub loop_control: Option<PathBuf>,
+
+    /// Loopback device files e.g /dev/loop or /dev/block/loop
+    #[structopt(long)]
+    pub loop_dev: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct Directories {
+    pub container_dirs: Vec<PathBuf>,
+    pub run_dir: PathBuf,
+    pub data_dir: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct CGroups {
+    pub memory: PathBuf,
+    pub cpu: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct Devices {
+    pub unshare_root: PathBuf,
+    pub unshare_fstype: String,
+    pub device_mapper: PathBuf,
+    pub device_mapper_dev: String,
+    pub loop_control: PathBuf,
+    pub loop_dev: String,
 }
 
 #[derive(Debug)]
 pub struct Settings {
     pub debug: bool,
-    pub container_dirs: Vec<PathBuf>,
-    pub run_dir: PathBuf,
-    pub data_dir: PathBuf,
     pub console_address: String,
-    pub disable_network_namespaces: bool,
     pub global_data_dir: bool,
+    pub directories: Directories,
+    pub cgroups: CGroups,
+    pub devices: Devices,
 }
 
 impl fmt::Display for Settings {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "debug: {:?}", self.debug)?;
-        writeln!(
-            f,
-            "container_dirs: {}",
-            self.container_dirs
-                .iter()
-                .map(|d| d.display().to_string())
-                .join(", "),
-        )?;
-        writeln!(f, "run_dir: {}", self.run_dir.display())?;
-        writeln!(f, "data_dir: {}", self.data_dir.display())?;
-        writeln!(f, "console_address: {}", self.console_address)?;
-        writeln!(
-            f,
-            "disable_network_namespaces: {}",
-            self.disable_network_namespaces
-        )?;
-        writeln!(f, "global_data_dir: {}", self.global_data_dir)
+        writeln!(f, "{:#?}", self)
     }
 }
