@@ -183,12 +183,12 @@ def pack(src_dir, registry, signing_key, key_name, fstype, uid, gid)
       # The list of pseudofiles is target specific.
       # Add /lib and lib64 on Linux systems.
       # Add /system on Android.
-      pseudofiles = [['/tmp', 444], ['/proc', 444], ['/dev', 444], ['/sys', 444]]
+      pseudofiles = [['/tmp', 444], ['/proc', 444], ['/dev', 444], ['/sys', 444], ['/data', 777]]
       pseudofiles = case arch
       when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
         pseudofiles += [['/lib', 444], ['/lib64', 444]]
       when 'aarch64-linux-android'
-        pseudofiles += [['/system', 444], ['/data', 777]]
+        pseudofiles += [['/system', 444]]
       else
         pseudofiles
       end
