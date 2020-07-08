@@ -36,16 +36,6 @@ def round_to_multiple(number, size)
   remainder == 0 ? number : number + size - remainder
 end
 
-# TODO: Make the dir creation target specific
-ADD_DIRECTORIES = [['/tmp', 444],
-                   ['/proc', 444],
-                   ['/dev', 444],
-                   ['/sys', 444],
-                   ['/lib', 444],
-                   ['/lib64', 444],
-                   ['/system', 444],
-                   ['/data', 777]].freeze
-
 def shell(cmd, verbose = false)
   if verbose
     Rake.sh cmd
@@ -129,110 +119,6 @@ def generate_hash_tree(image, image_size, block_size, salt, hash_level_offsets, 
   [sha256(salt + level_output), hash_ret]
 end
 
-def create_npk(input, key_name, key, fstype, zip)
-  Dir.mktmpdir do |dir|
-    root = "#{input}/root"
-    fsimg = "#{dir}/fs.img"
-
-    # Create filesystem image
-    if fstype == 'squashfs'
-      require 'os'
-      # TODO: The compression algorithm should be target and not host specific!
-      squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
-      pseudofiles = ADD_DIRECTORIES.map { |d| "-p '#{d[0]} d #{d[1]} 1000 1000'" }.join(' ')
-      shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
-      raise 'mksquashfs failed' unless File.exist? fsimg
-    elsif fstype == 'ext4'
-      ADD_DIRECTORIES.each do |d|
-        FileUtils.mkdir_p("#{root}#{d}") unless Dir.exist? "#{root}#{d}"
-      end
-
-      # system("chmod", "-R", "a-w,a+rX", root) or raise "chmod failed"
-      # system("chown", "-R", "0:0", root) or raise # only works as root
-      blocks = `du -ks #{root}`.split.first.to_i # rough, too big, estimate
-      shell("mke2fs -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
-      e2fsck_output = `e2fsck -f -n #{fsimg}`
-      unless e2fsck_output.chomp.split("\n").last =~ %r{(\d+)/\d+ blocks}
-        raise "e2fsck failed: #{e2fsck_output}"
-      end
-
-      blocks = Regexp.last_match(1).to_i # actual required blocks
-      FileUtils.rm_f(fsimg)
-      sh("mke2fs  -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
-
-      ADD_DIRECTORIES.each do |d|
-        FileUtils.rmdir("#{root}#{d}")
-      end
-    else
-      raise "Unknown filesystem: #{fstype}"
-    end
-    filesystem_size = File.size(fsimg)
-
-    # Append verity header and hash tree to filesystem image
-    verity_hash = nil
-    digest_size = 32
-    block_size = 4096
-    if filesystem_size % block_size != 0
-      raise "Filesystem size (#{filesystem_size}) not multiple of block size (#{block_size})"
-    end # or pad?
-
-    data_blocks = filesystem_size / block_size
-    uuid = SecureRandom.uuid
-    salt = SecureRandom.bytes(digest_size)
-    hash_level_offsets, tree_size = calc_hash_level_offsets(filesystem_size, block_size, digest_size)
-    File.open(fsimg, 'a+b') do |file|
-      verity_hash, hash_tree = generate_hash_tree(file, filesystem_size, block_size, salt, hash_level_offsets, tree_size)
-
-      file.seek(filesystem_size)
-      file << ['verity', 1, 1, uuid.gsub('-', ''), 'sha256', 4096, 4096, data_blocks, 32, salt, ''].pack('a8 L L H32 a32 L L Q S x6 a256 a3752')
-      file << hash_tree
-    end
-
-    # Create hashes YAML
-    manifest = IO.binread("#{input}/manifest.yaml")
-    manifest_hash = sha256(manifest)
-    fs_hash = sha256(IO.binread(fsimg))
-    hashes = +''"manifest.yaml:
-  hash: #{hex(manifest_hash)}
-fs.img:
-  hash: #{hex(fs_hash)}
-  verity-hash: #{hex(verity_hash)}
-  verity-offset: #{filesystem_size}
-"''
-
-    # Sign hashes
-    signing_key = RbNaCl::SigningKey.new(key)
-    signature = Base64.strict_encode64(signing_key.sign(hashes))
-
-    signatures = hashes
-    signatures << "---\n"
-    signatures << "key: #{key_name}\n"
-    signatures << "signature: #{signature}\n"
-
-    # Create ZIP
-    Zip::OutputStream.open(zip) do |stream|
-      stream.put_next_entry('signature.yaml', nil, nil, Zip::Entry::STORED)
-      stream.write signatures
-
-      stream.put_next_entry('manifest.yaml', nil, nil, Zip::Entry::STORED)
-      stream.write manifest
-
-      offset = 43 + manifest.length + 44 + signatures.length + 36 # stored
-      padding = (offset / 4096 + 1) * 4096 - offset
-
-      # store uncompressed to support mounting without extracting
-      # store at content offset 4096 for direct IO loopback support
-      extra = [''].pack("a#{padding}")
-      stream.put_next_entry('fs.img', nil, extra, Zip::Entry::STORED)
-      stream.write IO.binread(fsimg)
-    end
-
-    if fstype == 'squashfs'
-      raise('Alignment failed') unless IO.binread(zip, 4, 4096) == 'hsqs'
-    end
-  end
-end
-
 class PackageInfo
   attr_accessor :architecture, :name, :version
   def initialize(arch, name, version)
@@ -242,24 +128,17 @@ class PackageInfo
   end
 end
 
-def create_containers(
-  registry,
-  container_sources,
-  key_directory,
-  signing_key_name
-)
-  signing_key = IO.binread("#{File.join(key_directory, signing_key_name)}.key")
+def pack_containers(registry, container_sources, key_directory, key_name, fstype, uid, gid)
+  signing_key = IO.binread("#{File.join(key_directory, key_name)}.key")
   packages = []
 
   Dir.glob("#{container_sources}/**/*")
      .filter { |d| File.exist?(File.join(d, 'manifest.yaml')) }
      .sort
      .each do |src_dir|
-    packages += create_one_container(src_dir, registry, signing_key, signing_key_name)
+    packages += pack(src_dir, registry, signing_key, key_name, fstype, uid, gid)
   end
-  Dir.glob("#{registry}/*.yaml").each do |f|
-    rm f
-  end
+  Dir.glob("#{registry}/*.yaml").each { |f| rm f }
 
   # Create version list
   packages.each do |p|
@@ -269,7 +148,7 @@ def create_containers(
   end
 end
 
-def create_one_container(src_dir, registry, signing_key, signing_key_name)
+def pack(src_dir, registry, signing_key, key_name, fstype, uid, gid)
   packages = []
   Dir.glob("#{src_dir}/root-*").each do |arch_dir|
     arch = arch_dir.gsub(%r{.*/root-}, '')
@@ -278,6 +157,8 @@ def create_one_container(src_dir, registry, signing_key, signing_key_name)
     name = manifest['name']
     version = manifest['version']
     info "Packing #{src_dir} (#{arch})"
+    uid = 1000
+    gid = 1000
 
     Dir.mktmpdir do |tmpdir|
       # Copy root
@@ -295,12 +176,117 @@ def create_one_container(src_dir, registry, signing_key, signing_key_name)
       # Remove existing containers
       Dir.glob("#{registry}/#{name}-#{arch}-*").each { |c| FileUtils.rm(c, :verbose => false) }
 
-      # Pack npk
       npk = "#{registry}/#{name}-#{arch}-#{version}.npk"
-      create_npk(tmpdir, signing_key_name, signing_key, 'squashfs', npk)
+      root = "#{tmpdir}/root"
+      fsimg = "#{tmpdir}/fs.img"
+
+      # The list of pseudofiles is target specific.
+      # Add /lib and lib64 on Linux systems.
+      # Add /system on Android.
+      pseudofiles = [['/tmp', 444], ['/proc', 444], ['/dev', 444], ['/sys', 444]]
+      pseudofiles = case arch
+      when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
+        pseudofiles += [['/lib', 444], ['/lib64', 444]]
+      when 'aarch64-linux-android'
+        pseudofiles += [['/system', 444], ['/data', 777]]
+      else
+        pseudofiles
+      end
+
+      # Create filesystem image
+      if fstype == 'squashfs'
+        require 'os'
+        pseudofiles = pseudofiles.map { |d| "-p '#{d[0]} d #{d[1]} #{uid} #{gid}'" }.join(' ')
+        # TODO: The compression algorithm should be target and not host specific!
+        squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
+        shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
+        raise 'mksquashfs failed' unless File.exist? fsimg
+      elsif fstype == 'ext4'
+        pseudofiles.each { |d| FileUtils.mkdir_p("#{root}#{d[0]}") unless Dir.exist? "#{root}#{d[0]}" }
+
+        # system("chmod", "-R", "a-w,a+rX", root) or raise "chmod failed"
+        # system("chown", "-R", "0:0", root) or raise # only works as root
+        blocks = `du -ks #{root}`.split.first.to_i # rough, too big, estimate
+        shell("mke2fs -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
+        e2fsck_output = `e2fsck -f -n #{fsimg}`
+        unless e2fsck_output.chomp.split("\n").last =~ %r{(\d+)/\d+ blocks}
+          raise "e2fsck failed: #{e2fsck_output}"
+        end
+
+        blocks = Regexp.last_match(1).to_i # actual required blocks
+        FileUtils.rm_f(fsimg)
+        sh("mke2fs  -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
+
+        pseudofiles.each { |d| FileUtils.rmdir("#{root}#{d[0]}") }
+      else
+        raise "Unknown filesystem: #{fstype}"
+      end
+      filesystem_size = File.size(fsimg)
+
+      # Append verity header and hash tree to filesystem image
+      verity_hash = nil
+      digest_size = 32
+      block_size = 4096
+      if filesystem_size % block_size != 0
+        raise "Filesystem size (#{filesystem_size}) not multiple of block size (#{block_size})"
+      end # or pad?
+
+      data_blocks = filesystem_size / block_size
+      uuid = SecureRandom.uuid
+      salt = SecureRandom.bytes(digest_size)
+      hash_level_offsets, tree_size = calc_hash_level_offsets(filesystem_size, block_size, digest_size)
+      File.open(fsimg, 'a+b') do |file|
+        verity_hash, hash_tree = generate_hash_tree(file, filesystem_size, block_size, salt, hash_level_offsets, tree_size)
+
+        file.seek(filesystem_size)
+        file << ['verity', 1, 1, uuid.gsub('-', ''), 'sha256', 4096, 4096, data_blocks, 32, salt, ''].pack('a8 L L H32 a32 L L Q S x6 a256 a3752')
+        file << hash_tree
+      end
+
+      # Create hashes YAML
+      manifest = IO.binread("#{tmpdir}/manifest.yaml")
+      manifest_hash = sha256(manifest)
+      fs_hash = sha256(IO.binread(fsimg))
+      hashes = +''"manifest.yaml:
+  hash: #{hex(manifest_hash)}
+fs.img:
+  hash: #{hex(fs_hash)}
+  verity-hash: #{hex(verity_hash)}
+  verity-offset: #{filesystem_size}
+"''
+
+      # Sign hashes
+      signing_key = RbNaCl::SigningKey.new(signing_key)
+      signature = Base64.strict_encode64(signing_key.sign(hashes))
+
+      signatures = hashes
+      signatures << "---\n"
+      signatures << "key: #{key_name}\n"
+      signatures << "signature: #{signature}\n"
+
+      # Create ZIP
+      Zip::OutputStream.open(npk) do |stream|
+        stream.put_next_entry('signature.yaml', nil, nil, Zip::Entry::STORED)
+        stream.write signatures
+
+        stream.put_next_entry('manifest.yaml', nil, nil, Zip::Entry::STORED)
+        stream.write manifest
+
+        offset = 43 + manifest.length + 44 + signatures.length + 36 # stored
+        padding = (offset / 4096 + 1) * 4096 - offset
+
+        # store uncompressed to support mounting without extracting
+        # store at content offset 4096 for direct IO loopback support
+        extra = [''].pack("a#{padding}")
+        stream.put_next_entry('fs.img', nil, extra, Zip::Entry::STORED)
+        stream.write IO.binread(fsimg)
+      end
+
+      if fstype == 'squashfs'
+        raise('Alignment failed') unless IO.binread(npk, 4, 4096) == 'hsqs'
+      end
 
       packages << PackageInfo.new(arch, name, version)
-
     end
   end
   packages

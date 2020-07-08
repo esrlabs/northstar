@@ -108,7 +108,7 @@ namespace :build do
     KEY_DIRECTORY = "#{EXAMPLE_DIR}/keys"
     REGISTRY = `pwd`.strip + '/target/north/registry'
     mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
-    create_containers(REGISTRY, CONTAINER_SOURCES, KEY_DIRECTORY, 'north')
+    pack_containers(REGISTRY, CONTAINER_SOURCES, KEY_DIRECTORY, 'north', 'squashfs', 1000, 1000)
 
     targets.each do |target_arch|
       apps.each do |app|
