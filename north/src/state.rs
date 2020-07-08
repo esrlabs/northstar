@@ -12,12 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{
-    cgroups::CGroups, container, container::Container, process::Process, EventTx, Name,
-    TerminationReason,
-};
+use crate::{npk, npk::Container, process::Process, EventTx, Name, TerminationReason};
 use anyhow::{anyhow, Result};
-use log::{debug, info, warn};
+use log::{info, warn};
 use north_common::manifest::{Manifest, OnExit, Version};
 use std::{collections::HashMap, fmt, iter, time};
 
@@ -36,9 +33,10 @@ pub struct Application {
 #[derive(Debug)]
 pub struct ProcessContext {
     process: Process,
-    cgroups: Option<CGroups>,
     incarnation: u32,
     start_timestamp: time::Instant,
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    cgroups: Option<crate::linux::cgroups::CGroups>,
 }
 
 impl ProcessContext {
@@ -118,7 +116,7 @@ impl State {
         if let Some(app) = self.applications.get_mut(name) {
             if app.process_context().is_none() {
                 info!("Uninstalling {}", app);
-                container::uninstall(app.container()).await?;
+                npk::uninstall(app.container()).await?;
                 self.applications.remove(name);
                 Ok(())
             } else {
@@ -135,21 +133,24 @@ impl State {
         if let Some(app) = self.applications.get_mut(name) {
             info!("Starting {}", app);
             let process = Process::spawn(&app.container, self.tx.clone()).await?;
+            #[cfg(any(target_os = "android", target_os = "linux"))]
             let cgroups = if let Some(ref c) = app.manifest().cgroups {
-                debug!("Creating cgroup configuration for {}", app);
-                let cgroups = CGroups::new(app.name(), c, self.tx.clone()).await?;
+                log::debug!("Creating cgroup configuration for {}", app);
+                let cgroups =
+                    crate::linux::cgroups::CGroups::new(app.name(), c, self.tx.clone()).await?;
 
-                debug!("Assigning {} to cgroup {}", process.pid(), app);
+                log::debug!("Assigning {} to cgroup {}", process.pid(), app);
                 cgroups.assign(process.pid()).await?;
                 Some(cgroups)
             } else {
                 None
             };
             app.process = Some(ProcessContext {
-                cgroups,
                 process,
                 incarnation,
                 start_timestamp: time::Instant::now(),
+                #[cfg(any(target_os = "android", target_os = "linux"))]
+                cgroups,
             });
             info!("Started {}", app);
             Ok(())
@@ -173,10 +174,14 @@ impl State {
                     .await?
                     .await;
 
-                if let Some(cgroups) = context.cgroups {
-                    debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await?;
+                #[cfg(any(target_os = "android", target_os = "linux"))]
+                {
+                    if let Some(cgroups) = context.cgroups {
+                        log::debug!("Destroying cgroup configuration of {}", app);
+                        cgroups.destroy().await?;
+                    }
                 }
+
                 info!("Stopped {} {:?}", app, status);
             } else {
                 warn!("Application {} is not running", app);
@@ -187,6 +192,7 @@ impl State {
         }
     }
 
+    #[allow(unused_mut)]
     pub async fn on_exit(&mut self, name: &str, return_code: i32) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(mut context) = app.process.take() {
@@ -197,9 +203,13 @@ impl State {
                     return_code,
                     context.process.termination_reason()
                 );
-                if let Some(cgroups) = context.cgroups.take() {
-                    debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await?;
+
+                #[cfg(any(target_os = "android", target_os = "linux"))]
+                {
+                    if let Some(cgroups) = context.cgroups.take() {
+                        log::debug!("Destroying cgroup configuration of {}", app);
+                        cgroups.destroy().await?;
+                    }
                 }
 
                 if let Some(OnExit::Restart(n)) = app.manifest().on_exit {

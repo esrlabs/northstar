@@ -12,9 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{
-    container::Container, Event, EventTx, TerminationReason, SETTINGS, SYSTEM_GID, SYSTEM_UID,
-};
+use crate::{npk::Container, Event, EventTx, TerminationReason, SETTINGS, SYSTEM_GID, SYSTEM_UID};
 use anyhow::{anyhow, Context, Result};
 use async_std::{fs, prelude::*, sync, task};
 use futures::{future::FutureExt, select, StreamExt};

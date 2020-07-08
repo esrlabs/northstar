@@ -13,8 +13,10 @@
 //   limitations under the License.
 
 use anyhow::{anyhow, Context, Error, Result};
+use async_std::path::PathBuf;
 use fmt::Debug;
 use log::{debug, trace};
+use north_common::manifest::Manifest;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::{
@@ -22,6 +24,23 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt::{self},
 };
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+mod linux;
+#[cfg(any(target_os = "android", target_os = "linux"))]
+pub use linux::{install, install_all, uninstall};
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+mod mock;
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+pub use mock::{install, install_all, uninstall};
+
+#[derive(Debug)]
+pub struct Container {
+    pub manifest: Manifest,
+    pub root: PathBuf,
+    pub data: PathBuf,
+}
 
 #[derive(Eq, PartialEq, Debug)]
 pub struct Hashes {
@@ -37,6 +56,7 @@ struct Signature {
 }
 
 impl Hashes {
+    #[allow(unused)]
     pub fn from_str(file: &str) -> Result<Hashes, Error> {
         // sha256 of signature.yaml
         let mut hasher = sha2::Sha256::new();
