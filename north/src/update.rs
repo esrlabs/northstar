@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{container, State, TerminationReason};
+use crate::{npk, State, TerminationReason};
 use anyhow::{Context, Result};
 use async_std::{fs, path::Path};
 use futures::stream::StreamExt;
@@ -94,7 +94,7 @@ pub async fn update(state: &mut State, dir: &Path) -> Result<Vec<(String, (Versi
         }
 
         info!("Update: Installing {}", update.display());
-        let installed = container::install(state, &update).await?;
+        let installed = npk::install(state, &update).await?;
         let new_version: Version = installed.1;
 
         if is_started {

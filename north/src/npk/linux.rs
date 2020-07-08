@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{hashes::Hashes, Container};
+use super::{Container, Hashes};
 use crate::{
     linux::{
         device_mapper as dm,

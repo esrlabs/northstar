@@ -22,11 +22,10 @@ use anyhow::{Context, Error, Result};
 use async_std::{fs, sync};
 use log::*;
 
-mod cgroups;
 mod console;
-mod container;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod linux;
+mod npk;
 mod process;
 mod settings;
 mod state;
@@ -84,7 +83,7 @@ async fn main() -> Result<()> {
     trace!("Settings: {}", *SETTINGS);
 
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    linux::setup().await?;
+    linux::init().await?;
 
     let (tx, rx) = sync::channel::<Event>(1000);
     let mut state = State::new(tx.clone());
@@ -107,7 +106,7 @@ async fn main() -> Result<()> {
         })?;
 
     for d in &SETTINGS.directories.container_dirs {
-        container::install_all(&mut state, d).await?;
+        npk::install_all(&mut state, d).await?;
     }
 
     info!(

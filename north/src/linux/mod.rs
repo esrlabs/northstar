@@ -14,37 +14,12 @@
 
 use anyhow::Result;
 
+pub mod cgroups;
 pub mod device_mapper;
 pub mod loopdev;
-
-#[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod mount;
 
-#[cfg(not(any(target_os = "android", target_os = "linux")))]
-pub mod mount {
-    use anyhow::Result;
-    use async_std::path::Path;
-    pub enum MountFlags {
-        RDONLY,
-    }
-
-    pub async fn mount(
-        _source: &Path,
-        _target: &Path,
-        _fstype: &str,
-        _flags: MountFlags,
-        _data: Option<&str>,
-    ) -> Result<()> {
-        unimplemented!("mount");
-    }
-
-    pub async fn unmount(_target: &Path) -> Result<()> {
-        unimplemented!("unmounting");
-    }
-}
-
-#[cfg(any(target_os = "android", target_os = "linux"))]
-pub async fn setup() -> Result<()> {
+pub async fn init() -> Result<()> {
     use crate::SETTINGS;
     use anyhow::Context;
 
