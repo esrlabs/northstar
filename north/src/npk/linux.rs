@@ -200,7 +200,11 @@ async fn install_internal(
         )
         .await?;
 
-        let data = SETTINGS.directories.data_dir.join(&manifest.name);
+        let data = if SETTINGS.global_data_dir {
+            SETTINGS.directories.data_dir.clone()
+        } else {
+            SETTINGS.directories.data_dir.join(&manifest.name)
+        };
         if !data.exists().await {
             fs::create_dir_all(&data)
                 .await
@@ -220,12 +224,6 @@ async fn install_internal(
                 )
             })?;
         }
-
-        let data = if SETTINGS.global_data_dir {
-            SETTINGS.directories.data_dir.clone()
-        } else {
-            SETTINGS.directories.data_dir.join(&manifest.name)
-        };
 
         let container = Container {
             root,
