@@ -68,7 +68,7 @@ task :setup_environment do
   end
   sh "cd docker && docker build -t north/aarch64-linux-android:0.2.0 -f Dockerfile.aarch64-linux-android ."
   sh "cd docker && docker build -t north/aarch64-unknown-linux-gnu:0.2.0 -f Dockerfile.aarch64-unknown-linux-gnu ."
-  sh "cd docker && docker build -t north/x86_64-unknown-linux-gnu:0.2.0 -f Dockerfile.x64_64-unknown-linux-gnu ."
+  sh "cd docker && docker build -t north/x86_64-unknown-linux-gnu:0.2.0 -f Dockerfile.x86_64-unknown-linux-gnu ."
 end
 
 namespace :build do
