@@ -21,6 +21,7 @@ extern crate structure;
 use anyhow::{Context, Error, Result};
 use async_std::{fs, sync};
 use log::*;
+use nix::unistd::{self, chown};
 
 mod console;
 #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -104,6 +105,23 @@ async fn main() -> Result<()> {
                 SETTINGS.directories.data_dir.display()
             )
         })?;
+
+    if SETTINGS.global_data_dir {
+        let data: &std::path::Path = SETTINGS.directories.data_dir.as_path().into();
+        chown(
+            data,
+            Some(unistd::Uid::from_raw(SYSTEM_UID)),
+            Some(unistd::Gid::from_raw(SYSTEM_GID)),
+        )
+        .with_context(|| {
+            format!(
+                "Failed to chown {} to {}:{}",
+                data.display(),
+                SYSTEM_UID,
+                SYSTEM_GID
+            )
+        })?;
+    }
 
     for d in &SETTINGS.directories.container_dirs {
         npk::install_all(&mut state, d).await?;
