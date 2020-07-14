@@ -22,6 +22,7 @@ use anyhow::{Context, Error, Result};
 use async_std::{fs, sync};
 use log::*;
 use nix::unistd::{self, chown};
+use north_common::manifest::Name;
 
 mod console;
 #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -39,7 +40,6 @@ pub const SYSTEM_GID: u32 = 1000;
 pub use settings::SETTINGS;
 pub use state::State;
 
-pub type Name = String;
 pub type EventTx = sync::Sender<Event>;
 #[allow(clippy::large_enum_variant)]
 pub enum Event {

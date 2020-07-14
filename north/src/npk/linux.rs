@@ -225,6 +225,12 @@ async fn install_internal(
             })?;
         }
 
+        let data = if SETTINGS.global_data_dir {
+            SETTINGS.directories.data_dir.clone()
+        } else {
+            SETTINGS.directories.data_dir.join(&manifest.name)
+        };
+
         let container = Container {
             root,
             data,

@@ -131,6 +131,10 @@ impl State {
 
     pub async fn start(&mut self, name: &str, incarnation: u32) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
+            if app.container.is_resource_container() {
+                warn!("Cannot start resource containers ({})", app);
+                return Err(anyhow!("Attempted to start resource container {}", name));
+            }
             info!("Starting {}", app);
             let process = Process::spawn(&app.container, self.tx.clone()).await?;
             #[cfg(any(target_os = "android", target_os = "linux"))]
