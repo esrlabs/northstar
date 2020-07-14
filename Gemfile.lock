@@ -1,0 +1,25 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    colored (1.2)
+    ffi (1.13.1)
+    fileutils (1.4.1)
+    os (1.1.0)
+    rbnacl (7.1.1)
+      ffi
+    rubyzip (2.3.0)
+    yaml (0.1.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  colored
+  fileutils
+  os
+  rbnacl
+  rubyzip
+  yaml
+
+BUNDLED WITH
+   2.1.4
