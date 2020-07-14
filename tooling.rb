@@ -119,135 +119,98 @@ def generate_hash_tree(image, image_size, block_size, salt, hash_level_offsets, 
   [sha256(salt + level_output), hash_ret]
 end
 
-class PackageInfo
-  attr_accessor :architecture, :name, :version
-  def initialize(arch, name, version)
-    @architecture = arch
-    @name = name
-    @version = version
-  end
-end
+def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
+  has_resources = !manifest['resources'].nil?
+  arch = manifest['arch']
+  Dir.mktmpdir do |tmpdir|
+    # Copy root
+    root = "#{src_dir}/root"
+    FileUtils.cp_r(root, tmpdir, :verbose => false) if Dir.exist? "#{src_dir}/root"
+    FileUtils.mkdir_p("#{tmpdir}/root", :verbose => false) unless Dir.exist? "#{tmpdir}/root"
 
-def pack_containers(registry, container_sources, key_directory, key_name, fstype, uid, gid)
-  signing_key = IO.binread("#{File.join(key_directory, key_name)}.key")
-  packages = []
+    # Copy arch specific root
+    Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, "#{tmpdir}/root", :verbose => false) }
 
-  Dir.glob("#{container_sources}/**/*")
-     .filter { |d| File.exist?(File.join(d, 'manifest.yaml')) }
-     .sort
-     .each do |src_dir|
-    packages += pack(src_dir, registry, signing_key, key_name, fstype, uid, gid)
-  end
-  Dir.glob("#{registry}/*.yaml").each { |f| rm f }
+    # Write manifest
+    File.write("#{tmpdir}/manifest.yaml", manifest.to_yaml)
 
-  # Create version list
-  packages.each do |p|
-    File.open("#{registry}/packages-#{p.architecture}.yaml", 'a') do |f|
-      f.puts "{ 'name' => #{p.name}, 'version' => #{p.version} }"
+    root = "#{tmpdir}/root"
+    fsimg = "#{tmpdir}/fs.img"
+
+    # The list of pseudofiles is target specific.
+    # Add /lib and lib64 on Linux systems.
+    # Add /system on Android.
+    pseudofiles = [['/tmp', 444], ['/proc', 444], ['/dev', 444], ['/sys', 444], ['/data', 777]]
+    case arch
+    when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
+      pseudofiles << ['/lib', 444]
+      pseudofiles << ['/lib64', 444]
+    when 'aarch64-linux-android'
+      pseudofiles << ['/system', 444]
     end
-  end
-end
+    if has_resources
+      manifest['resources'].each do |res|
+        pseudofiles << [res['mountpoint'], 444]
+      end
+    end
 
-def pack(src_dir, registry, signing_key, key_name, fstype, uid, gid)
-  packages = []
-  Dir.glob("#{src_dir}/root-*").each do |arch_dir|
-    arch = arch_dir.gsub(%r{.*/root-}, '')
-    # Load manifest
-    manifest = YAML.load_file("#{src_dir}/manifest.yaml")
-    name = manifest['name']
-    version = manifest['version']
-    info "Packing #{src_dir} (#{arch})"
-    uid = 1000
-    gid = 1000
-
-    Dir.mktmpdir do |tmpdir|
-      # Copy root
-      root = "#{src_dir}/root"
-      FileUtils.cp_r(root, tmpdir, :verbose => false) if Dir.exist? "#{src_dir}/root"
-      FileUtils.mkdir_p("#{tmpdir}/root", :verbose => false) unless Dir.exist? "#{tmpdir}/root"
-
-      # Copy arch specific root
-      Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, "#{tmpdir}/root", :verbose => false) }
-
-      # Write manifest
-      manifest['arch'] = arch
-      File.open("#{tmpdir}/manifest.yaml", 'w') { |f| f.write(manifest.to_yaml) }
-
-      # Remove existing containers
-      Dir.glob("#{registry}/#{name}-#{arch}-*").each { |c| FileUtils.rm(c, :verbose => false) }
-
-      npk = "#{registry}/#{name}-#{arch}-#{version}.npk"
-      root = "#{tmpdir}/root"
-      fsimg = "#{tmpdir}/fs.img"
-
-      # The list of pseudofiles is target specific.
-      # Add /lib and lib64 on Linux systems.
-      # Add /system on Android.
-      pseudofiles = [['/tmp', 444], ['/proc', 444], ['/dev', 444], ['/sys', 444], ['/data', 777]]
-      pseudofiles = case arch
-      when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
-        pseudofiles += [['/lib', 444], ['/lib64', 444]]
-      when 'aarch64-linux-android'
-        pseudofiles += [['/system', 444]]
-      else
-        pseudofiles
+    # Create filesystem image
+    if pack_config.fstype == 'squashfs'
+      require 'os'
+      pseudofiles = pseudofiles.map { |d| "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'" }.join(' ')
+      # TODO: The compression algorithm should be target and not host specific!
+      squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
+      shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
+      raise 'mksquashfs failed' unless File.exist? fsimg
+    elsif pack_config.fstype == 'ext4'
+      pseudofiles.each do |d|
+        FileUtils.mkdir_p("#{root}#{d[0]}") unless Dir.exist? "#{root}#{d[0]}"
       end
 
-      # Create filesystem image
-      if fstype == 'squashfs'
-        require 'os'
-        pseudofiles = pseudofiles.map { |d| "-p '#{d[0]} d #{d[1]} #{uid} #{gid}'" }.join(' ')
-        # TODO: The compression algorithm should be target and not host specific!
-        squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
-        shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
-        raise 'mksquashfs failed' unless File.exist? fsimg
-      elsif fstype == 'ext4'
-        pseudofiles.each { |d| FileUtils.mkdir_p("#{root}#{d[0]}") unless Dir.exist? "#{root}#{d[0]}" }
-
-        # system("chmod", "-R", "a-w,a+rX", root) or raise "chmod failed"
-        # system("chown", "-R", "0:0", root) or raise # only works as root
-        blocks = `du -ks #{root}`.split.first.to_i # rough, too big, estimate
-        shell("mke2fs -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
-        e2fsck_output = `e2fsck -f -n #{fsimg}`
-        unless e2fsck_output.chomp.split("\n").last =~ %r{(\d+)/\d+ blocks}
-          raise "e2fsck failed: #{e2fsck_output}"
-        end
-
-        blocks = Regexp.last_match(1).to_i # actual required blocks
-        FileUtils.rm_f(fsimg)
-        sh("mke2fs  -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
-
-        pseudofiles.each { |d| FileUtils.rmdir("#{root}#{d[0]}") }
-      else
-        raise "Unknown filesystem: #{fstype}"
-      end
-      filesystem_size = File.size(fsimg)
-
-      # Append verity header and hash tree to filesystem image
-      verity_hash = nil
-      digest_size = 32
-      block_size = 4096
-      if filesystem_size % block_size != 0
-        raise "Filesystem size (#{filesystem_size}) not multiple of block size (#{block_size})"
-      end # or pad?
-
-      data_blocks = filesystem_size / block_size
-      uuid = SecureRandom.uuid
-      salt = SecureRandom.bytes(digest_size)
-      hash_level_offsets, tree_size = calc_hash_level_offsets(filesystem_size, block_size, digest_size)
-      File.open(fsimg, 'a+b') do |file|
-        verity_hash, hash_tree = generate_hash_tree(file, filesystem_size, block_size, salt, hash_level_offsets, tree_size)
-
-        file.seek(filesystem_size)
-        file << ['verity', 1, 1, uuid.gsub('-', ''), 'sha256', 4096, 4096, data_blocks, 32, salt, ''].pack('a8 L L H32 a32 L L Q S x6 a256 a3752')
-        file << hash_tree
+      # system("chmod", "-R", "a-w,a+rX", root) or raise "chmod failed"
+      # system("chown", "-R", "0:0", root) or raise # only works as root
+      blocks = `du -ks #{root}`.split.first.to_i # rough, too big, estimate
+      shell("mke2fs -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
+      e2fsck_output = `e2fsck -f -n #{fsimg}`
+      unless e2fsck_output.chomp.split("\n").last =~ %r{(\d+)/\d+ blocks}
+        raise "e2fsck failed: #{e2fsck_output}"
       end
 
-      # Create hashes YAML
-      manifest = IO.binread("#{tmpdir}/manifest.yaml")
-      manifest_hash = sha256(manifest)
-      fs_hash = sha256(IO.binread(fsimg))
-      hashes = +''"manifest.yaml:
+      blocks = Regexp.last_match(1).to_i # actual required blocks
+      FileUtils.rm_f(fsimg)
+      sh("mke2fs  -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
+
+      pseudofiles.each { |d| FileUtils.rmdir("#{root}#{d[0]}") }
+    else
+      raise "Unknown filesystem: #{pack_config.fstype}"
+    end
+    filesystem_size = File.size(fsimg)
+
+    # Append verity header and hash tree to filesystem image
+    verity_hash = nil
+    digest_size = 32
+    block_size = 4096
+    if filesystem_size % block_size != 0
+      raise "Filesystem size (#{filesystem_size}) not multiple of block size (#{block_size})"
+    end # or pad?
+
+    data_blocks = filesystem_size / block_size
+    uuid = SecureRandom.uuid
+    salt = SecureRandom.bytes(digest_size)
+    hash_level_offsets, tree_size = calc_hash_level_offsets(filesystem_size, block_size, digest_size)
+    File.open(fsimg, 'a+b') do |file|
+      verity_hash, hash_tree = generate_hash_tree(file, filesystem_size, block_size, salt, hash_level_offsets, tree_size)
+
+      file.seek(filesystem_size)
+      file << ['verity', 1, 1, uuid.gsub('-', ''), 'sha256', 4096, 4096, data_blocks, 32, salt, ''].pack('a8 L L H32 a32 L L Q S x6 a256 a3752')
+      file << hash_tree
+    end
+
+    # Create hashes YAML
+    manifest = IO.binread("#{tmpdir}/manifest.yaml")
+    manifest_hash = sha256(manifest)
+    fs_hash = sha256(IO.binread(fsimg))
+    hashes = +''"manifest.yaml:
   hash: #{hex(manifest_hash)}
 fs.img:
   hash: #{hex(fs_hash)}
@@ -255,39 +218,88 @@ fs.img:
   verity-offset: #{filesystem_size}
 "''
 
-      # Sign hashes
-      signing_key = RbNaCl::SigningKey.new(signing_key)
-      signature = Base64.strict_encode64(signing_key.sign(hashes))
+    # Sign hashes
+    signature = Base64.strict_encode64(pack_config.signing_key.sign(hashes))
 
-      signatures = hashes
-      signatures << "---\n"
-      signatures << "key: #{key_name}\n"
-      signatures << "signature: #{signature}\n"
+    signatures = hashes
+    signatures << "---\n"
+    signatures << "key: #{pack_config.key_id}\n"
+    signatures << "signature: #{signature}\n"
 
-      # Create ZIP
-      Zip::OutputStream.open(npk) do |stream|
-        stream.put_next_entry('signature.yaml', nil, nil, Zip::Entry::STORED)
-        stream.write signatures
+    # Create ZIP
+    Zip::OutputStream.open(npk) do |stream|
+      stream.put_next_entry('signature.yaml', nil, nil, Zip::Entry::STORED)
+      stream.write signatures
 
-        stream.put_next_entry('manifest.yaml', nil, nil, Zip::Entry::STORED)
-        stream.write manifest
+      stream.put_next_entry('manifest.yaml', nil, nil, Zip::Entry::STORED)
+      stream.write manifest
 
-        offset = 43 + manifest.length + 44 + signatures.length + 36 # stored
-        padding = (offset / 4096 + 1) * 4096 - offset
+      offset = 43 + manifest.length + 44 + signatures.length + 36 # stored
+      padding = (offset / 4096 + 1) * 4096 - offset
 
-        # store uncompressed to support mounting without extracting
-        # store at content offset 4096 for direct IO loopback support
-        extra = [''].pack("a#{padding}")
-        stream.put_next_entry('fs.img', nil, extra, Zip::Entry::STORED)
-        stream.write IO.binread(fsimg)
-      end
+      # store uncompressed to support mounting without extracting
+      # store at content offset 4096 for direct IO loopback support
+      extra = [''].pack("a#{padding}")
+      stream.put_next_entry('fs.img', nil, extra, Zip::Entry::STORED)
+      stream.write IO.binread(fsimg)
+    end
 
-      if fstype == 'squashfs'
-        raise('Alignment failed') unless IO.binread(npk, 4, 4096) == 'hsqs'
-      end
-
-      packages << PackageInfo.new(arch, name, version)
+    if pack_config.fstype == 'squashfs'
+      raise('Alignment failed') unless IO.binread(npk, 4, 4096) == 'hsqs'
     end
   end
-  packages
+end
+
+class PackageConfig
+  attr_accessor :uid, :gid, :version, :fstype, :key_id, :signing_key
+  def initialize(uid, gid, key_dir, key_id, fstype)
+    @uid = uid
+    @gid = gid
+    @fstype = fstype
+    @key_id = key_id
+    signing_key_seed = IO.binread("#{File.join(key_dir, key_id)}.key")
+    @signing_key = RbNaCl::SigningKey.new(signing_key_seed)
+  end
+end
+
+def create_arch_package(arch, arch_dir, src_dir, out_dir, pack_config)
+  # Load manifest
+  manifest = YAML.load_file("#{src_dir}/manifest.yaml")
+  manifest['arch'] = arch
+  name = manifest['name']
+  version = manifest['version']
+  info "Packing #{src_dir} (#{arch})"
+
+  npk = "#{out_dir}/#{name}-#{arch}-#{version}.npk"
+
+  # TODO: do this seperatly
+  # Remove existing containers
+  Dir.glob("#{out_dir}/#{name}-#{arch}-*").each { |c| FileUtils.rm(c, :verbose => false) }
+
+  create_npk(src_dir, npk, manifest, arch_dir, pack_config)
+
+  # Update/Create version list
+  version_info_path = File.join(out_dir, "packages-#{arch}.yaml")
+  update_version_list(version_info_path, name, version)
+end
+
+def update_version_list(version_file, name, new_version)
+  versions = if File.exist?(version_file)
+               YAML.load_file(version_file)
+             else
+               []
+             end
+  if versions.any? { |x| x['name'] == name }
+    versions.map do |n|
+      if n['name'] == name
+        n['version'] = new_version
+      else
+        n
+      end
+    end
+  else
+    versions << { 'name' => name, 'version' => new_version }
+  end
+  versions.each { |r| r.transform_keys(&:to_s) }
+  File.write(version_file, versions.to_yaml)
 end
