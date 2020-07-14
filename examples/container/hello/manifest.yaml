@@ -4,6 +4,14 @@ init: /hello
 env: [[HELLO, north]]
 # autostart: true
 # instances: 20
+resources: [
+    {
+        name: resource_a,
+        version: 0.1.1,
+        dir: /,
+        mountpoint: /res/we/go
+    }
+]
 seccomp:
   clone: 1
   mmap: arg2 in ~PROT_EXEC || arg2 in ~PROT_WRITE
