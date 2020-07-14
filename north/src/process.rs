@@ -56,6 +56,18 @@ impl Process {
     pub async fn spawn(container: &Container, event_tx: EventTx) -> Result<Process> {
         let root: std::path::PathBuf = container.root.clone().into();
         let manifest = &container.manifest;
+        let cmd = match &manifest.init {
+            Some(a) => a.clone(),
+            None => {
+                let error = format!(
+                    "Cannot start a resource container {}:{}",
+                    manifest.name, manifest.version
+                );
+                event_tx.send(Event::Error(anyhow!(error.clone()))).await;
+                return Err(anyhow!(error));
+            }
+        };
+
         let tmpdir = tempfile::TempDir::new()
             .with_context(|| format!("Failed to create tmpdir for {}", manifest.name))?;
 
@@ -111,8 +123,15 @@ impl Process {
             &std::path::PathBuf::from("/data").as_path(),
             true,
         )?;
-
-        let cmd = manifest.init.clone();
+        // mount resource containers
+        match &container.manifest.resources {
+            Some(resources) => {
+                for res in resources {
+                    jail.mount_bind(&res.dir, &res.mountpoint, false)?;
+                }
+            }
+            None => {}
+        }
 
         let args = if let Some(ref args) = manifest.args {
             args.iter().map(|a| a.as_str()).collect()

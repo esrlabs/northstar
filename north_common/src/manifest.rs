@@ -24,6 +24,8 @@ use std::{collections::HashMap, fmt, fs::File, str::FromStr};
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
 pub struct Version(semver::Version);
 
+pub type Name = String;
+
 impl Version {
     #[allow(dead_code)]
     pub fn parse(s: &str) -> Result<Version> {
@@ -111,6 +113,14 @@ pub struct CGroups {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Resource {
+    pub name: Name,
+    pub version: Version,
+    pub dir: std::path::PathBuf,
+    pub mountpoint: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum LogBuffer {
     #[serde(rename(serialize = "main", deserialize = "main"))]
     Main,
@@ -127,17 +137,18 @@ pub struct Log {
 #[derive(Clone, Default, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container
-    pub name: String,
+    pub name: Name,
     /// Container version
     pub version: Version,
     /// Target arch
     pub arch: String,
     /// Path to init
-    pub init: std::path::PathBuf,
+    pub init: Option<std::path::PathBuf>,
     /// Additional arguments for the application invocation
     pub args: Option<Vec<String>>,
     /// Environment passed to container
     pub env: Option<Vec<(String, String)>>,
+    pub resources: Option<Vec<Resource>>,
     /// Autostart this container upon north startup
     pub autostart: Option<bool>,
     /// Action on application exit
@@ -162,9 +173,21 @@ impl Manifest {
                 .with_context(|| format!("Failed to parse {}", f.display()))?;
 
             if let Some(OnExit::Restart(n)) = manifest.on_exit {
+                if manifest.init.is_none() {
+                    return Err(anyhow!(
+                        "on_exit not allowed in resource container {}",
+                        f.display()
+                    ));
+                }
                 if n == 0 {
                     return Err(anyhow!("Invalid on_exit value in {}", f.display()));
                 }
+            }
+            if manifest.init.is_none() && manifest.args.is_some() {
+                return Err(anyhow!(
+                    "arguments not allowed in resource container {}",
+                    f.display()
+                ));
             }
             Ok(manifest)
         })
@@ -186,7 +209,6 @@ async fn parse() -> Result<()> {
 
     let file = tempfile::NamedTempFile::new()?;
     let path = file.path();
-
     let m = "
 name: hello
 version: 0.0.0
@@ -194,6 +216,14 @@ arch: aarch64-linux-android
 init: /binary
 args: [one, two]
 env: [[LD_LIBRARY_PATH, /lib]]
+resources: [
+    {
+        name: bla,
+        version: 1.0.0,
+        dir: /bin/foo,
+        mountpoint: /here/we/go
+    }
+]
 autostart: true
 on_exit:
     restart: 3
@@ -217,12 +247,18 @@ log:
 
     let manifest = Manifest::from_path(&PathBuf::from(path)).await?;
 
-    assert_eq!(manifest.init, std::path::PathBuf::from("/binary"));
+    assert_eq!(manifest.init, Some(std::path::PathBuf::from("/binary")));
     assert_eq!(manifest.name, "hello");
     let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
     assert_eq!(args.len(), 2);
     assert_eq!(args[0], "one");
     assert_eq!(args[1], "two");
+
+    let resources = manifest
+        .resources
+        .ok_or_else(|| anyhow!("Missing resource containers"))?;
+    assert_eq!(resources.len(), 1);
+    assert_eq!(resources[0].name, "bla".to_owned());
     assert!(manifest.autostart.unwrap());
     assert_eq!(manifest.on_exit, Some(OnExit::Restart(3)));
     let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;

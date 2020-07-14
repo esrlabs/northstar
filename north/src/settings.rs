@@ -136,7 +136,7 @@ lazy_static::lazy_static! {
 #[derive(Debug, StructOpt)]
 #[structopt(name = "north", about = "North")]
 struct CliOptions {
-    /// Directory containing images in container format
+    /// File that contains the north configuration
     #[structopt(short, long)]
     pub config: Option<String>,
 

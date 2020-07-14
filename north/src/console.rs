@@ -89,6 +89,7 @@ async fn list(state: &State) -> Result<String> {
             "Name".to_string(),
             "Version".to_string(),
             "Running".to_string(),
+            "Type".to_string(),
         ]]
         .iter()
         .cloned()
@@ -103,6 +104,12 @@ async fn list(state: &State) -> Result<String> {
                         app.process_context()
                             .map(|c| format!("Yes (pid: {})", c.process().pid()))
                             .unwrap_or_else(|| "No".to_string()),
+                        if app.container().is_resource_container() {
+                            "resource"
+                        } else {
+                            "app"
+                        }
+                        .to_owned(),
                     ]
                 }),
         ),
@@ -187,6 +194,7 @@ async fn start(state: &mut State, args: &[&str]) -> Result<String> {
     let apps = state
         .applications()
         .filter(|app| app.process_context().is_none())
+        .filter(|app| !app.container().is_resource_container())
         .filter(|app| re.is_match(app.name()))
         .map(|app| app.name().clone())
         .collect::<Vec<Name>>();

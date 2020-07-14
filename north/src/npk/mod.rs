@@ -42,6 +42,12 @@ pub struct Container {
     pub data: PathBuf,
 }
 
+impl Container {
+    pub fn is_resource_container(&self) -> bool {
+        self.manifest.init.is_none()
+    }
+}
+
 #[derive(Eq, PartialEq, Debug)]
 pub struct Hashes {
     pub manifest_hash: String,
