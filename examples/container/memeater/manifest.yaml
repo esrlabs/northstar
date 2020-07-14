@@ -1,5 +1,6 @@
 name: memeater
 version: 0.0.1
+arch: x86_64-unknown-linux-gnu
 init: /memeater
 on_exit:
   restart: 3

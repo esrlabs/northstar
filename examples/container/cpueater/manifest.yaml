@@ -1,5 +1,6 @@
 name: cpueater
 version: 0.0.1
+arch: x86_64-unknown-linux-gnu
 init: /cpueater
 env: [[THREADS, 4]]
 cgroups:

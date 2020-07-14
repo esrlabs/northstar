@@ -1,5 +1,6 @@
 name: crashing
 version: 0.0.1
+arch: x86_64-unknown-linux-gnu
 init: /crashing
 env: [[RUST_BACKTRACE, 1]]
 on_exit:
