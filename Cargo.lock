@@ -728,6 +728,9 @@ dependencies = [
 [[package]]
 name = "hello"
 version = "0.1.0"
+dependencies = [
+ "walkdir",
+]
 
 [[package]]
 name = "hermit-abi"

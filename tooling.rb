@@ -119,8 +119,22 @@ def generate_hash_tree(image, image_size, block_size, salt, hash_level_offsets, 
   [sha256(salt + level_output), hash_ret]
 end
 
+def path_trail(p)
+  require 'pathname'
+  parts = Pathname(p).each_filename.to_a
+  trail = parts.inject([[], '/']) do |acc, x|
+    prev_path = acc[1]
+    next_path = File.join(prev_path, x)
+    acc[0].unshift next_path
+    acc[1] = next_path
+    acc
+  end
+  trail[0]
+end
+
 def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
   has_resources = !manifest['resources'].nil?
+  is_resource_container = manifest['init'].nil?
   arch = manifest['arch']
   Dir.mktmpdir do |tmpdir|
     # Copy root
@@ -137,10 +151,18 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     root = "#{tmpdir}/root"
     fsimg = "#{tmpdir}/fs.img"
 
+    pseudofiles = []
+    if !is_resource_container
+      pseudofiles << ['/tmp', 444]
+      pseudofiles << ['/proc', 444]
+      pseudofiles << ['/dev', 444]
+      pseudofiles << ['/sys', 444]
+      pseudofiles << ['/data', 777]
+    end
+
     # The list of pseudofiles is target specific.
     # Add /lib and lib64 on Linux systems.
     # Add /system on Android.
-    pseudofiles = [['/tmp', 444], ['/proc', 444], ['/dev', 444], ['/sys', 444], ['/data', 777]]
     case arch
     when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
       pseudofiles << ['/lib', 444]
@@ -148,15 +170,21 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     when 'aarch64-linux-android'
       pseudofiles << ['/system', 444]
     end
+
     if has_resources
       manifest['resources'].each do |res|
-        pseudofiles << [res['mountpoint'], 444]
+        # in order to support mountpoints with multiple path segments, we need to call mksquashfs multiple times:
+        # e.gl to support res/foo in our image, we need to add /res/foo AND /res
+        # ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000"
+        trail = path_trail res['mountpoint']
+        trail.each {|part| pseudofiles << [part, 555]}
       end
     end
 
     # Create filesystem image
     if pack_config.fstype == 'squashfs'
       require 'os'
+      info "pseudofiles: #{pseudofiles}"
       pseudofiles = pseudofiles.map { |d| "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'" }.join(' ')
       # TODO: The compression algorithm should be target and not host specific!
       squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
@@ -303,3 +331,29 @@ def update_version_list(version_file, name, new_version)
   versions.each { |r| r.transform_keys(&:to_s) }
   File.write(version_file, versions.to_yaml)
 end
+
+def inspect_npk(pkg)
+  require 'colored'
+  puts("#{'----------------------------------------------'.green}")
+  info "Inspecting #{File.basename(pkg, '.npk')}"
+  Dir.mktmpdir do |tmpdir|
+    cp_r pkg, tmpdir, :verbose => false
+    cd tmpdir, :verbose => false do
+      Zip::File.open(pkg) do |zip_file|
+        zip_file.each do |f|
+          f_path=File.join("extracted", f.name)
+          FileUtils.mkdir_p(File.dirname(f_path))
+          zip_file.extract(f, f_path) unless File.exist?(f_path)
+        end
+        cd 'extracted', :verbose => false do
+          puts `tree .`
+          Dir["*.img"].each do |file|
+            puts "#{'squashFS-image'.yellow}: #{file}"
+            sh "unsquashfs -l #{file}"
+          end
+        end
+      end
+    end
+  end
+end
+

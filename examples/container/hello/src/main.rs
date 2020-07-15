@@ -11,10 +11,17 @@
 //   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
+use walkdir::WalkDir;
 
 fn main() {
     let hello = std::env::var("HELLO").unwrap_or_else(|_| "unknown".into());
     let version = std::env::var("VERSION").unwrap_or_else(|_| "unknown".into());
+    for entry in WalkDir::new("/res") {
+        match entry {
+            Ok(entry) => println!("--> {}", entry.path().display()),
+            Err(e) => println!("ERROR: {}", e),
+        }
+    }
     println!("Hello again {} from version {}!", hello, version);
     for i in 0..u64::MAX {
         println!(

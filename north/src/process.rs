@@ -127,7 +127,17 @@ impl Process {
         match &container.manifest.resources {
             Some(resources) => {
                 for res in resources {
-                    jail.mount_bind(&res.dir, &res.mountpoint, false)?;
+                    let cwd = std::env::current_dir().unwrap();
+                    let src_dir = cwd
+                        .join(SETTINGS.directories.run_dir.to_owned())
+                        .join(res.name.to_owned());
+                    //TODO: verify res.name
+                    info!(
+                        "mounting from src_dir {} to target {:?}",
+                        src_dir.display(),
+                        res.mountpoint
+                    );
+                    jail.mount_bind(src_dir.as_ref(), &res.mountpoint, false)?;
                 }
             }
             None => {}
@@ -210,7 +220,7 @@ impl Process {
                     ExitStatus::Exit(0)
                 }, // This is the happy path...
                 _ = timeout => {
-                    if let Err(e) = signal::kill(Pid::from_raw(-(pid as i32)), Some(Signal::SIGKILL)) {
+                    if let Err(e) = signal::kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)) {
                         // If we couldn't send a SIGKILL we have a problem
                         tx.send(Event::Error(anyhow!("Failed to kill pid {}", pid)))
                             .await;
@@ -231,6 +241,7 @@ impl Process {
             let exit_code: i32 = task::spawn_blocking(move || {
                 let pid = Pid::from_raw(pid as i32);
                 let result = wait::waitpid(Some(pid), None);
+                debug!("wait pid res: {:?}", result);
 
                 match result {
                     // The process exited normally (as with exit() or returning from main) with the given exit code.

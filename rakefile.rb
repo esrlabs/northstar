@@ -93,7 +93,7 @@ namespace :build do
   end
 
   desc 'Build dcon control client'
-  task :north do
+  task :dcon do
     sh 'cargo build --release --bin dcon'
   end
 
@@ -115,8 +115,8 @@ def all_targets
 end
 
 def all_apps
-  # %w[hello] # for testing
-  %w[cpueater hello crashing datarw memeater resource_a]
+  %w[hello resource_a] # for testing
+  # %w[cpueater hello crashing datarw memeater resource_a]
 end
 
 namespace :examples do
@@ -167,6 +167,19 @@ namespace :examples do
   desc 'Clean example registry'
   task :drop do
     rm_rf registry
+  end
+
+  desc 'Inspect'
+  task :inspect, [:id] do |t,args|
+    require './tooling.rb'
+    name = args[:id]
+    puts "Inpsecting npk with id: #{name}"
+    pkgs = Dir["#{registry}/#{name}*.npk"]
+    if pkgs.empty?
+      puts "no packages for id #{name} found in registry"
+    else
+      inspect_npk pkgs[0]
+    end
   end
 end
 
