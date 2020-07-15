@@ -9,7 +9,7 @@ resources: [
         name: resource_a,
         version: 0.1.1,
         dir: /,
-        mountpoint: /res/we/go
+        mountpoint: /res/abc
     }
 ]
 seccomp:

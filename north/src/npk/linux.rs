@@ -142,6 +142,10 @@ async fn install_internal(
         manifest_file.read_to_string(&mut manifest)?;
         Manifest::from_str(&manifest)?
     };
+    debug!(
+        "Manifest loaded for {}, resources: {:?}",
+        manifest.name, manifest.resources
+    );
 
     debug!("Loading hashes");
     let hashes = {

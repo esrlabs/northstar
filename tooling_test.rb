@@ -35,4 +35,19 @@ class TestVersionList < Test::Unit::TestCase
     new_hello = versions.select { |elem| elem['name'] == 'hello' }.first
     assert_equal('0.1.0', new_hello['version'])
   end
+
+  def test_path_trail
+    path = '/tmp'
+    trail = path_trail path
+    assert_equal(1, trail.length)
+    assert_equal('/tmp', trail[0])
+
+    # multi part path
+    path = '/tmp/abc/foo'
+    trail = path_trail path
+    assert_equal(3, trail.length)
+    assert_equal('/tmp/abc/foo', trail[0])
+    assert_equal('/tmp/abc', trail[1])
+    assert_equal('/tmp', trail[2])
+  end
 end
