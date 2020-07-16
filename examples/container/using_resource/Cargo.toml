@@ -1,0 +1,8 @@
+[package]
+name = "using_resource"
+version = "0.1.0"
+authors = ["ESRLabs"]
+edition = "2018"
+
+[dependencies]
+walkdir = "2.3.1"
