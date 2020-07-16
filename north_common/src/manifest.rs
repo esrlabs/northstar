@@ -165,30 +165,29 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    fn verify(&self) -> Result<()> {
+        if let Some(OnExit::Restart(n)) = self.on_exit {
+            if self.init.is_none() {
+                return Err(anyhow!("on_exit not allowed in resource container"));
+            }
+            if n == 0 {
+                return Err(anyhow!("Invalid on_exit value in manifest"));
+            }
+        }
+        if self.init.is_none() && self.args.is_some() {
+            return Err(anyhow!("arguments not allowed in resource container"));
+        }
+        Ok(())
+    }
+
     pub async fn from_path(f: &Path) -> Result<Manifest> {
         let f = f.to_owned();
         task::spawn_blocking(move || {
             let file = File::open(&f)?;
             let manifest: Manifest = serde_yaml::from_reader(file)
-                .with_context(|| format!("Failed to parse {}", f.display()))?;
+                .with_context(|| format!("Failed to parse manifest from {}", f.display()))?;
+            manifest.verify()?;
 
-            if let Some(OnExit::Restart(n)) = manifest.on_exit {
-                if manifest.init.is_none() {
-                    return Err(anyhow!(
-                        "on_exit not allowed in resource container {}",
-                        f.display()
-                    ));
-                }
-                if n == 0 {
-                    return Err(anyhow!("Invalid on_exit value in {}", f.display()));
-                }
-            }
-            if manifest.init.is_none() && manifest.args.is_some() {
-                return Err(anyhow!(
-                    "arguments not allowed in resource container {}",
-                    f.display()
-                ));
-            }
             Ok(manifest)
         })
         .await
@@ -198,7 +197,12 @@ impl Manifest {
 impl FromStr for Manifest {
     type Err = Error;
     fn from_str(s: &str) -> std::result::Result<Manifest, Error> {
-        serde_yaml::from_str(s).context("Failed to parse manifest")
+        let parse_res: std::result::Result<Manifest, Error> =
+            serde_yaml::from_str(s).context("Failed to parse manifest");
+        if let Ok(manifest) = &parse_res {
+            manifest.verify()?;
+        }
+        parse_res
     }
 }
 
