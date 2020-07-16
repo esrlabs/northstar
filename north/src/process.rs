@@ -127,17 +127,25 @@ impl Process {
         match &container.manifest.resources {
             Some(resources) => {
                 for res in resources {
-                    let cwd = std::env::current_dir().unwrap();
-                    let src_dir = cwd
-                        .join(SETTINGS.directories.run_dir.to_owned())
-                        .join(res.name.to_owned());
-                    //TODO: verify res.name
-                    info!(
-                        "mounting from src_dir {} to target {:?}",
-                        src_dir.display(),
-                        res.mountpoint
-                    );
-                    jail.mount_bind(src_dir.as_ref(), &res.mountpoint, false)?;
+                    if let Ok(cwd) = std::env::current_dir() {
+                        let dir_in_container_path = std::path::Path::new(&res.dir);
+                        let first_part_of_path = cwd
+                            .join(SETTINGS.directories.run_dir.to_owned())
+                            .join(res.name.to_owned());
+                        //TODO: verify res.name
+                        let src_dir = match dir_in_container_path.strip_prefix("/") {
+                            Ok(dir_in_resource_container) => {
+                                first_part_of_path.join(dir_in_resource_container)
+                            }
+                            Err(_) => first_part_of_path,
+                        };
+                        info!(
+                            "mounting from src_dir {} to target {:?}",
+                            src_dir.display(),
+                            res.mountpoint
+                        );
+                        jail.mount_bind(src_dir.as_ref(), &res.mountpoint, false)?;
+                    }
                 }
             }
             None => {}
