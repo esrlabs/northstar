@@ -130,8 +130,6 @@ pub struct Manifest {
     pub name: String,
     /// Container version
     pub version: Version,
-    /// Target arch
-    pub arch: String,
     /// Path to init
     pub init: std::path::PathBuf,
     /// Additional arguments for the application invocation

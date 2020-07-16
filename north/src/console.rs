@@ -376,13 +376,7 @@ fn versions(state: &mut State) -> Result<String> {
     let versions = state
         .applications()
         .map(|app| app.manifest())
-        .map(|manifest| {
-            (
-                manifest.name.clone(),
-                manifest.version.clone(),
-                manifest.arch.clone(),
-            )
-        })
+        .map(|manifest| (manifest.name.clone(), manifest.version.clone()))
         .collect::<Vec<_>>();
     serde_json::to_string(&versions).context("Failed to encode manifest to json")
 }

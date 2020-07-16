@@ -170,7 +170,6 @@ def pack(src_dir, registry, signing_key, key_name, fstype, uid, gid)
       Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, "#{tmpdir}/root", :verbose => false) }
 
       # Write manifest
-      manifest['arch'] = arch
       File.open("#{tmpdir}/manifest.yaml", 'w') { |f| f.write(manifest.to_yaml) }
 
       # Remove existing containers
