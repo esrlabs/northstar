@@ -115,8 +115,7 @@ def all_targets
 end
 
 def all_apps
-  %w[hello using_resource resource_a interpreter] # for testing
-  # %w[cpueater hello crashing datarw memeater resource_a]
+  %w[cpueater hello using_resource crashing datarw memeater resource_samplei interpreter]
 end
 
 namespace :examples do
