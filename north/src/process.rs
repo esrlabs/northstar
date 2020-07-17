@@ -63,7 +63,7 @@ impl Process {
                     "Cannot start a resource container {}:{}",
                     manifest.name, manifest.version
                 );
-                event_tx.send(Event::Error(anyhow!(error.clone()))).await;
+                warn!("{}", error);
                 return Err(anyhow!(error));
             }
         };

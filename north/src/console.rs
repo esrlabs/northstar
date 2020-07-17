@@ -194,23 +194,30 @@ async fn start(state: &mut State, args: &[&str]) -> Result<String> {
     let apps = state
         .applications()
         .filter(|app| app.process_context().is_none())
-        .filter(|app| !app.container().is_resource_container())
         .filter(|app| re.is_match(app.name()))
-        .map(|app| app.name().clone())
-        .collect::<Vec<Name>>();
-    for app in &apps {
+        .map(|app| (app.name().clone(), app.container().is_resource_container()))
+        .collect::<Vec<(Name, bool)>>();
+    for (app, is_resource_container) in &apps {
         let start = time::Instant::now();
-        match state.start(&app, 0).await {
-            Ok(_) => result.push(vec![
+        if *is_resource_container {
+            result.push(vec![
                 app.to_string(),
-                "Ok".to_string(),
+                "Cannot start a resource container".to_string(),
                 format!("{:?}", start.elapsed()),
-            ]),
-            Err(e) => result.push(vec![
-                app.to_string(),
-                format!("Failed: {:?}", e),
-                format!("{:?}", start.elapsed()),
-            ]),
+            ]);
+        } else {
+            match state.start(&app, 0).await {
+                Ok(_) => result.push(vec![
+                    app.to_string(),
+                    "Ok".to_string(),
+                    format!("{:?}", start.elapsed()),
+                ]),
+                Err(e) => result.push(vec![
+                    app.to_string(),
+                    format!("Failed: {:?}", e),
+                    format!("{:?}", start.elapsed()),
+                ]),
+            }
         }
     }
 
