@@ -184,7 +184,6 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     # Create filesystem image
     if pack_config.fstype == 'squashfs'
       require 'os'
-      info "pseudofiles: #{pseudofiles}"
       pseudofiles = pseudofiles.map { |d| "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'" }.join(' ')
       # TODO: The compression algorithm should be target and not host specific!
       squashfs_comp = OS.linux? ? 'gzip' : 'zstd'

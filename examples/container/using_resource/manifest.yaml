@@ -4,13 +4,13 @@ init: /using_resource
 env: []
 resources: [
     {
-        name: resource_a,
+        name: resource_sample,
         version: 0.1.1,
         dir: /images,
         mountpoint: /res/images
     },
     {
-        name: resource_a,
+        name: resource_sample,
         version: 0.1.1,
         dir: /text,
         mountpoint: /res/text
