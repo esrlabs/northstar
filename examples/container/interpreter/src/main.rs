@@ -17,10 +17,13 @@ use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    println!("{:?}", args);
-    let mut writer = std::io::BufWriter::new(std::io::stdout());
-    match say(b"hello", 29, &mut writer) {
-        Ok(_) => println!("worked!"),
-        Err(e) => println!("error: {}", e),
+    if let Some(greeting) = args.get(1) {
+        let mut writer = std::io::BufWriter::new(std::io::stdout());
+        match say(greeting.as_bytes(), 100, &mut writer) {
+            Ok(_) => (),
+            Err(e) => println!("error: {}", e),
+        }
+    } else {
+        println!("need to pass argument to interpreter!");
     }
 }
