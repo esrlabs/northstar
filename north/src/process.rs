@@ -132,7 +132,6 @@ impl Process {
                         let first_part_of_path = cwd
                             .join(SETTINGS.directories.run_dir.to_owned())
                             .join(res.name.to_owned());
-                        //TODO: verify res.name
                         let src_dir = match dir_in_container_path.strip_prefix("/") {
                             Ok(dir_in_resource_container) => {
                                 first_part_of_path.join(dir_in_resource_container)
