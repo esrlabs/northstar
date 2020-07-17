@@ -12,13 +12,15 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use walkdir::WalkDir;
+use ferris_says::*;
+use std::env;
 
 fn main() {
-    for entry in WalkDir::new("/res") {
-        match entry {
-            Ok(entry) => println!("--> {}", entry.path().display()),
-            Err(e) => println!("ERROR: {}", e),
-        }
+    let args: Vec<String> = env::args().collect();
+    println!("{:?}", args);
+    let mut writer = std::io::BufWriter::new(std::io::stdout());
+    match say(b"hello", 29, &mut writer) {
+        Ok(_) => println!("worked!"),
+        Err(e) => println!("error: {}", e),
     }
 }

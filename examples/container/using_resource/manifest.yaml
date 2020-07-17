@@ -6,7 +6,19 @@ resources: [
     {
         name: resource_a,
         version: 0.1.1,
+        dir: /images,
+        mountpoint: /res/images
+    },
+    {
+        name: resource_a,
+        version: 0.1.1,
+        dir: /text,
+        mountpoint: /res/text
+    },
+    {
+        name: interpreter,
+        version: 0.0.1,
         dir: /,
-        mountpoint: /res/abc
+        mountpoint: /res/interpreter
     }
 ]

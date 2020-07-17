@@ -1,0 +1,8 @@
+[package]
+name = "interpreter"
+version = "0.1.0"
+authors = ["ESRLabs"]
+edition = "2018"
+
+[dependencies]
+ferris-says = "0.2"

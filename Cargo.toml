@@ -8,6 +8,7 @@ members = [
     "examples/container/hello",
     "examples/container/memeater",
     "examples/container/using_resource",
+    "examples/container/interpreter",
     "minijail/minijail",
     "minijail/minijail-sys",
     "north",
