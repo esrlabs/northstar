@@ -130,10 +130,31 @@ impl State {
     }
 
     pub async fn start(&mut self, name: &str, incarnation: u32) -> Result<()> {
+        let available_resource_ids: Vec<String> = self
+            .applications
+            .values()
+            .map(|a| &a.container)
+            .filter(|c| c.is_resource_container())
+            .map(|c| c.manifest.name.clone())
+            .collect();
         if let Some(app) = self.applications.get_mut(name) {
             if app.container.is_resource_container() {
                 warn!("Cannot start resource containers ({})", app);
                 return Err(anyhow!("Attempted to start resource container {}", name));
+            }
+            if let Some(required_resources) = &app.container.manifest.resources {
+                for r in required_resources {
+                    if !available_resource_ids.contains(&r.name) {
+                        warn!(
+                            "Container [{}] missing required resource \"{}\")",
+                            name, &r.name
+                        );
+                        return Err(anyhow!(
+                            "Attempt to start Container, missing resource \"{}\"",
+                            r.name
+                        ));
+                    }
+                }
             }
             info!("Starting {}", app);
             let process = Process::spawn(&app.container, self.tx.clone()).await?;
