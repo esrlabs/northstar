@@ -115,7 +115,7 @@ def all_targets
 end
 
 def all_apps
-  %w[hello using_resource resource_a] # for testing
+  %w[hello using_resource resource_a interpreter] # for testing
   # %w[cpueater hello crashing datarw memeater resource_a]
 end
 
