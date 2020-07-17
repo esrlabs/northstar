@@ -131,11 +131,10 @@ namespace :examples do
     package_config = PackageConfig.new(1000, 1000, KEY_DIRECTORY, KEY_ID, 'squashfs')
     all_apps.each do |app|
       app_dir = "#{EXAMPLE_DIR}/container/#{app}"
-      manifest = YAML.load_file("#{app_dir}/manifest.yaml")
       all_targets.each do |target_arch|
         target_dir = "#{app_dir}/root-#{target_arch}"
         mkdir_p target_dir unless Dir.exist?(target_dir)
-        unless manifest['init'].nil? # is resource container?
+        if File.exist?("#{app_dir}/Cargo.toml")  # only for rust projects
           sh "cross build --release --bin #{app} --target #{target_arch}"
           cp "target/#{target_arch}/release/#{app}", target_dir
         end
@@ -149,10 +148,8 @@ namespace :examples do
     all_targets.each do |target_arch|
       all_apps.each do |app|
         app_dir = "#{EXAMPLE_DIR}/container/#{app}"
-        manifest = YAML.load_file("#{app_dir}/manifest.yaml")
-        next if manifest['init'].nil? # skip resource containers
+        next unless File.exist?("#{app_dir}/Cargo.toml")  # skip non rust projects
 
-        app_dir = "#{EXAMPLE_DIR}/container/#{app}"
         target_dir = "#{app_dir}/root-#{target_arch}"
         rm_rf target_dir
       end
