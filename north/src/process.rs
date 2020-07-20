@@ -36,12 +36,22 @@ pub enum ExitStatus {
 
 #[derive(Debug)]
 pub struct Process {
+    /// PID of this process
     pid: u32,
+    /// Handle to a libminijail configuration
     jail: minijail::Minijail,
+    /// If the process is intentionally shut down the termination_reason
+    /// is set. This is used to distinguish crashes and graceful shutdowns
     termination_reason: Option<TerminationReason>,
+    /// Timstamp when the process is spawned
     started: time::Instant,
+    /// Handle to the main loop.
     event_tx: EventTx,
+    /// Internal rx part of the shutdown detection
     exit: Option<sync::Receiver<i32>>,
+    /// Temporary directory created in the systems tmp folder.
+    /// This directory holds process instance specific data that needs
+    /// to be dumped to disk for startup. e.g seccomp config (TODO)
     tmpdir: tempfile::TempDir,
 }
 
@@ -123,6 +133,7 @@ impl Process {
 
         let mut jail = minijail::Minijail::new()?;
 
+        // Pass stdout to minijail to make libminijail write to stdout
         jail.log_to_fd(
             1,
             if SETTINGS.debug {
@@ -132,7 +143,9 @@ impl Process {
             },
         );
 
-        // Dump seccom config to process tmpdir
+        // Dump seccomp config to process tmpdir. This is a subject to be changed since
+        // minijail provides a API to configure seccomp without writing to a file.
+        // TODO: configure seccomp via API instead of a file
         if let Some(ref seccomp) = container.manifest.seccomp {
             let seccomp_config = tmpdir.path().join("seccomp");
             let mut f = fs::File::create(&seccomp_config)
@@ -152,12 +165,21 @@ impl Process {
             // jail.use_seccomp_filter();
         }
 
+        // Configure UID
         jail.change_uid(SYSTEM_UID);
+        // Configure PID
         jail.change_gid(SYSTEM_GID);
+        // Make the process enter a pid namespace
         jail.namespace_pids();
+        // Make the process enter a vfs namespace
         jail.namespace_vfs();
+        // Set no_new_privs. See </kernel/seccomp.c> and </kernel/sys.c>
+        // in the kernel source tree for an explanation of the parameters.
         jail.no_new_privs();
+        // Set chroot dir for process
         jail.enter_chroot(&root.as_path())?;
+
+        // Configure bind mounts
         #[cfg(target_os = "android")]
         let mounts = &["/sys", "/dev", "/proc", "/system"];
         #[cfg(target_os = "linux")]
@@ -167,6 +189,8 @@ impl Process {
             let path = std::path::PathBuf::from(mount);
             mount_bind(&mut jail, &path.as_path(), &path.as_path(), false)?;
         }
+
+        // /data is mounted rw
         let data: std::path::PathBuf = container.data.clone().into();
         mount_bind(
             &mut jail,
@@ -174,7 +198,8 @@ impl Process {
             &std::path::PathBuf::from("/data").as_path(),
             true,
         )?;
-        // mount resource containers
+
+        // Mount resource containers
         for (src_dir, mountpoint) in resources_to_mount {
             info!(
                 "Mounting from src_dir {} to target {:?}",
@@ -214,6 +239,7 @@ impl Process {
             vec![]
         };
 
+        // Create environment for process. Set data directory, container name and version
         let mut env = manifest.env.clone().unwrap_or_default();
         env.push((ENV_DATA.to_string(), "/data".to_string())); // TODO OSX
         env.push((ENV_NAME.to_string(), manifest.name.to_string()));
@@ -258,6 +284,8 @@ impl Process {
     ) -> Result<impl Future<Output = ExitStatus>> {
         let pid = self.pid;
 
+        // Send a SIGTERM to the application. If the application does not terminate with a timeout
+        // it is SIGKILLed.
         signal::kill(Pid::from_raw(pid as i32), Some(Signal::SIGTERM))
             .with_context(|| format!("Failed to SIGTERM {}", self.pid))?;
 
@@ -268,7 +296,7 @@ impl Process {
         let mut exit_rx = if let Some(exit_rx) = self.exit.take() {
             exit_rx
         } else {
-            warn!("Called terminate on alreasy exiting process {}", pid);
+            warn!("Called terminate on already exiting process {}", pid);
             return Err(anyhow!(
                 "Terminate called on already exiting process {}",
                 pid
@@ -300,6 +328,8 @@ impl Process {
         self.pid
     }
 
+    /// Spawn a task that waits for the process to exit. Once the process is exited send the return code
+    // (if any) to the exit_tx handle passed
     fn wait_exit(name: &str, pid: u32, exit_tx: sync::Sender<i32>, event_tx: EventTx) {
         let name = name.to_string();
         task::spawn(async move {

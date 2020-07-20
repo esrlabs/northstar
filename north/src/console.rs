@@ -20,6 +20,9 @@ use log::{debug, warn, *};
 use prettytable::{format, Table};
 use std::{iter, time};
 
+/// Helptext displayed on the `help` command. The `dcon` tool parses this text
+/// and creates suggestions and completions. Ensure to a correct helptext when
+/// adding/removing/changing commands.
 const HELP: &str = "\
     help: Display help text\n\
     list: List all loaded images\n\
@@ -35,6 +38,7 @@ const HELP: &str = "\
 pub async fn init(tx: &EventTx) -> Result<()> {
     let rx = serve().await?;
     let tx = tx.clone();
+    // Spawn a task that handles lines received on the debug port.
     task::spawn(async move {
         while let Ok((line, tx_reply)) = rx.recv().await {
             tx.send(Event::Console(line, tx_reply)).await;
@@ -79,10 +83,12 @@ pub async fn process(state: &mut State, command: &str, reply: sync::Sender<Strin
     Ok(())
 }
 
+/// Return the help text
 fn help() -> Result<String> {
     Ok(HELP.into())
 }
 
+/// List all known containers instances and their state.
 async fn list(state: &State) -> Result<String> {
     to_table(
         vec![vec![
@@ -116,6 +122,7 @@ async fn list(state: &State) -> Result<String> {
     )
 }
 
+/// List all running applications.
 #[cfg(all(not(target_os = "android"), not(target_os = "linux")))]
 async fn ps(state: &State) -> Result<String> {
     to_table(
@@ -142,6 +149,7 @@ async fn ps(state: &State) -> Result<String> {
     )
 }
 
+/// List all running applications.
 #[cfg(any(target_os = "android", target_os = "linux"))]
 async fn ps(state: &State) -> Result<String> {
     use pretty_bytes::converter::convert;
@@ -175,6 +183,10 @@ async fn ps(state: &State) -> Result<String> {
     to_table(result)
 }
 
+/// Start applications. If `args` is empty *all* known applications that
+/// are not in a running state are started. If a argument is supplied it
+/// is used to construct a Regex and all container (names) matching that
+/// Regex are attempted to be started.
 async fn start(state: &mut State, args: &[&str]) -> Result<String> {
     let re = match args.len() {
         1 => regex::Regex::new(args[0])?,
@@ -224,10 +236,12 @@ async fn start(state: &mut State, args: &[&str]) -> Result<String> {
     to_table(result)
 }
 
+/// Dump settings
 fn settings() -> Result<String> {
     Ok(format!("{}", *SETTINGS))
 }
 
+/// Stop one, some or all containers. See start for the argument handling.
 async fn stop(state: &mut State, args: &[&str]) -> Result<String> {
     let re = match args.len() {
         1 => regex::Regex::new(args[0])?,
@@ -272,6 +286,8 @@ async fn stop(state: &mut State, args: &[&str]) -> Result<String> {
     to_table(result)
 }
 
+/// Umount and remove a containers. See `start` for the argument handling.
+/// The data directory is not removed. This needs discussion.
 async fn uninstall(state: &mut State, args: &[&str]) -> Result<String> {
     let re = match args.len() {
         1 => regex::Regex::new(args[0])?,
@@ -303,6 +319,7 @@ async fn uninstall(state: &mut State, args: &[&str]) -> Result<String> {
     to_table(result)
 }
 
+/// Trigger the update module.
 async fn update(state: &mut State, args: &[&str]) -> Result<String> {
     if args.len() != 1 {
         return Err(anyhow!("Invalid arguments for update command"));
@@ -332,6 +349,7 @@ async fn update(state: &mut State, args: &[&str]) -> Result<String> {
     }
 }
 
+/// Send a shutdown command to the main loop.
 async fn shutdown(state: &mut State) -> Result<String> {
     let stop = stop(state, &[]).await?;
     state.tx().send(Event::Shutdown).await;
@@ -339,6 +357,7 @@ async fn shutdown(state: &mut State) -> Result<String> {
     Ok(stop)
 }
 
+/// Open a TCP socket and read lines terminated with `\n`.
 async fn serve() -> Result<sync::Receiver<(String, sync::Sender<String>)>> {
     let address = &SETTINGS.console_address;
 
@@ -352,6 +371,7 @@ async fn serve() -> Result<sync::Receiver<(String, sync::Sender<String>)>> {
     task::spawn(async move {
         let mut incoming = listener.incoming();
 
+        // Spawn a task for each incoming connection.
         while let Some(stream) = incoming.next().await {
             let (tx_reply, rx_reply) = sync::channel::<String>(10);
 
@@ -387,6 +407,7 @@ async fn serve() -> Result<sync::Receiver<(String, sync::Sender<String>)>> {
     Ok(rx)
 }
 
+/// List versions of currently known containers and applications.
 fn versions(state: &mut State) -> Result<String> {
     let versions = state
         .applications()
@@ -402,6 +423,8 @@ fn versions(state: &mut State) -> Result<String> {
     serde_json::to_string(&versions).context("Failed to encode manifest to json")
 }
 
+/// Format something iterateable into a ascii table. The first row of the table input
+/// contains the column titles. The table cannot be empty.
 fn to_table<T: iter::IntoIterator<Item = I>, I: iter::IntoIterator<Item = S>, S: ToString>(
     table: T,
 ) -> Result<String> {

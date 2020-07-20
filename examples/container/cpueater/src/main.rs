@@ -14,7 +14,6 @@
 
 use std::env::var;
 
-#[warn(clippy::empty_loop)]
 fn main() {
     logd_logger::builder()
         .parse_filters("cpueater")
@@ -29,7 +28,7 @@ fn main() {
 
     log::debug!("Eating CPU with {} threads (v{})!", threads, version);
 
-    for _ in 0..threads {
+    for _ in 0..(threads - 1) {
         std::thread::spawn(move || loop {
             let (tx, rx) = std::sync::mpsc::channel();
             tx.send(0).expect("Channel error");

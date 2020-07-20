@@ -85,6 +85,7 @@ impl fmt::Display for Application {
 }
 
 impl State {
+    /// Create a new empty State instance
     pub fn new(tx: EventTx) -> State {
         State {
             tx,
@@ -92,18 +93,22 @@ impl State {
         }
     }
 
+    /// Return an owned copy of the main loop tx handle
     pub fn tx(&self) -> EventTx {
         self.tx.clone()
     }
 
+    /// Return an iterator over all known applications
     pub fn applications(&self) -> impl iter::Iterator<Item = &Application> {
         self.applications.values()
     }
 
+    /// Try to find a application with name `name`
     pub fn application(&mut self, name: &str) -> Option<&Application> {
         self.applications.get(name)
     }
 
+    /// Add a container instance the list of known containers
     pub fn add(&mut self, container: Container) -> Result<()> {
         // TODO: check for dups
         let name = container.manifest.name.clone();
@@ -112,6 +117,7 @@ impl State {
         Ok(())
     }
 
+    /// Remove and umount a specific container
     pub async fn uninstall(&mut self, name: &str) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
             if app.process_context().is_none() {
@@ -129,6 +135,7 @@ impl State {
         }
     }
 
+    /// Start a container with name `name`
     pub async fn start(&mut self, name: &str, incarnation: u32) -> Result<()> {
         let available_resource_ids: Vec<String> = self
             .applications
@@ -185,6 +192,8 @@ impl State {
         }
     }
 
+    /// Stop a application. Timeout specifies the time until the process is
+    /// SIGKILLed if it doesn't exit when receiving a SIGTERM
     pub async fn stop(
         &mut self,
         name: &str,
@@ -218,6 +227,8 @@ impl State {
         }
     }
 
+    /// Handle the exit of a container. The restarting of containers is a subject
+    /// to be removed and handled externally
     #[allow(unused_mut)]
     pub async fn on_exit(&mut self, name: &str, return_code: i32) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
@@ -253,6 +264,7 @@ impl State {
         Ok(())
     }
 
+    /// Handle out of memory conditions for container `name`
     pub async fn on_oom(&mut self, name: &str) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
             warn!("Process {} is out of memory. Stopping {}", app, app);
