@@ -26,7 +26,7 @@ def warn(content)
 end
 
 def installed?(existence_check)
-  sh(existence_check, :verbose => false) do |ok, _res|
+  sh(existence_check, verbose: false) do |ok, _res|
     ok
   end
 end
@@ -45,7 +45,7 @@ end
 
 desc 'Check local environment'
 task :check_environment do
-  bundler_installed = check_program('bundle --version', 'ruby bundler is required. Please install with `gem install bundler`')
+  bundler_installed = check_program('bundle --version', 'ruby bundler is required. Please install first')
   check_program('rustup --version', 'Rustup is required. Please install first!')
   check_program('cargo --version', 'Rust is required. Please install Rust')
   check_program('cross --version', 'cross is required. Please install it first')
@@ -115,7 +115,7 @@ def all_targets
 end
 
 def all_apps
-  %w[cpueater hello using_resource crashing datarw memeater resource_samplei interpreter]
+  %w[cpueater hello using_resource crashing datarw memeater resource_sample interpreter]
 end
 
 namespace :examples do
@@ -133,7 +133,7 @@ namespace :examples do
       all_targets.each do |target_arch|
         target_dir = "#{app_dir}/root-#{target_arch}"
         mkdir_p target_dir unless Dir.exist?(target_dir)
-        if File.exist?("#{app_dir}/Cargo.toml")  # only for rust projects
+        if File.exist?("#{app_dir}/Cargo.toml") # only for rust projects
           sh "cross build --release --bin #{app} --target #{target_arch}"
           cp "target/#{target_arch}/release/#{app}", target_dir
         end
@@ -147,7 +147,7 @@ namespace :examples do
     all_targets.each do |target_arch|
       all_apps.each do |app|
         app_dir = "#{EXAMPLE_DIR}/container/#{app}"
-        next unless File.exist?("#{app_dir}/Cargo.toml")  # skip non rust projects
+        next unless File.exist?("#{app_dir}/Cargo.toml") # skip non rust projects
 
         target_dir = "#{app_dir}/root-#{target_arch}"
         rm_rf target_dir
@@ -156,7 +156,7 @@ namespace :examples do
   end
 
   desc 'Execute runtime with examples (use with sudo)'
-  task :run => 'build:north' do
+  task run: 'build:north' do
     sh 'sudo ./target/release/north --config north.toml'
   end
 
@@ -166,7 +166,7 @@ namespace :examples do
   end
 
   desc 'Inspect'
-  task :inspect, [:id] do |t,args|
+  task :inspect, [:id] do |_t, args|
     require './tooling.rb'
     name = args[:id]
     puts "Inpsecting npk with id: #{name}"
@@ -208,8 +208,8 @@ task :coverage do
                 '-Copt-level=0',
                 '-Clink-dead-code',
                 '-Coverflow-checks=off'].join(' ')
-  sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly build', :verbose => false)
-  sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly test', :verbose => false)
+  sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly build', verbose: false)
+  sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly test', verbose: false)
   cov_dir = 'target/debug/coverage'
   sh "mkdir #{cov_dir}"
   sh "grcov ./target/debug/ -s north_common/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/north"
