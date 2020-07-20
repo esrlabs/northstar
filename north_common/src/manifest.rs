@@ -21,6 +21,7 @@ use serde::{
 };
 use std::{collections::HashMap, fmt, fs::File, str::FromStr};
 
+/// A container version. Versions follow the semver format
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
 pub struct Version(semver::Version);
 
@@ -39,6 +40,7 @@ impl Default for Version {
     }
 }
 
+/// Serde serialization for `Version`
 impl Serialize for Version {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -48,6 +50,7 @@ impl Serialize for Version {
     }
 }
 
+/// Serde deserialization for `Version`
 impl<'de> Deserialize<'de> for Version {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -102,7 +105,8 @@ pub struct CGroupMem {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CGroupCpu {
-    /// CPU shares
+    /// CPU shares assigned to this container. CGroups cpu divide
+    /// the ressource CPU into 1024 shares
     pub shares: u32,
 }
 
@@ -112,6 +116,7 @@ pub struct CGroups {
     pub cpu: Option<CGroupCpu>,
 }
 
+// TODO: Remove?
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Resource {
     pub name: Name,
@@ -128,6 +133,7 @@ pub enum LogBuffer {
     Custom(u8),
 }
 
+// TODO: Remove?
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Log {
     pub tag: Option<String>,
@@ -161,6 +167,7 @@ pub struct Manifest {
     /// The name get's extended with the instance id.
     pub instances: Option<u32>,
     /// Log priority of stdout
+    // TODO: Remove?
     pub log: Option<Log>,
 }
 

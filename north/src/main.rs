@@ -83,12 +83,19 @@ async fn main() -> Result<()> {
 
     trace!("Settings: {}", *SETTINGS);
 
+    // On Linux systems north enters a mount namespace for automatic
+    // umounting of npks. Next the mount propagation of the the parent
+    // mount of the run dir is set to private. See linux::init for details.
     #[cfg(any(target_os = "android", target_os = "linux"))]
     linux::init().await?;
 
+    // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
+    // loop.
     let (tx, rx) = sync::channel::<Event>(1000);
     let mut state = State::new(tx.clone());
 
+    // Ensure the configured run_dir exists
+    // TODO: permission check of SETTINGS.directories.run_dir
     fs::create_dir_all(&SETTINGS.directories.run_dir)
         .await
         .with_context(|| {
@@ -97,6 +104,8 @@ async fn main() -> Result<()> {
                 SETTINGS.directories.run_dir.display()
             )
         })?;
+
+    // Ensure the configured data_dir exists
     fs::create_dir_all(&SETTINGS.directories.data_dir)
         .await
         .with_context(|| {
@@ -106,6 +115,10 @@ async fn main() -> Result<()> {
             )
         })?;
 
+    // The SETTINGS.global_data_dir option makes north using a single directory
+    // that is bind mounted into the roots of the containers. In normal operation
+    // each container get's it's own read and writeable data directory for
+    // persistent data.
     if SETTINGS.global_data_dir {
         let data: &std::path::Path = SETTINGS.directories.data_dir.as_path().into();
         chown(
@@ -123,6 +136,8 @@ async fn main() -> Result<()> {
         })?;
     }
 
+    // Iterate all files in SETTINGS.directories.container_dirs and try
+    // to load/install the npks.
     for d in &SETTINGS.directories.container_dirs {
         npk::install_all(&mut state, d).await?;
     }
@@ -135,7 +150,8 @@ async fn main() -> Result<()> {
     // Initialize console
     console::init(&tx).await?;
 
-    // Autostart flagged containers
+    // Autostart flagged containers. Each container with the `autostart` option
+    // set to true in the manifest is started.
     let autostart_apps = state
         .applications
         .values()
@@ -152,13 +168,23 @@ async fn main() -> Result<()> {
     // Enter main loop
     while let Ok(event) = rx.recv().await {
         match event {
+            // Debug console commands are handled via the main loop in order to get access
+            // to the global state. Therefore the console server receives a tx handle to the
+            // main loop and issues `Event::Console`. Processing of the command takes place
+            // in the console module again but with access to `state`.
             Event::Console(cmd, txr) => console::process(&mut state, &cmd, txr).await?,
+            // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
+            // If a out of memory condition occours this is signaled with `Event::Oom` which
+            // carries the id of the container that is oom.
             Event::Oom(id) => state.on_oom(&id).await?,
+            // A container process existed. Check `process::wait_exit` for details.
             Event::Exit(ref name, return_code) => state.on_exit(name, return_code).await?,
+            // Handle unrecoverable errors by logging it and do a gracefull shutdown.
             Event::Error(ref error) => {
                 error!("Fatal error: {}", error);
                 break;
             }
+            // The runtime os commanded to shut down and exit.
             Event::Shutdown => break,
         }
     }
