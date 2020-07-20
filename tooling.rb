@@ -24,7 +24,7 @@ def unhex(input)
 end
 
 def hex(input)
-  input.unpack('H*').first
+  input.unpack1('H*')
 end
 
 def sha256(input)
@@ -122,12 +122,11 @@ end
 def path_trail(p)
   require 'pathname'
   parts = Pathname(p).each_filename.to_a
-  trail = parts.inject([[], '/']) do |acc, x|
+  trail = parts.each_with_object([[], '/']) do |x, acc|
     prev_path = acc[1]
     next_path = File.join(prev_path, x)
     acc[0].unshift next_path
     acc[1] = next_path
-    acc
   end
   trail[0]
 end
@@ -152,7 +151,7 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     fsimg = "#{tmpdir}/fs.img"
 
     pseudofiles = []
-    if !is_resource_container
+    unless is_resource_container
       pseudofiles << ['/tmp', 444]
       pseudofiles << ['/proc', 444]
       pseudofiles << ['/dev', 444]
@@ -177,14 +176,16 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
         # e.gl to support res/foo in our image, we need to add /res/foo AND /res
         # ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000"
         trail = path_trail res['mountpoint']
-        trail.each {|part| pseudofiles << [part, 555]}
+        trail.each { |part| pseudofiles << [part, 555] }
       end
     end
 
     # Create filesystem image
     if pack_config.fstype == 'squashfs'
       require 'os'
-      pseudofiles = pseudofiles.map { |d| "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'" }.join(' ')
+      pseudofiles = pseudofiles.map do |d|
+        "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'"
+      end.join(' ')
       # TODO: The compression algorithm should be target and not host specific!
       squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
       shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
@@ -333,20 +334,20 @@ end
 
 def inspect_npk(pkg)
   require 'colored'
-  puts("#{'----------------------------------------------'.green}")
+  puts('----------------------------------------------'.green)
   info "Inspecting #{File.basename(pkg, '.npk')}"
   Dir.mktmpdir do |tmpdir|
     cp_r pkg, tmpdir, :verbose => false
     cd tmpdir, :verbose => false do
       Zip::File.open(pkg) do |zip_file|
         zip_file.each do |f|
-          f_path=File.join("extracted", f.name)
+          f_path = File.join('extracted', f.name)
           FileUtils.mkdir_p(File.dirname(f_path))
           zip_file.extract(f, f_path) unless File.exist?(f_path)
         end
         cd 'extracted', :verbose => false do
           puts `tree .`
-          Dir["*.img"].each do |file|
+          Dir['*.img'].each do |file|
             puts "#{'squashFS-image'.yellow}: #{file}"
             sh "unsquashfs -l #{file}"
           end
@@ -355,4 +356,3 @@ def inspect_npk(pkg)
     end
   end
 end
-
