@@ -155,9 +155,9 @@ namespace :examples do
     end
   end
 
-  desc 'Execute runtime with examples'
-  task :run do
-    sh 'cargo run --bin north --release -- --config north.toml'
+  desc 'Execute runtime with examples (use with sudo)'
+  task :run => 'build:north' do
+    sh 'sudo ./target/release/north --config north.toml'
   end
 
   desc 'Clean example registry'
