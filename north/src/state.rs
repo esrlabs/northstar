@@ -146,11 +146,12 @@ impl State {
                 for r in required_resources {
                     if !available_resource_ids.contains(&r.name) {
                         warn!(
-                            "Container [{}] missing required resource \"{}\")",
+                            "Container {} missing required resource \"{}\")",
                             name, &r.name
                         );
                         return Err(anyhow!(
-                            "Attempt to start Container, missing resource \"{}\"",
+                            "Failed to start {} because of missing resource \"{}\"",
+                            name,
                             r.name
                         ));
                     }
