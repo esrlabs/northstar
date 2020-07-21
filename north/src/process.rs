@@ -21,6 +21,7 @@ use nix::{
     sys::{signal, signal::Signal, wait, wait::WaitStatus},
     unistd::Pid,
 };
+use north_common::manifest::Resource;
 use std::{future::Future, time, time::Duration};
 
 const ENV_DATA: &str = "DATA";
@@ -44,6 +45,37 @@ pub struct Process {
     tmpdir: tempfile::TempDir,
 }
 
+fn shared_resource(res: &Resource) -> Result<std::path::PathBuf> {
+    let cwd = std::env::current_dir()?;
+    let dir_in_container_path = std::path::Path::new(&res.dir);
+    let first_part_of_path = cwd
+        .join(SETTINGS.directories.run_dir.to_owned())
+        .join(res.name.to_owned());
+    let src_dir = match dir_in_container_path.strip_prefix("/") {
+        Ok(dir_in_resource_container) => first_part_of_path.join(dir_in_resource_container),
+        Err(_) => first_part_of_path,
+    };
+    if src_dir.exists() {
+        Ok(src_dir)
+    } else {
+        let error = format!("Resource folder missing: {}", src_dir.display());
+        warn!("{}", error);
+        Err(anyhow!(error))
+    }
+}
+
+fn collect_resource_folders(
+    needed_resources: Option<&Vec<Resource>>,
+) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf)>> {
+    let mut resources_to_mount = vec![];
+    if let Some(resources) = &needed_resources {
+        for res in *resources {
+            resources_to_mount.push((shared_resource(res)?, res.mountpoint.clone()));
+        }
+    }
+    Ok(resources_to_mount)
+}
+
 impl Process {
     pub fn termination_reason(&self) -> Option<TerminationReason> {
         self.termination_reason.clone()
@@ -56,6 +88,9 @@ impl Process {
     pub async fn spawn(container: &Container, event_tx: EventTx) -> Result<Process> {
         let root: std::path::PathBuf = container.root.clone().into();
         let manifest = &container.manifest;
+
+        let resources_to_mount = collect_resource_folders(container.manifest.resources.as_ref())?;
+
         let cmd = match &manifest.init {
             Some(a) => a.clone(),
             None => {
@@ -124,6 +159,14 @@ impl Process {
             true,
         )?;
         // mount resource containers
+        for (src_dir, mountpoint) in resources_to_mount {
+            info!(
+                "Mounting from src_dir {} to target {:?}",
+                src_dir.display(),
+                mountpoint
+            );
+            jail.mount_bind(&src_dir, &mountpoint, false)?;
+        }
         if let Some(resources) = &container.manifest.resources {
             for res in resources {
                 if let Ok(cwd) = std::env::current_dir() {
@@ -137,8 +180,10 @@ impl Process {
                         }
                         Err(_) => first_part_of_path,
                     };
+                    info!("src_dir {:?} exists: {}", src_dir, src_dir.exists());
+                    if !src_dir.exists() {}
                     info!(
-                        "mounting from src_dir {} to target {:?}",
+                        "Mounting from src_dir {} to target {:?}",
                         src_dir.display(),
                         res.mountpoint
                     );

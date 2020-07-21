@@ -168,14 +168,16 @@ impl Manifest {
     fn verify(&self) -> Result<()> {
         if let Some(OnExit::Restart(n)) = self.on_exit {
             if self.init.is_none() {
-                return Err(anyhow!("on_exit not allowed in resource container"));
+                return Err(anyhow!(
+                    "An `on_exit` tag is not allowed in resource container"
+                ));
             }
             if n == 0 {
                 return Err(anyhow!("Invalid on_exit value in manifest"));
             }
         }
         if self.init.is_none() && self.args.is_some() {
-            return Err(anyhow!("arguments not allowed in resource container"));
+            return Err(anyhow!("Arguments not allowed in resource container"));
         }
         Ok(())
     }
