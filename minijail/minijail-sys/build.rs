@@ -18,6 +18,7 @@ fn main() {
     cc::Build::new()
         .define("ALLOW_DEBUG_LOGGING", "1")
         .define("PRELOADPATH", "\"invalid\"")
+        .flag("-Wno-implicit-function-declaration")
         .file(format!("libminijail/{}/libconstants.gen.c", target_os_dir))
         .file(format!("libminijail/{}/libsyscalls.gen.c", target_os_dir))
         .file("libminijail/bpf.c")
