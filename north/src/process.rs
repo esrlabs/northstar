@@ -72,22 +72,27 @@ impl Process {
 
         // Dump seccom config to process tmpdir
         if let Some(ref seccomp) = container.manifest.seccomp {
-            let seccomp_config = tmpdir.path().join("seccomp");
-            let mut f = fs::File::create(&seccomp_config)
+            let seccomp_config_path = tmpdir.path().join("seccomp");
+            let mut seccomp_config = fs::File::create(&seccomp_config_path)
                 .await
                 .context("Failed to create seccomp configuraiton")?;
             let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
-            f.write_all(s.as_bytes())
+            seccomp_config
+                .write_all(s.as_bytes())
                 .await
                 .context("Failed to write seccomp configuraiton")?;
+            seccomp_config
+                .sync_all()
+                .await
+                .context("Failed to flush seccomp file")?;
+            drop(seccomp_config);
 
-            // Temporary disabled
             // Must be called before parse_seccomp_filters
-            // jail.log_seccomp_filter_failures();
-            // let p: std::path::PathBuf = seccomp_config.into();
-            // jail.parse_seccomp_filters(p.as_path())
-            //     .context("Failed parse seccomp config")?;
-            // jail.use_seccomp_filter();
+            jail.log_seccomp_filter_failures();
+            let p: std::path::PathBuf = seccomp_config_path.into();
+            jail.parse_seccomp_filters(p.as_path())
+                .context("Failed parse seccomp config")?;
+            jail.use_seccomp_filter();
         }
 
         jail.change_uid(SYSTEM_UID);
