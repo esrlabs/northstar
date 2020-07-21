@@ -76,6 +76,19 @@ fn collect_resource_folders(
     Ok(resources_to_mount)
 }
 
+fn mount_bind(
+    jail: &minijail::Minijail,
+    src: &std::path::Path,
+    dest: &std::path::Path,
+    writable: bool,
+) -> Result<()> {
+    jail.mount_bind(&src, &dest, writable).with_context(format!(
+        "Failed to add bind mount of {} to {}",
+        src.display(),
+        dest.display(),
+    ))
+}
+
 impl Process {
     pub fn termination_reason(&self) -> Option<TerminationReason> {
         self.termination_reason.clone()
@@ -150,10 +163,11 @@ impl Process {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         for mount in mounts {
             let path = std::path::PathBuf::from(mount);
-            jail.mount_bind(&path.as_path(), &path.as_path(), false)?;
+            mount_bind(&jail, &path.as_path(), &path.as_path(), false)?;
         }
         let data: std::path::PathBuf = container.data.clone().into();
-        jail.mount_bind(
+        mount_bind(
+            &jail,
             &data.as_path(),
             &std::path::PathBuf::from("/data").as_path(),
             true,
@@ -165,7 +179,7 @@ impl Process {
                 src_dir.display(),
                 mountpoint
             );
-            jail.mount_bind(&src_dir, &mountpoint, false)?;
+            mount_bind(&jail, &src_dir, &mountpoint, false)?;
         }
         if let Some(resources) = &container.manifest.resources {
             for res in resources {
@@ -187,7 +201,7 @@ impl Process {
                         src_dir.display(),
                         res.mountpoint
                     );
-                    jail.mount_bind(src_dir.as_ref(), &res.mountpoint, false)?;
+                    mount_bind(&jail, src_dir.as_ref(), &res.mountpoint, false)?;
                 }
             }
         }
