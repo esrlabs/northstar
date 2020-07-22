@@ -92,7 +92,7 @@ namespace :build do
     sh 'cargo build --release --bin north'
   end
 
-  desc 'Build dcon control client'
+  desc 'Build dcon client'
   task :dcon do
     sh 'cargo build --release --bin dcon'
   end
@@ -103,19 +103,31 @@ namespace :build do
   end
 end
 
-def all_targets
+def targets
   require 'os'
   targets = %w[
     aarch64-linux-android
     aarch64-unknown-linux-gnu
     x86_64-unknown-linux-gnu
   ]
+
+  # Building for x86_64-apple-darwin is not possible via cross
   targets << 'x86_64-apple-darwin' if OS.mac?
+
   targets
 end
 
-def all_apps
-  %w[cpueater hello using_resource crashing datarw memeater resource_sample interpreter]
+def examples
+  %w[
+    cpueater
+    crashing
+    datarw
+    hello
+    memeater
+    resource/interpreter
+    resource/resource_sample
+    resource/using_resource
+  ]
 end
 
 namespace :examples do
@@ -128,28 +140,29 @@ namespace :examples do
     mkdir_p registry unless Dir.exist?(registry)
 
     package_config = PackageConfig.new(1000, 1000, KEY_DIRECTORY, KEY_ID, 'squashfs')
-    all_apps.each do |app|
-      app_dir = "#{EXAMPLE_DIR}/container/#{app}"
-      all_targets.each do |target_arch|
-        target_dir = "#{app_dir}/root-#{target_arch}"
+    examples.each do |dir|
+      dir = "#{EXAMPLE_DIR}/container/#{dir}"
+      targets.each do |target_arch|
+        target_dir = "#{dir}/root-#{target_arch}"
         mkdir_p target_dir unless Dir.exist?(target_dir)
-        if File.exist?("#{app_dir}/Cargo.toml") # only for rust projects
-          sh "cross build --release --bin #{app} --target #{target_arch}"
-          cp "target/#{target_arch}/release/#{app}", target_dir
+        if File.exist?(File.join(dir, 'Cargo.toml')) # only for rust projects
+          name = Pathname::new(dir).basename 
+          sh "cross build --release --bin #{name} --target #{target_arch}"
+          cp "target/#{target_arch}/release/#{name}", target_dir
         end
-        create_arch_package(target_arch, target_dir, app_dir, registry, package_config)
+        create_arch_package(target_arch, target_dir, dir, registry, package_config)
       end
     end
   end
 
   desc 'Clean example builds'
   task :clean do
-    all_targets.each do |target_arch|
-      all_apps.each do |app|
-        app_dir = "#{EXAMPLE_DIR}/container/#{app}"
-        next unless File.exist?("#{app_dir}/Cargo.toml") # skip non rust projects
+    targets.each do |target_arch|
+      examples.each do |dir|
+        dir = "#{EXAMPLE_DIR}/container/#{dir}"
+        next unless File.exist?("#{dir}/Cargo.toml") # skip non rust projects
 
-        target_dir = "#{app_dir}/root-#{target_arch}"
+        target_dir = "#{dir}/root-#{target_arch}"
         rm_rf target_dir
       end
     end
@@ -188,7 +201,7 @@ task :check do
   check_program('docker info >/dev/null', 'Docker is needed to run the check task')
   sh 'cargo +nightly fmt -- --color=always --check'
 
-  all_targets.each do |target|
+  targets.each do |target|
     sh "cross check --target #{target}"
     sh "cross clippy --target #{target}"
     sh 'cross test'
