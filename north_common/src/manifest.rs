@@ -125,21 +125,6 @@ pub struct Resource {
     pub mountpoint: std::path::PathBuf,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum LogBuffer {
-    #[serde(rename(serialize = "main", deserialize = "main"))]
-    Main,
-    #[serde(rename(serialize = "custom", deserialize = "custom"))]
-    Custom(u8),
-}
-
-// TODO: Remove?
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Log {
-    pub tag: Option<String>,
-    pub buffer: Option<LogBuffer>,
-}
-
 #[derive(Clone, Default, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container
@@ -166,9 +151,6 @@ pub struct Manifest {
     /// Number of instances to mount of this container
     /// The name get's extended with the instance id.
     pub instances: Option<u32>,
-    /// Log priority of stdout
-    // TODO: Remove?
-    pub log: Option<Log>,
 }
 
 impl Manifest {
@@ -288,8 +270,6 @@ log:
     seccomp.insert("fork".to_string(), "1".to_string());
     seccomp.insert("waitpid".to_string(), "1".to_string());
     assert_eq!(manifest.seccomp, Some(seccomp));
-    assert_eq!(manifest.log.as_ref().unwrap().tag.as_ref().unwrap(), "test");
-    assert_eq!(manifest.log.unwrap().buffer.unwrap(), LogBuffer::Custom(8));
 
     Ok(())
 }
