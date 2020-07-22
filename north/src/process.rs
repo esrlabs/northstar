@@ -260,7 +260,7 @@ impl Process {
 
         let pid = jail.run(
             &std::path::PathBuf::from(cmd.as_path()),
-            &[0, 1, 2],
+            &[1, 2],
             &args,
             &env,
         )? as u32;
