@@ -188,15 +188,7 @@ async fn ps(state: &State) -> Result<String> {
 /// is used to construct a Regex and all container (names) matching that
 /// Regex are attempted to be started.
 async fn start(state: &mut State, args: &[&str]) -> Result<String> {
-    let re = match args.len() {
-        1 => regex::Regex::new(args[0])?,
-        0 => regex::Regex::new(".*")?,
-        _ => {
-            return Err(anyhow!(
-                "Arguments invalid. Use `start multiple NUM PATTERN` or `start PATTERN`",
-            ))
-        }
-    };
+    let re = arg_regex(args)?;
 
     let mut result = vec![vec![
         "Name".to_string(),
@@ -205,32 +197,29 @@ async fn start(state: &mut State, args: &[&str]) -> Result<String> {
     ]];
     let apps = state
         .applications()
+        // Filter for not already running containers
         .filter(|app| app.process_context().is_none())
+        // Filter ressource container that are not startable
+        .filter(|app| !app.container().is_resource_container())
+        // Filter matching container
         .filter(|app| re.is_match(app.name()))
+        // Sort container by name
         .sorted_by_key(|app| app.name().clone())
-        .map(|app| (app.name().clone(), app.container().is_resource_container()))
-        .collect::<Vec<(Name, bool)>>();
-    for (app, is_resource_container) in &apps {
+        .map(|app| app.name().clone())
+        .collect::<Vec<Name>>();
+    for app in &apps {
         let start = time::Instant::now();
-        if *is_resource_container {
-            result.push(vec![
+        match state.start(&app, 0).await {
+            Ok(_) => result.push(vec![
                 app.to_string(),
-                "Cannot start a resource container".to_string(),
+                "Ok".to_string(),
                 format!("{:?}", start.elapsed()),
-            ]);
-        } else {
-            match state.start(&app, 0).await {
-                Ok(_) => result.push(vec![
-                    app.to_string(),
-                    "Ok".to_string(),
-                    format!("{:?}", start.elapsed()),
-                ]),
-                Err(e) => result.push(vec![
-                    app.to_string(),
-                    format!("Failed: {:?}", e),
-                    format!("{:?}", start.elapsed()),
-                ]),
-            }
+            ]),
+            Err(e) => result.push(vec![
+                app.to_string(),
+                format!("Failed: {:?}", e),
+                format!("{:?}", start.elapsed()),
+            ]),
         }
     }
 
@@ -244,15 +233,7 @@ fn settings() -> Result<String> {
 
 /// Stop one, some or all containers. See start for the argument handling.
 async fn stop(state: &mut State, args: &[&str]) -> Result<String> {
-    let re = match args.len() {
-        1 => regex::Regex::new(args[0])?,
-        0 => regex::Regex::new(".*")?,
-        _ => {
-            return Err(anyhow!(
-                "Arguments invalid. Use `start multiple NUM PATTERN` or `start PATTERN`",
-            ))
-        }
-    };
+    let re = arg_regex(args)?;
 
     let mut result = vec![vec![
         "Name".to_string(),
@@ -290,15 +271,8 @@ async fn stop(state: &mut State, args: &[&str]) -> Result<String> {
 /// Umount and remove a containers. See `start` for the argument handling.
 /// The data directory is not removed. This needs discussion.
 async fn uninstall(state: &mut State, args: &[&str]) -> Result<String> {
-    let re = match args.len() {
-        1 => regex::Regex::new(args[0])?,
-        0 => regex::Regex::new(".*")?,
-        _ => {
-            return Err(anyhow!(
-                "Arguments invalid. Use `start multiple NUM PATTERN` or `start PATTERN`",
-            ))
-        }
-    };
+    let re = arg_regex(args)?;
+
     let mut result = vec![vec!["Name".to_string(), "Result".to_string()]];
 
     let to_uninstall = state
@@ -446,4 +420,14 @@ fn to_table<T: iter::IntoIterator<Item = I>, I: iter::IntoIterator<Item = S>, S:
     let mut result = vec![];
     t.print(&mut result).context("Failed to format table")?;
     String::from_utf8(result).context("Invalid table content")
+}
+
+fn arg_regex(args: &[&str]) -> Result<regex::Regex> {
+    match args.len() {
+        1 => regex::Regex::new(args[0])
+            .with_context(|| format!("Invalid container name regex {}", args[0])),
+        0 => regex::Regex::new(".*")
+            .with_context(|| format!("Invalid container name regex {}", args[0])),
+        _ => Err(anyhow!("Arguments invalid. Use `start PATTERN`",)),
+    }
 }
