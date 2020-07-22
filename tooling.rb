@@ -347,6 +347,8 @@ def inspect_npk(pkg)
         end
         cd 'extracted', :verbose => false do
           puts `tree .`
+          puts "#{'Manifest'.yellow}:\n#{File.read('manifest.yaml')}" if File.exist? 'manifest.yaml'
+          puts "#{'Signature'.yellow}:\n#{File.read('signature.yaml')}" if File.exist? 'signature.yaml'
           Dir['*.img'].each do |file|
             puts "#{'squashFS-image'.yellow}: #{file}"
             sh "unsquashfs -l #{file}"
