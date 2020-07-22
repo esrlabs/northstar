@@ -90,8 +90,8 @@ impl LoopDevice {
         read_only: bool,
         auto_clear: bool,
     ) -> Result<()> {
-        log::debug!("Attaching");
-        // Attach the file
+        log::debug!("Attaching file to loopback device");
+        // Attach the file => Associate the loop device with the open file
         unsafe {
             if ioctl(
                 self.device.as_raw_fd() as c_int,
