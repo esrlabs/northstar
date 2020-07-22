@@ -125,6 +125,12 @@ pub struct Resource {
     pub mountpoint: std::path::PathBuf,
 }
 
+impl fmt::Display for Resource {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Resource \"{} {}\"", self.name, self.version)
+    }
+}
+
 #[derive(Clone, Default, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container

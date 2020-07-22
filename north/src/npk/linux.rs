@@ -126,14 +126,15 @@ async fn install_internal(
 ) -> Result<(Name, Version)> {
     let start = time::Instant::now();
 
-    info!("Loading {}", npk.display());
+    if let Some(npk_name) = npk.file_name() {
+        info!("Loading {}", npk_name.to_string_lossy());
+    }
 
     let file =
         std::fs::File::open(&npk).with_context(|| format!("Failed to open {}", npk.display()))?;
     let reader = std::io::BufReader::new(file);
     let mut archive = zip::ZipArchive::new(reader).context("Failed to read zip")?;
 
-    debug!("Loading manifest");
     let manifest = {
         let mut manifest_file = archive
             .by_name(MANIFEST)
@@ -142,10 +143,13 @@ async fn install_internal(
         manifest_file.read_to_string(&mut manifest)?;
         Manifest::from_str(&manifest)?
     };
-    debug!(
-        "Manifest loaded for {}, resources: {:?}",
-        manifest.name, manifest.resources
-    );
+    debug!("Manifest loaded for \"{}\"", manifest.name);
+    if let Some(resources) = &manifest.resources {
+        debug!("Referencing {} resources:", resources.len());
+        for res in resources {
+            debug!("- {}", res);
+        }
+    }
 
     debug!("Loading hashes");
     let hashes = {
