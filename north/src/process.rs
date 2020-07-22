@@ -182,6 +182,8 @@ impl Process {
         jail.no_new_privs();
         // Set chroot dir for process
         jail.enter_chroot(&root.as_path())?;
+        // Make the application the init process
+        jail.run_as_init();
 
         // Configure bind mounts
         #[cfg(target_os = "android")]
