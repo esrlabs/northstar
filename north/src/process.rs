@@ -169,8 +169,12 @@ impl Process {
         jail.change_uid(SYSTEM_UID);
         // Configure PID
         jail.change_gid(SYSTEM_GID);
+
+        // TODO: Do not use pid namespace because of multithreadding
+        // issues discovered by minijail. See libminijail.c for details.
         // Make the process enter a pid namespace
-        jail.namespace_pids();
+        //jail.namespace_pids();
+
         // Make the process enter a vfs namespace
         jail.namespace_vfs();
         // Set no_new_privs. See </kernel/seccomp.c> and </kernel/sys.c>
