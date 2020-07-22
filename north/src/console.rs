@@ -207,6 +207,7 @@ async fn start(state: &mut State, args: &[&str]) -> Result<String> {
         .applications()
         .filter(|app| app.process_context().is_none())
         .filter(|app| re.is_match(app.name()))
+        .sorted_by_key(|app| app.name().clone())
         .map(|app| (app.name().clone(), app.container().is_resource_container()))
         .collect::<Vec<(Name, bool)>>();
     for (app, is_resource_container) in &apps {
