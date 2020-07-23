@@ -129,6 +129,9 @@ void do_fatal_log(int priority, const char *format, ...)
 
 void do_log(int priority, const char *format, ...)
 {
+	if (logging_config.min_priority < priority)
+		return;
+
 	if (logging_config.logger == LOG_TO_SYSLOG) {
 		va_list args;
 		va_start(args, format);
@@ -137,14 +140,12 @@ void do_log(int priority, const char *format, ...)
 		return;
 	}
 
-	if (logging_config.min_priority < priority)
-		return;
-
 	va_list args;
 	va_start(args, format);
 	vdprintf(logging_config.fd, format, args);
 	va_end(args);
 	dprintf(logging_config.fd, "\n");
+	fsync(logging_config.fd);
 }
 
 int lookup_syscall(const char *name)
