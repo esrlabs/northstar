@@ -582,6 +582,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b90eb1dec02087df472ab9f0db65f27edaa654a746830042688bcc2eaf68090f"
 
 [[package]]
+name = "ferris"
+version = "0.1.0"
+dependencies = [
+ "ferris-says",
+]
+
+[[package]]
 name = "ferris-says"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -813,13 +820,6 @@ dependencies = [
  "matches",
  "unicode-bidi",
  "unicode-normalization",
-]
-
-[[package]]
-name = "interpreter"
-version = "0.1.0"
-dependencies = [
- "ferris-says",
 ]
 
 [[package]]
@@ -1883,13 +1883,6 @@ dependencies = [
  "idna",
  "matches",
  "percent-encoding",
-]
-
-[[package]]
-name = "using_resource"
-version = "0.1.0"
-dependencies = [
- "yaml-rust",
 ]
 
 [[package]]

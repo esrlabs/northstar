@@ -1,0 +1,20 @@
+# Use the ferris interpreter from the resouce listed below
+name: ferris_says_hello
+version: 0.0.1
+init: /bin/ferris
+# Pass the filename with the hello message
+args: [ /message/hello ]
+resources: [
+    {
+        name: ferris,
+        version: 0.0.1,
+        dir: /,
+        mountpoint: /bin
+    },
+    {
+        name: hello_message,
+        version: 0.0.1,
+        dir: /,
+        mountpoint: /message
+    }
+]
