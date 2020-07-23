@@ -124,9 +124,9 @@ def examples
     datarw
     hello
     memeater
-    resource/interpreter
-    resource/resource_sample
-    resource/using_resource
+    resource/ferris
+    resource/ferris_says_hello
+    resource/hello_message
   ]
 end
 
