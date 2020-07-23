@@ -13,4 +13,6 @@ glob = "0.3.0"
 serde_yaml = "0.8.13"
 tempdir = "0.3.7"
 fs_extra = "1.1.0"
+rand = "0.7.3"
+uuid = "0.8.1"
 north_common = {path = "../north_common"}

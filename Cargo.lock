@@ -1597,9 +1597,11 @@ dependencies = [
  "glob",
  "log",
  "north_common",
+ "rand 0.7.3",
  "serde_yaml",
  "structopt",
  "tempdir",
+ "uuid",
 ]
 
 [[package]]
