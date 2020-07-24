@@ -180,38 +180,16 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
       end
     end
 
-    # Create filesystem image
-    if pack_config.fstype == 'squashfs'
-      require 'os'
-      pseudofiles = pseudofiles.map do |d|
-        "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'"
-      end.join(' ')
-      # TODO: The compression algorithm should be target and not host specific!
-      squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
-      shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
-      raise 'mksquashfs failed' unless File.exist? fsimg
-    elsif pack_config.fstype == 'ext4'
-      pseudofiles.each do |d|
-        FileUtils.mkdir_p("#{root}#{d[0]}") unless Dir.exist? "#{root}#{d[0]}"
-      end
+    # Create squashfs filesystem image
+    require 'os'
+    pseudofiles = pseudofiles.map do |d|
+      "-p '#{d[0]} d #{d[1]} #{pack_config.uid} #{pack_config.gid}'"
+    end.join(' ')
+    # TODO: The compression algorithm should be target and not host specific!
+    squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
+    shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
+    raise 'mksquashfs failed' unless File.exist? fsimg
 
-      # system("chmod", "-R", "a-w,a+rX", root) or raise "chmod failed"
-      # system("chown", "-R", "0:0", root) or raise # only works as root
-      blocks = `du -ks #{root}`.split.first.to_i # rough, too big, estimate
-      shell("mke2fs -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
-      e2fsck_output = `e2fsck -f -n #{fsimg}`
-      unless e2fsck_output.chomp.split("\n").last =~ %r{(\d+)/\d+ blocks}
-        raise "e2fsck failed: #{e2fsck_output}"
-      end
-
-      blocks = Regexp.last_match(1).to_i # actual required blocks
-      FileUtils.rm_f(fsimg)
-      sh("mke2fs  -q -b 4096 -t ext4 -v -m 0 -d #{root} #{fsimg} #{blocks}")
-
-      pseudofiles.each { |d| FileUtils.rmdir("#{root}#{d[0]}") }
-    else
-      raise "Unknown filesystem: #{pack_config.fstype}"
-    end
     filesystem_size = File.size(fsimg)
 
     # Append verity header and hash tree to filesystem image
@@ -272,18 +250,15 @@ fs.img:
       stream.write IO.binread(fsimg)
     end
 
-    if pack_config.fstype == 'squashfs'
-      raise('Alignment failed') unless IO.binread(npk, 4, 4096) == 'hsqs'
-    end
+    raise('Alignment failed') unless IO.binread(npk, 4, 4096) == 'hsqs'
   end
 end
 
 class PackageConfig
   attr_accessor :uid, :gid, :version, :fstype, :key_id, :signing_key
-  def initialize(uid, gid, key_dir, key_id, fstype)
+  def initialize(uid, gid, key_dir, key_id)
     @uid = uid
     @gid = gid
-    @fstype = fstype
     @key_id = key_id
     signing_key_seed = IO.binread("#{File.join(key_dir, key_id)}.key")
     @signing_key = RbNaCl::SigningKey.new(signing_key_seed)
@@ -347,8 +322,12 @@ def inspect_npk(pkg)
         end
         cd 'extracted', :verbose => false do
           puts `tree .`
-          puts "#{'Manifest'.yellow}:\n#{File.read('manifest.yaml')}" if File.exist? 'manifest.yaml'
-          puts "#{'Signature'.yellow}:\n#{File.read('signature.yaml')}" if File.exist? 'signature.yaml'
+          if File.exist? 'manifest.yaml'
+            puts "#{'Manifest'.yellow}:\n#{File.read('manifest.yaml')}"
+          end
+          if File.exist? 'signature.yaml'
+            puts "#{'Signature'.yellow}:\n#{File.read('signature.yaml')}"
+          end
           Dir['*.img'].each do |file|
             puts "#{'squashFS-image'.yellow}: #{file}"
             sh "unsquashfs -l #{file}"
