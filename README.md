@@ -26,22 +26,25 @@ At its core, Northstar makes extensive use of sandboxing to isolate applications
 
 ### Northstar Packages (NPK)
 
-Similar as in the docker world, a Northstar **image** is the unit that gets deployed into a system. Once the runtime starts, all images in the registry will be loaded into **containers**. Containers are the entities that the Northstar runtime is managing.
+Similar as in the docker world, a Northstar **image** is the unit that gets deployed into a system. Once the runtime starts, all images in the registry will be loaded into **containers**. Containers are the entities that are managed by the Northstar runtime.
 
 Images are packaged as **Northstar Packages** or **NPK**s. At it's outer layer, such an NPK is just a plain zip-archive. The content looks like this:
 
 <br/><img src="doc/images/npk.png" class="inline" width=400/>
 
 The `manifest.yaml` contains essential information about the package like id and version.
-The `signature.yaml` contains signatures that are used to verify the package.
+The `signature.yaml` contains signatures that are used to verify the package and the included file
+system.
 Now the actual content is the `fs.img` file, which is a squashfs filesystem image that contains the actual content of what the user puts into a container.
-This image is packaged as an archive with a zero compression factor. That means we now can read file entries in this archive directly without unpacking.
+The image is packed a an zip archive with zero compression. Compression takes place via the SquashFS
+functionality. Not compression the outer package allows Northstar to access the content without
+unpacking the image to disk.
 
 ### Installing a package
 
 <br/><img src="doc/images/mounting.png" class="inline" width=600/>
 
-When a package is installed, a loopback device on the host is used to mount the verity device mapper. This mapper acts as a block device that translates each read access to a file in the actual container and checks the integrity of all files on the fly.
+A file system image of a Nortstar package is attached to a loopback device. The loopback device is used to setup a verity check block device with the dm-verity module. The verity hashes are appended to the file system image. The verity block device is finally mounted and used in operation.
 
 ## Creating Northstar Packages
 
@@ -111,8 +114,6 @@ See [our examples README](examples/README.md)
 <br/><img src="doc/images/work.png" class="inline" width=100/>
 
 ## For Northstar Devs
-
-Developing with north requires some tooling. The first starting point is to install `Rust` via `https://rustup.rs`.
 
 See [HACKING](HACKING.md) for more on what you might need.
 
