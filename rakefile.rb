@@ -139,14 +139,14 @@ namespace :examples do
 
     mkdir_p registry unless Dir.exist?(registry)
 
-    package_config = PackageConfig.new(1000, 1000, KEY_DIRECTORY, KEY_ID, 'squashfs')
+    package_config = PackageConfig.new(1000, 1000, KEY_DIRECTORY, KEY_ID)
     examples.each do |dir|
       dir = "#{EXAMPLE_DIR}/container/#{dir}"
       targets.each do |target_arch|
         target_dir = "#{dir}/root-#{target_arch}"
         mkdir_p target_dir unless Dir.exist?(target_dir)
         if File.exist?(File.join(dir, 'Cargo.toml')) # only for rust projects
-          name = Pathname::new(dir).basename 
+          name = Pathname::new(dir).basename
           sh "cross build --release --bin #{name} --target #{target_arch}"
           cp "target/#{target_arch}/release/#{name}", target_dir
         end
