@@ -246,6 +246,16 @@ impl Minijail {
         }
     }
 
+    pub fn preserve_fd(&self, parent_fd: RawFd, child_fd: RawFd) -> Result<()> {
+        unsafe {
+            let ret = minijail_preserve_fd(self.jail, parent_fd, child_fd);
+            if ret < 0 {
+                return Err(Error::PreservingFd(ret));
+            }
+        }
+        Ok(())
+    }
+
     // The following functions are safe because they only set values in the
     // struct already owned by minijail.  The struct's lifetime is tied to
     // `struct Minijail` so it is guaranteed to be valid
