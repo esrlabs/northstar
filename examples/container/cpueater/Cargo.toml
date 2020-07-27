@@ -5,5 +5,3 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
-logd-logger = { git = "https://github.com/flxo/logd-logger.git" }
-log = "0.4.8"

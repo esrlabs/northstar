@@ -12,17 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use log::info;
-
 fn main() {
-    logd_logger::builder()
-        .parse_filters("memeater")
-        .tag("memeater")
-        .init();
-
     let mut mem = vec![];
     for _ in 0..9_999_999 {
-        info!("Eating a Megabyte... have {}", mem.len());
+        println!("Eating a Megabyte... have {}", mem.len());
         let mut chunk = vec![];
         for i in 0..1_000_000 {
             chunk.push((i % 8) as u8);
