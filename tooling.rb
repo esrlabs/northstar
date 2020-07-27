@@ -137,17 +137,18 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
   arch = manifest['arch']
   Dir.mktmpdir do |tmpdir|
     # Copy root
-    root = "#{src_dir}/root"
-    FileUtils.cp_r(root, tmpdir, :verbose => false) if Dir.exist? "#{src_dir}/root"
-    FileUtils.mkdir_p("#{tmpdir}/root", :verbose => false) unless Dir.exist? "#{tmpdir}/root"
+    root_src = "#{src_dir}/root"
+    FileUtils.cp_r(root_src, tmpdir, :verbose => false) if Dir.exist? root_src
+
+    tmp_root = "#{tmpdir}/root"
+    FileUtils.mkdir_p(tmp_root, :verbose => false) unless Dir.exist? tmp_root
 
     # Copy arch specific root
-    Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, "#{tmpdir}/root", :verbose => false) }
+    Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, tmp_root, :verbose => false) }
 
     # Write manifest
     File.write("#{tmpdir}/manifest.yaml", manifest.to_yaml)
 
-    root = "#{tmpdir}/root"
     fsimg = "#{tmpdir}/fs.img"
 
     pseudofiles = []
@@ -187,7 +188,7 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     end.join(' ')
     # TODO: The compression algorithm should be target and not host specific!
     squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
-    shell "mksquashfs #{root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
+    shell "mksquashfs #{tmp_root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
     raise 'mksquashfs failed' unless File.exist? fsimg
 
     filesystem_size = File.size(fsimg)
@@ -265,6 +266,13 @@ class PackageConfig
   end
 end
 
+# Create an NPK package
+# Params:
+# +arch+:: achitecture for which this package will be built
+#          e.g. aarch64-linux-android, aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu
+# +arch_dir+:: directory where the architecture specific content is to be found
+# +src_dir+:: directory where non-architecture specific content is found
+# +out_dir+:: where the npk should be packaged to (usually the registry directory)
 def create_arch_package(arch, arch_dir, src_dir, out_dir, pack_config)
   # Load manifest
   manifest = YAML.load_file("#{src_dir}/manifest.yaml")
