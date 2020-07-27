@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use log::debug;
 use std::{
     convert::Into,
     env, fs, io,
@@ -24,23 +23,18 @@ use std::{
 const DATA: &str = "DATA";
 
 fn main() -> io::Result<()> {
-    logd_logger::builder()
-        .parse_filters("datarw")
-        .tag("datarw")
-        .init();
-
     let sleep = |s| {
         thread::sleep(time::Duration::from_secs(s));
     };
 
     let data = PathBuf::from(std::env::var(DATA).expect("Cannot read env var DATA"));
 
-    debug!("Doing some operations on {}", data.display());
+    println!("Doing some operations on {}", data.display());
 
-    debug!("Listing {}", data.display());
+    println!("Listing {}", data.display());
     for e in fs::read_dir(&data)? {
         let e = e?;
-        debug!(
+        println!(
             "{}: {:?}",
             e.path().display(),
             e.path().metadata()?.file_type()
@@ -49,11 +43,11 @@ fn main() -> io::Result<()> {
 
     let file = data.join("foo");
 
-    debug!("Trying to create {}", file.display());
+    println!("Trying to create {}", file.display());
     let mut f = loop {
         match fs::File::create(&file) {
             Ok(f) => {
-                debug!("Success!");
+                println!("Success!");
                 break f;
             }
             Err(e) => ("Failed: {}", e),
@@ -76,13 +70,13 @@ fn main() -> io::Result<()> {
     loop {
         let mut f = fs::File::create(&file)?;
         let now = serde_json::to_string_pretty(&we)?;
-        debug!("Creating {} with context {}", file.display(), now);
+        println!("Creating {} with context {}", file.display(), now);
         f.write_all(now.as_bytes())?;
 
-        debug!("Listing {}", data.display());
+        println!("Listing {}", data.display());
         for e in fs::read_dir(&data)? {
             let e = e?;
-            debug!(
+            println!(
                 "{}: {:?}",
                 e.path().display(),
                 e.path().metadata()?.file_type()
@@ -92,9 +86,9 @@ fn main() -> io::Result<()> {
         let mut f = fs::File::open(&file)?;
         let mut buffer = String::new();
         f.read_to_string(&mut buffer)?;
-        debug!("Content of {}: {}", file.display(), buffer);
+        println!("Content of {}: {}", file.display(), buffer);
 
-        debug!("Unlinking {}", file.display());
+        println!("Unlinking {}", file.display());
         fs::remove_file(&file)?;
 
         sleep(1);

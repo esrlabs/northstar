@@ -15,18 +15,13 @@
 use std::time::Duration;
 
 fn main() {
-    logd_logger::builder()
-        .parse_filters("crashing")
-        .tag("crashing")
-        .init();
-
     let mut n = 10;
     loop {
         if n == 0 {
-            log::error!("BOOM!");
+            println!("BOOM!");
             panic!("BOOM");
         }
-        log::warn!("Crashing in {} seconds", n);
+        println!("Crashing in {} seconds", n);
         std::thread::sleep(Duration::from_secs(1));
         n -= 1;
     }

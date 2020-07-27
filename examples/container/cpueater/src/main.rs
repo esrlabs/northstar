@@ -15,18 +15,13 @@
 use std::env::var;
 
 fn main() {
-    logd_logger::builder()
-        .parse_filters("cpueater")
-        .tag("cpueater")
-        .init();
-
     let version = var("VERSION").expect("Failed to read VERSION");
     let threads = var("THREADS")
         .expect("Failed to read THREADS")
         .parse::<i32>()
         .expect("Invalid thread count");
 
-    log::debug!("Eating CPU with {} threads (v{})!", threads, version);
+    println!("Eating CPU with {} threads (v{})!", threads, version);
 
     for _ in 0..(threads - 1) {
         std::thread::spawn(move || loop {
