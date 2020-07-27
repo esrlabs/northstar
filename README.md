@@ -12,14 +12,14 @@ Northstar is still under heavy development. While we already have implemented mo
 
 So far we tested Northstar on
 
-* Raspberry 2 (32bit ARM)
-* Renesas (64-bit ARM)
+* 32-bit ARM
+* 64-bit ARM
 * x86_64
 
 ### Missing from implementation
 
 - [ ] User-support of configuring and managing network-namespaces
-- [ ] Individual UID for each container
+- [ ] Dedicated UID for each container
 - [ ] Management API of the runtime [#64](https://github.com/esrlabs/northstar/issues/64)
 - [ ] Signature Check of NPK at install time [#54](https://github.com/esrlabs/northstar/issues/54)
 - [ ] PID Namespaces [#51](https://github.com/esrlabs/northstar/issues/51)
@@ -77,8 +77,8 @@ resources: [
 ]
 ```
 
-The `signature.yaml` contains signatures that are used to verify the package and the included file
-system.
+The `signature.yaml` contains signatures that are used to verify the package and the included file system. It is automatically created by the tooling.
+
 Now the actual content is the `fs.img` file, which is a squashfs filesystem image that contains the actual content of what the user puts into a container.
 The image is packed a an zip archive with zero compression. Compression takes place via the SquashFS
 functionality. Not compression the outer package allows Northstar to access the content without
@@ -119,9 +119,9 @@ Northstar is designed to be running a modern linux environment. When the kernel 
 Required Kernel features are:
 
 * device-mapper with dm-verity
-* Squashfs
+* SquashFS
 * loopback-blockdevice-support
-* pid namespaces
+* PID namespaces
 * mount namespaces
 
 ### Starting Northstar
@@ -151,13 +151,22 @@ device_mapper_dev = "/dev/dm-"
 
 The `[directories]` section just tells north what directories to use.
 
-* **`container_dir`** -- this is the directory where the `*.npk` packages for the correct architecture
+* **`container_dir`** -- list of directories where to find the `*.npk` packages for the correct architecture
   are to be found
 * **`run_dir`** -- where the container content will be mounted
-* **`data_dir`** -- r/w directory for the container
+* **`data_dir`** -- In data_dir a directory for each container is created. data_dir is not directly exposed (currently only for testing purposes - see global_data_dir settings which will be removed.
 
-The `[cgroups]` section let's northstar know where the cgroups will be organized.
+The [`cgroups`] optionally configures northstar applications CGroups settings.
 Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchies.
+
+`[devices]`-section:
+
+* **`unshare_root`** -- Set to mountpoint of the fs containing run_dir. The runtime needs this directory to set the mount propagation to MS_PRIVATE.
+* **`unshare_fstype`** -- For applying the mount propagation type the fs type is needed.
+* **`loop_control`** -- Location of the loopback block device control file
+* **`loop_dev`** -- Prefix of preconfigured loopback devices. Usually loopback devices are e.g /dev/block0
+* **`device_mapper`** -- Device mapper control file.
+* **`device_mapper_dev`** -- Prefix of device mapper mappings.
 
 ## Examples
 
