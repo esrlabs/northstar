@@ -136,9 +136,8 @@ container_dirs= [ "target/north/registry" ]
 run_dir = "target/north/run"
 data_dir = "target/north/data"
 
-[cgroups] where will cgroups be mounted
-cgroups mount-point +
-memory = "/sys/fs/cgroup/memory/north" => where will the memory cgroups defined
+[cgroups]
+memory = "/sys/fs/cgroup/memory/north"
 cpu = "/sys/fs/cgroup/cpu/north"
 
 [devices]
