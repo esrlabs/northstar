@@ -6,6 +6,24 @@ Northstar is an open source technology for securly running self sufficient sandb
 
 At its core, Northstar makes extensive use of sandboxing to isolate applications from the rest of the system while at the same time orchestrating efficient startup and secure update scenarios. Such applications run inside Northstar-containers and only rely on system services and ressource containers provided by the Northstar-platform. Similar sandboxing techniques were selected and used as are found in Docker and other containerization approaches to reach maximum isolation. To build the most efficient and robust solution, Northstar is completely developed in Rust, a language designed to afford the performance of C++ while at the same time guaranteeing memory safety.
 
+## Northstar Status
+
+Northstar is still under heavy development. While we already have implemented most of the basic building blocks, Northstar is not production ready.
+
+So far we tested Northstar on
+
+* Raspberry 2 (32bit ARM)
+* Renesas (64-bit ARM)
+* x86_64
+
+### Missing from implementation
+
+- [ ] User-support of configuring and managing network-namespaces
+- [ ] Individual UID for each container
+- [ ] Management API of the runtime [#64](https://github.com/esrlabs/northstar/issues/64)
+- [ ] Signature Check of NPK at install time [#54](https://github.com/esrlabs/northstar/issues/54)
+- [ ] PID Namespaces [#51](https://github.com/esrlabs/northstar/issues/51)
+
 <br/><img src="doc/images/prison.png" class="inline" width=100/>
 
 ## Supported Sandboxing features
@@ -33,6 +51,32 @@ Images are packaged as **Northstar Packages** or **NPK**s. At it's outer layer, 
 <br/><img src="doc/images/npk.png" class="inline" width=400/>
 
 The `manifest.yaml` contains essential information about the package like id and version.
+
+This is what a typical manifest looks like (taken from the examples)
+
+```yaml
+# Use the ferris interpreter from the resouce listed below
+name: ferris_says_hello
+version: 0.0.1
+init: /bin/ferris
+# Pass the filename with the hello message
+args: [ /message/hello ]
+resources: [
+    {
+        name: ferris,
+        version: 0.0.1,
+        dir: /,
+        mountpoint: /bin
+    },
+    {
+        name: hello_message,
+        version: 0.0.1,
+        dir: /,
+        mountpoint: /message
+    }
+]
+```
+
 The `signature.yaml` contains signatures that are used to verify the package and the included file
 system.
 Now the actual content is the `fs.img` file, which is a squashfs filesystem image that contains the actual content of what the user puts into a container.
@@ -52,7 +96,16 @@ In order to use an application in a northstar container, it needs to be packaged
 
 An example of how to use it can be found in the top level `rakefile.rb`. This is the function that needs to be called:
 
-    create_arch_package
+```ruby
+# Create an NPK package
+# Params:
+# +arch+:: achitecture for which this package will be built
+#          e.g. aarch64-linux-android, aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu
+# +arch_dir+:: directory where the architecture specific content is to be found
+# +src_dir+:: directory where non-architecture specific content is found
+# +out_dir+:: where the npk should be packaged to (usually the registry directory)
+def create_arch_package(arch, arch_dir, src_dir, out_dir, pack_config)
+```
 
 Once the packages are created, they are stored in a registry directory. This registry needs to be configured later when starting the northstar runtime.
 
@@ -77,7 +130,7 @@ The Northstar runtime is an executable and usually run as a daemon started by yo
 choice. The configuration of the runtime is done with a `*.toml` configuration file.
 Here is an example:
 
-```
+```toml
 [directories]
 container_dirs= [ "target/north/registry" ]
 run_dir = "target/north/run"
@@ -98,6 +151,7 @@ device_mapper_dev = "/dev/dm-"
 ```
 
 The `[directories]` section just tells north what directories to use.
+
 * **`container_dir`** -- this is the directory where the `*.npk` packages for the correct architecture
   are to be found
 * **`run_dir`** -- where the container content will be mounted
@@ -106,9 +160,9 @@ The `[directories]` section just tells north what directories to use.
 The `[cgroups]` section let's northstar know where the cgroups will be organized.
 Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchies.
 
-## Running the Examples
+## Examples
 
-We include runnable examples in the examples directory.
+If you want to see how containers can look like, take a look at the examples in the examples directory.
 See [our examples README](examples/README.md)
 
 <br/><img src="doc/images/work.png" class="inline" width=100/>
@@ -116,5 +170,3 @@ See [our examples README](examples/README.md)
 ## For Northstar Devs
 
 See [HACKING](HACKING.md) for more on what you might need.
-
-
