@@ -34,6 +34,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.56"
 serde_yaml = "0.8.13"
 sha2 = "0.9.1"
+stop-token = "0.1.2"
 structopt = "0.3.15"
 structure = "0.1.2"
 tempfile = "3.1.0"

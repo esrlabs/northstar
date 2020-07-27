@@ -53,6 +53,8 @@ pub enum Event {
     Error(Error),
     /// North shall shut down
     Shutdown,
+    /// Stdout and stderr of child processes
+    ChildOutput { name: Name, fd: i32, line: String },
 }
 
 #[derive(Clone, Debug)]
@@ -168,6 +170,7 @@ async fn main() -> Result<()> {
     // Enter main loop
     while let Ok(event) = rx.recv().await {
         match event {
+            Event::ChildOutput { name, fd, line } => on_child_output(&mut state, &name, fd, &line),
             // Debug console commands are handled via the main loop in order to get access
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
@@ -192,4 +195,13 @@ async fn main() -> Result<()> {
     info!("Shutting down...");
 
     Ok(())
+}
+
+/// This is a starting point for doing something meaningful with the childs outputs.
+fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
+    if let Some(p) = state.application(name) {
+        if let Some(p) = p.process_context() {
+            debug!("[{}] {}: {}: {}", p.process().pid(), name, fd, line);
+        }
+    }
 }

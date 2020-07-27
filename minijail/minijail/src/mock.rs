@@ -41,6 +41,9 @@ impl Minijail {
         Ok(Minijail::default())
     }
     pub fn log_to_fd(&self, _fd: RawFd, _priority: LogPriority) {}
+    pub fn preserve_fd(&self, _parent_fd: RawFd, _child_fd: RawFd) -> Result<()> {
+        Ok(())
+    }
     pub fn change_uid(&mut self, _uid: libc::uid_t) {}
     pub fn change_gid(&mut self, _gid: libc::gid_t) {}
     pub fn set_supplementary_gids(&mut self, _ids: &[libc::gid_t]) {}
