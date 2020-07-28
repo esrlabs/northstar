@@ -16,8 +16,13 @@ So far we tested Northstar on
 * 64-bit ARM
 * x86_64
 
-### Missing from implementation
+### Everything that is checked is implemented
 
+- [x] On-the-fly verification of container content
+- [x] Process supervision: memory control
+- [x] Process supervision: cpu control
+- [x] Limiting system calls (whitelist)
+- [x] Shared resource containers
 - [ ] User-support of configuring and managing network-namespaces
 - [ ] Dedicated UID for each container
 - [ ] Management API of the runtime [#64](https://github.com/esrlabs/northstar/issues/64)
