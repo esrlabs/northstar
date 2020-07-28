@@ -15,7 +15,7 @@
 #![deny(clippy::all)]
 
 use anyhow::{anyhow, Error, Result};
-use log::info;
+use sextant::npk;
 use std::{path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 
@@ -44,8 +44,14 @@ enum Opt {
         /// Container source dir
         #[structopt(short, long)]
         dir: PathBuf,
+        /// Key file
+        #[structopt(short, long)]
+        key: PathBuf,
+        /// Registry dir
         #[structopt(short, long)]
         out: PathBuf,
+        #[structopt(short, long)]
+        platform: String,
     },
     /// Unpack Northstar containers
     Unpack {
@@ -55,7 +61,7 @@ enum Opt {
         #[structopt(short, long)]
         out: PathBuf,
     },
-    /// Print information about a northstart container
+    /// Print information about a Northstar container
     Inspect {
         /// Container to inspect
         #[structopt(short, long)]
@@ -69,6 +75,15 @@ enum Opt {
 fn main() -> Result<()> {
     env_logger::init();
     let opt = Opt::from_args();
-    info!("{:#?}", opt);
-    todo!();
+    match opt {
+        Opt::Pack {
+            dir,
+            out,
+            key,
+            platform,
+        } => npk::pack(&dir, &out, &key, &platform),
+        _ => {
+            unimplemented!();
+        }
+    }
 }
