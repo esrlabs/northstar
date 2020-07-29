@@ -1,0 +1,9 @@
+set noparent
+jorgelo@google.com
+lhchavez@google.com
+drewry@google.com
+keescook@google.com
+vapier@google.com
+
+per-file Cargo.toml = file:/OWNERS.rust
+per-file *.rs = file:/OWNERS.rust
