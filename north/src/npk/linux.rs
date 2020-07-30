@@ -69,7 +69,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
         .expect("Invalid regex");
     }
 
-    let containers = fs::read_dir(&dir)
+    let npks = fs::read_dir(&dir)
         .await
         .with_context(|| format!("Failed to read {}", dir.display()))?
         .filter_map(move |d| async move { d.ok() })
@@ -87,9 +87,9 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
         .await
         .context("Failed to open loop control")?;
 
-    let mut containers = Box::pin(containers);
-    while let Some(container) = containers.next().await {
-        install_internal(state, &dm, &lc, &container).await?;
+    let mut npks = Box::pin(npks);
+    while let Some(npk) = npks.next().await {
+        install_internal(state, &dm, &lc, &npk).await?;
     }
     Ok(())
 }

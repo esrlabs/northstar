@@ -16,11 +16,10 @@ use std::{fs, io};
 
 fn main() -> io::Result<()> {
     std::env::args()
-        .nth(0)
-        .ok_or(io::Error::new(
-            io::ErrorKind::Other,
-            "Missing or invalid arguments",
-        ))
-        .map(|greeting| fs::read_to_string(&greeting).unwrap_or(greeting))
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Missing or invalid arguments"))
+        .map(|greeting| {
+            fs::read_to_string(&greeting).unwrap_or(format!("no such file: {}", greeting))
+        })
         .and_then(|greeting| ferris_says::say(greeting.as_bytes(), 100, &mut std::io::stdout()))
 }
