@@ -26,7 +26,6 @@ use async_std::{
 };
 use futures::{future::FutureExt, select, StreamExt};
 use log::*;
-use minijail::LogPriority;
 use nix::{
     sys::{signal, signal::Signal, wait, wait::WaitStatus},
     unistd::Pid,
@@ -121,12 +120,11 @@ impl CaptureOutput {
     }
 }
 
-#[derive(Debug)]
 pub struct Process {
     /// PID of this process
     pid: u32,
     /// Handle to a libminijail configuration
-    jail: minijail::Minijail,
+    _jail: minijail::Minijail,
     /// If the process is intentionally shut down the termination_reason
     /// is set. This is used to distinguish crashes and graceful shutdowns
     termination_reason: Option<TerminationReason>,
@@ -139,11 +137,11 @@ pub struct Process {
     /// Temporary directory created in the systems tmp folder.
     /// This directory holds process instance specific data that needs
     /// to be dumped to disk for startup. e.g seccomp config (TODO)
-    tmpdir: tempfile::TempDir,
+    _tmpdir: tempfile::TempDir,
     /// Captured stdout output
-    stdout: CaptureOutput,
+    _stdout: CaptureOutput,
     /// Captured stderr output
-    stderr: CaptureOutput,
+    _stderr: CaptureOutput,
 }
 
 impl Process {
@@ -182,18 +180,8 @@ impl Process {
             .with_context(|| format!("Failed to create tmpdir for {}", manifest.name))?;
         let tmpdir_path = tmpdir.path();
 
-        jail.log_to_fd(
-            1,
-            LogPriority::Debug, // TODO: read from config
-        );
-
         let stdout = CaptureOutput::new(tmpdir_path, 1, &manifest.name, event_tx.clone()).await?;
-        jail.preserve_fd(stdout.write_fd(), stdout.fd())
-            .context("Failed to map child stdout to stdout fifo")?;
-
         let stderr = CaptureOutput::new(tmpdir_path, 2, &manifest.name, event_tx.clone()).await?;
-        jail.preserve_fd(stderr.write_fd(), stderr.fd())
-            .context("Failed to map child stdout to stdout fifo")?;
 
         // Dump seccomp config to process tmpdir. This is a subject to be changed since
         // minijail provides a API to configure seccomp without writing to a file.
@@ -295,25 +283,29 @@ impl Process {
 
         let started = time::Instant::now();
 
-        let pid = jail.run(
+        let pid = jail.run_remap_preload(
             &std::path::PathBuf::from(cmd.as_path()),
-            &[1, 2],
+            &[
+                (stderr.write_fd(), stderr.fd()),
+                (stdout.write_fd(), stdout.fd()),
+            ],
             &args,
-            &env,
+            //&env,
+            false,
         )? as u32;
 
         let (exit_tx, exit_rx) = sync::channel::<i32>(1);
 
         let process = Process {
             pid,
-            jail,
+            _jail: jail,
             started,
             event_tx: event_tx.clone(),
             termination_reason: None,
             exit: Some(exit_rx),
-            tmpdir,
-            stdout,
-            stderr,
+            _tmpdir: tmpdir,
+            _stdout: stdout,
+            _stderr: stderr,
         };
 
         // Spawn background task that waits for the process exit
