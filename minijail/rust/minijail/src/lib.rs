@@ -4,14 +4,17 @@
 
 use libc::pid_t;
 use minijail_sys::*;
-use std::ffi::CString;
-use std::fmt::{self, Display};
-use std::fs;
-use std::io;
-use std::os::raw::{c_char, c_ulong, c_ushort};
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::path::{Path, PathBuf};
-use std::ptr::{null, null_mut};
+use std::{
+    ffi::CString,
+    fmt::{self, Display},
+    fs, io,
+    os::{
+        raw::{c_char, c_ulong, c_ushort},
+        unix::io::{AsRawFd, RawFd},
+    },
+    path::{Path, PathBuf},
+    ptr::{null, null_mut},
+};
 
 #[derive(Debug)]
 pub enum Error {
