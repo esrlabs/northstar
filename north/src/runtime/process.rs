@@ -283,14 +283,14 @@ impl Process {
 
         let started = time::Instant::now();
 
-        let pid = jail.run_remap_preload(
+        let pid = jail.run_remap_env_preload(
             &std::path::PathBuf::from(cmd.as_path()),
             &[
                 (stderr.write_fd(), stderr.fd()),
                 (stdout.write_fd(), stdout.fd()),
             ],
             &args,
-            //&env,
+            &env,
             false,
         )? as u32;
 

@@ -617,7 +617,7 @@ impl Minijail {
         inheritable_fds: &[(RawFd, RawFd)],
         args: &[&str],
     ) -> Result<pid_t> {
-        self.run_remap_preload(cmd, inheritable_fds, args, false)
+        self.run_remap_env_preload(cmd, inheritable_fds, args, &[], false)
     }
 
     /// Behaves the same as `run()` except `inheritable_fds` is a list of fd
@@ -627,6 +627,19 @@ impl Minijail {
         cmd: &Path,
         inheritable_fds: &[(RawFd, RawFd)],
         args: &[&str],
+        preload: bool,
+    ) -> Result<pid_t> {
+        self.run_remap_env_preload(cmd, inheritable_fds, args, &[], preload)
+    }
+
+    /// Behaves the same as `run()` except `inheritable_fds` is a list of fd
+    /// mappings rather than just a list of fds to preserve.
+    pub fn run_remap_env_preload(
+        &self,
+        cmd: &Path,
+        inheritable_fds: &[(RawFd, RawFd)],
+        args: &[&str],
+        env: &[&str],
         preload: bool,
     ) -> Result<pid_t> {
         let cmd_os = cmd
@@ -644,6 +657,17 @@ impl Minijail {
             args_cstr.push(arg_cstr);
         }
         args_array.push(null());
+
+        // Converts each incoming `env` string to a `CString`, and then puts each `CString` pointer
+        // into a null terminated array, suitable for use as an argv parameter to `execve`.
+        let mut envs_cstr = Vec::with_capacity(env.len());
+        let mut envs_array = Vec::with_capacity(env.len());
+        for &env in env {
+            let env_cstr = CString::new(env).map_err(|_| Error::StrToCString(env.to_owned()))?;
+            envs_array.push(env_cstr.as_ptr());
+            envs_cstr.push(env_cstr);
+        }
+        envs_array.push(null());
 
         for (src_fd, dst_fd) in inheritable_fds {
             let ret = unsafe { minijail_preserve_fd(self.jail, *src_fd, *dst_fd) };
@@ -675,20 +699,13 @@ impl Minijail {
         let mut pid = 0;
         let ret = unsafe {
             if preload {
-                minijail_run_pid_pipes(
-                    self.jail,
-                    cmd_cstr.as_ptr(),
-                    args_array.as_ptr() as *const *mut c_char,
-                    &mut pid,
-                    null_mut(),
-                    null_mut(),
-                    null_mut(),
-                )
+                unimplemented!("preload");
             } else {
-                minijail_run_pid_pipes_no_preload(
+                minijail_run_env_pid_pipes_no_preload(
                     self.jail,
                     cmd_cstr.as_ptr(),
                     args_array.as_ptr() as *const *mut c_char,
+                    envs_array.as_ptr() as *const *mut c_char,
                     &mut pid,
                     null_mut(),
                     null_mut(),
