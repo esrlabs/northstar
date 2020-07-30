@@ -258,30 +258,6 @@ impl Process {
             );
             mount_bind(&mut jail, &src_dir, &mountpoint, false)?;
         }
-        if let Some(resources) = &container.manifest.resources {
-            for res in resources {
-                if let Ok(cwd) = std::env::current_dir() {
-                    let dir_in_container_path = std::path::Path::new(&res.dir);
-                    let first_part_of_path = cwd
-                        .join(SETTINGS.directories.run_dir.to_owned())
-                        .join(res.name.to_owned());
-                    let src_dir = match dir_in_container_path.strip_prefix("/") {
-                        Ok(dir_in_resource_container) => {
-                            first_part_of_path.join(dir_in_resource_container)
-                        }
-                        Err(_) => first_part_of_path,
-                    };
-                    info!("src_dir {:?} exists: {}", src_dir, src_dir.exists());
-                    if !src_dir.exists() {}
-                    info!(
-                        "Mounting from src_dir {} to target {:?}",
-                        src_dir.display(),
-                        res.mountpoint
-                    );
-                    mount_bind(&mut jail, src_dir.as_ref(), &res.mountpoint, false)?;
-                }
-            }
-        }
 
         let args = if let Some(ref args) = manifest.args {
             args.iter().map(|a| a.as_str()).collect()
@@ -440,11 +416,12 @@ fn wait_for_exit(name: &str, pid: u32, exit_tx: sync::Sender<i32>, event_tx: Eve
 }
 
 fn shared_resource(res: &Resource) -> Result<std::path::PathBuf> {
-    let cwd = std::env::current_dir()?;
+    let run_dir: &std::path::Path = std::path::Path::new(&SETTINGS.directories.run_dir);
     let dir_in_container_path = std::path::Path::new(&res.dir);
-    let first_part_of_path = cwd
-        .join(SETTINGS.directories.run_dir.to_owned())
-        .join(res.name.to_owned());
+    let first_part_of_path = run_dir
+        .join(res.name.to_owned())
+        .join(format!("{}", res.version));
+
     let src_dir = match dir_in_container_path.strip_prefix("/") {
         Ok(dir_in_resource_container) => first_part_of_path.join(dir_in_resource_container),
         Err(_) => first_part_of_path,
@@ -464,7 +441,8 @@ fn collect_resource_folders(
     let mut resources_to_mount = vec![];
     if let Some(resources) = &needed_resources {
         for res in *resources {
-            resources_to_mount.push((shared_resource(res)?, res.mountpoint.clone()));
+            let shared_resource_path = shared_resource(res)?;
+            resources_to_mount.push((shared_resource_path, res.mountpoint.clone()));
         }
     }
     Ok(resources_to_mount)

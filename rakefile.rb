@@ -146,7 +146,7 @@ namespace :examples do
         target_dir = "#{dir}/root-#{target_arch}"
         mkdir_p target_dir unless Dir.exist?(target_dir)
         if File.exist?(File.join(dir, 'Cargo.toml')) # only for rust projects
-          name = Pathname::new(dir).basename
+          name = Pathname.new(dir).basename
           sh "cross build --release --bin #{name} --target #{target_arch}"
           cp "target/#{target_arch}/release/#{name}", target_dir
         end
@@ -178,6 +178,53 @@ namespace :examples do
     rm_rf registry
   end
 
+  def write_header(columns)
+    puts "| #{columns.map { |_, g| g[:label].ljust(g[:width]) }.join(' | ')} |"
+  end
+
+  def write_divider(columns)
+    puts "+-#{columns.map { |_, g| '-' * g[:width] }.join('-+-')}-+"
+  end
+
+  def write_line(h, columns)
+    str = h.keys.map { |k| h[k].ljust(columns[k][:width]) }.join(' | ')
+    puts "| #{str} |"
+  end
+
+  def table(col_labels, arr)
+    @columns = col_labels.each_with_object({}) do |(col, label), h|
+      h[col] = { label: label,
+                 width: [arr.map { |g| g[col].size }.max, label.size].max }
+    end
+
+    write_divider(@columns)
+    write_header(@columns)
+    write_divider(@columns)
+    arr.each { |h| write_line(h, @columns) }
+    write_divider(@columns)
+  end
+
+  desc 'Show registry'
+  task :registry do
+    col_labels = { name: 'Name', arch: 'Arch', version: 'Version' }
+
+    pkgs = Dir["#{registry}/*.npk"]
+    registry_info = []
+    pkgs.each do |pkg|
+      file_name = File.basename(pkg, '.*')
+      captured = file_name.match(/(?<name>^.*)-(?<version>\d+\.\d+\.\d+)/i).named_captures
+
+      name = captured['name']
+      supported_targets.each do |arch|
+        if name.end_with?(arch)
+          registry_info << { name: name.chomp(arch).chomp('-'), arch: arch, version: captured['version'] }
+        end
+      end
+    end
+    sorted = registry_info.sort_by { |entry| entry[:name] }
+    table(col_labels, sorted)
+  end
+
   desc 'Inspect'
   task :inspect, [:id] do |_t, args|
     require './tooling.rb'
@@ -187,7 +234,7 @@ namespace :examples do
     if pkgs.empty?
       puts "no packages for id #{name} found in registry"
     else
-      inspect_npk pkgs[0]
+      pkgs.each { |pkg| inspect_npk pkg }
     end
   end
 end

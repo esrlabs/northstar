@@ -127,7 +127,7 @@ pub struct Resource {
 
 impl fmt::Display for Resource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Resource \"{} {}\"", self.name, self.version)
+        write!(f, "Resource \"{} ({})\"", self.name, self.version)
     }
 }
 

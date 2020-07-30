@@ -135,16 +135,24 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
   has_resources = !manifest['resources'].nil?
   is_resource_container = manifest['init'].nil?
   arch = manifest['arch']
+  version = manifest['version']
   Dir.mktmpdir do |tmpdir|
     # Copy root
     root_src = "#{src_dir}/root"
-    FileUtils.cp_r(root_src, tmpdir, :verbose => false) if Dir.exist? root_src
 
-    tmp_root = "#{tmpdir}/root"
+    tmp_root = if is_resource_container
+                 "#{tmpdir}/root/#{version}"
+               else
+                 "#{tmpdir}/root"
+               end
     FileUtils.mkdir_p(tmp_root, :verbose => false) unless Dir.exist? tmp_root
+    Dir["#{root_src}/*"].each { |entry| FileUtils.cp_r(entry, tmp_root, verbose: true) }
+    # FileUtils.cp_r(root_src, tmpdir, :verbose => true) if Dir.exist? root_src
+
+    folder_to_package = "#{tmpdir}/root"
 
     # Copy arch specific root
-    Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, tmp_root, :verbose => false) }
+    Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, tmp_root, :verbose => true) }
 
     # Write manifest
     File.write("#{tmpdir}/manifest.yaml", manifest.to_yaml)
@@ -158,17 +166,17 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
       pseudofiles << ['/dev', 444]
       pseudofiles << ['/sys', 444]
       pseudofiles << ['/data', 777]
-    end
 
-    # The list of pseudofiles is target specific.
-    # Add /lib and lib64 on Linux systems.
-    # Add /system on Android.
-    case arch
-    when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
-      pseudofiles << ['/lib', 444]
-      pseudofiles << ['/lib64', 444]
-    when 'aarch64-linux-android'
-      pseudofiles << ['/system', 444]
+      # The list of pseudofiles is target specific.
+      # Add /lib and lib64 on Linux systems.
+      # Add /system on Android.
+      case arch
+      when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
+        pseudofiles << ['/lib', 444]
+        pseudofiles << ['/lib64', 444]
+      when 'aarch64-linux-android'
+        pseudofiles << ['/system', 444]
+      end
     end
 
     if has_resources
@@ -188,7 +196,7 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     end.join(' ')
     # TODO: The compression algorithm should be target and not host specific!
     squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
-    shell "mksquashfs #{tmp_root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
+    shell "mksquashfs #{folder_to_package} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
     raise 'mksquashfs failed' unless File.exist? fsimg
 
     filesystem_size = File.size(fsimg)
@@ -315,10 +323,12 @@ def update_version_list(version_file, name, new_version)
   File.write(version_file, versions.to_yaml)
 end
 
-def inspect_npk(pkg)
+def inspect_npk(pkg, show_files = false)
   require 'colored'
-  puts('----------------------------------------------'.green)
-  info "Inspecting #{File.basename(pkg, '.npk')}"
+  s = "Inspecting #{File.basename(pkg, '.npk').green}"
+  puts(('-' * s.length).green)
+  puts s
+  puts(('-' * s.length).green)
   Dir.mktmpdir do |tmpdir|
     cp_r pkg, tmpdir, :verbose => false
     cd tmpdir, :verbose => false do
@@ -329,16 +339,18 @@ def inspect_npk(pkg)
           zip_file.extract(f, f_path) unless File.exist?(f_path)
         end
         cd 'extracted', :verbose => false do
-          puts `tree .`
-          if File.exist? 'manifest.yaml'
-            puts "#{'Manifest'.yellow}:\n#{File.read('manifest.yaml')}"
-          end
-          if File.exist? 'signature.yaml'
-            puts "#{'Signature'.yellow}:\n#{File.read('signature.yaml')}"
+          if show_files
+            puts `tree .`
+            if File.exist? 'manifest.yaml'
+              puts "#{'Manifest'.yellow}:\n#{File.read('manifest.yaml')}"
+            end
+            if File.exist? 'signature.yaml'
+              puts "#{'Signature'.yellow}:\n#{File.read('signature.yaml')}"
+            end
           end
           Dir['*.img'].each do |file|
             puts "#{'squashFS-image'.yellow}: #{file}"
-            sh "unsquashfs -l #{file}"
+            sh "unsquashfs -l #{file}", verbose: false
           end
         end
       end
