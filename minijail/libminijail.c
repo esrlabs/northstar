@@ -1929,6 +1929,9 @@ static void drop_capbset(uint64_t keep_mask, unsigned int last_valid_cap)
 
 static void drop_caps(const struct minijail *j, unsigned int last_valid_cap)
 {
+	(void)j;
+	(void)last_valid_cap;
+#if 0
 	if (!j->flags.use_caps)
 		return;
 
@@ -2022,6 +2025,7 @@ static void drop_caps(const struct minijail *j, unsigned int last_valid_cap)
 	}
 
 	cap_free(caps);
+#endif
 }
 
 static void set_seccomp_filter(const struct minijail *j)
