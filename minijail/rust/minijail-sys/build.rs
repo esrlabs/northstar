@@ -104,23 +104,29 @@ fn main() -> io::Result<()> {
         .expect("Faild to get CARGO_MANIFEST_DIR")
         .join("../..");
 
+    let sources = &[
+        "../../bpf.c",
+        "../../libminijail.c",
+        "../../signal_handler.c",
+        "../../syscall_filter.c",
+        "../../syscall_wrapper.c",
+        "../../system.c",
+        "../../util.c",
+    ];
+
     cc::Build::new()
         .define("ALLOW_DEBUG_LOGGING", "1")
         .define("PRELOADPATH", "\"invalid\"")
         .flag("-Wno-implicit-function-declaration")
-        .file("../../bpf.c")
-        .file("../../libminijail.c")
-        .file("../../signal_handler.c")
-        .file("../../syscall_filter.c")
-        .file("../../syscall_wrapper.c")
-        .file("../../system.c")
-        .file("../../util.c")
+        .files(sources)
         .file(generate_syscall_constants(&target_os)?)
         .file(generate_syscall_table()?)
         .include(minijail_dir)
         .compile("minijail");
 
-    // TODO: emit proper cargo:rerun-if-changed
+    sources
+        .iter()
+        .for_each(|s| println!("cargo:rerun-if-changed={}", s));
 
     println!("cargo:rustc-link-lib=static=minijail");
 
