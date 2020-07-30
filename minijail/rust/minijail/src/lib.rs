@@ -617,6 +617,18 @@ impl Minijail {
         inheritable_fds: &[(RawFd, RawFd)],
         args: &[&str],
     ) -> Result<pid_t> {
+        self.run_remap_preload(cmd, inheritable_fds, args, false)
+    }
+
+    /// Behaves the same as `run()` except `inheritable_fds` is a list of fd
+    /// mappings rather than just a list of fds to preserve.
+    pub fn run_remap_preload(
+        &self,
+        cmd: &Path,
+        inheritable_fds: &[(RawFd, RawFd)],
+        args: &[&str],
+        preload: bool,
+    ) -> Result<pid_t> {
         let cmd_os = cmd
             .to_str()
             .ok_or_else(|| Error::PathToCString(cmd.to_owned()))?;
@@ -662,15 +674,27 @@ impl Minijail {
 
         let mut pid = 0;
         let ret = unsafe {
-            minijail_run_pid_pipes(
-                self.jail,
-                cmd_cstr.as_ptr(),
-                args_array.as_ptr() as *const *mut c_char,
-                &mut pid,
-                null_mut(),
-                null_mut(),
-                null_mut(),
-            )
+            if preload {
+                minijail_run_pid_pipes(
+                    self.jail,
+                    cmd_cstr.as_ptr(),
+                    args_array.as_ptr() as *const *mut c_char,
+                    &mut pid,
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                )
+            } else {
+                minijail_run_pid_pipes_no_preload(
+                    self.jail,
+                    cmd_cstr.as_ptr(),
+                    args_array.as_ptr() as *const *mut c_char,
+                    &mut pid,
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                )
+            }
         };
         if ret < 0 {
             return Err(Error::ForkingMinijail(ret));
