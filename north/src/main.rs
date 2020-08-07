@@ -22,7 +22,7 @@ use anyhow::{Context, Error, Result};
 use async_std::{fs, sync};
 use log::*;
 use nix::unistd::{self, chown};
-use north_common::manifest::Name;
+use north_common::{api, manifest::Name};
 
 mod console;
 mod keys;
@@ -32,7 +32,6 @@ mod npk;
 mod process;
 mod settings;
 mod state;
-mod update;
 
 pub const SYSTEM_UID: u32 = 1000;
 pub const SYSTEM_GID: u32 = 1000;
@@ -43,9 +42,10 @@ pub use state::State;
 
 pub type EventTx = sync::Sender<Event>;
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub enum Event {
-    /// Incomming console command
-    Console(String, sync::Sender<String>),
+    /// Incomming command
+    Console(api::Message, sync::Sender<api::Message>),
     /// A instance exited with return code
     Exit(Name, i32),
     /// Out of memory event occured
@@ -163,7 +163,7 @@ async fn main() -> Result<()> {
         .collect::<Vec<Name>>();
     for app in &autostart_apps {
         info!("Autostarting {}", app);
-        if let Err(e) = state.start(&app, 0).await {
+        if let Err(e) = state.start(&app).await {
             warn!("Failed to start {}: {}", app, e);
         }
     }
@@ -175,8 +175,8 @@ async fn main() -> Result<()> {
             // Debug console commands are handled via the main loop in order to get access
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
-            // in the console module again but with access to `state`.
-            Event::Console(cmd, txr) => console::process(&mut state, &cmd, txr).await?,
+            // in the console module but with access to `state`.
+            Event::Console(msg, txr) => console::process(&mut state, &msg, txr).await?,
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.

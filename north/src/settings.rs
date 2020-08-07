@@ -16,7 +16,7 @@ use async_std::path::PathBuf;
 use std::{fmt, path::Path};
 use structopt::StructOpt;
 
-const DEFAULT_CONSOLE_ADDRESS: &str = "127.0.0.1:4242";
+const DEFAULT_CONSOLE_ADDRESS: &str = "127.0.0.1:4200";
 
 lazy_static::lazy_static! {
     #[derive(Debug)]

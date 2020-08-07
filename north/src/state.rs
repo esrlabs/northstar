@@ -12,12 +12,36 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{keys, npk, npk::Container, process::Process, EventTx, Name, TerminationReason};
-use anyhow::{anyhow, Result};
+use crate::{keys, npk, npk::Container, process::Process, Event, EventTx, Name, TerminationReason};
+use anyhow::{Error as AnyhowError, Result};
+use async_std::path::Path;
 use ed25519_dalek::PublicKey;
 use log::{info, warn};
-use north_common::manifest::{Manifest, OnExit, Version};
-use std::{collections::HashMap, fmt, iter, time};
+use north_common::manifest::{Manifest, Version};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt, iter, result, time,
+};
+use thiserror::Error;
+use time::Duration;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("No application found")]
+    UnknownApplication,
+    #[error("Missing resouce {0}")]
+    MissingResource(String),
+    #[error("Failed to spawn process")]
+    ProcessError(AnyhowError),
+    #[error("Application(s) \"{0:?}\" is/are running")]
+    ApplicationRunning(Vec<Name>),
+    #[error("Failed to uninstall")]
+    UninstallationError(AnyhowError),
+    #[error("Failed to install")]
+    InstallationError(AnyhowError),
+    #[error("Application is not started")]
+    ApplicationNotRunning,
+}
 
 #[derive(Debug)]
 pub struct State {
@@ -46,7 +70,7 @@ impl ProcessContext {
         &self.process
     }
 
-    pub fn uptime(&self) -> time::Duration {
+    pub fn uptime(&self) -> Duration {
         self.start_timestamp.elapsed()
     }
 }
@@ -123,79 +147,84 @@ impl State {
         Ok(())
     }
 
-    /// Remove and umount a specific container
-    pub async fn uninstall(&mut self, name: &str) -> Result<()> {
-        if let Some(app) = self.applications.get_mut(name) {
-            if app.process_context().is_none() {
-                info!("Removing {}", app);
-                npk::uninstall(app.container()).await?;
-                self.applications.remove(name);
-                Ok(())
-            } else {
-                warn!("Cannot uninstall running container {}", app);
-                Err(anyhow!("Cannot uninstall running container {}", app))
-            }
-        } else {
-            warn!("Cannot uninstall unknown container {}", name);
-            Err(anyhow!("Cannot uninstall unknown container {}", name))
-        }
-    }
+    pub async fn start(&mut self, name: &str) -> result::Result<(), Error> {
+        let tx = self.tx.clone();
 
-    /// Start a container with name `name`
-    pub async fn start(&mut self, name: &str, incarnation: u32) -> Result<()> {
-        let available_resource_ids: Vec<String> = self
+        // Setup set of available resources
+        let resources = self
             .applications
             .values()
-            .map(|a| &a.container)
-            .filter(|c| c.is_resource_container())
-            .map(|c| c.manifest.name.clone())
-            .collect();
-        if let Some(app) = self.applications.get_mut(name) {
-            if app.container.is_resource_container() {
-                warn!("Cannot start resource containers ({})", app);
-                return Err(anyhow!("Attempted to start resource container {}", name));
-            }
-            if let Some(required_resources) = &app.container.manifest.resources {
-                for r in required_resources {
-                    if !available_resource_ids.contains(&r.name) {
-                        warn!(
-                            "Container {} missing required resource \"{}\")",
-                            name, &r.name
-                        );
-                        return Err(anyhow!(
-                            "Failed to start {} because of missing resource \"{}\"",
-                            name,
-                            r.name
-                        ));
-                    }
+            .filter_map(|app| {
+                if app.container.is_resource_container() {
+                    Some(app.container.manifest.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<Name>>();
+
+        // Look for app
+        let app = if let Some(app) = self.applications.get_mut(name) {
+            app
+        } else {
+            return Err(Error::UnknownApplication);
+        };
+
+        // Check if application is already running
+        if app.process.is_some() {
+            warn!("Application {} is already running", app.manifest().name);
+            return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
+        }
+
+        // Check if app is a resource container that cannot be started
+        if app.container.is_resource_container() {
+            warn!("Cannot start resource containers ({})", app);
+            return Err(Error::UnknownApplication);
+        }
+
+        // Check for all required resources
+        if let Some(required_resources) = &app.container.manifest.resources {
+            for r in required_resources {
+                if !resources.contains(&r.name) {
+                    return Err(Error::MissingResource(r.name.clone()));
                 }
             }
-            info!("Starting {}", app);
-            let process = Process::spawn(&app.container, self.tx.clone()).await?;
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            let cgroups = if let Some(ref c) = app.manifest().cgroups {
-                log::debug!("Creating cgroup configuration for {}", app);
-                let cgroups =
-                    crate::linux::cgroups::CGroups::new(app.name(), c, self.tx.clone()).await?;
-
-                log::debug!("Assigning {} to cgroup {}", process.pid(), app);
-                cgroups.assign(process.pid()).await?;
-                Some(cgroups)
-            } else {
-                None
-            };
-            app.process = Some(ProcessContext {
-                process,
-                incarnation,
-                start_timestamp: time::Instant::now(),
-                #[cfg(any(target_os = "android", target_os = "linux"))]
-                cgroups,
-            });
-            info!("Started {}", app);
-            Ok(())
-        } else {
-            Err(anyhow!("Invalid application {}", name))
         }
+
+        // Spawn process
+        info!("Starting {}", app);
+        let process = Process::spawn(&app.container, tx)
+            .await
+            .map_err(Error::ProcessError)?;
+
+        // CGroups
+        #[cfg(any(target_os = "android", target_os = "linux"))]
+        let cgroups = if let Some(ref c) = app.manifest().cgroups {
+            log::debug!("Creating cgroup configuration for {}", app);
+            let cgroups = crate::linux::cgroups::CGroups::new(app.name(), c, self.tx.clone())
+                .await
+                .map_err(Error::ProcessError)?;
+
+            log::debug!("Assigning {} to cgroup {}", process.pid(), app);
+            cgroups
+                .assign(process.pid())
+                .await
+                .map_err(Error::ProcessError)?;
+            Some(cgroups)
+        } else {
+            None
+        };
+
+        app.process = Some(ProcessContext {
+            process,
+            incarnation: 0,
+            start_timestamp: time::Instant::now(),
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            cgroups,
+        });
+        info!("Started {}", app);
+
+        Ok(())
     }
 
     /// Stop a application. Timeout specifies the time until the process is
@@ -203,42 +232,84 @@ impl State {
     pub async fn stop(
         &mut self,
         name: &str,
-        timeout: time::Duration,
+        timeout: Duration,
         reason: TerminationReason,
-    ) -> Result<()> {
+    ) -> result::Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(mut context) = app.process.take() {
                 info!("Stopping {}", app);
                 let status = context
                     .process
                     .terminate(timeout, Some(reason))
-                    .await?
+                    .await
+                    .map_err(Error::ProcessError)?
                     .await;
 
                 #[cfg(any(target_os = "android", target_os = "linux"))]
                 {
                     if let Some(cgroups) = context.cgroups {
                         log::debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await?;
+                        cgroups.destroy().await.map_err(Error::ProcessError)?;
                     }
                 }
 
                 info!("Stopped {} {:?}", app, status);
+                Ok(())
             } else {
                 warn!("Application {} is not running", app);
+                Err(Error::ApplicationNotRunning)
             }
+        } else {
+            Err(Error::UnknownApplication)
+        }
+    }
+
+    pub async fn shutdown(&self) -> result::Result<(), Error> {
+        if self
+            .applications
+            .values()
+            .all(|app| app.process_context().is_none())
+        {
+            self.tx.send(Event::Shutdown).await;
             Ok(())
         } else {
-            Err(anyhow!("Invalid application {}", name))
+            let apps = self
+                .applications
+                .values()
+                .filter_map(|app| app.process_context().map(|_| app.name().to_string()))
+                .collect();
+            Err(Error::ApplicationRunning(apps))
+        }
+    }
+
+    /// Install a npk from give path
+    pub async fn install(&mut self, npk: &Path) -> result::Result<(), Error> {
+        npk::install(self, npk)
+            .await
+            .map_err(Error::InstallationError)?;
+        Ok(())
+    }
+
+    /// Remove and umount a specific app
+    pub async fn uninstall(&mut self, app: &Application) -> result::Result<(), Error> {
+        if app.process_context().is_none() {
+            info!("Removing {}", app);
+            npk::uninstall(app.container())
+                .await
+                .map_err(Error::UninstallationError)?;
+            self.applications.remove(&app.manifest().name);
+            Ok(())
+        } else {
+            warn!("Cannot uninstall running container {}", app);
+            Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]))
         }
     }
 
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally
-    #[allow(unused_mut)]
     pub async fn on_exit(&mut self, name: &str, return_code: i32) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
-            if let Some(mut context) = app.process.take() {
+            if let Some(context) = app.process.take() {
                 info!(
                     "Process {} exited after {:?} with code {} and termination reason {:?}",
                     app,
@@ -249,20 +320,10 @@ impl State {
 
                 #[cfg(any(target_os = "android", target_os = "linux"))]
                 {
+                    let mut context = context;
                     if let Some(cgroups) = context.cgroups.take() {
                         log::debug!("Destroying cgroup configuration of {}", app);
                         cgroups.destroy().await?;
-                    }
-                }
-
-                if let Some(OnExit::Restart(n)) = app.manifest().on_exit {
-                    if context.incarnation < n {
-                        info!(
-                            "Restarting {} in incarnation {}",
-                            app,
-                            context.incarnation + 1
-                        );
-                        self.start(name, context.incarnation + 1).await?;
                     }
                 }
             }
@@ -271,15 +332,27 @@ impl State {
     }
 
     /// Handle out of memory conditions for container `name`
-    pub async fn on_oom(&mut self, name: &str) -> Result<()> {
+    pub async fn on_oom(&mut self, name: &str) -> result::Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
-            warn!("Process {} is out of memory. Stopping {}", app, app);
-            self.stop(
-                name,
-                time::Duration::from_secs(1),
-                TerminationReason::OutOfMemory,
-            )
-            .await?;
+            if let Some(mut context) = app.process.take() {
+                warn!("Process {} is out of memory. Stopping {}", app, app);
+                let status = context
+                    .process
+                    .terminate(Duration::from_secs(1), Some(TerminationReason::OutOfMemory))
+                    .await
+                    .map_err(Error::ProcessError)?
+                    .await;
+
+                #[cfg(any(target_os = "android", target_os = "linux"))]
+                {
+                    if let Some(cgroups) = context.cgroups {
+                        log::debug!("Destroying cgroup configuration of {}", app);
+                        cgroups.destroy().await.map_err(Error::ProcessError)?;
+                    }
+                }
+
+                info!("Stopped {} {:?}", app, status);
+            }
         }
         Ok(())
     }
