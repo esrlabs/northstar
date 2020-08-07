@@ -1,4 +1,4 @@
-## Running the examples
+# Running the examples
 
 To run the examples, you first need to create the `NPK`s for the architecture you plan to run them on.
 
@@ -7,13 +7,14 @@ In the toplevel rakefile we provide a task to build the `NPK`s for different tar
 Once you have the `*.npk` packages in your registry, you can start the northstar process and configure this registry.
 
 When the northstar runtime is up and running, you can issue control commands to it via a socket.
-We provide an utility that can easily communicate with the northstar daemon and send it commands (`dcon`)
+We provide an utility that can easily communicate with the northstar daemon and send it commands (`nstar`)
 
-Build `dcon` using the raketask `rake build:dcon`
+Build `nstar` using the raketask `rake build:nstar`
 
-After that just start `dcon` (found in `./target/release/dcon`). It is an interactive client that offers this help:
-```
-➜  northstar git:(master) ✗ ./target/release/dcon
+After that just start `nstar` (found in `./target/release/nstar`). It is an interactive client that offers this help:
+
+``` shell
+➜  northstar git:(master) ✗ ./target/release/nstar
 >> help
  Command   | Subcommands | Help
  help      |             | Display help text

@@ -30,7 +30,7 @@ So far we tested Northstar on
 - [x] chroot environment - every process only sees it's own environment
 - [ ] User-support of configuring and managing network-namespaces
 - [ ] Dedicated UID for each container
-- [ ] Management API of the runtime [#64](https://github.com/esrlabs/northstar/issues/64)
+- [x] Management API of the runtime
 - [x] Signature Check of NPK [#54](https://github.com/esrlabs/northstar/issues/54)
 - [ ] PID Namespaces [#51](https://github.com/esrlabs/northstar/issues/51)
 
@@ -50,7 +50,7 @@ So far we tested Northstar on
 * secure boot
 * verification on each read access prevents manipulation
 
-## How do Northstar images/containers work?
+## How do Northstar images/containers work
 
 ### Northstar Packages (NPK)
 
@@ -173,6 +173,16 @@ Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchie
 * **`loop_dev`** -- Prefix of preconfigured loopback devices. Usually loopback devices are e.g /dev/block0
 * **`device_mapper`** -- Device mapper control file.
 * **`device_mapper_dev`** -- Prefix of device mapper mappings.
+
+## Controlling the runtime
+
+The northstar runtime can be controlled our `nstar` application or from a custom application. You can
+
+- start and stop containers
+- uninstall or upgrade containers
+- query information about running processes and setttings
+- ...
+With `nstar` we include a commandline interface that can be used to issue commands to the runtime. Underneth all communication happends via protocol-buffer objects over sockets (see [the runtime API README](north_common/README.md))
 
 ## Examples
 

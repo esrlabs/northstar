@@ -1,7 +1,6 @@
 [workspace]
 
 members = [
-    "dcon",
     "examples/container/cpueater",
     "examples/container/crashing",
     "examples/container/datarw",
@@ -12,9 +11,10 @@ members = [
     "minijail/minijail-sys",
     "north",
     "north_common",
+    "nstar",
     "sextant",
 ]
 
 [profile.release]
 lto = true
-
+opt-level = 'z' # Optimize for size

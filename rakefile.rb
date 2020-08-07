@@ -72,7 +72,7 @@ end
 desc 'Setup build environment'
 task :setup_environment do
   sh 'bundle install'
-  sh 'cargo install --path dcon'
+  sh 'cargo install --path nstar'
   sh 'cargo install --version 0.2.0 cross'
   require 'os'
   if OS.linux?
@@ -93,14 +93,14 @@ namespace :build do
     sh 'cargo build --release --bin north'
   end
 
-  desc 'Build dcon client'
-  task :dcon do
-    sh 'cargo build --release --bin dcon'
-  end
-
   desc 'Build everything'
   task :all do
     sh 'cargo build --release'
+  end
+
+  desc 'Build everything debug'
+  task :all_debug do
+    sh 'cargo build'
   end
 end
 
@@ -174,9 +174,14 @@ namespace :examples do
     end
   end
 
-  desc 'Execute runtime with examples (use with sudo)'
+  desc 'Execute runtime with examples (use with sudo on linux)'
   task run: 'build:north' do
-    sh 'sudo ./target/release/north --config north.toml'
+    require 'os'
+    if OS.mac?
+      sh './target/release/north --config north.toml'
+    else
+      sh 'sudo ./target/release/north --config north.toml'
+    end
   end
 
   desc 'Clean example registry'
@@ -256,6 +261,7 @@ desc 'Check'
 task :check do
   check_program('docker info >/dev/null', 'Docker is needed to run the check task')
   sh 'cargo +nightly fmt -- --color=always --check'
+  sh 'cargo +nightly clippy'
 
   targets.each do |target|
     sh "cross check --target #{target}"

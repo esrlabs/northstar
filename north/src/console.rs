@@ -12,328 +12,133 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{Event, EventTx, Name, State, TerminationReason, SETTINGS};
-use anyhow::{anyhow, Context, Result};
-use async_std::{io, net::TcpListener, path::PathBuf, prelude::*, sync, task};
-use itertools::Itertools;
-use log::{debug, warn, *};
-use prettytable::{format, Table};
-use std::{iter, time};
-
-/// Helptext displayed on the `help` command. The `dcon` tool parses this text
-/// and creates suggestions and completions. Ensure to a correct helptext when
-/// adding/removing/changing commands.
-const HELP: &str = "\
-    help: Display help text\n\
-    list: List all loaded images\n\
-    ps: List running instances\n\
-    shutdown: Stop the north runtime\n\
-    settings: Dump north configuration\n\
-    start: PATTERN Start containers matching PATTERN e.g 'start hello*'. Omit PATTERN to start all containers\n\
-    stop: PATTERN Stop all containers matching PATTERN. Omit PATTERN to stop all running containers\n\
-    uninstall: PATTERN: Unmount and remove all containers matching PATTERN\n\
-    update: Run update with provided ressources\n\
-    versions: Version list of installed applications";
+use crate::{Event, EventTx, State, TerminationReason, SETTINGS};
+use anyhow::{Context, Result};
+use api::{
+    Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
+    StopResult,
+};
+use async_std::{
+    io::{self, Write},
+    net::TcpListener,
+    prelude::*,
+    sync::{self, Receiver, Sender},
+    task,
+};
+use byteorder::{BigEndian, ByteOrder};
+use io::{ErrorKind, Read};
+use log::{debug, info, warn};
+use north_common::api;
 
 pub async fn init(tx: &EventTx) -> Result<()> {
-    let rx = serve().await?;
-    let tx = tx.clone();
-    // Spawn a task that handles lines received on the debug port.
-    task::spawn(async move {
-        while let Ok((line, tx_reply)) = rx.recv().await {
-            tx.send(Event::Console(line, tx_reply)).await;
-        }
-    });
-
+    serve(tx.clone()).await?;
     Ok(())
 }
 
-pub async fn process(state: &mut State, command: &str, reply: sync::Sender<String>) -> Result<()> {
-    info!("Running \'{}\'", command);
-    let mut commands = command.split_whitespace();
-
-    if let Some(cmd) = commands.next() {
-        let args = commands.collect::<Vec<&str>>();
-        let start_timestamp = time::Instant::now();
-        match match cmd {
-            "help" => help(),
-            "list" => list(state).await,
-            "ps" => ps(state).await,
-            "settings" => settings(),
-            "shutdown" => shutdown(state).await,
-            "start" => start(state, &args).await,
-            "stop" => stop(state, &args).await,
-            "uninstall" => uninstall(state, &args).await,
-            "update" => update(state, &args).await,
-            "versions" => versions(state),
-            _ => Err(anyhow!("Unknown command: {}", command)),
-        } {
-            Ok(mut r) => {
-                r.push_str(&format!("Duration: {:?}\n", start_timestamp.elapsed()));
-                reply.send(r).await
-            }
-            Err(e) => {
-                let msg = format!("Failed to run: {} {:?}: {}\n", cmd, args, e);
-                reply.send(msg).await
-            }
-        }
-    } else {
-        reply.send("Invalid command".into()).await
-    }
-    Ok(())
-}
-
-/// Return the help text
-fn help() -> Result<String> {
-    Ok(HELP.into())
-}
-
-/// List all known containers instances and their state.
-async fn list(state: &State) -> Result<String> {
-    to_table(
-        vec![vec![
-            "Name".to_string(),
-            "Version".to_string(),
-            "Running".to_string(),
-            "Type".to_string(),
-        ]]
-        .iter()
-        .cloned()
-        .chain(
-            state
-                .applications()
-                .sorted_by_key(|app| app.name())
-                .map(|app| {
-                    vec![
-                        app.name().to_string(),
-                        app.version().to_string(),
-                        app.process_context()
-                            .map(|c| format!("Yes (pid: {})", c.process().pid()))
-                            .unwrap_or_else(|| "No".to_string()),
-                        if app.container().is_resource_container() {
-                            "resource"
-                        } else {
-                            "app"
+pub async fn process(
+    state: &mut State,
+    message: &Message,
+    response_tx: sync::Sender<Message>,
+) -> Result<()> {
+    let payload = &message.payload;
+    if let Payload::Request(ref request) = payload {
+        let response = match request {
+            Request::Containers => {
+                let containers = state
+                    .applications()
+                    .map(|app| {
+                        Container {
+                            manifest: app.manifest().clone(),
+                            process: app.process_context().map(|f| Process {
+                                pid: f.process().pid(),
+                                uptime: f.uptime().as_nanos() as u64,
+                                memory: {
+                                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                                    {
+                                        None
+                                    }
+                                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                                    {
+                                        // TODO
+                                        const PAGE_SIZE: usize = 4096;
+                                        let pid = f.process().pid();
+                                        let statm = procinfo::pid::statm(pid as i32)
+                                            .expect("Failed get statm");
+                                        Some(api::Memory {
+                                            size: (statm.size * PAGE_SIZE) as u64,
+                                            resident: (statm.resident * PAGE_SIZE) as u64,
+                                            shared: (statm.share * PAGE_SIZE) as u64,
+                                            text: (statm.text * PAGE_SIZE) as u64,
+                                            data: (statm.data * PAGE_SIZE) as u64,
+                                        })
+                                    }
+                                },
+                            }),
                         }
-                        .to_owned(),
-                    ]
-                }),
-        ),
-    )
-}
+                    })
+                    .collect();
 
-/// List all running applications.
-#[cfg(all(not(target_os = "android"), not(target_os = "linux")))]
-async fn ps(state: &State) -> Result<String> {
-    to_table(
-        vec![vec![
-            "Name".to_string(),
-            "Version".to_string(),
-            "Uptime".to_string(),
-        ]]
-        .iter()
-        .cloned()
-        .chain(
-            state
-                .applications()
-                .filter_map(|app| app.process_context().map(|p| (app, p)))
-                .sorted_by_key(|(app, _)| app.name())
-                .map(|(app, context)| {
-                    vec![
-                        app.name().to_string(),
-                        app.version().to_string(),
-                        format!("{:?}", context.uptime()),
-                    ]
-                }),
-        ),
-    )
-}
+                Response::Containers(containers)
+            }
+            Request::Start(name) => match state.start(&name).await {
+                Ok(_) => Response::Start {
+                    result: StartResult::Success,
+                },
+                Err(e) => Response::Start {
+                    result: StartResult::Error(e.to_string()),
+                },
+            },
+            Request::Stop(name) => {
+                match state
+                    .stop(
+                        &name,
+                        std::time::Duration::from_secs(1),
+                        TerminationReason::Stopped,
+                    )
+                    .await
+                {
+                    Ok(_) => Response::Stop {
+                        result: StopResult::Success,
+                    },
+                    Err(e) => Response::Stop {
+                        result: StopResult::Error(e.to_string()),
+                    },
+                }
+            }
+            Request::Install(_) => Response::Install {
+                result: api::InstallationResult::Error("unimplemented".into()),
+            },
+            Request::Uninstall { name, version } => {
+                let _ = name;
+                let _ = version;
+                Response::Uninstall {
+                    result: api::UninstallResult::Error("unimplemented".into()),
+                }
+            }
+            Request::Shutdown => match state.shutdown().await {
+                Ok(_) => Response::Shutdown {
+                    result: ShutdownResult::Success,
+                },
+                Err(e) => Response::Shutdown {
+                    result: ShutdownResult::Error(e.to_string()),
+                },
+            },
+        };
 
-/// List all running applications.
-#[cfg(any(target_os = "android", target_os = "linux"))]
-async fn ps(state: &State) -> Result<String> {
-    use pretty_bytes::converter::convert;
-    const PAGE_SIZE: usize = 4096;
-
-    let mut result = vec![[
-        "Name", "Version", "PID", "Size", "Resident", "Shared", "Text", "Data", "Uptime",
-    ]
-    .iter()
-    .map(ToString::to_string)
-    .collect()];
-
-    for app in state.applications().sorted_by_key(|app| app.name()) {
-        if let Some(ref context) = app.process_context() {
-            let pid = context.process().pid();
-            let statm = procinfo::pid::statm(pid as i32)?;
-            result.push(vec![
-                app.name().to_string(),
-                app.version().to_string(),
-                pid.to_string(),
-                convert((statm.size * PAGE_SIZE) as f64),
-                convert((statm.resident * PAGE_SIZE) as f64),
-                convert((statm.share * PAGE_SIZE) as f64),
-                convert((statm.text * PAGE_SIZE) as f64),
-                convert((statm.data * PAGE_SIZE) as f64),
-                format!("{:?}", context.uptime()),
-            ]);
-        }
-    }
-
-    to_table(result)
-}
-
-/// Start applications. If `args` is empty *all* known applications that
-/// are not in a running state are started. If a argument is supplied it
-/// is used to construct a Regex and all container (names) matching that
-/// Regex are attempted to be started.
-async fn start(state: &mut State, args: &[&str]) -> Result<String> {
-    let re = arg_regex(args)?;
-
-    let mut result = vec![vec![
-        "Name".to_string(),
-        "Result".to_string(),
-        "Duration".to_string(),
-    ]];
-    let apps = state
-        .applications()
-        // Filter for not already running containers
-        .filter(|app| app.process_context().is_none())
-        // Filter ressource container that are not startable
-        .filter(|app| !app.container().is_resource_container())
-        // Filter matching container
-        .filter(|app| re.is_match(app.name()))
-        // Sort container by name
-        .sorted_by_key(|app| app.name().clone())
-        .map(|app| app.name().clone())
-        .collect::<Vec<Name>>();
-    for app in &apps {
-        let start = time::Instant::now();
-        match state.start(&app, 0).await {
-            Ok(_) => result.push(vec![
-                app.to_string(),
-                "Ok".to_string(),
-                format!("{:?}", start.elapsed()),
-            ]),
-            Err(e) => result.push(vec![
-                app.to_string(),
-                format!("Failed: {:?}", e),
-                format!("{:?}", start.elapsed()),
-            ]),
-        }
-    }
-
-    to_table(result)
-}
-
-/// Dump settings
-fn settings() -> Result<String> {
-    Ok(format!("{}", *SETTINGS))
-}
-
-/// Stop one, some or all containers. See start for the argument handling.
-async fn stop(state: &mut State, args: &[&str]) -> Result<String> {
-    let re = arg_regex(args)?;
-
-    let mut result = vec![vec![
-        "Name".to_string(),
-        "Result".to_string(),
-        "Duration".to_string(),
-    ]];
-    let apps = state
-        .applications()
-        .filter(|app| app.process_context().is_some())
-        .filter(|app| re.is_match(app.name()))
-        .map(|app| app.name().clone())
-        .collect::<Vec<Name>>();
-    for app in &apps {
-        let timeout = time::Duration::from_secs(10);
-        let reason = TerminationReason::Stopped;
-        let start = time::Instant::now();
-        match state.stop(&app, timeout, reason).await {
-            Ok(()) => result.push(vec![
-                app.to_string(),
-                "Ok".to_string(),
-                format!("{:?}", start.elapsed()),
-            ]),
-
-            Err(e) => result.push(vec![
-                app.to_string(),
-                e.to_string(),
-                format!("{:?}", start.elapsed()),
-            ]),
-        }
-    }
-
-    to_table(result)
-}
-
-/// Umount and remove a containers. See `start` for the argument handling.
-/// The data directory is not removed. This needs discussion.
-async fn uninstall(state: &mut State, args: &[&str]) -> Result<String> {
-    let re = arg_regex(args)?;
-
-    let mut result = vec![vec!["Name".to_string(), "Result".to_string()]];
-
-    let to_uninstall = state
-        .applications
-        .values()
-        .filter(|app| app.process_context().is_none())
-        .filter(|app| re.is_match(app.name()))
-        .map(|app| app.name())
-        .cloned()
-        .collect::<Vec<Name>>();
-
-    for app in &to_uninstall {
-        match state.uninstall(&app).await {
-            Ok(()) => result.push(vec![app.to_string(), "Ok".to_string()]),
-            Err(e) => result.push(vec![app.to_string(), e.to_string()]),
-        }
-    }
-
-    to_table(result)
-}
-
-/// Trigger the update module.
-async fn update(state: &mut State, args: &[&str]) -> Result<String> {
-    if args.len() != 1 {
-        return Err(anyhow!("Invalid arguments for update command"));
-    }
-
-    let dir = PathBuf::from(args[0]);
-
-    if !dir.exists().await {
-        let err = anyhow!("Update directory {} does not exists", dir.display());
-        Err(err)
+        let response_message = Message {
+            id: message.id.clone(),
+            payload: Payload::Response(response),
+        };
+        response_tx.send(response_message).await;
+        Ok(())
     } else {
-        let updates = crate::update::update(state, &dir).await?;
-
-        let mut result = vec![vec![
-            "Name".to_string(),
-            "From".to_string(),
-            "To".to_string(),
-        ]];
-        for update in &updates {
-            result.push(vec![
-                update.0.to_string(),
-                (update.1).0.to_string(),
-                (update.1).1.to_string(),
-            ])
-        }
-        to_table(result)
+        // TODO
+        panic!("Received message is not a request");
     }
-}
-
-/// Send a shutdown command to the main loop.
-async fn shutdown(state: &mut State) -> Result<String> {
-    let stop = stop(state, &[]).await?;
-    state.tx().send(Event::Shutdown).await;
-
-    Ok(stop)
 }
 
 /// Open a TCP socket and read lines terminated with `\n`.
-async fn serve() -> Result<sync::Receiver<(String, sync::Sender<String>)>> {
+async fn serve(tx: EventTx) -> Result<()> {
     let address = &SETTINGS.console_address;
 
     debug!("Starting console on {}", address);
@@ -341,93 +146,85 @@ async fn serve() -> Result<sync::Receiver<(String, sync::Sender<String>)>> {
     let listener = TcpListener::bind(address)
         .await
         .with_context(|| format!("Failed to open listener on {}", address))?;
-    let (tx, rx) = sync::channel(1000);
 
     task::spawn(async move {
         let mut incoming = listener.incoming();
 
         // Spawn a task for each incoming connection.
         while let Some(stream) = incoming.next().await {
-            let (tx_reply, rx_reply) = sync::channel::<String>(10);
-
+            let mut tx_main = tx.clone();
             if let Ok(stream) = stream {
                 let peer = match stream.peer_addr() {
                     Ok(peer) => peer,
                     Err(e) => {
-                        warn!("Failed to get peer from console connection: {}", e);
-                        return;
+                        warn!("Failed to get peer from command connection: {}", e);
+                        continue;
                     }
                 };
                 debug!("Client {:?} connected", peer);
 
-                let tx = tx.clone();
+                // Spawn a task that handles this client
                 task::spawn(async move {
                     let (reader, writer) = &mut (&stream, &stream);
-                    let reader = io::BufReader::new(reader);
-                    let mut lines = reader.lines();
-                    while let Some(Ok(line)) = lines.next().await {
-                        let line = line.trim();
-                        tx.send((line.into(), tx_reply.clone())).await;
-                        if let Ok(reply) = rx_reply.recv().await {
-                            if let Err(e) = writer.write_all(reply.as_bytes()).await {
-                                warn!("Error on console connection {:?}: {}", peer, e);
-                                break;
+                    let mut reader = io::BufReader::new(reader);
+                    let (mut tx, mut rx) = sync::channel::<Message>(10);
+
+                    loop {
+                        if let Err(e) =
+                            connection(&mut reader, writer, &mut tx_main, &mut rx, &mut tx).await
+                        {
+                            match e.kind() {
+                                ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
+                                _ => warn!("Error on connection to {:?}: {:?}", peer, e),
                             }
+                            break;
                         }
                     }
                 });
             }
         }
     });
-    Ok(rx)
+    Ok(())
 }
 
-/// List versions of currently known containers and applications.
-fn versions(state: &mut State) -> Result<String> {
-    let versions = state
-        .applications()
-        .map(|app| app.manifest())
-        .map(|manifest| {
-            (
-                manifest.name.clone(),
-                manifest.version.clone(),
-                manifest.arch.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    serde_json::to_string(&versions).context("Failed to encode manifest to json")
-}
+async fn connection<R: Unpin + Read, W: Unpin + Write>(
+    reader: &mut R,
+    writer: &mut W,
+    tx: &mut EventTx,
+    rx_reply: &mut Receiver<Message>,
+    tx_reply: &mut Sender<Message>,
+) -> io::Result<()> {
+    // Read frame length
+    let mut buf = [0u8; 4];
+    reader.read_exact(&mut buf).await?;
+    let frame_len = BigEndian::read_u32(&buf) as usize;
 
-/// Format something iterateable into a ascii table. The first row of the table input
-/// contains the column titles. The table cannot be empty.
-fn to_table<T: iter::IntoIterator<Item = I>, I: iter::IntoIterator<Item = S>, S: ToString>(
-    table: T,
-) -> Result<String> {
-    let mut t = Table::new();
-    let format = prettytable::format::FormatBuilder::new()
-        .column_separator('|')
-        .separators(&[], format::LineSeparator::new('-', '+', '+', '+'))
-        .padding(1, 1)
-        .build();
-    t.set_format(format);
-    let mut rows = table.into_iter();
-    let titles = rows.next().ok_or_else(|| anyhow!("Missing titles"))?.into();
-    t.set_titles(titles);
-    for r in rows {
-        t.add_row(r.into());
-    }
+    // Read payload
+    let mut buffer = vec![0; frame_len];
+    reader.read_exact(&mut buffer).await?;
 
-    let mut result = vec![];
-    t.print(&mut result).context("Failed to format table")?;
-    String::from_utf8(result).context("Invalid table content")
-}
+    // Deserialize message
+    let message: Message = serde_json::from_slice(&buffer)?;
 
-fn arg_regex(args: &[&str]) -> Result<regex::Regex> {
-    match args.len() {
-        1 => regex::Regex::new(args[0])
-            .with_context(|| format!("Invalid container name regex {}", args[0])),
-        0 => regex::Regex::new(".*")
-            .with_context(|| format!("Invalid container name regex {}", args[0])),
-        _ => Err(anyhow!("Arguments invalid. Use `start PATTERN`",)),
-    }
+    // Send message and response handle to main loop
+    tx.send(Event::Console(message, tx_reply.clone())).await;
+
+    // Wait for reply of main loop
+    // TODO: timeout
+    let reply = rx_reply
+        .recv()
+        .await
+        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+    // Serialize reply
+    let reply =
+        serde_json::to_string_pretty(&reply).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+    // Send reply
+    let mut buffer = [0u8; 4];
+    BigEndian::write_u32(&mut buffer, reply.len() as u32);
+    writer.write_all(&buffer).await?;
+    writer.write_all(reply.as_bytes()).await?;
+
+    Ok(())
 }
