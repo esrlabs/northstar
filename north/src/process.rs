@@ -418,9 +418,7 @@ fn wait_for_exit(name: &str, pid: u32, exit_tx: sync::Sender<i32>, event_tx: Eve
 fn shared_resource(res: &Resource) -> Result<std::path::PathBuf> {
     let run_dir: &std::path::Path = std::path::Path::new(&SETTINGS.directories.run_dir);
     let dir_in_container_path = std::path::Path::new(&res.dir);
-    let first_part_of_path = run_dir
-        .join(res.name.to_owned())
-        .join(format!("{}", res.version));
+    let first_part_of_path = run_dir.join(&res.name).join(&res.version.to_string());
 
     let src_dir = match dir_in_container_path.strip_prefix("/") {
         Ok(dir_in_resource_container) => first_part_of_path.join(dir_in_resource_container),
