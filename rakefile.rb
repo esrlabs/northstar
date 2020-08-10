@@ -209,6 +209,8 @@ namespace :examples do
     col_labels = { name: 'Name', arch: 'Arch', version: 'Version' }
 
     pkgs = Dir["#{registry}/*.npk"]
+    abort 'registry empty' if pkgs.empty?
+
     registry_info = []
     pkgs.each do |pkg|
       file_name = File.basename(pkg, '.*')
