@@ -1,0 +1,39 @@
+---
+    name: Build
+    on:
+      push:
+        branches:
+          - master
+
+    jobs:
+      build:
+        name: Build
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v2
+          - env:
+              TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            run: |
+              sudo apt update
+              sudo apt install -y gcc
+              sudo apt install -y libsodium-dev
+
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh
+              sh ./rustup.sh -y
+              source $HOME/.cargo/env
+
+              cargo install cross
+
+              echo "${TOKEN}" | docker login https://docker.pkg.github.com \
+                -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+              
+              sudo apt install -y gnupg2
+
+              gpg2 --keyserver hkp://pool.sks-keyservers.net --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3 7D2BAF1CF37B13E2069D6956105BD0E739499BDB
+              curl -sSL https://get.rvm.io | bash -s stable
+              source /home/runner/.rvm/scripts/rvm
+              rvm install ruby
+
+              bundle add rake
+
+              bundle exec rake examples:build

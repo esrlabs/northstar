@@ -1,0 +1,37 @@
+---
+name: Build docker images
+on:
+  push:
+    tags:
+      - docker-*
+
+jobs:
+  build:
+    name: Build docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          
+          tag="$( echo "${GITHUB_REF}" | sed 's/refs\/tags\/docker-//' )"
+
+          echo "${TOKEN}" | docker login https://docker.pkg.github.com -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+          
+          cd docker
+
+          for f in Dockerfile.*; do
+            
+            image_name="$( echo "$f" | sed 's/Dockerfile\.//' )"
+            
+            full_image_name="docker.pkg.github.com/${GITHUB_REPOSITORY}/${image_name}:${tag}"
+
+            docker build \
+              -t "$full_image_name" \
+              -f "$f" \
+              .
+            
+            docker push "$full_image_name"
+
+          done
