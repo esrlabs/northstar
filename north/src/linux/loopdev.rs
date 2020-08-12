@@ -62,6 +62,7 @@ impl LoopControl {
 #[derive(Debug)]
 pub struct LoopDevice {
     device: fs::File,
+    path: PathBuf,
 }
 
 impl AsRawFd for LoopDevice {
@@ -79,18 +80,29 @@ impl LoopDevice {
             .open(dev.as_ref())
             .await
             .context("Failed to open")?;
-        Ok(LoopDevice { device: f })
+        Ok(LoopDevice {
+            device: f,
+            path: PathBuf::from(dev.as_ref()),
+        })
     }
 
     pub fn attach_file(
         &self,
+        bf_path: &Path,
         bf: &mut fs::File,
         offset: u64,
         sizelimit: u64,
         read_only: bool,
         auto_clear: bool,
     ) -> Result<()> {
-        log::debug!("Attaching file to loopback device");
+        log::debug!(
+            "Attaching {} to loopback device at {}",
+            bf_path
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_else(|| bf_path.to_string_lossy()),
+            self.path.to_string_lossy()
+        );
         // Attach the file => Associate the loop device with the open file
         unsafe {
             if ioctl(

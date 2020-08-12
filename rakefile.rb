@@ -132,6 +132,7 @@ end
 
 namespace :examples do
   registry = `pwd`.strip + '/target/north/registry'
+  run_dir = `pwd`.strip + '/target/north/run'
 
   desc 'Build examples'
   task :build do
@@ -176,6 +177,7 @@ namespace :examples do
   desc 'Clean example registry'
   task :drop do
     rm_rf registry
+    rm_rf run_dir
   end
 
   def write_header(columns)
@@ -241,7 +243,7 @@ namespace :examples do
   end
 end
 
-task :clean do
+task :clean => ['examples:drop'] do
   sh 'cargo clean'
 end
 
