@@ -163,11 +163,11 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
       # Add /lib and lib64 on Linux systems.
       # Add /system on Android.
       case arch
-      when 'aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu'
-        pseudofiles << ['/lib', 444]
-        pseudofiles << ['/lib64', 444]
       when 'aarch64-linux-android'
         pseudofiles << ['/system', 444]
+      else
+        pseudofiles << ['/lib', 444]
+        pseudofiles << ['/lib64', 444]
       end
     end
 
