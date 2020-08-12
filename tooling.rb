@@ -135,21 +135,13 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
   has_resources = !manifest['resources'].nil?
   is_resource_container = manifest['init'].nil?
   arch = manifest['arch']
-  version = manifest['version']
   Dir.mktmpdir do |tmpdir|
     # Copy root
     root_src = "#{src_dir}/root"
 
-    tmp_root = if is_resource_container
-                 "#{tmpdir}/root/#{version}"
-               else
-                 "#{tmpdir}/root"
-               end
+    tmp_root = "#{tmpdir}/root"
     FileUtils.mkdir_p(tmp_root, :verbose => false) unless Dir.exist? tmp_root
     Dir["#{root_src}/*"].each { |entry| FileUtils.cp_r(entry, tmp_root, verbose: true) }
-    # FileUtils.cp_r(root_src, tmpdir, :verbose => true) if Dir.exist? root_src
-
-    folder_to_package = "#{tmpdir}/root"
 
     # Copy arch specific root
     Dir.glob("#{arch_dir}/*").each { |f| FileUtils.cp_r(f, tmp_root, :verbose => true) }
@@ -196,7 +188,7 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     end.join(' ')
     # TODO: The compression algorithm should be target and not host specific!
     squashfs_comp = OS.linux? ? 'gzip' : 'zstd'
-    shell "mksquashfs #{folder_to_package} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
+    shell "mksquashfs #{tmp_root} #{fsimg} -all-root -comp #{squashfs_comp} -no-progress -info #{pseudofiles}"
     raise 'mksquashfs failed' unless File.exist? fsimg
 
     filesystem_size = File.size(fsimg)

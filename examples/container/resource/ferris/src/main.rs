@@ -15,11 +15,20 @@
 use std::{fs, io};
 
 fn main() -> io::Result<()> {
-    std::env::args()
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Missing or invalid arguments"))
-        .map(|greeting| {
-            fs::read_to_string(&greeting).unwrap_or(format!("no such file: {}", greeting))
-        })
-        .and_then(|greeting| ferris_says::say(greeting.as_bytes(), 100, &mut std::io::stdout()))
+    let mut args = std::env::args();
+    println!("args: {:?}", args);
+    if args.len() >= 2 {
+        for arg in args {
+            let greet = fs::read_to_string(&arg).unwrap_or(format!("no such file: {}", arg));
+            ferris_says::say(greet.as_bytes(), 100, &mut std::io::stdout())?;
+        }
+        Ok(())
+    } else {
+        args.next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Missing or invalid arguments"))
+            .map(|greeting| {
+                fs::read_to_string(&greeting).unwrap_or(format!("no such file: {}", greeting))
+            })
+            .and_then(|greeting| ferris_says::say(greeting.as_bytes(), 100, &mut std::io::stdout()))
+    }
 }

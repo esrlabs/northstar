@@ -127,7 +127,7 @@ async fn install_internal(
     let start = time::Instant::now();
 
     if let Some(npk_name) = npk.file_name() {
-        info!("Loading {}", npk_name.to_string_lossy());
+        info!("Installing {}", npk_name.to_string_lossy());
     }
 
     let file =
@@ -169,7 +169,7 @@ async fn install_internal(
     };
 
     let fs = archive.into_inner().into_inner();
-    let mut fs: fs::File = fs.into();
+    let mut fs: fs::File = fs.into(); // the npk file
 
     let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset).await?;
     assert_eq!(&verity.header, b"verity");
@@ -183,7 +183,11 @@ async fn install_internal(
         if instances > 1 {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
-        let root = SETTINGS.directories.run_dir.join(&manifest.name);
+        let root = SETTINGS
+            .directories
+            .run_dir
+            .join(&manifest.name)
+            .join(&format!("{}", manifest.version));
 
         if !root.exists().await {
             info!("Creating mountpoint {}", root.display());
@@ -192,7 +196,7 @@ async fn install_internal(
                 .context("Failed to create mountpoint")?;
         }
 
-        let name = format!("north_{}", manifest.name);
+        let name = format!("north_{}_{}", manifest.name, manifest.version);
 
         setup_and_mount(
             dm,
@@ -201,6 +205,7 @@ async fn install_internal(
             &name,
             hashes.fs_verity_offset,
             &hashes.fs_verity_hash,
+            &npk,
             &mut fs,
             fs_offset,
             fs_size,
@@ -268,6 +273,7 @@ async fn setup_and_mount(
     name: &str,
     dm_device_size: u64,
     verity_hash: &str,
+    fs_path: &Path,
     mut fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
@@ -275,7 +281,7 @@ async fn setup_and_mount(
 ) -> Result<()> {
     let fs_type = get_fs_type(&mut fs, fs_offset).await?;
 
-    let loop_device = losetup(lc, fs, fs_offset, lo_size).await?;
+    let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size).await?;
     let loop_device_id = loop_device
         .dev_id()
         .await
@@ -293,7 +299,6 @@ async fn setup_and_mount(
 
     mount(dm_dev.as_path(), root, fs_type).await?;
 
-    debug!("Setting deferred remove flag");
     dm.device_remove(
         &name.to_string(),
         &dm::DmOptions::new().set_flags(dm::DmFlags::DM_DEFERRED_REMOVE),
@@ -359,6 +364,7 @@ async fn read_verity_header(
 
 async fn losetup(
     lc: &LoopControl,
+    fs_path: &Path,
     fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
@@ -370,12 +376,12 @@ async fn losetup(
         .context("Failed to acquire free loopdev")?;
 
     debug!(
-        "Using loop device {}",
+        "Created loop device {}",
         loop_device.path().await.unwrap().display()
     );
 
     loop_device
-        .attach_file(fs, fs_offset, lo_size, true, true)
+        .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
         .context("Failed to attach loopback")?;
 
     loop_device
@@ -399,7 +405,7 @@ async fn veritysetup(
     verity_hash: &str,
     size: u64,
 ) -> Result<PathBuf> {
-    debug!("Creating device {}", dev);
+    debug!("Creating a read-only verity device (name: {})", &name);
     let start = time::Instant::now();
     let dm_device = dm
         .device_create(
@@ -424,7 +430,13 @@ async fn veritysetup(
     );
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
-    debug!("Loading table");
+    let dm_dev = PathBuf::from(format!(
+        "{}{}",
+        SETTINGS.devices.device_mapper_dev,
+        dm_device.id() & 0xFF
+    ));
+
+    debug!("Verity-device used: {}", dm_dev.to_string_lossy());
     dm.table_load_flags(
         name,
         &table,
@@ -438,11 +450,6 @@ async fn veritysetup(
         .await
         .context("Failed to suspend device")?;
 
-    let dm_dev = PathBuf::from(format!(
-        "{}{}",
-        SETTINGS.devices.device_mapper_dev,
-        dm_device.id() & 0xFF
-    ));
     debug!("Waiting for device {}", dm_dev.display());
     while !dm_dev.exists().await {
         task::sleep(std::time::Duration::from_millis(1)).await;
@@ -460,10 +467,10 @@ async fn veritysetup(
 async fn mount(dm_dev: &Path, root: &Path, r#type: &str) -> Result<()> {
     let start = time::Instant::now();
     debug!(
-        "Mounting device {} on {} with type {}",
+        "Mount read-only {} filesystem on device {} to this location:{}",
+        r#type,
         dm_dev.display(),
         root.display(),
-        r#type,
     );
     mount::mount(&dm_dev, &root, &r#type, mount::MountFlags::RDONLY, None)
         .await
