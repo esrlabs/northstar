@@ -384,9 +384,9 @@ async fn losetup(
         .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
         .context("Failed to attach loopback")?;
 
-    loop_device
-        .set_direct_io(true)
-        .context("Failed to enable direct io")?;
+    if let Err(error) = loop_device.set_direct_io(true) {
+        warn!("Failed to enable direct io: {:?}", error);
+    }
 
     let losetup_duration = start.elapsed();
     debug!(
