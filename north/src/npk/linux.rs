@@ -158,7 +158,7 @@ async fn install_internal(
             .with_context(|| format!("Failed to read signature from {}", npk.display()))?;
         let mut signature = String::new();
         signature_file.read_to_string(&mut signature)?;
-        Hashes::from_str(&signature).context("Failed to load hashes")?
+        Hashes::from_str(&signature, &state.signing_keys).context("Failed to load hashes")?
     };
 
     let (fs_offset, fs_size) = {

@@ -133,12 +133,15 @@ end
 namespace :examples do
   registry = `pwd`.strip + '/target/north/registry'
   run_dir = `pwd`.strip + '/target/north/run'
+  key_directory = `pwd`.strip + '/target/north/keys'
 
   desc 'Build examples'
   task :build do
     require './tooling.rb'
 
     mkdir_p registry unless Dir.exist?(registry)
+    mkdir_p key_directory unless Dir.exist?(key_directory)
+    Dir["#{KEY_DIRECTORY}/*.pub"].each { |key| cp key, key_directory }
 
     package_config = PackageConfig.new(1000, 1000, KEY_DIRECTORY, KEY_ID)
     examples.each do |dir|

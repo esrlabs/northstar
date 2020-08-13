@@ -14,11 +14,11 @@
 
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::path::PathBuf;
+use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
 use log::{debug, trace};
 use north_common::manifest::Manifest;
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
@@ -63,13 +63,8 @@ struct Signature {
 
 impl Hashes {
     #[allow(unused)]
-    pub fn from_str(file: &str) -> Result<Hashes, Error> {
-        // sha256 of signature.yaml
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(file.as_bytes());
-        let _digest = format!("{:x}", hasher.finalize());
-
-        let mut docs = file.split("---");
+    pub fn from_str(file: &str, keys: &HashMap<String, PublicKey>) -> Result<Hashes, Error> {
+        let mut docs = file.splitn(2, "---");
 
         // Manifest hash and fs.img part
         let hashes = docs
@@ -84,8 +79,11 @@ impl Hashes {
 
         // Check signature
         debug!("Using key {}", signature.key);
-
-        // TODO verify hashes
+        let key = keys
+            .get(&signature.key)
+            .ok_or_else(|| anyhow!("Key {} not found", &signature.key))?;
+        let signature = EdSignature::from_bytes(&signature.signature)?;
+        key.verify_strict(&hashes.as_bytes(), &signature)?;
 
         let hashes: Hashes = serde_yaml::from_str::<SerdeHashes>(hashes)
             .context("Failed to parse signature")?
@@ -166,8 +164,7 @@ impl TryFrom<SerdeHashes> for Hashes {
 
 #[async_std::test]
 async fn test_signature_parsing() -> std::io::Result<()> {
-    let signature = "
-manifest.yaml:
+    let signature = "manifest.yaml:
   hash: 0cbc141c2ef274989683d9ec03edcf41c57688ef5c422c647239328de2c3f306
 fs.img:
   hash: 3920b5cdb472a9b82a31a77192d9de8c0200718c6eeaf0f6c5cabba80de852f3
@@ -178,7 +175,12 @@ key: north
 signature: +lUTeD1YQDAmZTa32Ni1EhztzpaOgN329kNbWEo5NA+hbKRQjIaP6jXffHWSL3x/glZ54dEm7yjXtjqFonT7BQ==
 ";
 
-    let s = Hashes::from_str(signature).expect("Failed to parse signature");
+    let key_bytes = base64::decode("DKkTMfhuqOggK4Bx3H8cgDAz3LH1AhiKu9gknCGOsCE=")
+        .expect("Cannot parse base64 key");
+    let key = PublicKey::from_bytes(&key_bytes).expect("Cannot parse public key");
+    let mut signing_keys: HashMap<String, PublicKey> = HashMap::new();
+    signing_keys.insert("north".to_string(), key);
+    let s = Hashes::from_str(signature, &signing_keys).expect("Failed to parse signature");
 
     assert_eq!(
         s.manifest_hash,

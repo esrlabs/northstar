@@ -60,6 +60,10 @@ lazy_static::lazy_static! {
             let dir: String = settings.get("directories.data_dir").expect("Missing directories.data_dir in configuration");
             PathBuf::from(dir)
         });
+        let key_dir = opt.key_dir.unwrap_or_else(|| {
+            let dir: String = settings.get("directories.key_dir").expect("Missing directories.key_dir in configuration");
+            PathBuf::from(dir)
+        });
 
 
         let cgroup_memory = opt.cgroup_memory.unwrap_or_else(|| {
@@ -114,6 +118,7 @@ lazy_static::lazy_static! {
                 container_dirs,
                 run_dir,
                 data_dir,
+                key_dir,
             },
             console_address,
             global_data_dir,
@@ -155,6 +160,10 @@ struct CliOptions {
     /// Directory where rw data of container shall be stored
     #[structopt(long)]
     pub data_dir: Option<PathBuf>,
+
+    /// Directory where public signing keys are stored
+    #[structopt(long)]
+    pub key_dir: Option<PathBuf>,
 
     /// Console address
     #[structopt(long)]
@@ -208,6 +217,7 @@ pub struct Directories {
     pub container_dirs: Vec<PathBuf>,
     pub run_dir: PathBuf,
     pub data_dir: PathBuf,
+    pub key_dir: PathBuf,
 }
 
 #[derive(Debug)]
