@@ -14,3 +14,7 @@ members = [
     "north_common",
     "sextant",
 ]
+
+[profile.release]
+lto = true
+
