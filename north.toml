@@ -1,9 +1,10 @@
 debug = true
 
 [directories]
-container_dirs= [ "target/north/registry" ]
+container_dirs = [ "target/north/registry" ]
 run_dir = "target/north/run"
 data_dir = "target/north/data"
+key_dir = "target/north/keys"
 
 [cgroups]
 memory = "/sys/fs/cgroup/memory/north"

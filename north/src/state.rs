@@ -14,6 +14,7 @@
 
 use crate::{npk, npk::Container, process::Process, EventTx, Name, TerminationReason};
 use anyhow::{anyhow, Result};
+use ed25519_dalek::PublicKey;
 use log::{info, warn};
 use north_common::manifest::{Manifest, OnExit, Version};
 use std::{collections::HashMap, fmt, iter, time};
@@ -21,6 +22,7 @@ use std::{collections::HashMap, fmt, iter, time};
 #[derive(Debug)]
 pub struct State {
     tx: EventTx,
+    pub signing_keys: HashMap<String, PublicKey>,
     pub applications: HashMap<Name, Application>,
 }
 
@@ -86,9 +88,10 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub fn new(tx: EventTx) -> State {
+    pub fn new(tx: EventTx, signing_keys: HashMap<String, PublicKey>) -> State {
         State {
             tx,
+            signing_keys,
             applications: HashMap::new(),
         }
     }
