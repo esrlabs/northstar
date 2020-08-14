@@ -12,17 +12,18 @@ Northstar is still under heavy development. While we already have implemented mo
 
 So far we tested Northstar on
 
-* 32-bit ARM
-* 64-bit ARM
-* x86_64
+* aarch64-linux-android
+* aarch64-unknown-linux-gnu
+* x86_64-unknown-linux-gnu
 
 ### Everything that is checked is implemented
 
 - [x] On-the-fly verification of container content
-- [x] Process supervision: memory control
-- [x] Process supervision: cpu control
+- [x] Process supervision: memory control (using cgroups)
+- [x] Process supervision: cpu control (using cgroups)
 - [x] Limiting system calls (whitelist)
 - [x] Shared resource containers
+- [x] chroot environment - every process only sees it's own environment
 - [ ] User-support of configuring and managing network-namespaces
 - [ ] Dedicated UID for each container
 - [ ] Management API of the runtime [#64](https://github.com/esrlabs/northstar/issues/64)
