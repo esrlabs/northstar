@@ -259,11 +259,17 @@ impl Process {
             mount_bind(&mut jail, &src_dir, &mountpoint, false)?;
         }
 
-        let args = if let Some(ref args) = manifest.args {
-            args.iter().map(|a| a.as_str()).collect()
-        } else {
-            vec![]
+        let mut args: Vec<&str> = Vec::new();
+        if let Some(init) = &manifest.init {
+            if let Some(init_path_str) = init.to_str() {
+                args.push(init_path_str);
+            }
         };
+        if let Some(ref manifest_args) = manifest.args {
+            for a in manifest_args {
+                args.push(a);
+            }
+        }
 
         // Create environment for process. Set data directory, container name and version
         let mut env = manifest.env.clone().unwrap_or_default();

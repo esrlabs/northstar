@@ -127,7 +127,7 @@ async fn install_internal(
     let start = time::Instant::now();
 
     if let Some(npk_name) = npk.file_name() {
-        info!("Installing {}", npk_name.to_string_lossy());
+        info!("Loading {}", npk_name.to_string_lossy());
     }
 
     let file =
@@ -376,7 +376,7 @@ async fn losetup(
         .context("Failed to acquire free loopdev")?;
 
     debug!(
-        "Created loop device {}",
+        "Using loop device {}",
         loop_device.path().await.unwrap().display()
     );
 
