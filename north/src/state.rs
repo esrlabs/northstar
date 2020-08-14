@@ -121,7 +121,7 @@ impl State {
     pub async fn uninstall(&mut self, name: &str) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
             if app.process_context().is_none() {
-                info!("Uninstalling {}", app);
+                info!("Removing {}", app);
                 npk::uninstall(app.container()).await?;
                 self.applications.remove(name);
                 Ok(())
