@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+#[allow(clippy::all)]
 fn main() {
     let mut mem = vec![];
     for _ in 0..9_999_999 {

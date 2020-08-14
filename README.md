@@ -1,3 +1,7 @@
+[![LICENSE](https://img.shields.io/github/license/esrlabs/northstar?color=blue)](LICENSE.md)
+[![](https://github.com/esrlabs/northstar/workflows/Build/badge.svg)](https://github.com/esrlabs/northstar/actions)
+[![](https://github.com/esrlabs/northstar/workflows/CI/badge.svg)](https://github.com/esrlabs/northstar/actions)
+
 <img src="doc/images/box.png" class="inline" width=100/>
 
 # Minimal and secure containers for edge computing
