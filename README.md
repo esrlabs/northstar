@@ -6,7 +6,7 @@
 
 # Minimal and secure containers for edge computing
 
-Northstar is an open source technology for securly running self sufficient sandboxed containers in a ressource constraint environment. It offers a runtime that monitors isolated containers. In addition it provides tooling to create and manage those containers.
+Northstar is an open source technology for securely running self sufficient sandboxed containers in a ressource constraint environment. It offers a runtime that monitors isolated containers. In addition it provides tooling to create and manage those containers.
 
 At its core, Northstar makes extensive use of sandboxing to isolate applications from the rest of the system while at the same time orchestrating efficient startup and secure update scenarios. Such applications run inside Northstar-containers and only rely on system services and ressource containers provided by the Northstar-platform. Similar sandboxing techniques were selected and used as are found in Docker and other containerization approaches to reach maximum isolation. To build the most efficient and robust solution, Northstar is completely developed in Rust, a language designed to afford the performance of C++ while at the same time guaranteeing memory safety.
 
@@ -31,7 +31,7 @@ So far we tested Northstar on
 - [ ] User-support of configuring and managing network-namespaces
 - [ ] Dedicated UID for each container
 - [ ] Management API of the runtime [#64](https://github.com/esrlabs/northstar/issues/64)
-- [ ] Signature Check of NPK at install time [#54](https://github.com/esrlabs/northstar/issues/54)
+- [x] Signature Check of NPK [#54](https://github.com/esrlabs/northstar/issues/54)
 - [ ] PID Namespaces [#51](https://github.com/esrlabs/northstar/issues/51)
 
 <br/><img src="doc/images/prison.png" class="inline" width=100/>

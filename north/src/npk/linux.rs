@@ -21,7 +21,7 @@ use crate::{
     },
     Name, State, SETTINGS,
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use async_std::{
     fs, io,
     path::{Path, PathBuf},
@@ -34,6 +34,7 @@ use futures::stream::StreamExt;
 use log::*;
 use nix::unistd::{self, chown};
 use north_common::manifest::{Manifest, Version};
+use sha2::Digest;
 use std::{
     fmt::{self},
     io::Read,
@@ -135,22 +136,6 @@ async fn install_internal(
     let reader = std::io::BufReader::new(file);
     let mut archive = zip::ZipArchive::new(reader).context("Failed to read zip")?;
 
-    let manifest = {
-        let mut manifest_file = archive
-            .by_name(MANIFEST)
-            .with_context(|| format!("Failed to read manifest from {}", npk.display()))?;
-        let mut manifest = String::new();
-        manifest_file.read_to_string(&mut manifest)?;
-        Manifest::from_str(&manifest)?
-    };
-    debug!("Manifest loaded for \"{}\"", manifest.name);
-    if let Some(resources) = &manifest.resources {
-        debug!("Referencing {} resources:", resources.len());
-        for res in resources {
-            debug!("- {}", res);
-        }
-    }
-
     debug!("Loading hashes");
     let hashes = {
         let mut signature_file = archive
@@ -160,6 +145,26 @@ async fn install_internal(
         signature_file.read_to_string(&mut signature)?;
         Hashes::from_str(&signature, &state.signing_keys).context("Failed to load hashes")?
     };
+
+    let manifest = {
+        let mut manifest_file = archive
+            .by_name(MANIFEST)
+            .with_context(|| format!("Failed to read manifest from {}", npk.display()))?;
+        let mut manifest = String::new();
+        manifest_file.read_to_string(&mut manifest)?;
+        let digest = sha2::Sha256::digest(manifest.as_bytes());
+        if digest.as_slice() != hex::decode(&hashes.manifest_hash)? {
+            return Err(anyhow!("Invalid manifest hash"));
+        }
+        Manifest::from_str(&manifest)?
+    };
+    debug!("Manifest loaded for \"{}\"", manifest.name);
+    if let Some(resources) = &manifest.resources {
+        debug!("Referencing {} resources:", resources.len());
+        for res in resources {
+            debug!("- {}", res);
+        }
+    }
 
     let (fs_offset, fs_size) = {
         let f = archive
