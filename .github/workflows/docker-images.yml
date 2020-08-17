@@ -12,12 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           
           tag="$( echo "${GITHUB_REF}" | sed 's/refs\/tags\/docker-//' )"
 
-          echo "${TOKEN}" | docker login https://docker.pkg.github.com -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+          echo "${TOKEN}" | docker login -u esrlabs --password-stdin
           
           cd docker
 
@@ -25,7 +25,7 @@ jobs:
             
             image_name="$( echo "$f" | sed 's/Dockerfile\.//' )"
             
-            full_image_name="docker.pkg.github.com/${GITHUB_REPOSITORY}/${image_name}:${tag}"
+            full_image_name="esrlabs/${image_name}:${tag}"
 
             docker build \
               -t "$full_image_name" \

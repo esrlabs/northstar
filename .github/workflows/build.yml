@@ -12,7 +12,7 @@
         steps:
           - uses: actions/checkout@v2
           - env:
-              TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
             run: |
               sudo apt update
               sudo apt install -y gcc
@@ -24,8 +24,8 @@
 
               cargo install cross
 
-              echo "${TOKEN}" | docker login https://docker.pkg.github.com \
-                -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+              echo "${TOKEN}" | docker login \
+                -u "esrlabs" --password-stdin
 
               sudo apt install -y gnupg2
 
