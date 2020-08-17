@@ -153,7 +153,7 @@ async fn install_internal(
         let mut manifest = String::new();
         manifest_file.read_to_string(&mut manifest)?;
         let digest = sha2::Sha256::digest(manifest.as_bytes());
-        if digest.as_slice() != hex::decode(&hashes.manifest_hash)? {
+        if hex::decode(&hashes.manifest_hash)? != digest.as_slice() {
             return Err(anyhow!("Invalid manifest hash"));
         }
         Manifest::from_str(&manifest)?
