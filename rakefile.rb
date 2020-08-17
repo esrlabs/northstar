@@ -40,6 +40,7 @@ end
 def supported_targets
   %w[aarch64-linux-android
      aarch64-unknown-linux-gnu
+     aarch64-unknown-linux-musl
      x86_64-unknown-linux-gnu]
 end
 
@@ -108,6 +109,7 @@ def targets
   targets = %w[
     aarch64-linux-android
     aarch64-unknown-linux-gnu
+    aarch64-unknown-linux-musl
     x86_64-unknown-linux-gnu
   ]
 

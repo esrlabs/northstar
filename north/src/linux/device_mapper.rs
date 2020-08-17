@@ -388,7 +388,7 @@ impl Dm {
         task::spawn_blocking(move || {
             loop {
                 if let Err(e) = unsafe {
-                    #[cfg(target_os = "android")]
+                    #[cfg(any(target_os = "android", target_env = "musl"))]
                     let op = op as i32;
                     nix::convert_ioctl_res!(nix_ioctl(fd, op, v.as_mut_ptr()))
                 } {

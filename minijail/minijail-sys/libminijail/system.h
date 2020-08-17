@@ -9,7 +9,13 @@
 #define _SYSTEM_H_
 
 #include <stdbool.h>
+#include <string.h>
+#if MUSL_C
+#include <linux/capability.h>
+#else
 #include <sys/capability.h>
+#endif
+
 #include <sys/prctl.h>
 #include <sys/types.h>
 

@@ -235,6 +235,9 @@ impl Process {
         #[cfg(any(target_os = "linux", target_os = "android"))]
         for mount in mounts {
             let path = std::path::PathBuf::from(mount);
+            if *mount == "/lib64" && !path.exists() {
+                continue;
+            }
             mount_bind(&mut jail, &path.as_path(), &path.as_path(), false)?;
         }
 

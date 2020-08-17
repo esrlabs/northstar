@@ -59,6 +59,10 @@ struct seccomp_data {
 	__u64 args[6];
 };
 
+#ifndef offsetof
+#define offsetof(type, member) ( (int) & ((type*)0) -> member )
+#endif
+
 #define syscall_nr (offsetof(struct seccomp_data, nr))
 #define arch_nr (offsetof(struct seccomp_data, arch))
 
