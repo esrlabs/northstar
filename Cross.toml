@@ -1,8 +1,8 @@
 [target.aarch64-linux-android]
-image = "docker.pkg.github.com/esrlabs/northstar/aarch64-linux-android:0.2.0"
+image = "esrlabs/aarch64-linux-android:0.2.0"
 
 [target.aarch64-unknown-linux-gnu]
-image = "docker.pkg.github.com/esrlabs/northstar/aarch64-unknown-linux-gnu:0.2.0"
+image = "esrlabs/aarch64-unknown-linux-gnu:0.2.0"
 
 [target.x86_64-unknown-linux-gnu]
-image = "docker.pkg.github.com/esrlabs/northstar/x86_64-unknown-linux-gnu:0.2.0"
+image = "esrlabs/x86_64-unknown-linux-gnu:0.2.0"
