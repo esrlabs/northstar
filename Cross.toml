@@ -1,11 +1,11 @@
 [target.aarch64-linux-android]
-image = "esrlabs/aarch64-linux-android:0.2.0"
+image = "esrlabs/aarch64-linux-android:0.2.1"
 
 [target.aarch64-unknown-linux-gnu]
-image = "esrlabs/aarch64-unknown-linux-gnu:0.2.0"
+image = "esrlabs/aarch64-unknown-linux-gnu:0.2.1"
 
 [target.aarch64-unknown-linux-musl]
-image = "esrlabs/aarch64-unknown-linux-musl:0.2.0"
+image = "esrlabs/aarch64-unknown-linux-musl:0.2.1"
 
 [target.x86_64-unknown-linux-gnu]
-image = "esrlabs/x86_64-unknown-linux-gnu:0.2.0"
+image = "esrlabs/x86_64-unknown-linux-gnu:0.2.1"
