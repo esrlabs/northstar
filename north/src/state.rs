@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{npk, npk::Container, process::Process, EventTx, Name, TerminationReason};
+use crate::{keys, npk, npk::Container, process::Process, EventTx, Name, TerminationReason};
 use anyhow::{anyhow, Result};
 use ed25519_dalek::PublicKey;
 use log::{info, warn};
@@ -88,12 +88,15 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub fn new(tx: EventTx, signing_keys: HashMap<String, PublicKey>) -> State {
-        State {
+    pub async fn new(tx: EventTx) -> Result<State> {
+        // Load keys for manifest verification
+        let signing_keys = keys::load().await?;
+
+        Ok(State {
             tx,
             signing_keys,
             applications: HashMap::new(),
-        }
+        })
     }
 
     /// Return an owned copy of the main loop tx handle

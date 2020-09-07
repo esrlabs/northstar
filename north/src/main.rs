@@ -19,14 +19,13 @@
 extern crate structure;
 
 use anyhow::{Context, Error, Result};
-use async_std::{fs, path::PathBuf, prelude::*, sync};
-use ed25519_dalek::PublicKey;
+use async_std::{fs, sync};
 use log::*;
 use nix::unistd::{self, chown};
 use north_common::manifest::Name;
-use std::collections::HashMap;
 
 mod console;
+mod keys;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod linux;
 mod npk;
@@ -93,12 +92,10 @@ async fn main() -> Result<()> {
     #[cfg(any(target_os = "android", target_os = "linux"))]
     linux::init().await?;
 
-    let signing_keys = load_signing_keys(&SETTINGS.directories.key_dir).await?;
-
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
     let (tx, rx) = sync::channel::<Event>(1000);
-    let mut state = State::new(tx.clone(), signing_keys);
+    let mut state = State::new(tx.clone()).await?;
 
     // Ensure the configured run_dir exists
     // TODO: permission check of SETTINGS.directories.run_dir
@@ -199,28 +196,6 @@ async fn main() -> Result<()> {
     info!("Shutting down...");
 
     Ok(())
-}
-
-async fn load_signing_keys(key_dir: &PathBuf) -> Result<HashMap<String, PublicKey>> {
-    let mut signing_keys = HashMap::new();
-    let mut key_dir = fs::read_dir(&key_dir).await?;
-    while let Some(entry) = key_dir.next().await {
-        let entry = entry?;
-        let path = entry.path();
-        if let Some(extension) = path.extension() {
-            if extension == "pub" && path.is_file().await {
-                if let Some(key_id) = path.file_stem() {
-                    let mut sign_key_file = fs::File::open(&path).await?;
-                    let mut key_bytes = Vec::new();
-                    sign_key_file.read_to_end(&mut key_bytes).await?;
-                    let key = PublicKey::from_bytes(&key_bytes)?;
-                    signing_keys.insert(key_id.to_string_lossy().to_string(), key);
-                    info!("Loaded signing key {:?}", key_id);
-                }
-            }
-        }
-    }
-    Ok(signing_keys)
 }
 
 /// This is a starting point for doing something meaningful with the childs outputs.
