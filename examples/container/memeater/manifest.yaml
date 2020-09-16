@@ -5,4 +5,4 @@ on_exit:
   restart: 3
 cgroups:
   mem:
-    limit: 100000000
+    limit: 10000000

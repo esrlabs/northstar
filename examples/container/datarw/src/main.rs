@@ -12,85 +12,27 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::{
-    convert::Into,
-    env, fs, io,
-    io::{Read, Write},
-    path::PathBuf,
-    thread, time,
-};
+use std::{env, fs, io, io::Write, path::PathBuf, time};
 
 const DATA: &str = "DATA";
 
 fn main() -> io::Result<()> {
-    let sleep = |s| {
-        thread::sleep(time::Duration::from_secs(s));
-    };
+    // The path to the rw data directory is provided via the env variable "DATA"
+    let data = PathBuf::from(env::var(DATA).expect("Cannot read env var DATA"));
 
-    let data = PathBuf::from(std::env::var(DATA).expect("Cannot read env var DATA"));
+    let file = data.join("file");
+    let text = "Hello!";
 
-    println!("Doing some operations on {}", data.display());
+    // Write some text to a file in DATA
+    let mut f = fs::File::create(&file).expect("Failed to create foo");
+    println!("Writing {} to {}", text, file.display());
+    f.write_all(text.as_bytes())?;
 
-    println!("Listing {}", data.display());
-    for e in fs::read_dir(&data)? {
-        let e = e?;
-        println!(
-            "{}: {:?}",
-            e.path().display(),
-            e.path().metadata()?.file_type()
-        );
-    }
+    std::thread::sleep(time::Duration::from_secs(1));
 
-    let file = data.join("foo");
+    // Read data
+    let text = fs::read_to_string(&file)?;
+    println!("Context of {}: {}", file.display(), text);
 
-    println!("Trying to create {}", file.display());
-    let mut f = loop {
-        match fs::File::create(&file) {
-            Ok(f) => {
-                println!("Success!");
-                break f;
-            }
-            Err(e) => ("Failed: {}", e),
-        };
-        sleep(1);
-    };
-
-    f.write_all(b"hello")?;
-    f.flush()?;
-    drop(f);
-
-    let we = (
-        env::args().take(2).map(Into::into).collect::<Vec<String>>(),
-        env::vars()
-            .take(2)
-            .map(|(k, v)| format!("{}: {}", k, v))
-            .collect::<Vec<String>>(),
-    );
-
-    loop {
-        let mut f = fs::File::create(&file)?;
-        let now = serde_json::to_string_pretty(&we)?;
-        println!("Creating {} with context {}", file.display(), now);
-        f.write_all(now.as_bytes())?;
-
-        println!("Listing {}", data.display());
-        for e in fs::read_dir(&data)? {
-            let e = e?;
-            println!(
-                "{}: {:?}",
-                e.path().display(),
-                e.path().metadata()?.file_type()
-            );
-        }
-
-        let mut f = fs::File::open(&file)?;
-        let mut buffer = String::new();
-        f.read_to_string(&mut buffer)?;
-        println!("Content of {}: {}", file.display(), buffer);
-
-        println!("Unlinking {}", file.display());
-        fs::remove_file(&file)?;
-
-        sleep(1);
-    }
+    Ok(())
 }
