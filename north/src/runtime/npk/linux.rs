@@ -215,7 +215,12 @@ async fn install_internal(
                 .context("Failed to create mountpoint")?;
         }
 
-        let name = format!("north_{}_{}", manifest.name, manifest.version);
+        let name = format!(
+            "north_{}_{}_{}",
+            unistd::getpid(),
+            manifest.name,
+            manifest.version
+        );
 
         let dm_dev = setup_and_mount(
             dm,
