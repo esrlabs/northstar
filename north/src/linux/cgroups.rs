@@ -24,6 +24,7 @@ use async_std::{
 use futures::{future::FutureExt, select};
 use log::{debug, warn};
 use north_common::manifest;
+use proc_mounts::MountIter;
 use std::time::Duration;
 
 const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
@@ -76,7 +77,9 @@ impl CGroup for CGroupMem {
 
 impl CGroupMem {
     pub async fn new(name: &str, cgroup: &manifest::CGroupMem, tx: EventTx) -> Result<CGroupMem> {
-        let path = SETTINGS.cgroups.memory.join(name);
+        let mount_point =
+            get_mount_point("memory").context("Failed to detect cgroups memory mount point")?;
+        let path = mount_point.join(SETTINGS.cgroups.memory.join(name));
         create(&path).await?;
 
         // Configure memory limit
@@ -151,7 +154,9 @@ impl CGroup for CGroupCpu {
 
 impl CGroupCpu {
     pub async fn new(name: &str, cgroup: &manifest::CGroupCpu) -> Result<CGroupCpu> {
-        let path = SETTINGS.cgroups.cpu.join(name);
+        let mount_point =
+            get_mount_point("cpu").context("Failed to detect cgroups cpu mount point")?;
+        let path = mount_point.join(SETTINGS.cgroups.cpu.join(name));
         create(&path).await?;
 
         // Configure cpu shares
@@ -246,4 +251,14 @@ async fn write(path: &Path, value: &str) -> Result<()> {
         .await
         .with_context(|| format!("Failed sync {}", path.display()))?;
     Ok(())
+}
+
+fn get_mount_point(cgroup: &str) -> Result<PathBuf> {
+    let cgroup = String::from(cgroup);
+    MountIter::new()
+        .context("Cannot access mount points")?
+        .filter_map(|m| m.ok())
+        .find(|m| m.fstype == "cgroup" && m.options.contains(&cgroup))
+        .map(|m| m.dest.into())
+        .ok_or_else(|| anyhow!("No mount point for cgroup {}", &cgroup))
 }
