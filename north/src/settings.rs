@@ -183,13 +183,13 @@ struct CliOptions {
     #[structopt(long)]
     pub unshare_fstype: Option<String>,
 
-    /// CGroups Memory dir. This can be a subdir of the root memory cgroup.
+    /// CGroups Memory dir. This is the subdir added to the root memory cgroup.
     /// The directory is created if it does not exist.
     /// This groups acts as the toplevel north memory cgroup.
     #[structopt(long)]
     pub cgroup_memory: Option<PathBuf>,
 
-    /// CGroups CPU dir. This can be a subdir of the root memory cgroup.
+    /// CGroups CPU dir. This is the subdir added to the root cpu cgroup.
     /// The directory is created if it does not exist.
     /// This groups acts as the toplevel north cpu cgroup.
     #[structopt(long)]

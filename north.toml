@@ -7,8 +7,8 @@ data_dir = "target/north/data"
 key_dir = "target/north/keys"
 
 [cgroups]
-memory = "/sys/fs/cgroup/memory/north"
-cpu = "/sys/fs/cgroup/cpu/north"
+memory = "north"
+cpu = "north"
 
 [devices]
 unshare_root = "/"
