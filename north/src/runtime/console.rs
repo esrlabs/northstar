@@ -31,7 +31,7 @@ use async_std::{
 };
 use byteorder::{BigEndian, ByteOrder};
 use io::ErrorKind;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 
 #[derive(Default)]
 pub struct Console;
@@ -95,18 +95,24 @@ impl Console {
                     Ok(_) => Response::Start {
                         result: StartResult::Success,
                     },
-                    Err(e) => Response::Start {
-                        result: StartResult::Error(e.to_string()),
-                    },
+                    Err(e) => {
+                        error!("Failed to start {}: {}", name, e);
+                        Response::Start {
+                            result: StartResult::Error(e.to_string()),
+                        }
+                    }
                 },
                 Request::Stop(name) => {
                     match state.stop(&name, std::time::Duration::from_secs(1)).await {
                         Ok(_) => Response::Stop {
                             result: StopResult::Success,
                         },
-                        Err(e) => Response::Stop {
-                            result: StopResult::Error(e.to_string()),
-                        },
+                        Err(e) => {
+                            error!("Failed to stop {}: {}", name, e);
+                            Response::Stop {
+                                result: StopResult::Error(e.to_string()),
+                            }
+                        }
                     }
                 }
                 Request::Install(_) => Response::Install {

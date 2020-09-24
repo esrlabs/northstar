@@ -132,6 +132,32 @@ def examples
   ]
 end
 
+namespace :test_container do 
+  desc 'Build test container'
+  task :build do
+    require './tooling.rb'
+
+    target_arch = 'x86_64-unknown-linux-gnu'
+    dir = `pwd`.strip + '/integration_tests/test_container'
+    target_dir = "#{dir}/root-x86_64-unknown-linux-gnu"
+    registry = `pwd`.strip + '/target/north/registry'
+    key_directory = `pwd`.strip + '/target/north/keys'
+    package_config = PackageConfig.new(1000, 1000, KEY_DIRECTORY, KEY_ID)
+
+    mkdir_p registry unless Dir.exist?(registry)
+    mkdir_p key_directory unless Dir.exist?(key_directory)
+    Dir["#{KEY_DIRECTORY}/*.pub"].each { |key| cp key, key_directory }
+
+    target_dir = "#{dir}/root-#{target_arch}"
+    mkdir_p target_dir unless Dir.exist?(target_dir)
+    name = Pathname.new(dir).basename
+    sh "cross build --release --bin #{name} --target #{target_arch}"
+    cp "target/#{target_arch}/release/#{name}", target_dir
+
+    create_arch_package(target_arch, target_dir, dir, registry, package_config)
+  end
+end
+
 namespace :examples do
   registry = `pwd`.strip + '/target/north/registry'
   run_dir = `pwd`.strip + '/target/north/run'

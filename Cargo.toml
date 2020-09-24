@@ -7,6 +7,8 @@ members = [
     "examples/container/hello",
     "examples/container/memeater",
     "examples/container/resource/ferris",
+    "integration_tests",
+    "integration_tests/test_container",
     "minijail/rust/minijail",
     "minijail/rust/minijail-sys",
     "north",

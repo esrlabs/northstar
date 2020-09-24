@@ -39,7 +39,7 @@ pub enum Error {
     UnknownApplication,
     #[error("Missing resouce {0}")]
     MissingResource(String),
-    #[error("Failed to spawn process")]
+    #[error("Failed to spawn process: {0}")]
     ProcessError(AnyhowError),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
