@@ -45,3 +45,9 @@ Generate a report of the unit tests code coverage with the following command:
 ```shell
 rake coverage
 ```
+
+## Integration tests
+
+```shell
+cargo test -p integration_tests -- --test-threads 1 --ignored
+```

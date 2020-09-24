@@ -40,6 +40,7 @@ use sha2::Digest;
 use std::{
     fmt::{self},
     io::Read,
+    process,
     str::FromStr,
     time,
 };
@@ -218,7 +219,7 @@ async fn install_internal(
 
         let name = format!(
             "north_{}_{}_{}",
-            unistd::getpid(),
+            process::id(),
             manifest.name,
             manifest.version
         );
