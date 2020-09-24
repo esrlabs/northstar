@@ -21,6 +21,7 @@ use nix::sched;
 pub(super) mod cgroups;
 #[allow(unused)]
 pub(super) mod device_mapper;
+pub(super) mod inotify;
 pub(super) mod loopdev;
 pub(super) mod mount;
 
@@ -33,7 +34,7 @@ pub async fn init(config: &Config) -> Result<()> {
         &unshare_root,
         &unshare_root,
         &config.devices.unshare_fstype,
-        mount::MountFlags::PRIVATE,
+        mount::MountFlags::MS_PRIVATE,
         None,
     )
     .await
