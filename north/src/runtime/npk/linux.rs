@@ -123,6 +123,12 @@ pub async fn uninstall(container: &Container) -> Result<()> {
     fs::remove_dir_all(&container.root)
         .await
         .with_context(|| format!("Failed to remove {}", container.root.display()))?;
+
+    crate::runtime::linux::inotify::wait_for_file_deleted(
+        container.dm_dev.as_path().into(),
+        std::time::Duration::from_secs(3),
+    )
+    .await?;
     Ok(())
 }
 
@@ -212,7 +218,7 @@ async fn install_internal(
 
         let name = format!("north_{}_{}", manifest.name, manifest.version);
 
-        setup_and_mount(
+        let dm_dev = setup_and_mount(
             dm,
             lc,
             &verity,
@@ -265,6 +271,7 @@ async fn install_internal(
             root,
             data,
             manifest,
+            dm_dev,
         };
 
         let duration = start.elapsed();
@@ -296,7 +303,7 @@ async fn setup_and_mount(
     fs_offset: u64,
     lo_size: u64,
     root: &Path,
-) -> Result<()> {
+) -> Result<PathBuf> {
     let fs_type = get_fs_type(&mut fs, fs_offset).await?;
 
     let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size).await?;
@@ -325,7 +332,7 @@ async fn setup_and_mount(
     .await
     .context("Failed to set defered remove flag")?;
 
-    Ok(())
+    Ok(dm_dev)
 }
 
 async fn get_fs_type(fs: &mut fs::File, fs_offset: u64) -> Result<&'static str> {
@@ -492,7 +499,7 @@ async fn mount(dm_dev: &Path, root: &Path, r#type: &str) -> Result<()> {
         &dm_dev,
         &root,
         &r#type,
-        linux_mount::MountFlags::RDONLY,
+        linux_mount::MountFlags::MS_RDONLY,
         None,
     )
     .await

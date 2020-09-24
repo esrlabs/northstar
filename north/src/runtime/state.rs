@@ -284,6 +284,14 @@ impl State {
             .values()
             .all(|app| app.process_context().is_none())
         {
+            // remove mounts before shutdown
+            for (name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
+                info!("Removing {}", name);
+                crate::runtime::npk::uninstall(container)
+                    .await
+                    .map_err(Error::ProcessError)?;
+            }
+
             self.tx.send(Event::Shutdown).await;
             Ok(())
         } else {
