@@ -10,6 +10,9 @@ license-file = "LICENSE.md"
 [[bin]]
 name = "north"
 
+[lib]
+name = "north"
+
 [dependencies]
 anyhow = "1.0.31"
 async-std = { version = "1.6.2", features = ["attributes", "unstable"] }
