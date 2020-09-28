@@ -22,23 +22,23 @@ lazy_static::lazy_static! {
     #[derive(Debug)]
     pub static ref SETTINGS: Settings = {
         let opt = CliOptions::from_args();
-        let mut settings = config::Config::default();
+        let mut settings = config_rs::Config::default();
 
         // Read config file
         // Try the command line config file and fall back to north.toml
         if let Some(config) = opt.config {
-            settings.merge(config::File::with_name(&config)).expect("Failed to read configuration");
+            settings.merge(config_rs::File::with_name(&config)).expect("Failed to read configuration");
         } else {
             let config = Path::new("north.toml");
             if config.is_file() {
-                settings.merge(config::File::with_name(&config.display().to_string())).expect("Failed to read configuration");
+                settings.merge(config_rs::File::with_name(&config.display().to_string())).expect("Failed to read configuration");
             } else {
                 panic!("Failed to find default configuration north.toml");
             }
         }
 
         // Read environment
-        settings.merge(config::Environment::with_prefix("NORTH")).expect("Failed to read environment");
+        settings.merge(config_rs::Environment::with_prefix("NORTH")).expect("Failed to read environment");
 
         let debug = opt.debug || settings.get("debug").unwrap_or(false);
 

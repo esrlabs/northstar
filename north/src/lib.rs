@@ -19,6 +19,7 @@
 extern crate structure;
 
 pub mod api;
+pub mod config;
 mod console;
 mod keys;
 #[cfg(any(target_os = "android", target_os = "linux"))]

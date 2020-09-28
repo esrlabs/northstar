@@ -1145,6 +1145,7 @@ dependencies = [
  "structure",
  "tempfile",
  "thiserror",
+ "toml",
  "url",
  "uuid",
  "vergen",

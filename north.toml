@@ -1,4 +1,6 @@
 debug = true
+console_address = "localhost:4200"
+global_data_dir = false
 
 [directories]
 container_dirs = [ "target/north/registry" ]
