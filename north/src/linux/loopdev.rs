@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::SETTINGS;
 use anyhow::{anyhow, Context, Result};
 use async_std::{
     fs,
@@ -32,16 +31,18 @@ const LOOP_CTL_GET_FREE: u16 = 0x4C82;
 #[derive(Debug)]
 pub struct LoopControl {
     dev_file: fs::File,
+    dev: String,
 }
 
 impl LoopControl {
-    pub async fn open() -> Result<LoopControl> {
+    pub async fn open(control: &Path, dev: &str) -> Result<LoopControl> {
         Ok(LoopControl {
             dev_file: fs::OpenOptions::new()
                 .read(true)
                 .write(true)
-                .open(&SETTINGS.devices.loop_control)
+                .open(&control)
                 .await?,
+            dev: dev.into(),
         })
     }
 
@@ -53,7 +54,7 @@ impl LoopControl {
         if result < 0 {
             Err(anyhow!(std::io::Error::last_os_error()))
         } else {
-            Ok(LoopDevice::open(&format!("{}{}", SETTINGS.devices.loop_dev, result)).await?)
+            Ok(LoopDevice::open(&format!("{}{}", self.dev, result)).await?)
         }
     }
 }

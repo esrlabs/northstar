@@ -16,13 +16,12 @@ use crate::{
     config::Config,
     keys,
     manifest::{Manifest, Name, Version},
-    npk,
     npk::Container,
     process::Process,
     runtime::{Event, EventTx, TerminationReason},
 };
 use anyhow::{Error as AnyhowError, Result};
-use async_std::path::{Path, PathBuf};
+use async_std::path::PathBuf;
 use ed25519_dalek::PublicKey;
 use log::{info, warn};
 use std::{
@@ -42,11 +41,11 @@ pub enum Error {
     ProcessError(AnyhowError),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
-    #[error("Failed to uninstall")]
-    UninstallationError(AnyhowError),
-    #[error("Failed to install")]
-    InstallationError(AnyhowError),
-    #[error("Application is not started")]
+    // #[error("Failed to uninstall")]
+    // UninstallationError(AnyhowError),
+    // #[error("Failed to install")]
+    // InstallationError(AnyhowError),
+    #[error("Application is not running")]
     ApplicationNotRunning,
 }
 
@@ -103,9 +102,9 @@ impl Application {
         &self.container.manifest
     }
 
-    pub fn container(&self) -> &Container {
-        &self.container
-    }
+    // pub fn container(&self) -> &Container {
+    //     &self.container
+    // }
 
     pub fn process_context(&self) -> Option<&ProcessContext> {
         self.process.as_ref()
@@ -134,7 +133,7 @@ impl State {
     }
 
     /// Return an owned copy of the main loop tx handle
-    pub fn tx(&self) -> EventTx {
+    pub fn _tx(&self) -> EventTx {
         self.tx.clone()
     }
 
@@ -212,9 +211,14 @@ impl State {
         #[cfg(any(target_os = "android", target_os = "linux"))]
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
             log::debug!("Creating cgroup configuration for {}", app);
-            let cgroups = crate::linux::cgroups::CGroups::new(app.name(), c, self.tx.clone())
-                .await
-                .map_err(Error::ProcessError)?;
+            let cgroups = crate::linux::cgroups::CGroups::new(
+                &self.config.cgroups,
+                app.name(),
+                c,
+                self.tx.clone(),
+            )
+            .await
+            .map_err(Error::ProcessError)?;
 
             log::debug!("Assigning {} to cgroup {}", process.pid(), app);
             cgroups
@@ -294,27 +298,27 @@ impl State {
     }
 
     /// Install a npk from give path
-    pub async fn install(&mut self, npk: &Path) -> result::Result<(), Error> {
-        npk::install(self, npk)
-            .await
-            .map_err(Error::InstallationError)?;
-        Ok(())
-    }
+    // pub async fn install(&mut self, npk: &Path) -> result::Result<(), Error> {
+    //     npk::install(self, npk)
+    //         .await
+    //         .map_err(Error::InstallationError)?;
+    //     Ok(())
+    // }
 
     /// Remove and umount a specific app
-    pub async fn uninstall(&mut self, app: &Application) -> result::Result<(), Error> {
-        if app.process_context().is_none() {
-            info!("Removing {}", app);
-            npk::uninstall(app.container())
-                .await
-                .map_err(Error::UninstallationError)?;
-            self.applications.remove(&app.manifest().name);
-            Ok(())
-        } else {
-            warn!("Cannot uninstall running container {}", app);
-            Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]))
-        }
-    }
+    // pub async fn uninstall(&mut self, app: &Application) -> result::Result<(), Error> {
+    //     if app.process_context().is_none() {
+    //         info!("Removing {}", app);
+    //         npk::uninstall(app.container())
+    //             .await
+    //             .map_err(Error::UninstallationError)?;
+    //         self.applications.remove(&app.manifest().name);
+    //         Ok(())
+    //     } else {
+    //         warn!("Cannot uninstall running container {}", app);
+    //         Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]))
+    //     }
+    // }
 
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally

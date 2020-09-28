@@ -52,7 +52,7 @@ pub async fn run(config: &Config) -> Result<()> {
     // umounting of npks. Next the mount propagation of the the parent
     // mount of the run dir is set to private. See linux::init for details.
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    linux::init().await?;
+    crate::linux::init(&config).await?;
 
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
@@ -75,7 +75,7 @@ pub async fn run(config: &Config) -> Result<()> {
     // each container get's it's own read and writeable data directory for
     // persistent data.
     if config.global_data_dir {
-        let data: &std::path::Path = config.directories.data_dir.as_path().into();
+        let data = config.directories.data_dir.as_path();
         chown(
             data,
             Some(unistd::Uid::from_raw(SYSTEM_UID)),

@@ -12,17 +12,16 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::Result;
+use crate::config::Config;
+use anyhow::{Context, Result};
+use async_std::path::PathBuf;
 
 pub mod cgroups;
 pub mod device_mapper;
 pub mod loopdev;
 pub mod mount;
 
-pub async fn init() -> Result<()> {
-    use crate::SETTINGS;
-    use anyhow::Context;
-
+pub async fn init(config: &Config) -> Result<()> {
     log::debug!("Entering mount namespace");
     let r = unsafe { libc::unshare(libc::CLONE_NEWNS) };
     if r != 0 {
@@ -35,10 +34,11 @@ pub async fn init() -> Result<()> {
     // Set mount propagation to PRIVATE on /data
     // Mounting with MS_PRIVATE fails on Android on
     // a non private tree.
+    let unshare_root: PathBuf = config.devices.unshare_root.clone().into();
     mount::mount(
-        &SETTINGS.devices.unshare_root,
-        &SETTINGS.devices.unshare_root,
-        &SETTINGS.devices.unshare_fstype,
+        &unshare_root,
+        &unshare_root,
+        &config.devices.unshare_fstype,
         mount::MountFlags::PRIVATE,
         None,
     )
@@ -46,7 +46,7 @@ pub async fn init() -> Result<()> {
     .with_context(|| {
         format!(
             "Failed to set mount propagation type to private on {}",
-            SETTINGS.devices.unshare_root.display()
+            config.devices.unshare_root.display()
         )
     })?;
     Ok(())

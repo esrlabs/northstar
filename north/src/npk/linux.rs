@@ -19,8 +19,8 @@ use crate::{
         loopdev::{LoopControl, LoopDevice},
         mount,
     },
-    manifest::{Manifest, Version},
-    Name, State, SETTINGS,
+    manifest::{Manifest, Name, Version},
+    state::State,
 };
 use anyhow::{anyhow, Context, Result};
 use async_std::{
@@ -83,8 +83,10 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
             }
         });
 
-    let dm = dm::Dm::new().context("Failed to open device mapper")?;
-    let lc = LoopControl::open()
+    let dm = state.config.devices.device_mapper.clone();
+    let dm = dm::Dm::new(&dm).context("Failed to open device mapper")?;
+    let lc: PathBuf = state.config.devices.loop_control.clone().into();
+    let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
         .await
         .context("Failed to open loop control")?;
 
@@ -99,8 +101,10 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
 pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
     debug!("Installing {}", npk.display());
 
-    let dm = dm::Dm::new().context("Failed to open device mapper")?;
-    let lc = LoopControl::open()
+    let dm = &state.config.devices.device_mapper.clone();
+    let dm = dm::Dm::new(&dm).context("Failed to open device mapper")?;
+    let lc: PathBuf = state.config.devices.loop_control.clone().into();
+    let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
         .await
         .context("Failed to open loop control")?;
 
@@ -109,6 +113,7 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
     Ok((name, version))
 }
 
+#[allow(dead_code)]
 pub async fn uninstall(container: &Container) -> Result<()> {
     debug!("Unmounting {}", container.root.display());
     mount::unmount(&container.root).await?;
@@ -188,11 +193,13 @@ async fn install_internal(
         if instances > 1 {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
-        let root = SETTINGS
+        let root = state
+            .config
             .directories
             .run_dir
             .join(&manifest.name)
             .join(&format!("{}", manifest.version));
+        let root: PathBuf = root.into();
 
         if !root.exists().await {
             info!("Creating mountpoint {}", root.display());
@@ -218,11 +225,12 @@ async fn install_internal(
         )
         .await?;
 
-        let data = if SETTINGS.global_data_dir {
-            SETTINGS.directories.data_dir.clone()
+        let data = if state.config.global_data_dir {
+            state.config.directories.data_dir.clone()
         } else {
-            SETTINGS.directories.data_dir.join(&manifest.name)
+            state.config.directories.data_dir.join(&manifest.name)
         };
+        let data = PathBuf::from(data);
         if !data.exists().await {
             fs::create_dir_all(&data)
                 .await
@@ -243,14 +251,15 @@ async fn install_internal(
             })?;
         }
 
-        let data = if SETTINGS.global_data_dir {
-            SETTINGS.directories.data_dir.clone()
+        let data = if state.config.global_data_dir {
+            state.config.directories.data_dir.clone()
         } else {
-            SETTINGS.directories.data_dir.join(&manifest.name)
+            state.config.directories.data_dir.join(&manifest.name)
         };
+        let data = PathBuf::from(data);
 
         let container = Container {
-            root,
+            root: root.into(),
             data,
             manifest,
         };
@@ -436,8 +445,8 @@ async fn veritysetup(
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
     let dm_dev = PathBuf::from(format!(
-        "{}{}",
-        SETTINGS.devices.device_mapper_dev,
+        "dm-{}",
+        //SETTINGS.devices.device_mapper_dev, // TODO
         dm_device.id() & 0xFF
     ));
 

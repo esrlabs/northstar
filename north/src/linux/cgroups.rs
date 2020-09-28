@@ -12,7 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{Event, EventTx, SETTINGS};
+use crate::{
+    config, manifest,
+    runtime::{Event, EventTx},
+};
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::{
     fs,
@@ -23,7 +26,6 @@ use async_std::{
 };
 use futures::{future::FutureExt, select};
 use log::{debug, warn};
-use north_common::manifest;
 use proc_mounts::MountIter;
 use std::time::Duration;
 
@@ -76,10 +78,15 @@ impl CGroup for CGroupMem {
 }
 
 impl CGroupMem {
-    pub async fn new(name: &str, cgroup: &manifest::CGroupMem, tx: EventTx) -> Result<CGroupMem> {
+    pub async fn new(
+        parent: &Path,
+        name: &str,
+        cgroup: &manifest::CGroupMem,
+        tx: EventTx,
+    ) -> Result<CGroupMem> {
         let mount_point =
             get_mount_point("memory").context("Failed to detect cgroups memory mount point")?;
-        let path = mount_point.join(SETTINGS.cgroups.memory.join(name));
+        let path = mount_point.join(parent).join(name);
         create(&path).await?;
 
         // Configure memory limit
@@ -153,10 +160,10 @@ impl CGroup for CGroupCpu {
 }
 
 impl CGroupCpu {
-    pub async fn new(name: &str, cgroup: &manifest::CGroupCpu) -> Result<CGroupCpu> {
+    pub async fn new(parent: &Path, name: &str, cgroup: &manifest::CGroupCpu) -> Result<CGroupCpu> {
         let mount_point =
             get_mount_point("cpu").context("Failed to detect cgroups cpu mount point")?;
-        let path = mount_point.join(SETTINGS.cgroups.cpu.join(name));
+        let path = mount_point.join(parent).join(name);
         create(&path).await?;
 
         // Configure cpu shares
@@ -182,12 +189,14 @@ pub struct CGroups {
 
 impl CGroups {
     pub async fn new(
+        config: &config::CGroups,
         name: &str,
         cgroups: &manifest::CGroups,
         tx: EventTx,
     ) -> Result<CGroups, Error> {
         let mem = if let Some(ref mem) = cgroups.mem {
-            let group = CGroupMem::new(&name, &mem, tx)
+            let parent: PathBuf = config.memory.clone().into();
+            let group = CGroupMem::new(&parent, &name, &mem, tx)
                 .await
                 .context("Failed to create mem cgroup")?;
             Some(group)
@@ -196,7 +205,8 @@ impl CGroups {
         };
 
         let cpu = if let Some(ref cpu) = cgroups.cpu {
-            let group = CGroupCpu::new(&name, &cpu)
+            let parent: PathBuf = config.cpu.clone().into();
+            let group = CGroupCpu::new(&parent, &name, &cpu)
                 .await
                 .context("Failed to create cpu cgroup")?;
             Some(group)
