@@ -152,9 +152,9 @@ impl Process {
         self.termination_reason.clone()
     }
 
-    pub fn start_timestamp(&self) -> time::Instant {
-        self.started
-    }
+    // pub fn start_timestamp(&self) -> time::Instant {
+    //     self.started
+    // }
 
     pub async fn spawn(
         run_dir: &Path,

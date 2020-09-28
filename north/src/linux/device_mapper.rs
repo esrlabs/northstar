@@ -12,11 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::SETTINGS;
 use anyhow::{anyhow, Context, Result};
 use async_std::task;
 use nix::libc::{c_ulong, ioctl as nix_ioctl};
-use std::{borrow::Cow, cmp, fmt, mem::size_of, os::unix::io::AsRawFd, slice};
+use std::{borrow::Cow, cmp, fmt, mem::size_of, os::unix::io::AsRawFd, path::Path, slice};
 
 const MIN_BUF_SIZE: usize = 16 * 1024;
 
@@ -138,11 +137,11 @@ pub struct Dm {
 }
 
 impl Dm {
-    pub fn new() -> Result<Dm> {
+    pub fn new(dm: &Path) -> Result<Dm> {
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
-            .open(&SETTINGS.devices.device_mapper)
+            .open(&dm)
             .context("Failed to open device mapper")?;
         Ok(Dm { file })
     }

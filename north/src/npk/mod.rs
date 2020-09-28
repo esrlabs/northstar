@@ -28,12 +28,12 @@ use std::{
 #[cfg(any(target_os = "android", target_os = "linux"))]
 mod linux;
 #[cfg(any(target_os = "android", target_os = "linux"))]
-pub use linux::{install, install_all, uninstall};
+pub use linux::{install, install_all /* uninstall */};
 
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
 mod mock;
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
-pub use mock::{install, install_all, uninstall};
+pub use mock::{install, install_all /* uninstall */};
 
 #[derive(Debug)]
 pub struct Container {
