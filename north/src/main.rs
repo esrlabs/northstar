@@ -18,5 +18,5 @@ use anyhow::Result;
 
 #[async_std::main]
 async fn main() -> Result<()> {
-    north::run().await
+    north::runtime::run().await
 }

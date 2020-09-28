@@ -12,7 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{api, Event, EventTx, State, TerminationReason, SETTINGS};
+use crate::{
+    api,
+    runtime::{Event, EventTx, TerminationReason},
+    state::State,
+    SETTINGS,
+};
 use anyhow::{Context, Result};
 use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,

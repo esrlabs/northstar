@@ -14,8 +14,8 @@
 
 use super::Container;
 use crate::{
-    manifest::{Manifest, Version},
-    Name, State, SETTINGS,
+    manifest::{Manifest, Name, Version},
+    State, SETTINGS,
 };
 use anyhow::{anyhow, Context, Result};
 use async_std::{fs, path::Path};
