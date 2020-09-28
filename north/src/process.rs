@@ -13,8 +13,10 @@
 //   limitations under the License.
 
 use crate::{
-    manifest::Resource, npk::Container, Event, EventTx, TerminationReason, SETTINGS, SYSTEM_GID,
-    SYSTEM_UID,
+    manifest::Resource,
+    npk::Container,
+    runtime::{Event, EventTx, TerminationReason},
+    SETTINGS, SYSTEM_GID, SYSTEM_UID,
 };
 use anyhow::{anyhow, Context, Result};
 use async_std::{fs, io, prelude::*, sync, task};

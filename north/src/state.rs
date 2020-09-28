@@ -14,11 +14,11 @@
 
 use crate::{
     keys,
-    manifest::{Manifest, Version},
+    manifest::{Manifest, Name, Version},
     npk,
     npk::Container,
     process::Process,
-    Event, EventTx, Name, TerminationReason,
+    runtime::{Event, EventTx, TerminationReason},
 };
 use anyhow::{Error as AnyhowError, Result};
 use async_std::path::Path;
