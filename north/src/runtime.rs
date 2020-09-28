@@ -13,11 +13,10 @@
 //   limitations under the License.
 
 use crate::{
-    api, config::Config, console, manifest::Name, npk, state::State, SETTINGS, SYSTEM_GID,
-    SYSTEM_UID,
+    api, config::Config, console, manifest::Name, npk, state::State, SYSTEM_GID, SYSTEM_UID,
 };
 use anyhow::{Context, Error, Result};
-use async_std::{fs, sync};
+use async_std::{fs, path::PathBuf, sync};
 use log::*;
 use nix::unistd::{self, chown};
 
@@ -48,9 +47,7 @@ pub enum TerminationReason {
     OutOfMemory,
 }
 
-pub async fn run(_config: &Config) -> Result<()> {
-    trace!("Settings: {}", *SETTINGS);
-
+pub async fn run(config: &Config) -> Result<()> {
     // On Linux systems north enters a mount namespace for automatic
     // umounting of npks. Next the mount propagation of the the parent
     // mount of the run dir is set to private. See linux::init for details.
@@ -60,35 +57,25 @@ pub async fn run(_config: &Config) -> Result<()> {
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
     let (tx, rx) = sync::channel::<Event>(1000);
-    let mut state = State::new(tx.clone()).await?;
+    let mut state = State::new(config, tx.clone()).await?;
 
     // Ensure the configured run_dir exists
     // TODO: permission check of SETTINGS.directories.run_dir
-    fs::create_dir_all(&SETTINGS.directories.run_dir)
+    fs::create_dir_all(&config.directories.run_dir)
         .await
-        .with_context(|| {
-            format!(
-                "Failed to create {}",
-                SETTINGS.directories.run_dir.display()
-            )
-        })?;
+        .with_context(|| format!("Failed to create {}", config.directories.run_dir.display()))?;
 
     // Ensure the configured data_dir exists
-    fs::create_dir_all(&SETTINGS.directories.data_dir)
+    fs::create_dir_all(&config.directories.data_dir)
         .await
-        .with_context(|| {
-            format!(
-                "Failed to create {}",
-                SETTINGS.directories.data_dir.display()
-            )
-        })?;
+        .with_context(|| format!("Failed to create {}", config.directories.data_dir.display()))?;
 
     // The SETTINGS.global_data_dir option makes north using a single directory
     // that is bind mounted into the roots of the containers. In normal operation
     // each container get's it's own read and writeable data directory for
     // persistent data.
-    if SETTINGS.global_data_dir {
-        let data: &std::path::Path = SETTINGS.directories.data_dir.as_path().into();
+    if config.global_data_dir {
+        let data: &std::path::Path = config.directories.data_dir.as_path().into();
         chown(
             data,
             Some(unistd::Uid::from_raw(SYSTEM_UID)),
@@ -106,8 +93,9 @@ pub async fn run(_config: &Config) -> Result<()> {
 
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to load/install the npks.
-    for d in &SETTINGS.directories.container_dirs {
-        npk::install_all(&mut state, d).await?;
+    for d in &config.directories.container_dirs {
+        let d: PathBuf = d.into();
+        npk::install_all(&mut state, &d.as_path()).await?;
     }
 
     info!(
@@ -116,7 +104,7 @@ pub async fn run(_config: &Config) -> Result<()> {
     );
 
     // Initialize console
-    console::init(&tx).await?;
+    console::init(&config.console_address, &tx).await?;
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.

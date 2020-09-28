@@ -13,6 +13,7 @@
 //   limitations under the License.
 
 use crate::{
+    config::Config,
     keys,
     manifest::{Manifest, Name, Version},
     npk,
@@ -21,7 +22,7 @@ use crate::{
     runtime::{Event, EventTx, TerminationReason},
 };
 use anyhow::{Error as AnyhowError, Result};
-use async_std::path::Path;
+use async_std::path::{Path, PathBuf};
 use ed25519_dalek::PublicKey;
 use log::{info, warn};
 use std::{
@@ -54,6 +55,7 @@ pub struct State {
     tx: EventTx,
     pub signing_keys: HashMap<String, PublicKey>,
     pub applications: HashMap<Name, Application>,
+    pub config: Config,
 }
 
 #[derive(Debug)]
@@ -118,14 +120,16 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub async fn new(tx: EventTx) -> Result<State> {
+    pub async fn new(config: &Config, tx: EventTx) -> Result<State> {
         // Load keys for manifest verification
-        let signing_keys = keys::load().await?;
+        let key_dir: PathBuf = config.directories.key_dir.clone().into();
+        let signing_keys = keys::load(&key_dir).await?;
 
         Ok(State {
             tx,
             signing_keys,
             applications: HashMap::new(),
+            config: config.clone(),
         })
     }
 
@@ -199,7 +203,8 @@ impl State {
 
         // Spawn process
         info!("Starting {}", app);
-        let process = Process::spawn(&app.container, tx)
+        let run_dir: PathBuf = self.config.directories.run_dir.clone().into();
+        let process = Process::spawn(run_dir.as_path(), &app.container, tx)
             .await
             .map_err(Error::ProcessError)?;
 

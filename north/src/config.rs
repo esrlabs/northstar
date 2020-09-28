@@ -15,7 +15,7 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Directories {
     /// Directory containing images in container format
     pub container_dirs: Vec<PathBuf>,
@@ -27,7 +27,7 @@ pub struct Directories {
     pub key_dir: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct CGroups {
     /// CGroups Memory dir. This is the subdir added to the root memory cgroup.
     /// The directory is created if it does not exist.
@@ -40,7 +40,7 @@ pub struct CGroups {
     pub cpu: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Devices {
     /// Parent mountpoint of north path. North needs to set private mount propagation
     /// on the parent mount of the north runtime dir. This mountpoint varies
@@ -57,7 +57,7 @@ pub struct Devices {
     pub loop_dev: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Print debug logs
     pub debug: bool,
