@@ -14,15 +14,14 @@
 
 use ansi_term::Color;
 use anyhow::{anyhow, Context, Result};
-use api::{
-    InstallationResult, Message, Payload, Request, Response, ShutdownResult, StartResult,
-    StopResult, UninstallResult,
-};
 use byteorder::{BigEndian, ByteOrder};
 use itertools::Itertools;
 use log::{info, warn};
 use net::TcpStream;
-use north_common::api;
+use north::api::{
+    InstallationResult, Message, Payload, Request, Response, ShutdownResult, StartResult,
+    StopResult, UninstallResult,
+};
 use prettytable::{format, Attr, Cell, Row, Table};
 use rustyline::{
     completion::{Completer, FilenameCompleter, Pair},

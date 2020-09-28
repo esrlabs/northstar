@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{Event, EventTx, State, TerminationReason, SETTINGS};
+use crate::{api, Event, EventTx, State, TerminationReason, SETTINGS};
 use anyhow::{Context, Result};
 use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
@@ -28,7 +28,6 @@ use async_std::{
 use byteorder::{BigEndian, ByteOrder};
 use io::{ErrorKind, Read};
 use log::{debug, info, warn};
-use north_common::api;
 
 pub async fn init(tx: &EventTx) -> Result<()> {
     serve(tx.clone()).await?;

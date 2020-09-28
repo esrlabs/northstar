@@ -13,12 +13,14 @@
 //   limitations under the License.
 
 use super::Container;
-use crate::{Name, State, SETTINGS};
+use crate::{
+    manifest::{Manifest, Version},
+    Name, State, SETTINGS,
+};
 use anyhow::{anyhow, Context, Result};
 use async_std::{fs, path::Path};
 use futures::stream::StreamExt;
 use log::{debug, info};
-use north_common::manifest::{Manifest, Version};
 use std::{io::Read, process::Command, str::FromStr};
 
 const MANIFEST: &str = "manifest.yaml";

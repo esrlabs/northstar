@@ -21,13 +21,15 @@ extern crate structure;
 use anyhow::{Context, Error, Result};
 use async_std::{fs, sync};
 use log::*;
+use manifest::Name;
 use nix::unistd::{self, chown};
-use north_common::{api, manifest::Name};
 
+pub mod api;
 mod console;
 mod keys;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod linux;
+pub mod manifest;
 mod npk;
 mod process;
 mod settings;
