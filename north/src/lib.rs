@@ -28,12 +28,9 @@ pub mod manifest;
 mod npk;
 mod process;
 pub mod runtime;
-mod settings;
 mod state;
 
-// Reexport SETTINGS for mods
-pub use settings::SETTINGS;
-pub use state::State;
-
+// TODO: Move to config
 pub const SYSTEM_UID: u32 = 1000;
+// TODO: Move to config
 pub const SYSTEM_GID: u32 = 1000;

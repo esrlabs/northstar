@@ -16,10 +16,15 @@ use crate::{
     manifest::Resource,
     npk::Container,
     runtime::{Event, EventTx, TerminationReason},
-    SETTINGS, SYSTEM_GID, SYSTEM_UID,
+    SYSTEM_GID, SYSTEM_UID,
 };
 use anyhow::{anyhow, Context, Result};
-use async_std::{fs, io, prelude::*, sync, task};
+use async_std::{
+    fs, io,
+    path::{Path, PathBuf},
+    prelude::*,
+    sync, task,
+};
 use futures::{future::FutureExt, select, StreamExt};
 use log::*;
 use minijail::LogPriority;
@@ -151,7 +156,11 @@ impl Process {
         self.started
     }
 
-    pub async fn spawn(container: &Container, event_tx: EventTx) -> Result<Process> {
+    pub async fn spawn(
+        run_dir: &Path,
+        container: &Container,
+        event_tx: EventTx,
+    ) -> Result<Process> {
         let root: std::path::PathBuf = container.root.clone().into();
         let manifest = &container.manifest;
         let mut jail = minijail::Minijail::new().context("Failed to build a minijail")?;
@@ -174,11 +183,7 @@ impl Process {
 
         jail.log_to_fd(
             1,
-            if SETTINGS.debug {
-                LogPriority::Trace
-            } else {
-                LogPriority::Info
-            },
+            LogPriority::Debug, // TODO: read from config
         );
 
         let stdout = CaptureOutput::new(tmpdir_path, 1, &manifest.name, event_tx.clone()).await?;
@@ -256,14 +261,12 @@ impl Process {
 
         // Mount resource containers
         for (src_dir, mountpoint) in
-            collect_resource_folders(container.manifest.resources.as_ref())?
+            collect_resource_folders(run_dir, container.manifest.resources.as_ref()).await?
         {
-            info!(
-                "Mounting from src_dir {} to target {:?}",
-                src_dir.display(),
-                mountpoint
-            );
-            mount_bind(&mut jail, &src_dir, &mountpoint, false)?;
+            info!("Mounting from {} on {:?}", src_dir.display(), mountpoint);
+            let source: std::path::PathBuf = src_dir.into();
+            let mountpoint: std::path::PathBuf = mountpoint.into();
+            mount_bind(&mut jail, &source, &mountpoint, false)?;
         }
 
         let mut args: Vec<&str> = Vec::new();
@@ -428,32 +431,35 @@ fn wait_for_exit(name: &str, pid: u32, exit_tx: sync::Sender<i32>, event_tx: Eve
     });
 }
 
-fn shared_resource(res: &Resource) -> Result<std::path::PathBuf> {
-    let run_dir: &std::path::Path = std::path::Path::new(&SETTINGS.directories.run_dir);
-    let dir_in_container_path = std::path::Path::new(&res.dir);
+// TODO: Clean this up
+async fn shared_resource(res: &Resource, run_dir: &Path) -> Result<PathBuf> {
+    let dir_in_container_path = &res.dir;
     let first_part_of_path = run_dir.join(&res.name).join(&res.version.to_string());
 
     let src_dir = match dir_in_container_path.strip_prefix("/") {
         Ok(dir_in_resource_container) => first_part_of_path.join(dir_in_resource_container),
         Err(_) => first_part_of_path,
     };
-    if src_dir.exists() {
+    if src_dir.exists().await {
         Ok(src_dir)
     } else {
         let error = format!("Resource folder missing: {}", src_dir.display());
-        warn!("{}", error);
+        error!("{}", error);
         Err(anyhow!(error))
     }
 }
 
-fn collect_resource_folders(
+// TODO: Clean this up
+async fn collect_resource_folders(
+    run_dir: &Path,
     needed_resources: Option<&Vec<Resource>>,
-) -> Result<Vec<(std::path::PathBuf, std::path::PathBuf)>> {
+) -> Result<Vec<(PathBuf, PathBuf)>> {
     let mut resources_to_mount = vec![];
     if let Some(resources) = &needed_resources {
         for res in *resources {
-            let shared_resource_path = shared_resource(res)?;
-            resources_to_mount.push((shared_resource_path, res.mountpoint.clone()));
+            let shared_resource_path = shared_resource(res, run_dir).await?;
+            let mount_point: PathBuf = res.mountpoint.clone().into();
+            resources_to_mount.push((shared_resource_path, mount_point));
         }
     }
     Ok(resources_to_mount)

@@ -15,10 +15,13 @@
 use super::Container;
 use crate::{
     manifest::{Manifest, Name, Version},
-    State, SETTINGS,
+    state::State,
 };
 use anyhow::{anyhow, Context, Result};
-use async_std::{fs, path::Path};
+use async_std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use futures::stream::StreamExt;
 use log::{debug, info};
 use std::{io::Read, process::Command, str::FromStr};
@@ -91,7 +94,8 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
 
-        let root = SETTINGS.directories.run_dir.join(&manifest.name);
+        let run_dir: PathBuf = state.config.directories.run_dir.as_path().into();
+        let root = run_dir.join(&manifest.name);
 
         if root.exists().await {
             debug!("Removing {}", root.display());
@@ -130,10 +134,11 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
             ));
         }
 
-        let data = if SETTINGS.global_data_dir {
-            SETTINGS.directories.data_dir.clone()
+        let data_dir: PathBuf = state.config.directories.data_dir.as_path().into();
+        let data = if state.config.global_data_dir {
+            data_dir.clone()
         } else {
-            SETTINGS.directories.data_dir.join(&manifest.name)
+            data_dir.join(&manifest.name)
         };
 
         if !data.exists().await {

@@ -16,7 +16,6 @@ use crate::{
     api,
     runtime::{Event, EventTx, TerminationReason},
     state::State,
-    SETTINGS,
 };
 use anyhow::{Context, Result};
 use api::{
@@ -34,8 +33,8 @@ use byteorder::{BigEndian, ByteOrder};
 use io::{ErrorKind, Read};
 use log::{debug, info, warn};
 
-pub async fn init(tx: &EventTx) -> Result<()> {
-    serve(tx.clone()).await?;
+pub async fn init(address: &str, tx: &EventTx) -> Result<()> {
+    serve(address, tx.clone()).await?;
     Ok(())
 }
 
@@ -142,9 +141,7 @@ pub async fn process(
 }
 
 /// Open a TCP socket and read lines terminated with `\n`.
-async fn serve(tx: EventTx) -> Result<()> {
-    let address = &SETTINGS.console_address;
-
+async fn serve(address: &str, tx: EventTx) -> Result<()> {
     debug!("Starting console on {}", address);
 
     let listener = TcpListener::bind(address)

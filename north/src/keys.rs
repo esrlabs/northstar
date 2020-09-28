@@ -12,16 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::SETTINGS;
 use anyhow::{Context, Result};
-use async_std::fs;
+use async_std::{fs, path::Path};
 use ed25519_dalek::PublicKey;
 use futures::{AsyncReadExt, StreamExt};
 use log::info;
 use std::collections::HashMap;
 
-pub async fn load() -> Result<HashMap<String, PublicKey>> {
-    let key_dir = &SETTINGS.directories.key_dir;
+pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>> {
     let mut signing_keys = HashMap::new();
     let mut key_dir = fs::read_dir(&key_dir)
         .await
