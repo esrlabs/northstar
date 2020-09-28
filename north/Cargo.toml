@@ -47,6 +47,11 @@ url = "2.1.1"
 uuid = { version = "0.8.1", features = [ "v4"] }
 zip = "0.5.6"
 
+[features]
+default = ["runtime"]
+api = []
+runtime = []
+
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
 proc-mounts = "0.2.4"
 procinfo = "0.4.2"
