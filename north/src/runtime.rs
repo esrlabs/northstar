@@ -12,7 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{api, console, manifest::Name, npk, state::State, SETTINGS, SYSTEM_GID, SYSTEM_UID};
+use crate::{
+    api, config::Config, console, manifest::Name, npk, state::State, SETTINGS, SYSTEM_GID,
+    SYSTEM_UID,
+};
 use anyhow::{Context, Error, Result};
 use async_std::{fs, sync};
 use log::*;
@@ -45,23 +48,7 @@ pub enum TerminationReason {
     OutOfMemory,
 }
 
-pub async fn run() -> Result<()> {
-    let filter = if SETTINGS.debug {
-        "north=debug"
-    } else {
-        "north=info"
-    };
-    logd_logger::builder()
-        .parse_filters(filter)
-        .tag("north")
-        .init();
-
-    info!(
-        "North v{} ({})",
-        env!("VERGEN_SEMVER"),
-        env!("VERGEN_SHA_SHORT")
-    );
-
+pub async fn run(_config: &Config) -> Result<()> {
     trace!("Settings: {}", *SETTINGS);
 
     // On Linux systems north enters a mount namespace for automatic

@@ -15,8 +15,44 @@
 #![deny(clippy::all)]
 
 use anyhow::Result;
+use async_std::{fs::read_to_string, path::PathBuf};
+use log::info;
+use north::runtime;
+use structopt::StructOpt;
+
+#[derive(Debug, StructOpt)]
+#[structopt(name = "north", about = "North")]
+struct Opt {
+    /// File that contains the north configuration
+    #[structopt(short, long, default_value = "north.toml")]
+    pub config: PathBuf,
+
+    #[structopt(short, long)]
+    /// Print debug logs
+    pub debug: bool,
+}
 
 #[async_std::main]
 async fn main() -> Result<()> {
-    north::runtime::run().await
+    let opt = Opt::from_args();
+
+    let log_filter = if opt.debug {
+        "north=debug"
+    } else {
+        "north=info"
+    };
+    logd_logger::builder()
+        .parse_filters(log_filter)
+        .tag("north")
+        .init();
+
+    info!(
+        "North v{} ({})",
+        env!("VERGEN_SEMVER"),
+        env!("VERGEN_SHA_SHORT")
+    );
+
+    let config = toml::from_str(&read_to_string(&opt.config).await?)?;
+
+    runtime::run(&config).await
 }
