@@ -10,7 +10,6 @@ members = [
     "minijail/minijail",
     "minijail/minijail-sys",
     "north",
-    "north_common",
     "nstar",
     "sextant",
 ]

@@ -12,7 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{npk::Container, Event, EventTx, TerminationReason, SETTINGS, SYSTEM_GID, SYSTEM_UID};
+use crate::{
+    manifest::Resource, npk::Container, Event, EventTx, TerminationReason, SETTINGS, SYSTEM_GID,
+    SYSTEM_UID,
+};
 use anyhow::{anyhow, Context, Result};
 use async_std::{fs, io, prelude::*, sync, task};
 use futures::{future::FutureExt, select, StreamExt};
@@ -22,7 +25,6 @@ use nix::{
     sys::{signal, signal::Signal, wait, wait::WaitStatus},
     unistd::Pid,
 };
-use north_common::manifest::Resource;
 use std::{future::Future, os::unix::io::AsRawFd, time, time::Duration};
 use stop_token::StopSource;
 

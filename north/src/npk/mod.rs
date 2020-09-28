@@ -12,12 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::manifest::Manifest;
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::path::PathBuf;
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
 use log::{debug, trace};
-use north_common::manifest::Manifest;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,

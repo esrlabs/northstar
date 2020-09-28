@@ -287,6 +287,6 @@ task :coverage do
   sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly test', verbose: false)
   cov_dir = 'target/debug/coverage'
   sh "mkdir #{cov_dir}"
-  sh "grcov ./target/debug/ -s north_common/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/north"
+  sh "grcov ./target/debug/ -s north/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/north"
   info "Code coverage report for north in: ./#{cov_dir}/north/index.html"
 end

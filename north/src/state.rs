@@ -12,12 +12,18 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{keys, npk, npk::Container, process::Process, Event, EventTx, Name, TerminationReason};
+use crate::{
+    keys,
+    manifest::{Manifest, Version},
+    npk,
+    npk::Container,
+    process::Process,
+    Event, EventTx, Name, TerminationReason,
+};
 use anyhow::{Error as AnyhowError, Result};
 use async_std::path::Path;
 use ed25519_dalek::PublicKey;
 use log::{info, warn};
-use north_common::manifest::{Manifest, Version};
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter, result, time,

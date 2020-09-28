@@ -19,6 +19,7 @@ use crate::{
         loopdev::{LoopControl, LoopDevice},
         mount,
     },
+    manifest::{Manifest, Version},
     Name, State, SETTINGS,
 };
 use anyhow::{anyhow, Context, Result};
@@ -33,7 +34,6 @@ use fmt::Debug;
 use futures::stream::StreamExt;
 use log::*;
 use nix::unistd::{self, chown};
-use north_common::manifest::{Manifest, Version};
 use sha2::Digest;
 use std::{
     fmt::{self},
