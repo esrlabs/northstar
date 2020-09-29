@@ -217,6 +217,7 @@ async fn install_internal(
             lc,
             &verity,
             &name,
+            &state.config.devices.device_mapper_dev,
             hashes.fs_verity_offset,
             &hashes.fs_verity_hash,
             &npk,
@@ -287,6 +288,7 @@ async fn setup_and_mount(
     lc: &LoopControl,
     verity: &VerityHeader,
     name: &str,
+    dm_dev: &str,
     dm_device_size: u64,
     verity_hash: &str,
     fs_path: &Path,
@@ -305,6 +307,7 @@ async fn setup_and_mount(
 
     let dm_dev = veritysetup(
         &dm,
+        &dm_dev,
         &loop_device_id,
         &verity,
         name,
@@ -415,6 +418,7 @@ async fn losetup(
 
 async fn veritysetup(
     dm: &dm::Dm,
+    dm_dev: &str,
     dev: &str,
     verity: &VerityHeader,
     name: &str,
@@ -446,11 +450,7 @@ async fn veritysetup(
     );
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
-    let dm_dev = PathBuf::from(format!(
-        "dm-{}",
-        //SETTINGS.devices.device_mapper_dev, // TODO
-        dm_device.id() & 0xFF
-    ));
+    let dm_dev = PathBuf::from(format!("{}{}", dm_dev, dm_device.id() & 0xFF));
 
     debug!("Verity-device used: {}", dm_dev.to_string_lossy());
     dm.table_load_flags(
