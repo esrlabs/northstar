@@ -63,7 +63,7 @@ struct Opt {
     json: bool,
 
     /// Run command and exit
-    cmd: Option<String>,
+    cmd: Vec<String>,
 }
 
 #[derive(Validator)]
@@ -241,15 +241,16 @@ fn main() -> Result<()> {
     let stream = TcpStream::connect(&opt.host)
         .with_context(|| format!("Failed to connect to {}", opt.host))?;
 
-    if let Some(cmd) = opt.cmd {
-        if let Some(response) = run_cmd(cmd.trim(), &stream)? {
+    if !opt.cmd.is_empty() {
+        let cmd_str = opt.cmd.join(" ");
+        if let Some(response) = run_cmd(cmd_str.trim(), &stream)? {
             if opt.json {
                 println!("{}", serde_json::to_string_pretty(&response)?);
             } else {
                 print_response(&response);
             }
         } else {
-            eprintln!("Invalid cmd \"{}\"", cmd);
+            eprintln!("Invalid cmd \"{}\"", cmd_str);
         }
         Ok(())
     } else {
