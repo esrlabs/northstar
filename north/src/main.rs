@@ -18,6 +18,7 @@ use anyhow::Result;
 use async_std::{fs::read_to_string, path::PathBuf};
 use log::info;
 use north::runtime;
+use runtime::config::Config;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -35,8 +36,9 @@ struct Opt {
 #[async_std::main]
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
+    let config: Config = toml::from_str(&read_to_string(&opt.config).await?)?;
 
-    let log_filter = if opt.debug {
+    let log_filter = if opt.debug || config.debug {
         "north=debug"
     } else {
         "north=info"
@@ -51,8 +53,6 @@ async fn main() -> Result<()> {
         env!("VERGEN_SEMVER"),
         env!("VERGEN_SHA_SHORT")
     );
-
-    let config = toml::from_str(&read_to_string(&opt.config).await?)?;
 
     runtime::run(&config).await
 }
