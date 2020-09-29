@@ -12,14 +12,15 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::config::Config;
+use super::config::Config;
 use anyhow::{Context, Result};
 use async_std::path::PathBuf;
 
-pub mod cgroups;
-pub mod device_mapper;
-pub mod loopdev;
-pub mod mount;
+pub(super) mod cgroups;
+#[allow(unused)]
+pub(super) mod device_mapper;
+pub(super) mod loopdev;
+pub(super) mod mount;
 
 pub async fn init(config: &Config) -> Result<()> {
     log::debug!("Entering mount namespace");

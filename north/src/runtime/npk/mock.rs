@@ -15,7 +15,7 @@
 use super::Container;
 use crate::{
     manifest::{Manifest, Name, Version},
-    state::State,
+    runtime::state::State,
 };
 use anyhow::{anyhow, Context, Result};
 use async_std::{

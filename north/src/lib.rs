@@ -19,16 +19,8 @@
 extern crate structure;
 
 pub mod api;
-pub mod config;
-mod console;
-mod keys;
-#[cfg(any(target_os = "android", target_os = "linux"))]
-pub mod linux;
 pub mod manifest;
-mod npk;
-mod process;
 pub mod runtime;
-mod state;
 
 // TODO: Move to config
 pub const SYSTEM_UID: u32 = 1000;

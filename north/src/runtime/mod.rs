@@ -12,13 +12,22 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{
-    api, config::Config, console, manifest::Name, npk, state::State, SYSTEM_GID, SYSTEM_UID,
-};
+pub mod config;
+pub(self) mod console;
+pub(self) mod keys;
+#[cfg(any(target_os = "android", target_os = "linux"))]
+pub(self) mod linux;
+pub(self) mod npk;
+pub(self) mod process;
+pub(super) mod state;
+
+use crate::{api, manifest::Name, SYSTEM_GID, SYSTEM_UID};
 use anyhow::{Context, Error, Result};
 use async_std::{fs, path::PathBuf, sync};
+use config::Config;
 use log::*;
 use nix::unistd::{self, chown};
+use state::State;
 
 pub type EventTx = sync::Sender<Event>;
 
@@ -52,7 +61,7 @@ pub async fn run(config: &Config) -> Result<()> {
     // umounting of npks. Next the mount propagation of the the parent
     // mount of the run dir is set to private. See linux::init for details.
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    crate::linux::init(&config).await?;
+    linux::init(&config).await?;
 
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
