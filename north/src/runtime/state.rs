@@ -200,7 +200,9 @@ impl State {
         // Spawn process
         info!("Starting {}", app);
         let run_dir: PathBuf = self.config.directories.run_dir.clone().into();
-        let process = Process::spawn(run_dir.as_path(), &app.container, tx)
+        let uid = self.config.container_uid;
+        let gid = self.config.container_gid;
+        let process = Process::spawn(run_dir.as_path(), &app.container, uid, gid, tx)
             .await
             .map_err(Error::ProcessError)?;
 

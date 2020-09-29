@@ -24,8 +24,3 @@ pub mod api;
 pub mod manifest;
 #[cfg(feature = "runtime")]
 pub mod runtime;
-
-// TODO: Move to config
-pub const SYSTEM_UID: u32 = 1000;
-// TODO: Move to config
-pub const SYSTEM_GID: u32 = 1000;
