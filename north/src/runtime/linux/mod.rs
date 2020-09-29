@@ -15,6 +15,8 @@
 use super::config::Config;
 use anyhow::{Context, Result};
 use async_std::path::PathBuf;
+use log::debug;
+use nix::sched;
 
 pub(super) mod cgroups;
 #[allow(unused)]
@@ -23,15 +25,6 @@ pub(super) mod loopdev;
 pub(super) mod mount;
 
 pub async fn init(config: &Config) -> Result<()> {
-    log::debug!("Entering mount namespace");
-    let r = unsafe { libc::unshare(libc::CLONE_NEWNS) };
-    if r != 0 {
-        return Err(anyhow::anyhow!(
-            "Failed to unshare: {}",
-            std::io::Error::last_os_error()
-        ));
-    }
-
     // Set mount propagation to PRIVATE on /data
     // Mounting with MS_PRIVATE fails on Android on
     // a non private tree.
@@ -44,11 +37,10 @@ pub async fn init(config: &Config) -> Result<()> {
         None,
     )
     .await
-    .with_context(|| {
-        format!(
-            "Failed to set mount propagation type to private on {}",
-            config.devices.unshare_root.display()
-        )
-    })?;
+    .context("Failed to set mount propagation")?;
+
+    debug!("Entering mount namespace");
+    sched::unshare(sched::CloneFlags::CLONE_NEWNS).context("Failed to enter mount namespace")?;
+
     Ok(())
 }
