@@ -261,7 +261,7 @@ async fn install_internal(
         let data = PathBuf::from(data);
 
         let container = Container {
-            root: root.into(),
+            root,
             data,
             manifest,
         };
