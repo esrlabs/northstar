@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use anyhow::{anyhow, Result};
-use async_std::{path::Path, task};
+use async_std::path::Path;
 use libc::*;
 use std::{ffi::CString, os::unix::ffi::OsStrExt, ptr};
 
@@ -120,44 +120,36 @@ pub async fn mount(
     let c_target = CString::new(target.as_os_str().as_bytes())?;
     let fstype = fstype.to_string();
     let data = data.map(|s| s.to_string());
+    let c_fstype = CString::new(fstype.as_bytes())?;
+    let c_data = data.as_ref().map_or(ptr::null(), |d| d.as_ptr()) as *const c_void;
+    let result = unsafe {
+        libc::mount(
+            c_source.as_ptr(),
+            c_target.as_ptr(),
+            c_fstype.as_ptr(),
+            flags.bits(),
+            c_data,
+        )
+    };
 
-    task::spawn_blocking(move || {
-        let c_fstype = CString::new(fstype.as_bytes())?;
-        let c_data = data.as_ref().map_or(ptr::null(), |d| d.as_ptr()) as *const c_void;
-        let result = unsafe {
-            libc::mount(
-                c_source.as_ptr(),
-                c_target.as_ptr(),
-                c_fstype.as_ptr(),
-                flags.bits(),
-                c_data,
-            )
-        };
-
-        match result {
-            0 => Ok(()),
-            _err => Err(anyhow!(
-                "Failed to mount: {}",
-                std::io::Error::last_os_error()
-            )),
-        }
-    })
-    .await
+    match result {
+        0 => Ok(()),
+        _err => Err(anyhow!(
+            "Failed to mount: {}",
+            std::io::Error::last_os_error()
+        )),
+    }
 }
 
 pub async fn unmount(target: &Path) -> Result<()> {
     let c_target = CString::new(target.as_os_str().as_bytes())?;
+    let result = unsafe { libc::umount(c_target.as_ptr()) };
 
-    task::spawn_blocking(move || {
-        let result = unsafe { libc::umount(c_target.as_ptr()) };
-
-        match result {
-            0 => Ok(()),
-            _err => Err(anyhow!(
-                "Failed to unmount: {}",
-                std::io::Error::last_os_error()
-            )),
-        }
-    })
-    .await
+    match result {
+        0 => Ok(()),
+        _err => Err(anyhow!(
+            "Failed to unmount: {}",
+            std::io::Error::last_os_error()
+        )),
+    }
 }
