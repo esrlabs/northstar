@@ -12,12 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::{config::Config, keys, npk::Container, process::Process};
 use crate::{
-    config::Config,
-    keys,
     manifest::{Manifest, Name, Version},
-    npk::Container,
-    process::Process,
     runtime::{Event, EventTx, TerminationReason},
 };
 use anyhow::{Error as AnyhowError, Result};
@@ -69,7 +66,7 @@ pub struct ProcessContext {
     incarnation: u32,
     start_timestamp: time::Instant,
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    cgroups: Option<crate::linux::cgroups::CGroups>,
+    cgroups: Option<super::linux::cgroups::CGroups>,
 }
 
 impl ProcessContext {
@@ -211,7 +208,7 @@ impl State {
         #[cfg(any(target_os = "android", target_os = "linux"))]
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
             log::debug!("Creating cgroup configuration for {}", app);
-            let cgroups = crate::linux::cgroups::CGroups::new(
+            let cgroups = crate::runtime::linux::cgroups::CGroups::new(
                 &self.config.cgroups,
                 app.name(),
                 c,

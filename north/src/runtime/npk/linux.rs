@@ -12,16 +12,18 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Container, Hashes};
-use crate::{
-    linux::{
-        device_mapper as dm,
-        loopdev::{LoopControl, LoopDevice},
-        mount,
+use super::{
+    super::{
+        linux::{
+            device_mapper as dm,
+            loopdev::{LoopControl, LoopDevice},
+            mount as linux_mount,
+        },
+        state::State,
     },
-    manifest::{Manifest, Name, Version},
-    state::State,
+    Container, Hashes,
 };
+use crate::manifest::{Manifest, Name, Version};
 use anyhow::{anyhow, Context, Result};
 use async_std::{
     fs, io,
@@ -116,7 +118,7 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
 #[allow(dead_code)]
 pub async fn uninstall(container: &Container) -> Result<()> {
     debug!("Unmounting {}", container.root.display());
-    mount::unmount(&container.root).await?;
+    linux_mount::unmount(&container.root).await?;
     debug!("Removing {}", container.root.display());
     fs::remove_dir_all(&container.root)
         .await
@@ -486,9 +488,15 @@ async fn mount(dm_dev: &Path, root: &Path, r#type: &str) -> Result<()> {
         dm_dev.display(),
         root.display(),
     );
-    mount::mount(&dm_dev, &root, &r#type, mount::MountFlags::RDONLY, None)
-        .await
-        .with_context(|| format!("Failed to mount {} on {}", dm_dev.display(), root.display()))?;
+    linux_mount::mount(
+        &dm_dev,
+        &root,
+        &r#type,
+        linux_mount::MountFlags::RDONLY,
+        None,
+    )
+    .await
+    .with_context(|| format!("Failed to mount {} on {}", dm_dev.display(), root.display()))?;
 
     let mount_duration = start.elapsed();
     debug!("Mounting took {:.03}s", mount_duration.as_fractional_secs());

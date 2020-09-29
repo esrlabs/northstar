@@ -12,10 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{
-    config, manifest,
-    runtime::{Event, EventTx},
-};
+use super::super::super::runtime::{config, Event, EventTx};
+use crate::manifest;
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::{
     fs,
