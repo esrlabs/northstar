@@ -18,8 +18,11 @@
 #[macro_use]
 extern crate structure;
 
+#[cfg(feature = "api")]
 pub mod api;
+#[cfg(feature = "manifest")]
 pub mod manifest;
+#[cfg(feature = "runtime")]
 pub mod runtime;
 
 // TODO: Move to config
