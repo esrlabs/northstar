@@ -16,7 +16,6 @@ use super::npk::Container;
 use crate::{
     manifest::Resource,
     runtime::{Event, EventTx, TerminationReason},
-    SYSTEM_GID, SYSTEM_UID,
 };
 use anyhow::{anyhow, Context, Result};
 use async_std::{
@@ -159,6 +158,8 @@ impl Process {
     pub async fn spawn(
         run_dir: &Path,
         container: &Container,
+        uid: u32,
+        gid: u32,
         event_tx: EventTx,
     ) -> Result<Process> {
         let root: std::path::PathBuf = container.root.clone().into();
@@ -217,9 +218,9 @@ impl Process {
         }
 
         // Configure UID
-        jail.change_uid(SYSTEM_UID);
+        jail.change_uid(uid);
         // Configure PID
-        jail.change_gid(SYSTEM_GID);
+        jail.change_gid(gid);
 
         // TODO: Do not use pid namespace because of multithreadding
         // issues discovered by minijail. See libminijail.c for details.

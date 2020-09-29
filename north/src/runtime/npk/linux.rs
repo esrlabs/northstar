@@ -241,15 +241,15 @@ async fn install_internal(
             let data: &std::path::Path = data.as_path().into();
             chown(
                 data,
-                Some(unistd::Uid::from_raw(crate::SYSTEM_UID)),
-                Some(unistd::Gid::from_raw(crate::SYSTEM_GID)),
+                Some(unistd::Uid::from_raw(state.config.container_uid)),
+                Some(unistd::Gid::from_raw(state.config.container_gid)),
             )
             .with_context(|| {
                 format!(
                     "Failed to chown {} to {}:{}",
                     data.display(),
-                    crate::SYSTEM_UID,
-                    crate::SYSTEM_GID
+                    state.config.container_uid,
+                    state.config.container_gid,
                 )
             })?;
         }

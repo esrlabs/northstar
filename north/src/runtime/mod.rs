@@ -21,7 +21,7 @@ pub(self) mod npk;
 pub(self) mod process;
 pub(super) mod state;
 
-use crate::{api, manifest::Name, SYSTEM_GID, SYSTEM_UID};
+use crate::{api, manifest::Name};
 use anyhow::{Context, Error, Result};
 use async_std::{fs, path::PathBuf, sync};
 use config::Config;
@@ -87,15 +87,15 @@ pub async fn run(config: &Config) -> Result<()> {
         let data = config.directories.data_dir.as_path();
         chown(
             data,
-            Some(unistd::Uid::from_raw(SYSTEM_UID)),
-            Some(unistd::Gid::from_raw(SYSTEM_GID)),
+            Some(unistd::Uid::from_raw(config.container_uid)),
+            Some(unistd::Gid::from_raw(config.container_gid)),
         )
         .with_context(|| {
             format!(
                 "Failed to chown {} to {}:{}",
                 data.display(),
-                SYSTEM_UID,
-                SYSTEM_GID
+                config.container_uid,
+                config.container_gid,
             )
         })?;
     }
