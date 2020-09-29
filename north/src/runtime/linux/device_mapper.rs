@@ -174,18 +174,6 @@ impl Dm {
     /// Create a DM device. It starts out in a "suspended" state.
     ///
     /// Valid flags: DM_READONLY, DM_PERSISTENT_DEV
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use devicemapper::{DM, DmOptions, DmName};
-    ///
-    /// let dm = DM::new().unwrap();
-    ///
-    /// // Setting a uuid is optional
-    /// let name = DmName::new("example-dev").expect("is valid DM name");
-    /// let dev = dm.device_create(name, None, &DmOptions::new()).unwrap();
-    /// ```
     pub async fn device_create(&self, name: &str, options: &DmOptions) -> Result<DeviceInfo> {
         let mut hdr = options.to_ioctl_hdr(None, DmFlags::DM_READONLY | DmFlags::DM_PERSISTENT_DEV);
 
@@ -221,26 +209,6 @@ impl Dm {
     /// https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/tree/ ->
     /// Documentation/device-mapper
     /// for more.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use devicemapper::{DM, DevId, DmName};
-    /// let dm = DM::new().unwrap();
-    ///
-    /// // Create a 16MiB device (32768 512-byte sectors) that maps to /dev/sdb1
-    /// // starting 1MiB into sdb1
-    /// let table = vec![(
-    ///     0,
-    ///     32768,
-    ///     "linear".into(),
-    ///     "/dev/sdb1 2048".into()
-    /// )];
-    ///
-    /// let name = DmName::new("example-dev").expect("is valid DM name");
-    /// let id = DevId::Name(name);
-    /// dm.table_load(&id, &table).unwrap();
-    /// ```
     pub async fn table_load_flags(
         &self,
         id: &str,
@@ -311,17 +279,6 @@ impl Dm {
     /// held until it is resumed.
     ///
     /// Valid flags: DM_SUSPEND, DM_NOFLUSH, DM_SKIP_LOCKFS
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use devicemapper::{DM, DevId, DmFlags, DmOptions, DmName};
-    /// let dm = DM::new().unwrap();
-    ///
-    /// let name = DmName::new("example-dev").expect("is valid DM name");
-    /// let id = DevId::Name(name);
-    /// dm.device_suspend(&id, &DmOptions::new().set_flags(DmFlags::DM_SUSPEND)).unwrap();
-    /// ```
     pub async fn device_suspend(&self, id: &str, options: &DmOptions) -> Result<DeviceInfo> {
         let mut hdr = options.to_ioctl_hdr(
             Some(id),
@@ -449,16 +406,6 @@ impl DmOptions {
     /// Set the DmFlags value for option.  Note this call is not additive in that it sets (replaces)
     /// entire flag value in one call.  Thus if you want to incrementally add additional flags you
     /// need to retrieve current and '|' with new.
-    ///
-    /// ```no_run
-    /// use devicemapper::DmFlags;
-    /// use devicemapper::DmOptions;
-    ///
-    /// let mut options = DmOptions::new();
-    /// options.set_flags(DmFlags::DM_READONLY);
-    /// let flags = DmFlags::DM_PERSISTENT_DEV | options.flags();
-    /// options.set_flags(flags);
-    /// ```
     pub fn set_flags(&mut self, flags: DmFlags) -> &mut DmOptions {
         self.flags = flags;
         self
