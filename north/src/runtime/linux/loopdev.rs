@@ -18,6 +18,7 @@ use async_std::{
     path::{Path, PathBuf},
 };
 use libc::{c_int, ioctl};
+use nix::{errno::Errno, Error::Sys};
 use std::os::unix::prelude::*;
 
 const LOOP_SET_FD: u16 = 0x4C00;
@@ -104,16 +105,15 @@ impl LoopDevice {
                 .unwrap_or_else(|| bf_path.to_string_lossy()),
             self.path.to_string_lossy()
         );
+
+        let device_fd = self.device.as_raw_fd() as c_int;
+        let file_fd = bf.as_raw_fd() as c_int;
+
         // Attach the file => Associate the loop device with the open file
-        unsafe {
-            if ioctl(
-                self.device.as_raw_fd() as c_int,
-                LOOP_SET_FD.into(),
-                bf.as_raw_fd() as c_int,
-            ) < 0
-            {
-                return Err(anyhow!("OS error: {}", std::io::Error::last_os_error()));
-            }
+        let code = unsafe { ioctl(device_fd, LOOP_SET_FD.into(), file_fd) };
+
+        if code < 0 {
+            return Err(anyhow!("OS error: {}", std::io::Error::last_os_error()));
         }
 
         // Set offset and limit for backing_file
@@ -128,27 +128,40 @@ impl LoopDevice {
             info.lo_flags |= LOOP_FLAG_AUTOCLEAR;
         }
 
-        unsafe {
-            if ioctl(
-                self.device.as_raw_fd() as c_int,
-                LOOP_SET_STATUS64.into(),
-                &mut info,
-            ) < 0
-            {
-                self.detach()?;
-                return Err(anyhow!("OS error: {}", std::io::Error::last_os_error()));
+        const MAX_RETRIES: usize = 3;
+
+        for _ in 0..MAX_RETRIES {
+            let code = unsafe { ioctl(device_fd, LOOP_SET_STATUS64.into(), &mut info) };
+
+            match Errno::result(code) {
+                Ok(_) => {
+                    return Ok(());
+                }
+                nix::Result::Err(Sys(Errno::EAGAIN)) => {
+                    // this error means the call should be retried
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                nix::Result::Err(e) => {
+                    self.detach()?;
+                    return Err(anyhow!("OS error: {}", e));
+                }
             }
         }
-        Ok(())
+
+        self.detach()?;
+        Err(anyhow!(
+            "Set Loop status exceeded number of retries ({})",
+            MAX_RETRIES
+        ))
     }
 
     pub fn detach(&self) -> Result<()> {
-        unsafe {
-            if ioctl(self.device.as_raw_fd() as c_int, LOOP_CLR_FD.into(), 0) < 0 {
-                Err(anyhow!("OS error: {}", std::io::Error::last_os_error()))
-            } else {
-                Ok(())
-            }
+        let fd = self.device.as_raw_fd() as c_int;
+        let code = unsafe { ioctl(fd, LOOP_CLR_FD.into(), 0) };
+        if code < 0 {
+            Err(anyhow!("OS error: {}", std::io::Error::last_os_error()))
+        } else {
+            Ok(())
         }
     }
 
