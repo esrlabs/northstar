@@ -30,7 +30,7 @@ use nix::{
     sys::{signal, signal::Signal, wait, wait::WaitStatus},
     unistd::Pid,
 };
-use std::{future::Future, os::unix::io::AsRawFd, time, time::Duration};
+use std::{fmt, future::Future, os::unix::io::AsRawFd, time, time::Duration};
 use stop_token::StopSource;
 
 const ENV_DATA: &str = "DATA";
@@ -142,6 +142,17 @@ pub struct Process {
     _stdout: CaptureOutput,
     /// Captured stderr output
     _stderr: CaptureOutput,
+}
+
+impl fmt::Debug for Process {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Process")
+         .field("pid", &self.pid)
+         .field("termination_reason", &self.termination_reason)
+         .field("started", &self.started)
+         .field("exit", &self.exit)
+         .finish()
+    }
 }
 
 impl Process {
