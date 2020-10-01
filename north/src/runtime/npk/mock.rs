@@ -163,9 +163,9 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
     Ok((manifest.name, manifest.version))
 }
 
-// pub async fn uninstall(container: &Container) -> Result<()> {
-//     debug!("Removing {}", container.root.display());
-//     fs::remove_dir_all(&container.root)
-//         .await
-//         .with_context(|| format!("Failed to remove {}", container.root.display()))
-// }
+pub async fn uninstall(container: &Container) -> Result<()> {
+    debug!("Removing {}", container.root.display());
+    fs::remove_dir_all(&container.root)
+        .await
+        .with_context(|| format!("Failed to remove {}", container.root.display()))
+}
