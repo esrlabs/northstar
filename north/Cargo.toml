@@ -66,6 +66,8 @@ runtime = [
     "libc",
     "minijail",
     "nix",
+    "proc-mounts",
+    "procinfo",
     "regex",
     "serde",
     "serde_json",
@@ -82,10 +84,9 @@ runtime = [
     "zip",
 ]
 
-# TODO: This should be optional and a dep of features runtime
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
-proc-mounts = { version = "0.2.4" }
-procinfo = { version = "0.4.2" }
+proc-mounts = { version = "0.2.4", optional = true }
+procinfo = { version = "0.4.2", optional = true }
 
 [build-dependencies]
 vergen = "3.1.0"
