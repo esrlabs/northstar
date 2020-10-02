@@ -15,7 +15,7 @@
 use super::state::State;
 use crate::{
     api,
-    runtime::{Event, EventTx, TerminationReason},
+    runtime::{Event, EventTx},
 };
 use anyhow::{Context, Result};
 use api::{
@@ -100,14 +100,7 @@ impl Console {
                     },
                 },
                 Request::Stop(name) => {
-                    match state
-                        .stop(
-                            &name,
-                            std::time::Duration::from_secs(1),
-                            TerminationReason::Stopped,
-                        )
-                        .await
-                    {
+                    match state.stop(&name, std::time::Duration::from_secs(1)).await {
                         Ok(_) => Response::Stop {
                             result: StopResult::Success,
                         },

@@ -12,10 +12,15 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config::Config, keys, npk::Container, process::Process};
+use super::{
+    config::Config,
+    keys,
+    npk::Container,
+    process::{ExitStatus, Process},
+};
 use crate::{
     manifest::{Manifest, Name, Version},
-    runtime::{Event, EventTx, TerminationReason},
+    runtime::{Event, EventTx},
 };
 use anyhow::{Error as AnyhowError, Result};
 use async_std::path::PathBuf;
@@ -62,7 +67,7 @@ pub struct Application {
 
 #[derive(Debug)]
 pub struct ProcessContext {
-    process: Process,
+    process: Box<dyn Process>,
     incarnation: u32,
     start_timestamp: time::Instant,
     #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -70,8 +75,12 @@ pub struct ProcessContext {
 }
 
 impl ProcessContext {
-    pub fn process(&self) -> &Process {
-        &self.process
+    pub fn process(&self) -> &dyn Process {
+        self.process.as_ref()
+    }
+
+    pub fn process_mut(&mut self) -> &mut dyn Process {
+        self.process.as_mut()
     }
 
     pub fn uptime(&self) -> Duration {
@@ -154,8 +163,6 @@ impl State {
     }
 
     pub async fn start(&mut self, name: &str) -> result::Result<(), Error> {
-        let tx = self.tx.clone();
-
         // Setup set of available resources
         let resources = self
             .applications
@@ -199,12 +206,26 @@ impl State {
 
         // Spawn process
         info!("Starting {}", app);
-        let run_dir: PathBuf = self.config.directories.run_dir.clone().into();
-        let uid = self.config.container_uid;
-        let gid = self.config.container_gid;
-        let process = Process::spawn(run_dir.as_path(), &app.container, uid, gid, tx)
+
+        // Android and Linux
+        #[cfg(any(target_os = "android", target_os = "linux"))]
+        let process = super::process::minijail::MinijailProcess::start(
+            &app.container,
+            self.tx.clone(),
+            self.config.directories.run_dir.as_path().into(),
+            self.config.container_uid,
+            self.config.container_gid,
+        )
+        .await
+        .map_err(Error::ProcessError)?;
+
+        // Not Android or Linux
+        #[cfg(not(any(target_os = "android", target_os = "linux")))]
+        let process = super::process::os::OsProcess::start(&app.container, self.tx.clone())
             .await
             .map_err(Error::ProcessError)?;
+
+        let process = Box::new(process) as Box<dyn Process>;
 
         // CGroups
         #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -243,21 +264,15 @@ impl State {
 
     /// Stop a application. Timeout specifies the time until the process is
     /// SIGKILLed if it doesn't exit when receiving a SIGTERM
-    pub async fn stop(
-        &mut self,
-        name: &str,
-        timeout: Duration,
-        reason: TerminationReason,
-    ) -> result::Result<(), Error> {
+    pub async fn stop(&mut self, name: &str, timeout: Duration) -> result::Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(mut context) = app.process.take() {
                 info!("Stopping {}", app);
                 let status = context
                     .process
-                    .terminate(timeout, Some(reason))
+                    .stop(timeout)
                     .await
-                    .map_err(Error::ProcessError)?
-                    .await;
+                    .map_err(Error::ProcessError)?;
 
                 #[cfg(any(target_os = "android", target_os = "linux"))]
                 {
@@ -329,15 +344,14 @@ impl State {
 
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally
-    pub async fn on_exit(&mut self, name: &str, return_code: i32) -> Result<()> {
+    pub async fn on_exit(&mut self, name: &str, exit_status: &ExitStatus) -> Result<()> {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(context) = app.process.take() {
                 info!(
-                    "Process {} exited after {:?} with code {} and termination reason {:?}",
+                    "Process {} exited after {:?} and status {:?}",
                     app,
                     context.start_timestamp.elapsed(),
-                    return_code,
-                    context.process.termination_reason()
+                    exit_status,
                 );
 
                 #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -358,22 +372,15 @@ impl State {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(mut context) = app.process.take() {
                 warn!("Process {} is out of memory. Stopping {}", app, app);
-                let status = context
-                    .process
-                    .terminate(Duration::from_secs(1), Some(TerminationReason::OutOfMemory))
+                // TODO: This might be under control of someone else. Maybe
+                // add a flag to the manifest whether to stop a oom app
+                // or not
+                info!("Stopping {}", app);
+                context
+                    .process_mut()
+                    .stop(Duration::from_secs(1))
                     .await
-                    .map_err(Error::ProcessError)?
-                    .await;
-
-                #[cfg(any(target_os = "android", target_os = "linux"))]
-                {
-                    if let Some(cgroups) = context.cgroups {
-                        log::debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::ProcessError)?;
-                    }
-                }
-
-                info!("Stopped {} {:?}", app, status);
+                    .map_err(Error::ProcessError)?;
             }
         }
         Ok(())
