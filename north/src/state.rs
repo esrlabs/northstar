@@ -30,15 +30,15 @@ pub struct Application {
     process: Option<ProcessContext>,
 }
 
-pub struct ProcessContext {
-    process: Process,
+pub struct ProcessContext<T: Process> {
+    process: T,
     incarnation: u32,
     start_timestamp: time::Instant,
     #[cfg(any(target_os = "android", target_os = "linux"))]
     cgroups: Option<crate::linux::cgroups::CGroups>,
 }
 
-impl ProcessContext {
+impl ProcessContext<T> {
     pub fn process(&self) -> &Process {
         &self.process
     }

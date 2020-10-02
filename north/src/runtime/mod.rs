@@ -27,6 +27,7 @@ use async_std::{fs, path::PathBuf, sync};
 use config::Config;
 use log::*;
 use nix::unistd::{self, chown};
+use process::ExitStatus;
 use state::State;
 
 pub type EventTx = sync::Sender<Event>;
@@ -37,7 +38,7 @@ pub enum Event {
     /// Incomming command
     Console(api::Message, sync::Sender<api::Message>),
     /// A instance exited with return code
-    Exit(Name, i32),
+    Exit(Name, ExitStatus),
     /// Out of memory event occured
     Oom(Name),
     /// Fatal unhandleable error
@@ -133,7 +134,9 @@ pub async fn run(config: &Config) -> Result<()> {
     // Enter main loop
     while let Ok(event) = rx.recv().await {
         match event {
-            Event::ChildOutput { name, fd, line } => on_child_output(&mut state, &name, fd, &line),
+            Event::ChildOutput { name, fd, line } => {
+                on_child_output(&mut state, &name, fd, &line).await
+            }
             // Debug console commands are handled via the main loop in order to get access
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
@@ -144,7 +147,7 @@ pub async fn run(config: &Config) -> Result<()> {
             // carries the id of the container that is oom.
             Event::Oom(id) => state.on_oom(&id).await?,
             // A container process existed. Check `process::wait_exit` for details.
-            Event::Exit(ref name, return_code) => state.on_exit(name, return_code).await?,
+            Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await?,
             // Handle unrecoverable errors by logging it and do a gracefull shutdown.
             Event::Error(ref error) => {
                 error!("Fatal error: {}", error);
@@ -161,7 +164,7 @@ pub async fn run(config: &Config) -> Result<()> {
 }
 
 /// This is a starting point for doing something meaningful with the childs outputs.
-fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
+async fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
     if let Some(p) = state.application(name) {
         if let Some(p) = p.process_context() {
             debug!("[{}] {}: {}: {}", p.process().pid(), name, fd, line);

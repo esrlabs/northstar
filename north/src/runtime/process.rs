@@ -12,474 +12,560 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::npk::Container;
-use crate::{
-    manifest::Resource,
-    runtime::{Event, EventTx, TerminationReason},
-};
-use anyhow::{anyhow, Context, Result};
-use async_std::{
-    fs, io,
-    path::{Path, PathBuf},
-    prelude::*,
-    sync, task,
-};
-use futures::{future::FutureExt, select, StreamExt};
-use log::*;
+use super::{npk::Container, Event, EventTx};
+use anyhow::{anyhow, Result};
+use async_std::{sync, task};
+use async_trait::async_trait;
+use futures::{select, FutureExt, StreamExt};
+use log::debug;
 use nix::{
-    sys::{signal, signal::Signal, wait, wait::WaitStatus},
-    unistd::Pid,
+    sys::{signal, wait},
+    unistd,
 };
-use std::{fmt, future::Future, os::unix::io::AsRawFd, time, time::Duration};
-use stop_token::StopSource;
+use std::{fmt::Debug, time};
+use wait::WaitStatus;
 
 const ENV_DATA: &str = "DATA";
 const ENV_NAME: &str = "NAME";
 const ENV_VERSION: &str = "VERSION";
 
-#[derive(Debug)]
+type ExitCode = i32;
+pub type Pid = u32;
+
+#[derive(Clone, Debug)]
 pub enum ExitStatus {
-    Exit(i32),
+    /// Process exited with exit code
+    Exit(ExitCode),
+    /// Process was killed
     Killed,
 }
 
-// Capture output of a child process. Create a fifo and spawn a task that forwards each line to
-// the main loop. When this struct is dropped the internal spawned tasks are stopped.
 #[derive(Debug)]
-struct CaptureOutput {
-    // Stop token to interrupt the stream
-    stop_source: StopSource,
-    // Fd
-    fd: i32,
-    // File instance to the write part. The raw fd of File is passed to minijail
-    // and File must be kept in scope to avoid that it is closed.
-    write: std::fs::File,
+struct ExitHandleWait(sync::Receiver<ExitStatus>);
+
+#[derive(Clone, Debug)]
+struct ExitHandleSignal(sync::Sender<ExitStatus>);
+
+impl ExitHandleSignal {
+    pub async fn signal(&mut self, status: ExitStatus) {
+        self.0.send(status).await
+    }
 }
 
-impl CaptureOutput {
-    pub async fn new(
-        tmpdir: &std::path::Path,
+#[derive(Debug)]
+pub struct ExitHandle {
+    signal: ExitHandleSignal,
+    wait: ExitHandleWait,
+}
+
+impl ExitHandle {
+    pub fn new() -> ExitHandle {
+        let (tx, rx) = sync::channel(1);
+        ExitHandle {
+            signal: ExitHandleSignal(tx),
+            wait: ExitHandleWait(rx),
+        }
+    }
+    async fn wait(&mut self) -> Option<ExitStatus> {
+        self.wait.0.next().await
+    }
+
+    fn signal(&self) -> ExitHandleSignal {
+        self.signal.clone()
+    }
+}
+
+#[async_trait]
+pub trait Process: Debug + Sync + Send {
+    fn pid(&self) -> Pid;
+    async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus>;
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+pub mod os {
+    use super::*;
+    use anyhow::Context;
+    use std::process;
+
+    #[derive(Debug)]
+    pub struct OsProcess {
+        exit_handle: ExitHandle,
+        child: process::Child,
+    }
+
+    impl OsProcess {
+        pub async fn start(container: &Container, event_tx: EventTx) -> Result<OsProcess> {
+            let manifest = &container.manifest;
+
+            // Init
+            let init = if let Some(ref init) = manifest.init {
+                init.display().to_string()
+            } else {
+                return Err(anyhow!(
+                    "Cannot start a resource container {}:{}",
+                    manifest.name,
+                    manifest.version
+                ));
+            };
+            let init = container.root.join(init.trim_start_matches('/'));
+
+            // Command
+            let mut cmd = std::process::Command::new(&init);
+
+            // Arguments
+            manifest.args.as_ref().map(|args| cmd.args(args));
+
+            // Environment
+            let mut env = manifest.env.clone().unwrap_or_default();
+            env.push((ENV_DATA.to_string(), container.data.display().to_string())); // TODO OSX
+            env.push((ENV_NAME.to_string(), manifest.name.to_string()));
+            env.push((ENV_VERSION.to_string(), manifest.version.to_string()));
+            cmd.envs(env.drain(..));
+
+            // Spawn
+            let child = cmd
+                .spawn()
+                .with_context(|| format!("Failed to execute {}", init.display()))?;
+
+            let pid = child.id();
+            debug!("Started {}", container.manifest.name);
+
+            let exit_handle = ExitHandle::new();
+            // Spawn a task thats waits for the child to exit
+            waitpid(&manifest.name, pid, exit_handle.signal(), event_tx).await;
+
+            Ok(OsProcess { exit_handle, child })
+        }
+    }
+
+    #[async_trait]
+    impl Process for OsProcess {
+        fn pid(&self) -> Pid {
+            self.child.id()
+        }
+
+        async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus> {
+            // Send a SIGTERM to the application. If the application does not terminate with a timeout
+            // it is SIGKILLed.
+            let sigterm = signal::Signal::SIGTERM;
+            signal::kill(unistd::Pid::from_raw(self.child.id() as i32), Some(sigterm))
+                .with_context(|| format!("Failed to SIGTERM {}", self.child.id()))?;
+
+            let mut timeout = Box::pin(task::sleep(timeout).fuse());
+            let mut exited = Box::pin(self.exit_handle.wait()).fuse();
+
+            let pid = self.child.id();
+            Ok(select! {
+                s = exited => {
+                    if let Some(exit_status) = s {
+                        exit_status
+                    } else {
+                        return Err(anyhow!("Internal error"));
+                    }
+                }, // This is the happy path...
+                _ = timeout => {
+                    signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))?;
+                    ExitStatus::Killed
+                }
+            })
+        }
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+pub mod minijail {
+    use super::*;
+    use std::fmt;
+
+    use anyhow::{Context, Result};
+    use async_std::{
+        fs, io,
+        path::{Path, PathBuf},
+        task,
+    };
+    use futures::StreamExt;
+    use io::prelude::{BufReadExt, WriteExt};
+    use stop_token::StopSource;
+
+    use crate::runtime::{Event, EventTx};
+    use std::os::unix::io::AsRawFd;
+
+    // We need a Send + Sync version of Minijail
+    struct Minijail(::minijail::Minijail);
+    unsafe impl Send for Minijail {}
+    unsafe impl Sync for Minijail {}
+
+    // Capture output of a child process. Create a fifo and spawn a task that forwards each line to
+    // the main loop. When this struct is dropped the internal spawned tasks are stopped.
+    #[derive(Debug)]
+    struct CaptureOutput {
+        // Stop token to interrupt the stream
+        stop_source: StopSource,
+        // Fd
         fd: i32,
-        tag: &str,
-        event_tx: EventTx,
-    ) -> Result<CaptureOutput> {
-        let fifo = tmpdir.join(fd.to_string());
-        use nix::sys::stat::Mode;
-        nix::unistd::mkfifo(
-            &fifo,
-            Mode::S_IRUSR | Mode::S_IWUSR, //| Mode::S_IROTH | Mode::S_IWOTH,
-        )
-        .context("Failed to mkfifo")?;
+        // File instance to the write part. The raw fd of File is passed to minijail
+        // and File must be kept in scope to avoid that it is closed.
+        write: std::fs::File,
+    }
 
-        // Open the writing part in blocking mode
-        let write = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&fifo)
-            .with_context(|| format!("Failed to open fifo {}", fifo.display()))?;
+    impl CaptureOutput {
+        pub async fn new(
+            tmpdir: &std::path::Path,
+            fd: i32,
+            tag: &str,
+            event_tx: EventTx,
+        ) -> Result<CaptureOutput> {
+            let fifo = tmpdir.join(fd.to_string());
+            use nix::sys::stat::Mode;
+            nix::unistd::mkfifo(
+                &fifo,
+                Mode::S_IRUSR | Mode::S_IWUSR, //| Mode::S_IROTH | Mode::S_IWOTH,
+            )
+            .context("Failed to mkfifo")?;
 
-        let read = fs::OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(&fifo)
-            .await
-            .with_context(|| format!("Failed to open fifo {}", fifo.display()))?;
+            // Open the writing part in blocking mode
+            let write = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&fifo)
+                .with_context(|| format!("Failed to open fifo {}", fifo.display()))?;
 
-        let stop_source = stop_token::StopSource::new();
-        let lines = io::BufReader::new(read).lines();
-        // Wrap lines in stop_source
-        let mut lines = stop_source.stop_token().stop_stream(lines);
+            let read = fs::OpenOptions::new()
+                .read(true)
+                .write(false)
+                .open(&fifo)
+                .await
+                .with_context(|| format!("Failed to open fifo {}", fifo.display()))?;
 
-        let tag = tag.to_string();
-        task::spawn(async move {
-            // The removal of tmpdir lines return a None and the loop breaks
-            while let Some(Ok(line)) = lines.next().await {
-                event_tx
-                    .send(Event::ChildOutput {
-                        name: tag.clone(),
-                        fd,
-                        line,
-                    })
-                    .await;
+            let stop_source = stop_token::StopSource::new();
+            let lines = io::BufReader::new(read).lines();
+            // Wrap lines in stop_source
+            let mut lines = stop_source.stop_token().stop_stream(lines);
+
+            let tag = tag.to_string();
+            task::spawn(async move {
+                // The removal of tmpdir lines return a None and the loop breaks
+                while let Some(Ok(line)) = lines.next().await {
+                    event_tx
+                        .send(Event::ChildOutput {
+                            name: tag.clone(),
+                            fd,
+                            line,
+                        })
+                        .await;
+                }
+            });
+
+            Ok(CaptureOutput {
+                stop_source,
+                fd,
+                write,
+            })
+        }
+
+        pub fn read_fd(&self) -> i32 {
+            self.fd
+        }
+
+        pub fn write_fd(&self) -> i32 {
+            self.write.as_raw_fd()
+        }
+    }
+
+    pub struct MinijailProcess {
+        /// PID of this process
+        pid: u32,
+        /// Handle to a libminijail configuration
+        _jail: Minijail,
+        /// Temporary directory created in the systems tmp folder.
+        /// This directory holds process instance specific data that needs
+        /// to be dumped to disk for startup. e.g seccomp config (TODO)
+        _tmpdir: tempfile::TempDir,
+        /// Captured stdout output
+        _stdout: CaptureOutput,
+        /// Captured stderr output
+        _stderr: CaptureOutput,
+        /// Sender and receiver for signaling this process exit
+        exit_handle: ExitHandle,
+    }
+
+    impl fmt::Debug for MinijailProcess {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Process").field("pid", &self.pid).finish()
+        }
+    }
+
+    impl MinijailProcess {
+        pub async fn start(
+            container: &Container,
+            event_tx: EventTx,
+            run_dir: &Path,
+            uid: u32,
+            gid: u32,
+        ) -> Result<MinijailProcess> {
+            let root: std::path::PathBuf = container.root.clone().into();
+            let manifest = &container.manifest;
+            let mut jail = ::minijail::Minijail::new().context("Failed to build a minijail")?;
+
+            let init = manifest
+                .init
+                .as_ref()
+                .ok_or_else(|| anyhow!("Cannot start a resource"))?;
+
+            let tmpdir = tempfile::TempDir::new()
+                .with_context(|| format!("Failed to create tmpdir for {}", manifest.name))?;
+            let tmpdir_path = tmpdir.path();
+
+            let stdout =
+                CaptureOutput::new(tmpdir_path, 1, &manifest.name, event_tx.clone()).await?;
+            let stderr =
+                CaptureOutput::new(tmpdir_path, 2, &manifest.name, event_tx.clone()).await?;
+
+            // Dump seccomp config to process tmpdir. This is a subject to be changed since
+            // minijail provides a API to configure seccomp without writing to a file.
+            // TODO: configure seccomp via API instead of a file
+            if let Some(ref seccomp) = container.manifest.seccomp {
+                let seccomp_config = tmpdir_path.join("seccomp");
+                let mut f = fs::File::create(&seccomp_config)
+                    .await
+                    .context("Failed to create seccomp configuraiton")?;
+                let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
+                f.write_all(s.as_bytes())
+                    .await
+                    .context("Failed to write seccomp configuraiton")?;
+
+                // Temporary disabled
+                // Must be called before parse_seccomp_filters
+                // jail.log_seccomp_filter_failures();
+                // let p: std::path::PathBuf = seccomp_config.into();
+                // jail.parse_seccomp_filters(p.as_path())
+                //     .context("Failed parse seccomp config")?;
+                // jail.use_seccomp_filter();
             }
-        });
 
-        Ok(CaptureOutput {
-            stop_source,
-            fd,
-            write,
+            // Configure UID
+            jail.change_uid(uid);
+            // Configure PID
+            jail.change_gid(gid);
+
+            // TODO: Do not use pid namespace because of multithreadding
+            // issues discovered by minijail. See libminijail.c for details.
+            // Make the process enter a pid namespace
+            //jail.namespace_pids();
+
+            // Make the process enter a vfs namespace
+            jail.namespace_vfs();
+            // Set no_new_privs. See </kernel/seccomp.c> and </kernel/sys.c>
+            // in the kernel source tree for an explanation of the parameters.
+            jail.no_new_privs();
+            // Set chroot dir for process
+            jail.enter_chroot(&root.as_path())?;
+            // Make the application the init process
+            jail.run_as_init();
+
+            // Configure bind mounts
+            #[cfg(target_os = "android")]
+            let mounts = &["/sys", "/dev", "/proc", "/system"];
+            #[cfg(not(target_os = "android"))]
+            let mounts = &["/sys", "/dev", "/proc", "/lib", "/lib64"];
+
+            for target in mounts.iter().map(PathBuf::from) {
+                if target == PathBuf::from("/lib64") && !target.exists().await {
+                    continue;
+                }
+                mount_bind(&mut jail, &target.as_path(), &target, false)?;
+            }
+
+            // /data is mounted rw
+            mount_bind(&mut jail, &container.data, &PathBuf::from("/data"), true)?;
+
+            // Mount resource containers
+            if let Some(ref resources) = container.manifest.resources {
+                for res in resources {
+                    let shared_resource_path = {
+                        let dir_in_container_path: PathBuf = res.dir.clone().into();
+                        let first_part_of_path =
+                            run_dir.join(&res.name).join(&res.version.to_string());
+
+                        let src_dir = dir_in_container_path
+                            .strip_prefix("/")
+                            .map(|dir_in_resource_container| {
+                                first_part_of_path.join(dir_in_resource_container)
+                            })
+                            .unwrap_or(first_part_of_path);
+
+                        if src_dir.exists().await {
+                            Ok(src_dir)
+                        } else {
+                            Err(anyhow!(format!(
+                                "Resource folder {} is missing",
+                                src_dir.display()
+                            )))
+                        }
+                    }?;
+
+                    let target: PathBuf = res.mountpoint.clone().into();
+                    mount_bind(&mut jail, &shared_resource_path, target.as_path(), false)?;
+                }
+            }
+
+            let mut args: Vec<&str> = Vec::new();
+            if let Some(init) = &manifest.init {
+                if let Some(init_path_str) = init.to_str() {
+                    args.push(init_path_str);
+                }
+            };
+            if let Some(ref manifest_args) = manifest.args {
+                for a in manifest_args {
+                    args.push(a);
+                }
+            }
+
+            // Create environment for process. Set data directory, container name and version
+            let mut env = manifest.env.clone().unwrap_or_default();
+            env.push((ENV_DATA.to_string(), "/data".to_string())); // TODO OSX
+            env.push((ENV_NAME.to_string(), manifest.name.to_string()));
+            env.push((ENV_VERSION.to_string(), manifest.version.to_string()));
+            let env = env
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<String>>();
+            let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
+
+            let pid = jail.run_remap_env_preload(
+                &std::path::PathBuf::from(init.as_path()),
+                &[
+                    (stderr.write_fd(), stderr.read_fd()),
+                    (stdout.write_fd(), stdout.read_fd()),
+                ],
+                &args,
+                &env,
+                false,
+            )? as u32;
+
+            let exit_handle = ExitHandle::new();
+            // Spawn a task thats waits for the child to exit
+            waitpid(&manifest.name, pid, exit_handle.signal(), event_tx).await;
+
+            Ok(MinijailProcess {
+                pid,
+                _jail: Minijail(jail),
+                _tmpdir: tmpdir,
+                _stdout: stdout,
+                _stderr: stderr,
+                exit_handle,
+            })
+        }
+    }
+
+    fn mount_bind(
+        jail: &mut ::minijail::Minijail,
+        src: &Path,
+        target: &Path,
+        writable: bool,
+    ) -> Result<()> {
+        let src: &std::path::Path = src.into();
+        let target: &std::path::Path = target.into();
+        jail.mount_bind(&src, &target, writable).with_context(|| {
+            format!(
+                "Failed to add bind mount of {} to {}",
+                src.display(),
+                target.display(),
+            )
         })
     }
 
-    pub fn fd(&self) -> i32 {
-        self.fd
-    }
-
-    pub fn write_fd(&self) -> i32 {
-        self.write.as_raw_fd()
-    }
-}
-
-pub struct Process {
-    /// PID of this process
-    pid: u32,
-    /// Handle to a libminijail configuration
-    _jail: minijail::Minijail,
-    /// If the process is intentionally shut down the termination_reason
-    /// is set. This is used to distinguish crashes and graceful shutdowns
-    termination_reason: Option<TerminationReason>,
-    /// Timstamp when the process is spawned
-    started: time::Instant,
-    /// Handle to the main loop.
-    event_tx: EventTx,
-    /// Internal rx part of the shutdown detection
-    exit: Option<sync::Receiver<i32>>,
-    /// Temporary directory created in the systems tmp folder.
-    /// This directory holds process instance specific data that needs
-    /// to be dumped to disk for startup. e.g seccomp config (TODO)
-    _tmpdir: tempfile::TempDir,
-    /// Captured stdout output
-    _stdout: CaptureOutput,
-    /// Captured stderr output
-    _stderr: CaptureOutput,
-}
-
-impl fmt::Debug for Process {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Process")
-         .field("pid", &self.pid)
-         .field("termination_reason", &self.termination_reason)
-         .field("started", &self.started)
-         .field("exit", &self.exit)
-         .finish()
-    }
-}
-
-impl Process {
-    pub fn termination_reason(&self) -> Option<TerminationReason> {
-        self.termination_reason.clone()
-    }
-
-    // pub fn start_timestamp(&self) -> time::Instant {
-    //     self.started
-    // }
-
-    pub async fn spawn(
-        run_dir: &Path,
-        container: &Container,
-        uid: u32,
-        gid: u32,
-        event_tx: EventTx,
-    ) -> Result<Process> {
-        let root: std::path::PathBuf = container.root.clone().into();
-        let manifest = &container.manifest;
-        let mut jail = minijail::Minijail::new().context("Failed to build a minijail")?;
-
-        let cmd = match &manifest.init {
-            Some(a) => a.clone(),
-            None => {
-                let error = format!(
-                    "Cannot start a resource container {}:{}",
-                    manifest.name, manifest.version
-                );
-                warn!("{}", error);
-                return Err(anyhow!(error));
-            }
-        };
-
-        let tmpdir = tempfile::TempDir::new()
-            .with_context(|| format!("Failed to create tmpdir for {}", manifest.name))?;
-        let tmpdir_path = tmpdir.path();
-
-        let stdout = CaptureOutput::new(tmpdir_path, 1, &manifest.name, event_tx.clone()).await?;
-        let stderr = CaptureOutput::new(tmpdir_path, 2, &manifest.name, event_tx.clone()).await?;
-
-        // Dump seccomp config to process tmpdir. This is a subject to be changed since
-        // minijail provides a API to configure seccomp without writing to a file.
-        // TODO: configure seccomp via API instead of a file
-        if let Some(ref seccomp) = container.manifest.seccomp {
-            let seccomp_config = tmpdir_path.join("seccomp");
-            let mut f = fs::File::create(&seccomp_config)
-                .await
-                .context("Failed to create seccomp configuraiton")?;
-            let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
-            f.write_all(s.as_bytes())
-                .await
-                .context("Failed to write seccomp configuraiton")?;
-
-            // Temporary disabled
-            // Must be called before parse_seccomp_filters
-            // jail.log_seccomp_filter_failures();
-            // let p: std::path::PathBuf = seccomp_config.into();
-            // jail.parse_seccomp_filters(p.as_path())
-            //     .context("Failed parse seccomp config")?;
-            // jail.use_seccomp_filter();
+    #[async_trait]
+    impl Process for MinijailProcess {
+        fn pid(&self) -> Pid {
+            self.pid
         }
 
-        // Configure UID
-        jail.change_uid(uid);
-        // Configure PID
-        jail.change_gid(gid);
+        async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus> {
+            // Send a SIGTERM to the application. If the application does not terminate with a timeout
+            // it is SIGKILLed.
+            let sigterm = signal::Signal::SIGTERM;
+            signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm))
+                .with_context(|| format!("Failed to SIGTERM {}", self.pid))?;
 
-        // TODO: Do not use pid namespace because of multithreadding
-        // issues discovered by minijail. See libminijail.c for details.
-        // Make the process enter a pid namespace
-        //jail.namespace_pids();
+            let mut timeout = Box::pin(task::sleep(timeout).fuse());
+            let mut exited = Box::pin(self.exit_handle.wait()).fuse();
 
-        // Make the process enter a vfs namespace
-        jail.namespace_vfs();
-        // Set no_new_privs. See </kernel/seccomp.c> and </kernel/sys.c>
-        // in the kernel source tree for an explanation of the parameters.
-        jail.no_new_privs();
-        // Set chroot dir for process
-        jail.enter_chroot(&root.as_path())?;
-        // Make the application the init process
-        jail.run_as_init();
-
-        // Configure bind mounts
-        #[cfg(target_os = "android")]
-        let mounts = &["/sys", "/dev", "/proc", "/system"];
-        #[cfg(target_os = "linux")]
-        let mounts = &["/sys", "/dev", "/proc", "/lib", "/lib64"];
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        for mount in mounts {
-            let path = std::path::PathBuf::from(mount);
-            if *mount == "/lib64" && !path.exists() {
-                continue;
-            }
-            mount_bind(&mut jail, &path.as_path(), &path.as_path(), false)?;
-        }
-
-        // /data is mounted rw
-        let data: std::path::PathBuf = container.data.clone().into();
-        mount_bind(
-            &mut jail,
-            &data.as_path(),
-            &std::path::PathBuf::from("/data").as_path(),
-            true,
-        )?;
-
-        // Mount resource containers
-        for (src_dir, mountpoint) in
-            collect_resource_folders(run_dir, container.manifest.resources.as_ref()).await?
-        {
-            info!("Mounting from {} on {:?}", src_dir.display(), mountpoint);
-            let source: std::path::PathBuf = src_dir.into();
-            let mountpoint: std::path::PathBuf = mountpoint.into();
-            mount_bind(&mut jail, &source, &mountpoint, false)?;
-        }
-
-        let mut args: Vec<&str> = Vec::new();
-        if let Some(init) = &manifest.init {
-            if let Some(init_path_str) = init.to_str() {
-                args.push(init_path_str);
-            }
-        };
-        if let Some(ref manifest_args) = manifest.args {
-            for a in manifest_args {
-                args.push(a);
-            }
-        }
-
-        // Create environment for process. Set data directory, container name and version
-        let mut env = manifest.env.clone().unwrap_or_default();
-        env.push((ENV_DATA.to_string(), "/data".to_string())); // TODO OSX
-        env.push((ENV_NAME.to_string(), manifest.name.to_string()));
-        env.push((ENV_VERSION.to_string(), manifest.version.to_string()));
-        let env = env
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<String>>();
-        let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
-
-        let started = time::Instant::now();
-
-        let pid = jail.run_remap_env_preload(
-            &std::path::PathBuf::from(cmd.as_path()),
-            &[
-                (stderr.write_fd(), stderr.fd()),
-                (stdout.write_fd(), stdout.fd()),
-            ],
-            &args,
-            &env,
-            false,
-        )? as u32;
-
-        let (exit_tx, exit_rx) = sync::channel::<i32>(1);
-
-        let process = Process {
-            pid,
-            _jail: jail,
-            started,
-            event_tx: event_tx.clone(),
-            termination_reason: None,
-            exit: Some(exit_rx),
-            _tmpdir: tmpdir,
-            _stdout: stdout,
-            _stderr: stderr,
-        };
-
-        // Spawn background task that waits for the process exit
-        wait_for_exit(&container.manifest.name, pid, exit_tx, event_tx.clone());
-
-        Ok(process)
-    }
-
-    pub async fn terminate(
-        &mut self,
-        time_to_kill: Duration,
-        termination_reason: Option<TerminationReason>,
-    ) -> Result<impl Future<Output = ExitStatus>> {
-        let pid = self.pid;
-
-        // Send a SIGTERM to the application. If the application does not terminate with a timeout
-        // it is SIGKILLed.
-        signal::kill(Pid::from_raw(pid as i32), Some(Signal::SIGTERM))
-            .with_context(|| format!("Failed to SIGTERM {}", self.pid))?;
-
-        let tx = self.event_tx.clone();
-
-        self.termination_reason = termination_reason;
-
-        let mut exit_rx = if let Some(exit_rx) = self.exit.take() {
-            exit_rx
-        } else {
-            warn!("Called terminate on already exiting process {}", pid);
-            return Err(anyhow!(
-                "Terminate called on already exiting process {}",
-                pid
-            ));
-        };
-
-        // Spawn a task that kills the process if it doesn't exit within time_to_kill
-        Ok(task::spawn(async move {
-            let mut timeout = Box::pin(task::sleep(time_to_kill).fuse());
-            let mut exited = Box::pin(exit_rx.next().fuse());
-
-            select! {
-                _ = exited => {
-                    ExitStatus::Exit(0)
+            let pid = self.pid;
+            Ok(select! {
+                s = exited => {
+                    if let Some(exit_status) = s {
+                        exit_status
+                    } else {
+                        return Err(anyhow!("Internal error"));
+                    }
                 }, // This is the happy path...
                 _ = timeout => {
-                    if let Err(e) = signal::kill(Pid::from_raw(pid as i32), Some(Signal::SIGKILL)) {
-                        // If we couldn't send a SIGKILL we have a problem
-                        tx.send(Event::Error(anyhow!("Failed to kill pid {}", pid)))
-                            .await;
-                    }
+                    signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))?;
                     ExitStatus::Killed
                 }
-            }
-        }))
-    }
-
-    pub fn pid(&self) -> u32 {
-        self.pid
+            })
+        }
     }
 }
 
 /// Spawn a task that waits for the process to exit. Once the process is exited send the return code
 // (if any) to the exit_tx handle passed
-fn wait_for_exit(name: &str, pid: u32, exit_tx: sync::Sender<i32>, event_tx: EventTx) {
+async fn waitpid(name: &str, pid: u32, mut exit_handle: ExitHandleSignal, event_handle: EventTx) {
     let name = name.to_string();
     task::spawn(async move {
         let exit_code: i32 = task::spawn_blocking(move || {
-            let pid = Pid::from_raw(pid as i32);
-            let result = wait::waitpid(Some(pid), None);
-            debug!("Result of wait_pid is {:?}", result);
+            let pid = unistd::Pid::from_raw(pid as i32);
+            loop {
+                let result = wait::waitpid(Some(pid), None);
+                debug!("Result of wait_pid is {:?}", result);
 
-            match result {
-                // The process exited normally (as with exit() or returning from main) with the given exit code.
-                // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
-                Ok(WaitStatus::Exited(_pid, code)) => code,
+                match result {
+                    // The process exited normally (as with exit() or returning from main) with the given exit code.
+                    // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
+                    Ok(WaitStatus::Exited(_pid, code)) => return code,
 
-                // The process was killed by the given signal.
-                // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
-                Ok(WaitStatus::Signaled(_pid, signal, _dump)) => match signal {
-                    Signal::SIGTERM => 0,
-                    _ => 1,
-                },
+                    // The process was killed by the given signal.
+                    // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
+                    Ok(WaitStatus::Signaled(_pid, signal, _dump)) => {
+                        return match signal {
+                            signal::Signal::SIGTERM => 0,
+                            _ => 1,
+                        }
+                    }
 
-                // The process is alive, but was stopped by the given signal.
-                //  This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
-                Ok(WaitStatus::Stopped(_pid, _signal)) => 1,
+                    // The process is alive, but was stopped by the given signal.
+                    // This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
+                    Ok(WaitStatus::Stopped(_pid, _signal)) => continue,
 
-                // The traced process was stopped by a PTRACE_EVENT_* event.
-                // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                Ok(WaitStatus::PtraceEvent(_pid, _signal, _)) => 1,
+                    // The traced process was stopped by a PTRACE_EVENT_* event.
+                    // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    Ok(WaitStatus::PtraceEvent(_pid, _signal, _)) => continue,
 
-                // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
-                // See ptrace(2) for more information.
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                Ok(WaitStatus::PtraceSyscall(_pid)) => 1,
+                    // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
+                    // See ptrace(2) for more information.
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    Ok(WaitStatus::PtraceSyscall(_pid)) => continue,
 
-                // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
-                // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
-                Ok(WaitStatus::Continued(_pid)) => 1,
+                    // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
+                    // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
+                    Ok(WaitStatus::Continued(_pid)) => continue,
 
-                // There are currently no state changes to report in any awaited child process.
-                // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
-                Ok(WaitStatus::StillAlive) => unreachable!(),
-                Err(e) => {
-                    warn!("Failed to waitpid on {}: {}", pid, e);
-                    1
+                    // There are currently no state changes to report in any awaited child process.
+                    // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
+                    Ok(WaitStatus::StillAlive) => continue,
+                    Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
                 }
             }
         })
         .await;
 
-        exit_tx.send(exit_code).await;
-        event_tx
-            .send(Event::Exit(name.to_string(), exit_code))
+        let status = ExitStatus::Exit(exit_code);
+
+        exit_handle.signal(status.clone()).await;
+        event_handle
+            .send(Event::Exit(name.to_string(), status))
             .await;
     });
-}
-
-// TODO: Clean this up
-async fn shared_resource(res: &Resource, run_dir: &Path) -> Result<PathBuf> {
-    let dir_in_container_path = &res.dir;
-    let first_part_of_path = run_dir.join(&res.name).join(&res.version.to_string());
-
-    let src_dir = match dir_in_container_path.strip_prefix("/") {
-        Ok(dir_in_resource_container) => first_part_of_path.join(dir_in_resource_container),
-        Err(_) => first_part_of_path,
-    };
-    if src_dir.exists().await {
-        Ok(src_dir)
-    } else {
-        let error = format!("Resource folder missing: {}", src_dir.display());
-        error!("{}", error);
-        Err(anyhow!(error))
-    }
-}
-
-// TODO: Clean this up
-async fn collect_resource_folders(
-    run_dir: &Path,
-    needed_resources: Option<&Vec<Resource>>,
-) -> Result<Vec<(PathBuf, PathBuf)>> {
-    let mut resources_to_mount = vec![];
-    if let Some(resources) = &needed_resources {
-        for res in *resources {
-            let shared_resource_path = shared_resource(res, run_dir).await?;
-            let mount_point: PathBuf = res.mountpoint.clone().into();
-            resources_to_mount.push((shared_resource_path, mount_point));
-        }
-    }
-    Ok(resources_to_mount)
-}
-
-fn mount_bind(
-    jail: &mut minijail::Minijail,
-    src: &std::path::Path,
-    dest: &std::path::Path,
-    writable: bool,
-) -> Result<()> {
-    jail.mount_bind(&src, &dest, writable).with_context(|| {
-        format!(
-            "Failed to add bind mount of {} to {}",
-            src.display(),
-            dest.display(),
-        )
-    })
 }
