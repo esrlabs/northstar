@@ -726,6 +726,7 @@ impl Minijail {
     /// inheritable_fds list.
     /// This Function may abort in the child on error because a partially
     /// entered jail isn't recoverable.
+    #[allow(clippy::missing_safety_doc)]
     pub unsafe fn fork(&self, inheritable_fds: Option<&[RawFd]>) -> Result<pid_t> {
         let m: Vec<(RawFd, RawFd)> = inheritable_fds
             .unwrap_or(&[])
@@ -737,6 +738,7 @@ impl Minijail {
 
     /// Behaves the same as `fork()` except `inheritable_fds` is a list of fd
     /// mappings rather than just a list of fds to preserve.
+    #[allow(clippy::missing_safety_doc)]
     pub unsafe fn fork_remap(&self, inheritable_fds: &[(RawFd, RawFd)]) -> Result<pid_t> {
         if !is_single_threaded().map_err(Error::CheckingMultiThreaded)? {
             // This test will fail during `cargo test` because the test harness always spawns a test
@@ -832,6 +834,7 @@ fn is_single_threaded() -> io::Result<bool> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::process::exit;
@@ -965,3 +968,4 @@ mod tests {
         j.run(Path::new("/bin/true"), &[], &[]).unwrap();
     }
 }
+*/
