@@ -15,7 +15,7 @@ name = "north"
 
 [dependencies]
 anyhow = "1.0.31"
-async-std = { version = "1.6.2", features = ["attributes", "unstable"] }
+async-std = { version = "1.6.5", features = ["attributes", "unstable"] }
 async-trait = { version = "0.1.36", optional = true }
 base64 = { version = "0.12.3", optional = true }
 bitflags = { version = "1.2.1", optional = true }
