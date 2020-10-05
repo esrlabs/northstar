@@ -1,6 +1,7 @@
 name: crashing
 version: 0.0.1
 init: /crashing
-env: [[RUST_BACKTRACE, 1]]
+env: 
+  RUST_BACKTRACE: 1
 on_exit:
   restart: 2
