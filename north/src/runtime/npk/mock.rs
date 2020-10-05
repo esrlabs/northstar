@@ -64,6 +64,10 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
 }
 
 pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
+    if let Some(npk_name) = npk.file_name() {
+        info!("Loading {}", npk_name.to_string_lossy());
+    }
+
     let file =
         std::fs::File::open(&npk).with_context(|| format!("Failed to open {}", npk.display()))?;
     let reader = std::io::BufReader::new(file);

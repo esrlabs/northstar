@@ -117,10 +117,10 @@ pub mod os {
 
             // Environment
             let mut env = manifest.env.clone().unwrap_or_default();
-            env.push((ENV_DATA.to_string(), container.data.display().to_string())); // TODO OSX
-            env.push((ENV_NAME.to_string(), manifest.name.to_string()));
-            env.push((ENV_VERSION.to_string(), manifest.version.to_string()));
-            cmd.envs(env.drain(..));
+            env.insert(ENV_DATA.to_string(), container.data.display().to_string()); // TODO OSX
+            env.insert(ENV_NAME.to_string(), manifest.name.to_string());
+            env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
+            cmd.envs(env.drain());
 
             // Spawn
             let child = cmd
@@ -423,9 +423,9 @@ pub mod minijail {
 
             // Create environment for process. Set data directory, container name and version
             let mut env = manifest.env.clone().unwrap_or_default();
-            env.push((ENV_DATA.to_string(), "/data".to_string())); // TODO OSX
-            env.push((ENV_NAME.to_string(), manifest.name.to_string()));
-            env.push((ENV_VERSION.to_string(), manifest.version.to_string()));
+            env.insert(ENV_DATA.to_string(), "/data".to_string());
+            env.insert(ENV_NAME.to_string(), manifest.name.to_string());
+            env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
             let env = env
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, v))

@@ -144,7 +144,7 @@ pub struct Manifest {
     /// Additional arguments for the application invocation
     pub args: Option<Vec<String>>,
     /// Environment passed to container
-    pub env: Option<Vec<(String, String)>>,
+    pub env: Option<HashMap<String, String>>,
     pub resources: Option<Vec<Resource>>,
     /// Autostart this container upon north startup
     pub autostart: Option<bool>,
@@ -216,7 +216,8 @@ version: 0.0.0
 arch: aarch64-linux-android
 init: /binary
 args: [one, two]
-env: [[LD_LIBRARY_PATH, /lib]]
+env:
+    LD_LIBRARY_PATH: /lib
 resources: [
     {
         name: bla,
@@ -263,7 +264,10 @@ log:
     assert!(manifest.autostart.unwrap());
     assert_eq!(manifest.on_exit, Some(OnExit::Restart(3)));
     let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
-    assert_eq!(env[0], ("LD_LIBRARY_PATH".into(), "/lib".into()));
+    assert_eq!(
+        env.get("LD_LIBRARY_PATH"),
+        Some("/lib".to_string()).as_ref()
+    );
     assert_eq!(
         manifest.cgroups,
         Some(CGroups {
@@ -294,7 +298,8 @@ version: 0.0.0
 arch: aarch64-linux-android
 init: /binary
 args: [one, two]
-env: [[LD_LIBRARY_PATH, /lib]]
+env:
+    LD_LIBRARY_PATH: /lib
 on_exit:
     Restart: 0
 ";

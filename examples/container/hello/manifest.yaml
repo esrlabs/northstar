@@ -1,7 +1,8 @@
 name: hello
 version: 0.0.2
 init: /hello
-env: [[HELLO, north]]
+env: 
+  HELLO: north
 # autostart: true
 # instances: 20
 seccomp:
