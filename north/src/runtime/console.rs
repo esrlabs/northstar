@@ -23,209 +23,216 @@ use api::{
     StopResult,
 };
 use async_std::{
-    io::{self, Write},
-    net::TcpListener,
+    io::{self, Read, Write},
+    net::{TcpListener, TcpStream},
     prelude::*,
     sync::{self, Receiver, Sender},
     task,
 };
 use byteorder::{BigEndian, ByteOrder};
-use io::{ErrorKind, Read};
+use io::ErrorKind;
 use log::{debug, info, warn};
 
-pub async fn init(address: &str, tx: &EventTx) -> Result<()> {
-    serve(address, tx.clone()).await?;
-    Ok(())
-}
+#[derive(Default)]
+pub struct Console;
 
-pub async fn process(
-    state: &mut State,
-    message: &Message,
-    response_tx: sync::Sender<Message>,
-) -> Result<()> {
-    let payload = &message.payload;
-    if let Payload::Request(ref request) = payload {
-        let response = match request {
-            Request::Containers => {
-                let containers = state
-                    .applications()
-                    .map(|app| {
-                        Container {
-                            manifest: app.manifest().clone(),
-                            process: app.process_context().map(|f| Process {
-                                pid: f.process().pid(),
-                                uptime: f.uptime().as_nanos() as u64,
-                                memory: {
-                                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-                                    {
-                                        None
-                                    }
-                                    #[cfg(any(target_os = "linux", target_os = "android"))]
-                                    {
-                                        // TODO
-                                        const PAGE_SIZE: usize = 4096;
-                                        let pid = f.process().pid();
-                                        let statm = procinfo::pid::statm(pid as i32)
-                                            .expect("Failed get statm");
-                                        Some(api::Memory {
-                                            size: (statm.size * PAGE_SIZE) as u64,
-                                            resident: (statm.resident * PAGE_SIZE) as u64,
-                                            shared: (statm.share * PAGE_SIZE) as u64,
-                                            text: (statm.text * PAGE_SIZE) as u64,
-                                            data: (statm.data * PAGE_SIZE) as u64,
-                                        })
-                                    }
-                                },
-                            }),
-                        }
-                    })
-                    .collect();
+impl Console {
+    pub async fn new(address: &str, tx: &EventTx) -> Result<Console> {
+        Self::start(address, tx.clone()).await?;
+        Ok(Console::default())
+    }
 
-                Response::Containers(containers)
-            }
-            Request::Start(name) => match state.start(&name).await {
-                Ok(_) => Response::Start {
-                    result: StartResult::Success,
-                },
-                Err(e) => Response::Start {
-                    result: StartResult::Error(e.to_string()),
-                },
-            },
-            Request::Stop(name) => {
-                match state
-                    .stop(
-                        &name,
-                        std::time::Duration::from_secs(1),
-                        TerminationReason::Stopped,
-                    )
-                    .await
-                {
-                    Ok(_) => Response::Stop {
-                        result: StopResult::Success,
+    pub async fn process(
+        &self,
+        state: &mut State,
+        message: &Message,
+        response_tx: sync::Sender<Message>,
+    ) -> Result<()> {
+        let payload = &message.payload;
+        if let Payload::Request(ref request) = payload {
+            let response = match request {
+                Request::Containers => {
+                    let containers = state
+                        .applications()
+                        .map(|app| {
+                            Container {
+                                manifest: app.manifest().clone(),
+                                process: app.process_context().map(|f| Process {
+                                    pid: f.process().pid(),
+                                    uptime: f.uptime().as_nanos() as u64,
+                                    memory: {
+                                        #[cfg(not(any(
+                                            target_os = "linux",
+                                            target_os = "android"
+                                        )))]
+                                        {
+                                            None
+                                        }
+                                        #[cfg(any(target_os = "linux", target_os = "android"))]
+                                        {
+                                            // TODO
+                                            const PAGE_SIZE: usize = 4096;
+                                            let pid = f.process().pid();
+                                            let statm = procinfo::pid::statm(pid as i32)
+                                                .expect("Failed get statm");
+                                            Some(api::Memory {
+                                                size: (statm.size * PAGE_SIZE) as u64,
+                                                resident: (statm.resident * PAGE_SIZE) as u64,
+                                                shared: (statm.share * PAGE_SIZE) as u64,
+                                                text: (statm.text * PAGE_SIZE) as u64,
+                                                data: (statm.data * PAGE_SIZE) as u64,
+                                            })
+                                        }
+                                    },
+                                }),
+                            }
+                        })
+                        .collect();
+
+                    Response::Containers(containers)
+                }
+                Request::Start(name) => match state.start(&name).await {
+                    Ok(_) => Response::Start {
+                        result: StartResult::Success,
                     },
-                    Err(e) => Response::Stop {
-                        result: StopResult::Error(e.to_string()),
+                    Err(e) => Response::Start {
+                        result: StartResult::Error(e.to_string()),
                     },
+                },
+                Request::Stop(name) => {
+                    match state
+                        .stop(
+                            &name,
+                            std::time::Duration::from_secs(1),
+                            TerminationReason::Stopped,
+                        )
+                        .await
+                    {
+                        Ok(_) => Response::Stop {
+                            result: StopResult::Success,
+                        },
+                        Err(e) => Response::Stop {
+                            result: StopResult::Error(e.to_string()),
+                        },
+                    }
+                }
+                Request::Install(_) => Response::Install {
+                    result: api::InstallationResult::Error("unimplemented".into()),
+                },
+                Request::Uninstall { name, version } => {
+                    let _ = name;
+                    let _ = version;
+                    Response::Uninstall {
+                        result: api::UninstallResult::Error("unimplemented".into()),
+                    }
+                }
+                Request::Shutdown => match state.shutdown().await {
+                    Ok(_) => Response::Shutdown {
+                        result: ShutdownResult::Success,
+                    },
+                    Err(e) => Response::Shutdown {
+                        result: ShutdownResult::Error(e.to_string()),
+                    },
+                },
+            };
+
+            let response_message = Message {
+                id: message.id.clone(),
+                payload: Payload::Response(response),
+            };
+            response_tx.send(response_message).await;
+            Ok(())
+        } else {
+            // TODO
+            panic!("Received message is not a request");
+        }
+    }
+
+    /// Open a TCP socket and read lines terminated with `\n`.
+    async fn start(address: &str, tx: EventTx) -> Result<()> {
+        debug!("Starting console on {}", address);
+
+        let listener = TcpListener::bind(address)
+            .await
+            .with_context(|| format!("Failed to open listener on {}", address))?;
+
+        task::spawn(async move {
+            let mut incoming = listener.incoming();
+
+            // Spawn a task for each incoming connection.
+            while let Some(stream) = incoming.next().await {
+                if let Ok(stream) = stream {
+                    task::spawn(connection(stream, tx.clone()));
                 }
             }
-            Request::Install(_) => Response::Install {
-                result: api::InstallationResult::Error("unimplemented".into()),
-            },
-            Request::Uninstall { name, version } => {
-                let _ = name;
-                let _ = version;
-                Response::Uninstall {
-                    result: api::UninstallResult::Error("unimplemented".into()),
-                }
-            }
-            Request::Shutdown => match state.shutdown().await {
-                Ok(_) => Response::Shutdown {
-                    result: ShutdownResult::Success,
-                },
-                Err(e) => Response::Shutdown {
-                    result: ShutdownResult::Error(e.to_string()),
-                },
-            },
-        };
-
-        let response_message = Message {
-            id: message.id.clone(),
-            payload: Payload::Response(response),
-        };
-        response_tx.send(response_message).await;
+        });
         Ok(())
-    } else {
-        // TODO
-        panic!("Received message is not a request");
     }
 }
 
-/// Open a TCP socket and read lines terminated with `\n`.
-async fn serve(address: &str, tx: EventTx) -> Result<()> {
-    debug!("Starting console on {}", address);
-
-    let listener = TcpListener::bind(address)
-        .await
-        .with_context(|| format!("Failed to open listener on {}", address))?;
-
-    task::spawn(async move {
-        let mut incoming = listener.incoming();
-
-        // Spawn a task for each incoming connection.
-        while let Some(stream) = incoming.next().await {
-            let mut tx_main = tx.clone();
-            if let Ok(stream) = stream {
-                let peer = match stream.peer_addr() {
-                    Ok(peer) => peer,
-                    Err(e) => {
-                        warn!("Failed to get peer from command connection: {}", e);
-                        continue;
-                    }
-                };
-                debug!("Client {:?} connected", peer);
-
-                // Spawn a task that handles this client
-                task::spawn(async move {
-                    let (reader, writer) = &mut (&stream, &stream);
-                    let mut reader = io::BufReader::new(reader);
-                    let (mut tx, mut rx) = sync::channel::<Message>(10);
-
-                    loop {
-                        if let Err(e) =
-                            connection(&mut reader, writer, &mut tx_main, &mut rx, &mut tx).await
-                        {
-                            match e.kind() {
-                                ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
-                                _ => warn!("Error on connection to {:?}: {:?}", peer, e),
-                            }
-                            break;
-                        }
-                    }
-                });
-            }
+async fn connection(stream: TcpStream, mut tx_main: EventTx) {
+    let peer = match stream.peer_addr() {
+        Ok(peer) => peer,
+        Err(e) => {
+            warn!("Failed to get peer from command connection: {}", e);
+            return;
         }
-    });
-    Ok(())
-}
+    };
+    debug!("Client {:?} connected", peer);
 
-async fn connection<R: Unpin + Read, W: Unpin + Write>(
-    reader: &mut R,
-    writer: &mut W,
-    tx: &mut EventTx,
-    rx_reply: &mut Receiver<Message>,
-    tx_reply: &mut Sender<Message>,
-) -> io::Result<()> {
-    // Read frame length
-    let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf).await?;
-    let frame_len = BigEndian::read_u32(&buf) as usize;
+    let (reader, writer) = &mut (&stream, &stream);
+    let mut reader = io::BufReader::new(reader);
+    let (mut tx, mut rx) = sync::channel::<Message>(1);
 
-    // Read payload
-    let mut buffer = vec![0; frame_len];
-    reader.read_exact(&mut buffer).await?;
+    async fn connection<R: Unpin + Read, W: Unpin + Write>(
+        reader: &mut R,
+        writer: &mut W,
+        tx: &mut EventTx,
+        rx_reply: &mut Receiver<Message>,
+        tx_reply: &mut Sender<Message>,
+    ) -> io::Result<()> {
+        // Read frame length
+        let mut buf = [0u8; 4];
+        reader.read_exact(&mut buf).await?;
+        let frame_len = BigEndian::read_u32(&buf) as usize;
 
-    // Deserialize message
-    let message: Message = serde_json::from_slice(&buffer)?;
+        // Read payload
+        let mut buffer = vec![0; frame_len];
+        reader.read_exact(&mut buffer).await?;
 
-    // Send message and response handle to main loop
-    tx.send(Event::Console(message, tx_reply.clone())).await;
+        // Deserialize message
+        let message: Message = serde_json::from_slice(&buffer)?;
 
-    // Wait for reply of main loop
-    // TODO: timeout
-    let reply = rx_reply
-        .recv()
-        .await
-        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        // Send message and response handle to main loop
+        tx.send(Event::Console(message, tx_reply.clone())).await;
 
-    // Serialize reply
-    let reply =
-        serde_json::to_string_pretty(&reply).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        // Wait for reply of main loop
+        // TODO: timeout
+        let reply = rx_reply
+            .recv()
+            .await
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
-    // Send reply
-    let mut buffer = [0u8; 4];
-    BigEndian::write_u32(&mut buffer, reply.len() as u32);
-    writer.write_all(&buffer).await?;
-    writer.write_all(reply.as_bytes()).await?;
+        // Serialize reply
+        let reply = serde_json::to_string_pretty(&reply)
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
-    Ok(())
+        // Send reply
+        let mut buffer = [0u8; 4];
+        BigEndian::write_u32(&mut buffer, reply.len() as u32);
+        writer.write_all(&buffer).await?;
+        writer.write_all(reply.as_bytes()).await?;
+
+        Ok(())
+    }
+
+    loop {
+        if let Err(e) = connection(&mut reader, writer, &mut tx_main, &mut rx, &mut tx).await {
+            match e.kind() {
+                ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
+                _ => warn!("Error on connection to {:?}: {:?}", peer, e),
+            }
+            break;
+        }
+    }
 }

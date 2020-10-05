@@ -113,7 +113,7 @@ pub async fn run(config: &Config) -> Result<()> {
     );
 
     // Initialize console
-    console::init(&config.console_address, &tx).await?;
+    let console = console::Console::new(&config.console_address, &tx).await?;
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
@@ -138,7 +138,7 @@ pub async fn run(config: &Config) -> Result<()> {
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
-            Event::Console(msg, txr) => console::process(&mut state, &msg, txr).await?,
+            Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await?,
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
