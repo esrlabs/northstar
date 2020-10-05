@@ -19,7 +19,12 @@ use serde::{
     ser::Serializer,
     Deserialize, Serialize,
 };
-use std::{collections::HashMap, fmt, fs::File, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    fs::File,
+    str::FromStr,
+};
 
 /// A container version. Versions follow the semver format
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
@@ -131,7 +136,39 @@ impl fmt::Display for Resource {
     }
 }
 
-#[derive(Clone, Default, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum MountType {
+    /// Bind mount
+    #[serde(rename = "bind")]
+    Bind,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+pub enum MountFlag {
+    /// Bind mount
+    #[serde(rename = "rw")]
+    Rw,
+    /// Mount noexec
+    #[serde(rename = "noexec")]
+    NoExec,
+    /// Mount noexec
+    #[serde(rename = "nosuid")]
+    NoSuid,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Mount {
+    /// Mount source
+    source: std::path::PathBuf,
+    /// Mount target
+    target: std::path::PathBuf,
+    /// Mount type
+    r#type: MountType,
+    /// Mount flags,
+    flags: Option<HashSet<MountFlag>>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container
     pub name: Name,
@@ -157,6 +194,8 @@ pub struct Manifest {
     /// Number of instances to mount of this container
     /// The name get's extended with the instance id.
     pub instances: Option<u32>,
+    /// Extra mounts
+    pub mounts: Option<Vec<Mount>>,
 }
 
 impl Manifest {
@@ -218,14 +257,19 @@ init: /binary
 args: [one, two]
 env:
     LD_LIBRARY_PATH: /lib
-resources: [
-    {
-        name: bla,
-        version: 1.0.0,
-        dir: /bin/foo,
-        mountpoint: /here/we/go
-    }
-]
+mounts:
+    - source: /lib
+      target: /lib
+      type: bind
+      flags: 
+        - rw
+        - noexec
+        - nosuid
+resources:
+    - name: bla
+      version: 1.0.0
+      dir: /bin/foo
+      mountpoint: /here/we/go
 autostart: true
 on_exit:
     restart: 3
@@ -268,6 +312,18 @@ log:
         env.get("LD_LIBRARY_PATH"),
         Some("/lib".to_string()).as_ref()
     );
+    let mount = Mount {
+        source: std::path::PathBuf::from("/lib"),
+        target: std::path::PathBuf::from("/lib"),
+        r#type: MountType::Bind,
+        flags: Some(
+            [MountFlag::Rw, MountFlag::NoExec, MountFlag::NoSuid]
+                .iter()
+                .cloned()
+                .collect(),
+        ),
+    };
+    assert_eq!(manifest.mounts.unwrap(), vec!(mount));
     assert_eq!(
         manifest.cgroups,
         Some(CGroups {
