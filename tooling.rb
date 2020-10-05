@@ -158,17 +158,11 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
       pseudofiles << ['/dev', 444]
       pseudofiles << ['/sys', 444]
       pseudofiles << ['/data', 777]
+    end
 
-      # The list of pseudofiles is target specific.
-      # Add /lib and lib64 on Linux systems.
-      # Add /system on Android.
-      case arch
-      when 'aarch64-linux-android'
-        pseudofiles << ['/system', 444]
-      else
-        pseudofiles << ['/lib', 444]
-        pseudofiles << ['/lib64', 444]
-      end
+    manifest['mounts'].each do |m| 
+      mode = m['flags'] && m['flags'].include?('rw') ? 777 : 444
+      pseudofiles << [m['target'], mode]
     end
 
     if has_resources
