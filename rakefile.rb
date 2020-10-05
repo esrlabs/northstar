@@ -126,6 +126,7 @@ def examples
     datarw
     hello
     memeater
+    mounts,
     resource/ferris
     resource/ferris_says_hello
     resource/hello_message
