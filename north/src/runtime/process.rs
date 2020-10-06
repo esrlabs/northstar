@@ -555,6 +555,8 @@ async fn waitpid(name: &str, pid: u32, mut exit_handle: ExitHandleSignal, event_
                     // There are currently no state changes to report in any awaited child process.
                     // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
                     Ok(WaitStatus::StillAlive) => continue,
+                    // Retry the waitpid call if waitpid fails with EINTR
+                    Err(e) if e == nix::Error::Sys(nix::errno::Errno::EINTR) => continue,
                     Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
                 }
             }
