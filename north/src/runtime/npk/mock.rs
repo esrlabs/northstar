@@ -14,10 +14,10 @@
 
 use super::Container;
 use crate::{
-    manifest::{Manifest, Mount, Name, Version},
-    runtime::state::State,
+    manifest::{MountType, Name, Version},
+    runtime::{error::InstallFailure, npk::ArchiveReader, state::State},
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_std::{
     fs,
     os::unix,
@@ -25,10 +25,7 @@ use async_std::{
 };
 use futures::stream::StreamExt;
 use log::{debug, info};
-use std::{io::Read, process::Command, str::FromStr};
-
-const MANIFEST: &str = "manifest.yaml";
-const FS_IMAGE: &str = "fs.img";
+use std::process::Command;
 
 pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
     info!("Installing containers from {}", dir.display());
@@ -64,31 +61,28 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
+pub async fn install(
+    state: &mut State,
+    npk: &Path,
+) -> std::result::Result<(Name, Version), InstallFailure> {
     if let Some(npk_name) = npk.file_name() {
         info!("Loading {}", npk_name.to_string_lossy());
     }
 
-    let file =
-        std::fs::File::open(&npk).with_context(|| format!("Failed to open {}", npk.display()))?;
-    let reader = std::io::BufReader::new(file);
-    let mut archive = zip::ZipArchive::new(reader).context("Failed to read zip")?;
+    let (manifest, (fs_offset, _fs_size)) = {
+        let mut archive_reader = ArchiveReader::new(npk.into(), &state.signing_keys)?;
 
-    debug!("Loading manifest");
-    let manifest = {
-        let mut manifest_file = archive
-            .by_name(MANIFEST)
-            .with_context(|| format!("Failed to read manifest from {}", npk.display()))?;
-        let mut manifest = String::new();
-        manifest_file.read_to_string(&mut manifest)?;
-        Manifest::from_str(&manifest)?
+        (
+            archive_reader.extract_manifest_from_archive()?,
+            archive_reader.extract_fs_start_and_size()?,
+        )
     };
 
     if state.applications.contains_key(&manifest.name) {
-        return Err(anyhow!(
+        return Err(InstallFailure::ApplicationAlreadyInstalled(format!(
             "Cannot install container with name {} because it already exists",
             manifest.name
-        ));
+        )));
     }
 
     let instances = manifest.instances.unwrap_or(1);
@@ -104,24 +98,10 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
 
         if root.exists().await {
             debug!("Removing {}", root.display());
-            fs::remove_dir_all(&root)
-                .await
-                .with_context(|| format!("Failed to remove {}", root.display()))?;
+            fs::remove_dir_all(&root).await.map_err(|_| {
+                InstallFailure::InternalError(format!("Failed to remove {}", root.display()))
+            })?;
         }
-
-        let fs_offset = {
-            let mut f = archive
-                .by_name(FS_IMAGE)
-                .with_context(|| format!("Failed to read manifest from {}", npk.display()))?;
-            let mut fstype = [0u8; 4];
-            f.read_exact(&mut fstype)?;
-            if &fstype == b"hsqs" {
-                debug!("Detected SquashFS file system");
-            } else {
-                unimplemented!("Only squashfs images are supported");
-            }
-            f.data_start()
-        };
 
         debug!("Unsquashing {} to {}", npk.display(), root.display());
         let mut cmd = Command::new("unsquashfs");
@@ -131,12 +111,14 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
         cmd.arg("-d");
         cmd.arg(root.display().to_string());
         cmd.arg(npk.display().to_string());
-        let output = cmd.output()?;
+        let output = cmd
+            .output()
+            .map_err(|e| InstallFailure::InternalError(format!("Output error: {}", e)))?;
         if !output.status.success() {
-            return Err(anyhow!(
+            return Err(InstallFailure::InternalError(format!(
                 "Failed to unsquash: {}",
                 String::from_utf8_lossy(&output.stderr)
-            ));
+            )));
         }
 
         for mount in manifest.mounts.iter() {

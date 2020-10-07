@@ -12,17 +12,20 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::manifest::Manifest;
-use anyhow::{anyhow, Context, Error, Result};
+use crate::{manifest::Manifest, runtime::error::InstallFailure};
+use anyhow::{anyhow, Context, Result};
 use async_std::path::PathBuf;
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
 use log::{debug, trace};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
     fmt::{self},
+    io::Read,
+    str::FromStr,
 };
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -64,31 +67,39 @@ struct Signature {
 
 impl Hashes {
     #[allow(unused)]
-    pub fn from_str(file: &str, keys: &HashMap<String, PublicKey>) -> Result<Hashes, Error> {
+    pub fn from_str(
+        file: &str,
+        keys: &HashMap<String, PublicKey>,
+    ) -> Result<Hashes, InstallFailure> {
         let mut docs = file.splitn(2, "---");
 
         // Manifest hash and fs.img part
-        let hashes = docs
-            .next()
-            .ok_or_else(|| anyhow!("Malformed signature.yaml"))?;
+        let hashes = docs.next().ok_or(InstallFailure::InvalidSignatureYaml)?;
 
         // Signature
-        let signature: Signature = serde_yaml::from_str::<SerdeSignature>(
-            docs.next().ok_or_else(|| anyhow!("Malformed signature"))?,
-        )?
-        .try_into()?;
+        let next = docs
+            .next()
+            .ok_or_else(|| anyhow!("Malformed signature"))
+            .map_err(|e| InstallFailure::MalformedSignature)?;
+        let signature: Signature = serde_yaml::from_str::<SerdeSignature>(next)
+            .map_err(|e| InstallFailure::MalformedSignature)?
+            .try_into()
+            .map_err(|e| InstallFailure::MalformedSignature)?;
 
         // Check signature
         debug!("Using key {}", signature.key);
-        let key = keys
-            .get(&signature.key)
-            .ok_or_else(|| anyhow!("Key {} not found", &signature.key))?;
-        let signature = EdSignature::from_bytes(&signature.signature)?;
-        key.verify_strict(&hashes.as_bytes(), &signature)?;
+        let key = keys.get(&signature.key).ok_or_else(|| {
+            InstallFailure::KeyNotFound(format!("Key {} not found", &signature.key))
+        })?;
+        let signature = EdSignature::from_bytes(&signature.signature)
+            .map_err(|e| InstallFailure::MalformedSignature)?;
+        key.verify_strict(&hashes.as_bytes(), &signature)
+            .map_err(|e| InstallFailure::MalformedHashes)?;
 
         let hashes: Hashes = serde_yaml::from_str::<SerdeHashes>(hashes)
-            .context("Failed to parse signature")?
-            .try_into()?;
+            .map_err(|e| InstallFailure::MalformedHashes)?
+            .try_into()
+            .map_err(|e| InstallFailure::MalformedHashes)?;
 
         trace!("manifest.yaml hash is {}", hashes.manifest_hash);
         trace!("fs.img hash is {}", hashes.fs_hash);
@@ -106,9 +117,9 @@ struct SerdeSignature {
 }
 
 impl TryFrom<SerdeSignature> for Signature {
-    type Error = Error;
+    type Error = anyhow::Error;
 
-    fn try_from(s: SerdeSignature) -> Result<Signature, Error> {
+    fn try_from(s: SerdeSignature) -> Result<Signature, anyhow::Error> {
         let signature = base64::decode(s.signature).context("Signature base64 error")?;
         Ok(Signature {
             key: s.key,
@@ -128,8 +139,8 @@ struct SerdeHashes {
 }
 
 impl TryFrom<SerdeHashes> for Hashes {
-    type Error = Error;
-    fn try_from(s: SerdeHashes) -> Result<Hashes, Error> {
+    type Error = anyhow::Error;
+    fn try_from(s: SerdeHashes) -> Result<Hashes, anyhow::Error> {
         let manifest_hash = s
             .manifest
             .get("hash")
@@ -159,6 +170,95 @@ impl TryFrom<SerdeHashes> for Hashes {
             fs_hash,
             fs_verity_hash,
             fs_verity_offset,
+        })
+    }
+}
+
+const MANIFEST: &str = "manifest.yaml";
+const SIGNATURE: &str = "signature.yaml";
+const FS_IMAGE: &str = "fs.img";
+
+struct ArchiveReader<'a> {
+    archive: zip::ZipArchive<std::io::BufReader<std::fs::File>>,
+    signing_keys: &'a HashMap<String, PublicKey>,
+}
+
+pub fn extract_manifest(
+    npk: &std::path::Path,
+    signing_keys: &HashMap<String, PublicKey>,
+) -> Result<Manifest, InstallFailure> {
+    let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
+    archive_reader.extract_manifest_from_archive()
+}
+
+impl<'a> ArchiveReader<'a> {
+    fn new(
+        npk: &std::path::Path,
+        signing_keys: &'a HashMap<String, PublicKey>,
+    ) -> std::result::Result<Self, InstallFailure> {
+        let file = std::fs::File::open(&npk).map_err(|e| {
+            InstallFailure::InternalError(format!("Failed to open {:?} ({})", npk, e))
+        })?;
+
+        let reader: std::io::BufReader<std::fs::File> = std::io::BufReader::new(file);
+        let archive: zip::ZipArchive<std::io::BufReader<std::fs::File>> =
+            zip::ZipArchive::new(reader)
+                .context("Failed to read zip")
+                .map_err(|_e| InstallFailure::FileCorrupted)?;
+        Ok(Self {
+            archive,
+            signing_keys,
+        })
+    }
+
+    pub fn extract_fs_start_and_size(&mut self) -> std::result::Result<(u64, u64), InstallFailure> {
+        let f = self.archive.by_name(FS_IMAGE).map_err(|e| {
+            InstallFailure::ArchiveError(format!("Failed to find file-system {}", e))
+        })?;
+
+        Ok((f.data_start(), f.size()))
+    }
+
+    pub fn extract_hashes(&mut self) -> std::result::Result<Hashes, InstallFailure> {
+        debug!("extract_hashes");
+        let mut signature_file = self
+            .archive
+            .by_name(SIGNATURE)
+            .with_context(|| "Failed to read signature".to_string())
+            .map_err(|_e| InstallFailure::SignatureNotFound)?;
+        let mut signature = String::new();
+        signature_file
+            .read_to_string(&mut signature)
+            .map_err(|_e| InstallFailure::InvalidSignatureYaml)?;
+        Hashes::from_str(&signature, &self.signing_keys)
+    }
+
+    pub fn extract_manifest_from_archive(
+        &mut self,
+    ) -> std::result::Result<Manifest, InstallFailure> {
+        debug!("extract_manifest_from_archive");
+        let hashes = self.extract_hashes()?;
+        let mut manifest_file = self.archive.by_name(MANIFEST).map_err(|e| {
+            InstallFailure::ArchiveError(format!("Failed to read manifest ({})", e))
+        })?;
+
+        let mut manifest_string = String::new();
+        manifest_file
+            .read_to_string(&mut manifest_string)
+            .map_err(|e| {
+                InstallFailure::ArchiveError(format!("Error reading manifest file: {}", e))
+            })?;
+        let digest = sha2::Sha256::digest(manifest_string.as_bytes());
+        let decoded_manifest_hash = hex::decode(&hashes.manifest_hash).map_err(|e| {
+            InstallFailure::ArchiveError(format!("Error decoding manifest hash: {}", e))
+        })?;
+        if decoded_manifest_hash != digest.as_slice() {
+            return Err(InstallFailure::HashInvalid(
+                "Invalid manifest hash".to_string(),
+            ));
+        }
+        Manifest::from_str(&manifest_string).map_err(|e| {
+            InstallFailure::MalformedManifest(format!("Error parsing manifest file: {}", e))
         })
     }
 }

@@ -15,6 +15,7 @@
 use super::state::State;
 use crate::{
     api,
+    api::{InstallationResult, MessageId},
     runtime::{Event, EventTx},
 };
 use anyhow::{Context, Result};
@@ -23,8 +24,10 @@ use api::{
     StopResult,
 };
 use async_std::{
+    fs::OpenOptions,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
+    path::PathBuf,
     prelude::*,
     sync::{self, Receiver, Sender},
     task,
@@ -32,6 +35,7 @@ use async_std::{
 use byteorder::{BigEndian, ByteOrder};
 use io::ErrorKind;
 use log::{debug, error, info, warn};
+use tempfile::tempdir;
 
 #[derive(Default)]
 pub struct Console;
@@ -115,9 +119,6 @@ impl Console {
                         }
                     }
                 }
-                Request::Install(_) => Response::Install {
-                    result: api::InstallationResult::Error("unimplemented".into()),
-                },
                 Request::Uninstall { name, version } => {
                     let _ = name;
                     let _ = version;
@@ -167,6 +168,33 @@ impl Console {
         });
         Ok(())
     }
+
+    pub async fn installation_finished(
+        &self,
+        success: InstallationResult,
+        msg_id: MessageId,
+        response_tx: sync::Sender<Message>,
+        registry_path: Option<std::path::PathBuf>,
+        npk: &std::path::Path,
+    ) {
+        debug!(
+            "Installation finished, registry_path: {:?}, npk path: {}",
+            registry_path,
+            npk.display()
+        );
+        let mut success = success;
+        if let (InstallationResult::Success, Some(new_path)) = (&success, registry_path) {
+            // move npk into container dir
+            if let Err(e) = std::fs::rename(npk, new_path) {
+                success = InstallationResult::InternalError(format!("Could not place npk: {}", e));
+            }
+        }
+        let response_message = Message {
+            id: msg_id,
+            payload: Payload::Response(Response::Install { result: success }),
+        };
+        response_tx.send(response_message).await
+    }
 }
 
 async fn connection(stream: TcpStream, mut tx_main: EventTx) {
@@ -180,7 +208,7 @@ async fn connection(stream: TcpStream, mut tx_main: EventTx) {
     debug!("Client {:?} connected", peer);
 
     let (reader, writer) = &mut (&stream, &stream);
-    let mut reader = io::BufReader::new(reader);
+    let mut reader: io::BufReader<&TcpStream> = io::BufReader::new(reader);
     let (mut tx, mut rx) = sync::channel::<Message>(1);
 
     async fn connection<R: Unpin + Read, W: Unpin + Write>(
@@ -201,9 +229,25 @@ async fn connection(stream: TcpStream, mut tx_main: EventTx) {
 
         // Deserialize message
         let message: Message = serde_json::from_slice(&buffer)?;
+        let tmp_installation_dir = tempdir()?;
+        tx.send(match message.payload {
+            Payload::Installation(size, name) => {
+                debug!("Was an installation message for {} ({} bytes)", name, size);
+                create_installation_event(
+                    reader,
+                    &tmp_installation_dir.path(),
+                    message.id,
+                    size,
+                    name,
+                    tx_reply.clone(),
+                )
+                .await?
+            }
+            _ => Event::Console(message, tx_reply.clone()),
+        })
+        .await;
 
         // Send message and response handle to main loop
-        tx.send(Event::Console(message, tx_reply.clone())).await;
 
         // Wait for reply of main loop
         // TODO: timeout
@@ -233,5 +277,43 @@ async fn connection(stream: TcpStream, mut tx_main: EventTx) {
             }
             break;
         }
+    }
+
+    async fn create_installation_event<R: Unpin + Read>(
+        mut reader: R,
+        tmp_installation_dir: &std::path::Path,
+        msg_id: MessageId,
+        size: usize,
+        install_file_name: String,
+        tx: sync::Sender<api::Message>,
+    ) -> io::Result<Event> {
+        const BUF_SIZE: usize = 4096;
+        let mut buffer = [0u8; BUF_SIZE];
+        // now we will receive the file with [size] bytes
+        let tmp_installation_file_path = tmp_installation_dir.join(&install_file_name);
+        let mut tmpfile = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&tmp_installation_file_path)
+            .await?;
+        let mut received_bytes = 0usize;
+        while received_bytes < size {
+            let received = reader.read(&mut buffer).await?;
+            if received > 0 {
+                tmpfile.write_all(&buffer[..received]).await?;
+                received_bytes += received;
+            }
+        }
+        tmpfile.flush().await?;
+        debug!(
+            "Received a total of {} bytes, start installation",
+            received_bytes
+        );
+        Ok(Event::Install(
+            msg_id,
+            PathBuf::from(tmp_installation_file_path),
+            install_file_name,
+            tx,
+        ))
     }
 }

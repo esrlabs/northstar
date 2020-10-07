@@ -19,37 +19,27 @@ use super::{
     process::{ExitStatus, Process},
 };
 use crate::{
+    api::{InstallationResult, Message, MessageId},
     manifest::{Manifest, Mount, Name, Version},
-    runtime::{Event, EventTx},
+    runtime::{
+        error::{Error, InstallFailure},
+        npk,
+        npk::extract_manifest,
+        Event, EventTx,
+    },
 };
-use anyhow::{Error as AnyhowError, Result};
-use async_std::path::PathBuf;
+use anyhow::Result;
+use async_std::{
+    path::{Path, PathBuf},
+    sync,
+};
 use ed25519_dalek::PublicKey;
 use log::{info, warn};
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter, result, time,
 };
-use thiserror::Error;
 use time::Duration;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("No application found")]
-    UnknownApplication,
-    #[error("Missing resouce {0}")]
-    MissingResource(String),
-    #[error("Failed to spawn process: {0}")]
-    ProcessError(AnyhowError),
-    #[error("Application(s) \"{0:?}\" is/are running")]
-    ApplicationRunning(Vec<Name>),
-    // #[error("Failed to uninstall")]
-    // UninstallationError(AnyhowError),
-    // #[error("Failed to install")]
-    // InstallationError(AnyhowError),
-    #[error("Application is not running")]
-    ApplicationNotRunning,
-}
 
 #[derive(Debug)]
 pub struct State {
@@ -154,9 +144,11 @@ impl State {
     }
 
     /// Add a container instance the list of known containers
-    pub fn add(&mut self, container: Container) -> Result<()> {
-        // TODO: check for dups
+    pub fn add(&mut self, container: Container) -> Result<(), InstallFailure> {
         let name = container.manifest.name.clone();
+        if self.applications.get(&name).is_some() {
+            return Err(InstallFailure::ApplicationAlreadyInstalled(name));
+        }
         let app = Application::new(container);
         self.applications.insert(name, app);
         Ok(())
@@ -320,13 +312,88 @@ impl State {
         }
     }
 
+    async fn is_installed(&self, npk: &Path) -> Result<bool, InstallFailure> {
+        let container_id = extract_manifest(npk.into(), &self.signing_keys)?.name;
+        Ok(self.applications.get(&container_id).is_some())
+    }
+
     /// Install a npk from give path
-    // pub async fn install(&mut self, npk: &Path) -> result::Result<(), Error> {
-    //     npk::install(self, npk)
-    //         .await
-    //         .map_err(Error::InstallationError)?;
-    //     Ok(())
-    // }
+    pub async fn install(
+        &mut self,
+        npk: &Path,
+        msg_id: MessageId,
+        container_dir: Option<std::path::PathBuf>,
+        install_file_name: String,
+        tx: sync::Sender<Message>,
+    ) {
+        info!(
+            "try to install {}, checking the installed apps:",
+            install_file_name,
+        );
+        for app in self.applications() {
+            info!("- {}", app);
+        }
+        let registry_path = container_dir.map(|p| p.join(&install_file_name));
+        match self.is_installed(&npk).await {
+            Ok(was_installed) if was_installed => {
+                warn!("Cannot install already installed application");
+                let _ = self
+                    .tx
+                    .send(Event::InstallationFinished(
+                        InstallationResult::ApplicationAlreadyInstalled,
+                        std::path::PathBuf::from(npk),
+                        msg_id,
+                        tx,
+                        registry_path,
+                    ))
+                    .await;
+                return;
+            }
+            Err(e) => {
+                warn!("Error reading manifest info for package");
+                let _ = self
+                    .tx
+                    .send(Event::InstallationFinished(
+                        e.into(),
+                        std::path::PathBuf::from(npk),
+                        msg_id,
+                        tx,
+                        registry_path,
+                    ))
+                    .await;
+                return;
+            }
+            _ => (),
+        }
+        match npk::install(self, npk).await {
+            Ok(_) => {
+                info!("Installation succeeded!");
+                let _ = self
+                    .tx
+                    .send(Event::InstallationFinished(
+                        InstallationResult::Success,
+                        std::path::PathBuf::from(npk),
+                        msg_id,
+                        tx,
+                        registry_path,
+                    ))
+                    .await;
+            }
+            Err(e) => {
+                warn!("Installation failed");
+                let _ = self
+                    .tx
+                    .send(Event::InstallationFinished(
+                        e.into(),
+                        std::path::PathBuf::from(npk),
+                        msg_id,
+                        tx,
+                        None,
+                    ))
+                    .await;
+            }
+        }
+    }
 
     /// Remove and umount a specific app
     // pub async fn uninstall(&mut self, app: &Application) -> result::Result<(), Error> {

@@ -12,7 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{anyhow, Context, Result};
+use crate::runtime::error::LoopDeviceError;
+use anyhow::Result;
 use async_std::{
     fs,
     path::{Path, PathBuf},
@@ -36,24 +37,25 @@ pub struct LoopControl {
 }
 
 impl LoopControl {
-    pub async fn open(control: &Path, dev: &str) -> Result<LoopControl> {
+    pub async fn open(control: &Path, dev: &str) -> Result<LoopControl, LoopDeviceError> {
         Ok(LoopControl {
             dev_file: fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(&control)
-                .await?,
+                .await
+                .map_err(|_| LoopDeviceError::ControlFileError)?,
             dev: dev.into(),
         })
     }
 
-    pub async fn next_free(&self) -> Result<LoopDevice> {
+    pub async fn next_free(&self) -> Result<LoopDevice, LoopDeviceError> {
         let result;
         unsafe {
             result = ioctl(self.dev_file.as_raw_fd() as c_int, LOOP_CTL_GET_FREE.into());
         }
         if result < 0 {
-            Err(anyhow!(std::io::Error::last_os_error()))
+            Err(LoopDeviceError::NoFreeDeviceFound)
         } else {
             Ok(LoopDevice::open(&format!("{}{}", self.dev, result)).await?)
         }
@@ -75,13 +77,13 @@ impl AsRawFd for LoopDevice {
 
 impl LoopDevice {
     /// Opens a loop device.
-    pub async fn open<P: AsRef<Path>>(dev: P) -> Result<LoopDevice> {
+    pub async fn open<P: AsRef<Path>>(dev: P) -> Result<LoopDevice, LoopDeviceError> {
         let f = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(dev.as_ref())
             .await
-            .context("Failed to open")?;
+            .map_err(|_| LoopDeviceError::ControlFileError)?;
         Ok(LoopDevice {
             device: f,
             path: PathBuf::from(dev.as_ref()),
@@ -96,7 +98,7 @@ impl LoopDevice {
         sizelimit: u64,
         read_only: bool,
         auto_clear: bool,
-    ) -> Result<()> {
+    ) -> Result<(), LoopDeviceError> {
         log::debug!(
             "Attaching {} to loopback device at {}",
             bf_path
@@ -113,7 +115,7 @@ impl LoopDevice {
         let code = unsafe { ioctl(device_fd, LOOP_SET_FD.into(), file_fd) };
 
         if code < 0 {
-            return Err(anyhow!("OS error: {}", std::io::Error::last_os_error()));
+            return Err(LoopDeviceError::AssociateError);
         }
 
         // Set offset and limit for backing_file
@@ -141,31 +143,28 @@ impl LoopDevice {
                     // this error means the call should be retried
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
-                nix::Result::Err(e) => {
+                nix::Result::Err(_e) => {
                     self.detach()?;
-                    return Err(anyhow!("OS error: {}", e));
+                    return Err(LoopDeviceError::SetStatusError);
                 }
             }
         }
 
         self.detach()?;
-        Err(anyhow!(
-            "Set Loop status exceeded number of retries ({})",
-            MAX_RETRIES
-        ))
+        Err(LoopDeviceError::StatusWriteBusy(MAX_RETRIES))
     }
 
-    pub fn detach(&self) -> Result<()> {
+    pub fn detach(&self) -> Result<(), LoopDeviceError> {
         let fd = self.device.as_raw_fd() as c_int;
         let code = unsafe { ioctl(fd, LOOP_CLR_FD.into(), 0) };
         if code < 0 {
-            Err(anyhow!("OS error: {}", std::io::Error::last_os_error()))
+            Err(LoopDeviceError::ClearError)
         } else {
             Ok(())
         }
     }
 
-    pub fn set_direct_io(&self, enable: bool) -> Result<()> {
+    pub fn set_direct_io(&self, enable: bool) -> Result<(), LoopDeviceError> {
         unsafe {
             if ioctl(
                 self.device.as_raw_fd() as c_int,
@@ -173,7 +172,7 @@ impl LoopDevice {
                 if enable { 1 } else { 0 },
             ) < 0
             {
-                Err(anyhow!("OS error: {}", std::io::Error::last_os_error()))
+                Err(LoopDeviceError::DirectIoError)
             } else {
                 Ok(())
             }

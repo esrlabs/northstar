@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::manifest::{Manifest, Version};
 
 type Name = String;
-type MessageId = String; // UUID
+pub type MessageId = String; // UUID
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -15,6 +15,7 @@ pub struct Message {
 pub enum Payload {
     Request(Request),
     Response(Response),
+    Installation(usize, String), // size of npk that will be sent + it's name
     Notification(Notification),
 }
 
@@ -29,7 +30,6 @@ pub enum Request {
     Start(Name),
     Stop(Name),
     Uninstall { name: Name, version: Version },
-    Install(String), // path to npk with new version
     Shutdown,
 }
 
@@ -86,7 +86,24 @@ pub enum UninstallResult {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum InstallationResult {
     Success,
-    Error(String), // TODO
+    ApplicationAlreadyInstalled,
+    FileCorrupted,
+    SignatureNotFound,
+    InvalidSignatureYaml,
+    MalformedSignature,
+    MalformedHashes,
+    MalformedManifest(String),
+    VerityProblem(String),
+    ArchiveError(String),
+    DeviceMapperProblem(String),
+    LoopDeviceError(String),
+    HashInvalid(String),
+    KeyNotFound(String),
+    InternalError(String),
+    MountError(String),
+    NoVerityHeader,
+    UnexpectedVerityAlgorithm(String),
+    UnexpectedVerityVersion(u32),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

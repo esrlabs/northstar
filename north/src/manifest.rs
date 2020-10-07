@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Context, Result};
 use async_std::{fs, path::Path};
 use lazy_static::lazy_static;
 use serde::{
@@ -25,10 +25,11 @@ use std::{
     fmt,
     str::FromStr,
 };
+use thiserror::Error;
 
 /// A container version. Versions follow the semver format
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
-pub struct Version(semver::Version);
+pub struct Version(pub semver::Version);
 
 pub type Name = String;
 
@@ -317,11 +318,21 @@ impl MountsSerialization {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ManifestError {
+    #[error("Invalid manifest ({0})")]
+    MalformedManifest(String),
+    #[error("Missing attribute: {0}")]
+    CouldNotParse(String),
+}
+
 impl Manifest {
-    fn verify(&self) -> Result<()> {
+    fn verify(&self) -> Result<(), ManifestError> {
         // TODO: check for none on env, autostart, cgroups, seccomp, instances
         if self.init.is_none() && self.args.is_some() {
-            return Err(anyhow!("Arguments not allowed in resource container"));
+            return Err(ManifestError::MalformedManifest(
+                "Arguments not allowed in resource container".to_string(),
+            ));
         }
         Ok(())
     }
@@ -338,16 +349,20 @@ impl Manifest {
 }
 
 impl FromStr for Manifest {
-    type Err = Error;
-    fn from_str(s: &str) -> std::result::Result<Manifest, Error> {
-        let manifest: Manifest = serde_yaml::from_str(s).context("Failed to parse manifest")?;
-        manifest.verify()?;
-        Ok(manifest)
+    type Err = ManifestError;
+    fn from_str(s: &str) -> std::result::Result<Manifest, ManifestError> {
+        let parse_res: std::result::Result<Manifest, ManifestError> = serde_yaml::from_str(s)
+            .map_err(|_| ManifestError::CouldNotParse("Failed to parse manifest".to_string()));
+        if let Ok(manifest) = &parse_res {
+            manifest.verify()?;
+        }
+        parse_res
     }
 }
 
 #[async_std::test]
 async fn parse() -> Result<()> {
+    use anyhow::anyhow;
     use async_std::path::PathBuf;
     use std::{fs::File, io::Write};
 
