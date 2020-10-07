@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::runtime::error::InstallFailure;
 use anyhow::{Context, Result};
 use async_std::path::Path;
 
@@ -23,7 +24,7 @@ pub async fn mount(
     fstype: &str,
     flags: MountFlags,
     data: Option<&str>,
-) -> Result<()> {
+) -> Result<(), InstallFailure> {
     nix::mount::mount(
         Some(source.as_os_str()),
         target.as_os_str(),
@@ -31,11 +32,13 @@ pub async fn mount(
         flags,
         data,
     )
-    .context(format!(
-        "Failed to mount {} on {}",
-        source.display(),
-        target.display()
-    ))
+    .map_err(|_| {
+        InstallFailure::MountError(format!(
+            "Failed to mount {} on {}",
+            source.display(),
+            target.display()
+        ))
+    })
 }
 
 pub async fn unmount(target: &Path) -> Result<()> {
