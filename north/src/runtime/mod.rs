@@ -14,6 +14,7 @@
 
 pub mod config;
 pub(self) mod console;
+pub mod error;
 pub(self) mod keys;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub(self) mod linux;
@@ -21,7 +22,11 @@ pub(self) mod npk;
 pub(self) mod process;
 pub(super) mod state;
 
-use crate::{api, manifest::Name};
+use crate::{
+    api,
+    api::{InstallationResult, MessageId},
+    manifest::Name,
+};
 use anyhow::{Context, Error, Result};
 use async_std::{fs, path::PathBuf, sync};
 use config::Config;
@@ -36,6 +41,16 @@ pub type EventTx = sync::Sender<Event>;
 pub enum Event {
     /// Incomming command
     Console(api::Message, sync::Sender<api::Message>),
+    /// Installation Event
+    Install(api::MessageId, PathBuf, String, sync::Sender<api::Message>),
+    /// Installation finished event
+    InstallationFinished(
+        InstallationResult,
+        std::path::PathBuf, // path to the temp npk file that was received
+        MessageId,          // UID of the message that triggered the installation
+        sync::Sender<api::Message>,
+        Option<std::path::PathBuf>, // path to registry
+    ),
     /// A instance exited with return code
     Exit(Name, ExitStatus),
     /// Out of memory event occured
@@ -120,6 +135,25 @@ pub async fn run(config: &Config) -> Result<()> {
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
             Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await?,
+            // Installation event that triggers the installation of a received file
+            Event::Install(msg_id, path, install_file_name, txr) => {
+                state
+                    .install(
+                        &path,
+                        msg_id,
+                        config.directories.container_dirs.first().cloned(),
+                        install_file_name,
+                        txr,
+                    )
+                    .await
+                // TODO handle installation error here
+            }
+            // Once the installation has finished, the file can be added to the registry
+            Event::InstallationFinished(success, npk, msg_id, txr, container_dir) => {
+                console
+                    .installation_finished(success, msg_id, txr, container_dir, &npk)
+                    .await
+            }
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
