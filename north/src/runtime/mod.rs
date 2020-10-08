@@ -113,6 +113,22 @@ pub async fn run(config: &Config) -> Result<()> {
         state.applications.len()
     );
 
+    // handle SIGINT and SIGTERM
+    let tx_interrupt = tx.clone();
+    ctrlc::set_handler(move || {
+        let request = api::Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            payload: api::Payload::Request(api::Request::Shutdown),
+        };
+        let (tx, rx) = sync::channel::<api::Message>(1);
+        async_std::task::block_on(tx_interrupt.send(Event::Console(request, tx)));
+
+        if async_std::task::block_on(rx.recv()).is_err() {
+            panic!("Failed to shutdown north");
+        }
+    })
+    .expect("Failed to set signal handler");
+
     // Initialize console
     let console = console::Console::new(&config.console_address, &tx).await?;
 

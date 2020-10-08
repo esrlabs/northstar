@@ -467,6 +467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0b676fa23f995faf587496dcd1c80fead847ed58d2da52ac1caca9a72790dd2"
+dependencies = [
+ "nix",
+ "winapi",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1059,6 +1069,7 @@ dependencies = [
  "base64 0.12.3",
  "bitflags",
  "byteorder",
+ "ctrlc",
  "ed25519-dalek",
  "floating-duration",
  "futures",
