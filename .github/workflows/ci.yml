@@ -25,6 +25,13 @@ jobs:
           toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt
+      - uses: actions/setup-ruby@v1
+        with:
+            version: 2.6
+      - run: |
+          gem install bundler
+          bundle add rake
+          bundle install
       - uses: actions-rs/cargo@v1
         with:
           command: check
@@ -59,6 +66,13 @@ jobs:
       - name: Install libcap
         run: sudo apt install libcap-dev
       - uses: actions/checkout@v2
+      - uses: actions/setup-ruby@v1
+        with:
+            version: 2.6
+      - run: |
+          gem install bundler
+          bundle add rake
+          bundle install
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
