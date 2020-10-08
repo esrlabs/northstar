@@ -14,11 +14,12 @@
 
 #![deny(clippy::all)]
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_std::{fs::read_to_string, path::PathBuf};
-use log::info;
+use log::{error, info};
 use north::runtime;
 use runtime::config::Config;
+use std::process;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -34,9 +35,22 @@ struct Opt {
 }
 
 #[async_std::main]
-async fn main() -> Result<()> {
+async fn main() {
+    process::exit(match run().await {
+        Ok(()) => 0,
+        Err(err) => {
+            error!("{}", err);
+            1
+        }
+    })
+}
+
+async fn run() -> Result<()> {
     let opt = Opt::from_args();
-    let config: Config = toml::from_str(&read_to_string(&opt.config).await?)?;
+    let config: Config = toml::from_str(&read_to_string(&opt.config).await?).context(format!(
+        "Failed to read configuration file {}",
+        opt.config.display()
+    ))?;
 
     let log_filter = if opt.debug || config.debug {
         "north=debug"
