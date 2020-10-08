@@ -491,6 +491,36 @@ impl State {
         Ok(())
     }
 
+    /// Stop and uninstall all the applications
+    pub async fn tear_down(&mut self) -> result::Result<(), Error> {
+        self.stop_all().await?;
+        let containers: Vec<(String, Version)> = self
+            .applications
+            .values()
+            .map(|v| (v.name().clone(), v.version().clone()))
+            .collect();
+        for (name, version) in containers {
+            if let Err(err) = self.uninstall(&name, &version).await {
+                warn!("Error uninstalling {}: {:?}", name, err);
+            }
+        }
+        Ok(())
+    }
+
+    async fn stop_all(&mut self) -> result::Result<(), Error> {
+        let running_containers: Vec<String> = self
+            .applications
+            .values()
+            .filter_map(|a| a.process.as_ref().and(Some(a.name().clone())))
+            .collect();
+        for name in running_containers {
+            if let Err(err) = self.stop(&name, Duration::from_secs(1)).await {
+                warn!("Error stopping {}: {:?}", name, err);
+            }
+        }
+        Ok(())
+    }
+
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally
     pub async fn on_exit(&mut self, name: &str, exit_status: &ExitStatus) -> Result<(), Error> {
