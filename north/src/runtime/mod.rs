@@ -35,6 +35,9 @@ use tokio::{
     sync::{self, oneshot},
 };
 
+#[cfg(any(target_os = "android", target_os = "linux"))]
+use tokio::signal::unix::{signal, SignalKind};
+
 pub type EventTx = mpsc::Sender<Event>;
 
 #[allow(clippy::large_enum_variant)]
@@ -123,6 +126,9 @@ pub async fn run(config: &Config) -> Result<(), Error> {
         }
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    enable_signaled_shutdown(event_tx.clone()).await;
+
     // Initialize console
     let console = console::Console::new(&config.console_address, &event_tx);
     // Start to listen for incoming connections
@@ -158,8 +164,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     }
 
     info!("Shutting down...");
-
-    Ok(())
+    state.tear_down().await
 }
 
 /// This is a starting point for doing something meaningful with the childs outputs.
@@ -169,4 +174,18 @@ async fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
             debug!("[{}] {}: {}: {}", p.process().pid(), name, fd, line);
         }
     }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+async fn enable_signaled_shutdown(event_tx: EventTx) {
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to initialize SIGINT stream");
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to initialize SIGTERM stream");
+
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = sigint.recv() => (),
+            _ = sigterm.recv() => (),
+        }
+        event_tx.send(Event::Shutdown).await
+    });
 }
