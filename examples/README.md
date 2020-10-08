@@ -9,7 +9,7 @@ Once you have the `*.npk` packages in your registry, you can start the northstar
 When the northstar runtime is up and running, you can issue control commands to it via a socket.
 We provide an utility that can easily communicate with the northstar daemon and send it commands (`nstar`)
 
-Build `nstar` using the raketask `rake build:nstar`
+Build `nstar` by running `cargo install --path nstar`.
 
 After that just start `nstar` (found in `./target/release/nstar`). It is an interactive client that offers this help:
 
