@@ -381,12 +381,22 @@ pub mod minijail {
                                 if source.exists() {
                                     let source: PathBuf = source.clone().into();
                                     let target: PathBuf = mount.target.clone().into();
+                                    let rw = mount
+                                        .flags
+                                        .as_ref()
+                                        .map(|flags| flags.contains(&MountFlag::Rw))
+                                        .unwrap_or_default();
                                     debug!(
-                                        "Bind mounting {} to {}",
+                                        "Bind mounting {} to {}{}",
                                         source.display(),
-                                        target.display()
+                                        target.display(),
+                                        if rw {
+                                            " (rw)"
+                                        } else {
+                                            ""
+                                        }
                                     );
-                                    mount_bind(&mut jail, &source, &target, false)?;
+                                    mount_bind(&mut jail, &source, &target, rw)?;
                                 } else {
                                     warn!(
                                         "Cannot bind mount nonexitent source {} to {}",
