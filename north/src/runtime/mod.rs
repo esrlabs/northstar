@@ -26,7 +26,6 @@ use anyhow::{Context, Error, Result};
 use async_std::{fs, path::PathBuf, sync};
 use config::Config;
 use log::*;
-use nix::unistd::{self, chown};
 use process::ExitStatus;
 use state::State;
 
@@ -79,27 +78,6 @@ pub async fn run(config: &Config) -> Result<()> {
     fs::create_dir_all(&config.directories.data_dir)
         .await
         .with_context(|| format!("Failed to create {}", config.directories.data_dir.display()))?;
-
-    // The SETTINGS.global_data_dir option makes north using a single directory
-    // that is bind mounted into the roots of the containers. In normal operation
-    // each container get's it's own read and writeable data directory for
-    // persistent data.
-    if config.global_data_dir {
-        let data = config.directories.data_dir.as_path();
-        chown(
-            data,
-            Some(unistd::Uid::from_raw(config.container_uid)),
-            Some(unistd::Gid::from_raw(config.container_gid)),
-        )
-        .with_context(|| {
-            format!(
-                "Failed to chown {} to {}:{}",
-                data.display(),
-                config.container_uid,
-                config.container_gid,
-            )
-        })?;
-    }
 
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to load/install the npks.

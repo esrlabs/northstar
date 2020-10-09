@@ -25,7 +25,6 @@ use nix::{
 use std::{fmt::Debug, time};
 use wait::WaitStatus;
 
-const ENV_DATA: &str = "DATA";
 const ENV_NAME: &str = "NAME";
 const ENV_VERSION: &str = "VERSION";
 
@@ -117,7 +116,6 @@ pub mod os {
 
             // Environment
             let mut env = manifest.env.clone().unwrap_or_default();
-            env.insert(ENV_DATA.to_string(), container.data.display().to_string()); // TODO OSX
             env.insert(ENV_NAME.to_string(), manifest.name.to_string());
             env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
             cmd.envs(env.drain());
@@ -175,8 +173,10 @@ pub mod os {
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod minijail {
     use super::*;
-    use std::fmt;
-
+    use crate::{
+        manifest::{MountFlag, MountType},
+        runtime::{Event, EventTx},
+    };
     use anyhow::{Context, Result};
     use async_std::{
         fs, io,
@@ -185,10 +185,10 @@ pub mod minijail {
     };
     use futures::StreamExt;
     use io::prelude::{BufReadExt, WriteExt};
+    use log::warn;
+    use nix::unistd::{self, chown};
+    use std::{fmt, os::unix::io::AsRawFd};
     use stop_token::StopSource;
-
-    use crate::runtime::{Event, EventTx};
-    use std::os::unix::io::AsRawFd;
 
     // We need a Send + Sync version of Minijail
     struct Minijail(::minijail::Minijail);
@@ -300,6 +300,7 @@ pub mod minijail {
             container: &Container,
             event_tx: EventTx,
             run_dir: &Path,
+            data_dir: &Path,
             uid: u32,
             gid: u32,
         ) -> Result<MinijailProcess> {
@@ -363,21 +364,72 @@ pub mod minijail {
             // Make the application the init process
             jail.run_as_init();
 
-            // Configure bind mounts
-            #[cfg(target_os = "android")]
-            let mounts = &["/sys", "/dev", "/proc", "/system"];
-            #[cfg(not(target_os = "android"))]
-            let mounts = &["/sys", "/dev", "/proc", "/lib", "/lib64"];
+            // Create a minimal dev folder in a tmpfs and mount on /dev
+            jail.mount_dev();
+            // Mount a tmpfs on /tmp
+            jail.mount_tmp();
+            // Mount /proc
+            mount_bind(&mut jail, Path::new("/proc"), Path::new("/proc"), false)?;
 
-            for target in mounts.iter().map(PathBuf::from) {
-                if target == PathBuf::from("/lib64") && !target.exists().await {
-                    continue;
+            if let Some(ref mounts) = container.manifest.mounts {
+                for mount in mounts {
+                    match mount.r#type {
+                        // Bind mounts
+                        MountType::Bind => {
+                            if let Some(ref source) = mount.source {
+                                // Check if the source exists. If not issue a warning
+                                if source.exists() {
+                                    let source: PathBuf = source.clone().into();
+                                    let target: PathBuf = mount.target.clone().into();
+                                    debug!(
+                                        "Bind mounting {} to {}",
+                                        source.display(),
+                                        target.display()
+                                    );
+                                    mount_bind(&mut jail, &source, &target, false)?;
+                                } else {
+                                    warn!(
+                                        "Cannot bind mount nonexitent source {} to {}",
+                                        source.display(),
+                                        mount.target.display()
+                                    );
+                                }
+                            } else {
+                                // TODO: Bind mounts without a source are invalid and should be checked in Manifest::verify
+                                return Err(anyhow!("Cannot mount of type bind without source"));
+                            }
+                        }
+                        MountType::Data => {
+                            let dir = data_dir.join(&container.manifest.name);
+                            debug!("Creating {}", dir.display());
+                            fs::create_dir_all(&dir)
+                                .await
+                                .with_context(|| format!("Failed to create {}", dir.display()))?;
+                            let d: &std::path::Path = dir.as_path().into();
+                            debug!("Chowning {} to {}:{}", d.display(), uid, gid);
+                            chown(
+                                d,
+                                Some(unistd::Uid::from_raw(uid)),
+                                Some(unistd::Gid::from_raw(gid)),
+                            )
+                            .with_context(|| {
+                                format!("Failed to chown {} to {}:{}", d.display(), uid, gid,)
+                            })?;
+                            let rw = mount
+                                .flags
+                                .as_ref()
+                                .map(|flags| flags.contains(&MountFlag::Rw))
+                                .unwrap_or_default();
+                            let target: &Path = mount.target.as_path().into();
+                            mount_bind(&mut jail, &dir, target, rw)?;
+                        }
+                    }
                 }
-                mount_bind(&mut jail, &target.as_path(), &target, false)?;
             }
 
-            // /data is mounted rw
-            mount_bind(&mut jail, &container.data, &PathBuf::from("/data"), true)?;
+            // Instruct minijail to remount /proc ro after entering the mount ns
+            // with MS_NODEV | MS_NOEXEC | MS_NOSUID
+            jail.remount_proc_readonly();
 
             // Mount resource containers
             if let Some(ref resources) = container.manifest.resources {
@@ -423,7 +475,6 @@ pub mod minijail {
 
             // Create environment for process. Set data directory, container name and version
             let mut env = manifest.env.clone().unwrap_or_default();
-            env.insert(ENV_DATA.to_string(), "/data".to_string());
             env.insert(ENV_NAME.to_string(), manifest.name.to_string());
             env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
             let env = env

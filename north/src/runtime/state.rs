@@ -213,6 +213,7 @@ impl State {
             &app.container,
             self.tx.clone(),
             self.config.directories.run_dir.as_path().into(),
+            self.config.directories.data_dir.as_path().into(),
             self.config.container_uid,
             self.config.container_gid,
         )

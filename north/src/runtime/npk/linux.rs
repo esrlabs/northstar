@@ -35,7 +35,6 @@ use floating_duration::TimeAsFloat;
 use fmt::Debug;
 use futures::stream::StreamExt;
 use log::*;
-use nix::unistd::{self, chown};
 use sha2::Digest;
 use std::{
     fmt::{self},
@@ -234,42 +233,8 @@ async fn install_internal(
         )
         .await?;
 
-        let data = if state.config.global_data_dir {
-            state.config.directories.data_dir.clone()
-        } else {
-            state.config.directories.data_dir.join(&manifest.name)
-        };
-        let data = PathBuf::from(data);
-        if !data.exists().await {
-            fs::create_dir_all(&data)
-                .await
-                .with_context(|| format!("Failed to create {}", data.display()))?;
-            let data: &std::path::Path = data.as_path().into();
-            chown(
-                data,
-                Some(unistd::Uid::from_raw(state.config.container_uid)),
-                Some(unistd::Gid::from_raw(state.config.container_gid)),
-            )
-            .with_context(|| {
-                format!(
-                    "Failed to chown {} to {}:{}",
-                    data.display(),
-                    state.config.container_uid,
-                    state.config.container_gid,
-                )
-            })?;
-        }
-
-        let data = if state.config.global_data_dir {
-            state.config.directories.data_dir.clone()
-        } else {
-            state.config.directories.data_dir.join(&manifest.name)
-        };
-        let data = PathBuf::from(data);
-
         let container = Container {
             root,
-            data,
             manifest,
             dm_dev,
         };

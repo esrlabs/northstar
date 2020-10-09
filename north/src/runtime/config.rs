@@ -63,9 +63,6 @@ pub struct Config {
     pub debug: bool,
     /// Console address
     pub console_address: String,
-    /// Share the rw data location between containers. Do not setup
-    /// a dedicated data dir per container.
-    pub global_data_dir: bool,
     /// Container UID
     pub container_uid: u32,
     /// Container GID

@@ -162,7 +162,7 @@ The `[directories]` section just tells north what directories to use.
 * **`container_dir`** -- list of directories where to find the `*.npk` packages for the correct architecture
   are to be found
 * **`run_dir`** -- where the container content will be mounted
-* **`data_dir`** -- In data_dir a directory for each container is created. data_dir is not directly exposed (currently only for testing purposes - see global_data_dir settings which will be removed.
+* **`data_dir`** -- In data_dir a directory for each container is created if a mount of type data is used in the manifest
 
 The [`cgroups`] optionally configures northstar applications CGroups settings.
 Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchies.
