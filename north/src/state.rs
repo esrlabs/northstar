@@ -251,17 +251,6 @@ impl State {
                         cgroups.destroy().await?;
                     }
                 }
-
-                if let Some(OnExit::Restart(n)) = app.manifest().on_exit {
-                    if context.incarnation < n {
-                        info!(
-                            "Restarting {} in incarnation {}",
-                            app,
-                            context.incarnation + 1
-                        );
-                        self.start(name, context.incarnation + 1).await?;
-                    }
-                }
             }
         }
         Ok(())
