@@ -153,16 +153,16 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
 
     pseudofiles = []
     unless is_resource_container
-      pseudofiles << ['/tmp', 444]
-      pseudofiles << ['/proc', 444]
       pseudofiles << ['/dev', 444]
-      pseudofiles << ['/sys', 444]
-      pseudofiles << ['/data', 777]
+      pseudofiles << ['/proc', 444]
+      pseudofiles << ['/tmp', 444]
     end
 
-    manifest['mounts'].each do |m| 
-      mode = m['flags'] && m['flags'].include?('rw') ? 777 : 444
-      pseudofiles << [m['target'], mode]
+    if manifest['mounts']
+      manifest['mounts'].each do |m| 
+        mode = m['flags'] && m['flags'].include?('rw') ? 777 : 444
+        pseudofiles << [m['target'], mode]
+      end
     end
 
     if has_resources

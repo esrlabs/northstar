@@ -3,6 +3,16 @@
 name: ferris_says_hello
 version: 0.0.3
 init: /bin/ferris
+mounts:
+    - source: /lib
+      target: /lib
+      type: bind
+    - source: /lib64
+      target: /lib64
+      type: bind
+    - source: /system
+      target: /system
+      type: bind
 # Pass the filename with the hello message
 args:
   - /message/hello

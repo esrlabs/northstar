@@ -3,5 +3,13 @@ version: 0.0.1
 init: /crashing
 env: 
   RUST_BACKTRACE: 1
-on_exit:
-  restart: 2
+mounts:
+    - source: /lib
+      target: /lib
+      type: bind
+    - source: /lib64
+      target: /lib64
+      type: bind
+    - source: /system
+      target: /system
+      type: bind

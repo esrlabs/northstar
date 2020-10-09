@@ -12,25 +12,21 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::{env, fs, io, io::Write, path::PathBuf, time};
-
-const DATA: &str = "DATA";
+use std::{fs, io, io::Write, path::Path, time};
 
 fn main() -> io::Result<()> {
-    // The path to the rw data directory is provided via the env variable "DATA"
-    let data = PathBuf::from(env::var(DATA).expect("Cannot read env var DATA"));
-
-    let file = data.join("file");
+    // In the manifest a mount of type data is configured on target "/data"
+    let file = Path::new("/data").join("file");
     let text = "Hello!";
 
-    // Write some text to a file in DATA
+    // Write
     let mut f = fs::File::create(&file).expect("Failed to create foo");
     println!("Writing {} to {}", text, file.display());
     f.write_all(text.as_bytes())?;
 
     std::thread::sleep(time::Duration::from_secs(1));
 
-    // Read data
+    // Read
     let text = fs::read_to_string(&file)?;
     println!("Context of {}: {}", file.display(), text);
 
