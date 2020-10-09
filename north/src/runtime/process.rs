@@ -364,112 +364,8 @@ pub mod minijail {
             // Make the application the init process
             jail.run_as_init();
 
-            // Create a minimal dev folder in a tmpfs and mount on /dev
-            jail.mount_dev();
-            // Mount a tmpfs on /tmp
-            jail.mount_tmp();
-            // Mount /proc
-            mount_bind(&mut jail, Path::new("/proc"), Path::new("/proc"), false)?;
-
-            if let Some(ref mounts) = container.manifest.mounts {
-                for mount in mounts {
-                    match mount.r#type {
-                        // Bind mounts
-                        MountType::Bind => {
-                            if let Some(ref source) = mount.source {
-                                // Check if the source exists. If not issue a warning
-                                if source.exists() {
-                                    let source: PathBuf = source.clone().into();
-                                    let target: PathBuf = mount.target.clone().into();
-                                    let rw = mount
-                                        .flags
-                                        .as_ref()
-                                        .map(|flags| flags.contains(&MountFlag::Rw))
-                                        .unwrap_or_default();
-                                    debug!(
-                                        "Bind mounting {} to {}{}",
-                                        source.display(),
-                                        target.display(),
-                                        if rw {
-                                            " (rw)"
-                                        } else {
-                                            ""
-                                        }
-                                    );
-                                    mount_bind(&mut jail, &source, &target, rw)?;
-                                } else {
-                                    warn!(
-                                        "Cannot bind mount nonexitent source {} to {}",
-                                        source.display(),
-                                        mount.target.display()
-                                    );
-                                }
-                            } else {
-                                // TODO: Bind mounts without a source are invalid and should be checked in Manifest::verify
-                                return Err(anyhow!("Cannot mount of type bind without source"));
-                            }
-                        }
-                        MountType::Data => {
-                            let dir = data_dir.join(&container.manifest.name);
-                            debug!("Creating {}", dir.display());
-                            fs::create_dir_all(&dir)
-                                .await
-                                .with_context(|| format!("Failed to create {}", dir.display()))?;
-                            let d: &std::path::Path = dir.as_path().into();
-                            debug!("Chowning {} to {}:{}", d.display(), uid, gid);
-                            chown(
-                                d,
-                                Some(unistd::Uid::from_raw(uid)),
-                                Some(unistd::Gid::from_raw(gid)),
-                            )
-                            .with_context(|| {
-                                format!("Failed to chown {} to {}:{}", d.display(), uid, gid,)
-                            })?;
-                            let rw = mount
-                                .flags
-                                .as_ref()
-                                .map(|flags| flags.contains(&MountFlag::Rw))
-                                .unwrap_or_default();
-                            let target: &Path = mount.target.as_path().into();
-                            mount_bind(&mut jail, &dir, target, rw)?;
-                        }
-                    }
-                }
-            }
-
-            // Instruct minijail to remount /proc ro after entering the mount ns
-            // with MS_NODEV | MS_NOEXEC | MS_NOSUID
-            jail.remount_proc_readonly();
-
-            // Mount resource containers
-            if let Some(ref resources) = container.manifest.resources {
-                for res in resources {
-                    let shared_resource_path = {
-                        let dir_in_container_path: PathBuf = res.dir.clone().into();
-                        let first_part_of_path =
-                            run_dir.join(&res.name).join(&res.version.to_string());
-
-                        let src_dir = dir_in_container_path
-                            .strip_prefix("/")
-                            .map(|dir_in_resource_container| {
-                                first_part_of_path.join(dir_in_resource_container)
-                            })
-                            .unwrap_or(first_part_of_path);
-
-                        if src_dir.exists().await {
-                            Ok(src_dir)
-                        } else {
-                            Err(anyhow!(format!(
-                                "Resource folder {} is missing",
-                                src_dir.display()
-                            )))
-                        }
-                    }?;
-
-                    let target: PathBuf = res.mountpoint.clone().into();
-                    mount_bind(&mut jail, &shared_resource_path, target.as_path(), false)?;
-                }
-            }
+            setup_mounts(&mut jail, container, &data_dir, uid, gid).await?;
+            setup_resources(&mut jail, container, &run_dir).await?;
 
             let mut args: Vec<&str> = Vec::new();
             if let Some(init) = &manifest.init {
@@ -519,18 +415,140 @@ pub mod minijail {
         }
     }
 
+    async fn setup_mounts(
+        jail: &mut ::minijail::Minijail,
+        container: &Container,
+        data_dir: &Path,
+        uid: u32,
+        gid: u32,
+    ) -> Result<()> {
+        // Create a minimal dev folder in a tmpfs and mount on /dev
+        jail.mount_dev();
+        // Mount a tmpfs on /tmp
+        jail.mount_tmp();
+
+        // Mount /proc
+        mount_bind(jail, Path::new("/proc"), Path::new("/proc"), false)?;
+        // Instruct minijail to remount /proc ro after entering the mount ns
+        // with MS_NODEV | MS_NOEXEC | MS_NOSUID
+        jail.remount_proc_readonly();
+
+        let mounts = if let Some(ref mounts) = container.manifest.mounts {
+            mounts
+        } else {
+            return Ok(());
+        };
+
+        for mount in mounts {
+            match mount.r#type {
+                // Bind mounts
+                MountType::Bind => {
+                    if let Some(ref source) = mount.source {
+                        // Check if the source exists. If not issue a warning
+                        if source.exists() {
+                            let source: PathBuf = source.clone().into();
+                            let target: PathBuf = mount.target.clone().into();
+                            let rw = mount
+                                .flags
+                                .as_ref()
+                                .map(|flags| flags.contains(&MountFlag::Rw))
+                                .unwrap_or_default();
+                            mount_bind(jail, &source, &target, rw)?;
+                        } else {
+                            warn!(
+                                "Cannot bind mount nonexitent source {} to {}",
+                                source.display(),
+                                mount.target.display()
+                            );
+                        }
+                    } else {
+                        // TODO: Bind mounts without a source are invalid and should be checked in Manifest::verify
+                        return Err(anyhow!("Cannot mount of type bind without source"));
+                    }
+                }
+                MountType::Data => {
+                    let dir = data_dir.join(&container.manifest.name);
+                    debug!("Creating {}", dir.display());
+                    fs::create_dir_all(&dir)
+                        .await
+                        .with_context(|| format!("Failed to create {}", dir.display()))?;
+                    let d: &std::path::Path = dir.as_path().into();
+                    debug!("Chowning {} to {}:{}", d.display(), uid, gid);
+                    chown(
+                        d,
+                        Some(unistd::Uid::from_raw(uid)),
+                        Some(unistd::Gid::from_raw(gid)),
+                    )
+                    .with_context(|| {
+                        format!("Failed to chown {} to {}:{}", d.display(), uid, gid,)
+                    })?;
+                    let rw = mount
+                        .flags
+                        .as_ref()
+                        .map(|flags| flags.contains(&MountFlag::Rw))
+                        .unwrap_or_default();
+                    let target: &Path = mount.target.as_path().into();
+                    mount_bind(jail, &dir, target, rw)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn setup_resources(
+        jail: &mut ::minijail::Minijail,
+        container: &Container,
+        run_dir: &Path,
+    ) -> Result<()> {
+        if let Some(ref resources) = container.manifest.resources {
+            for res in resources {
+                let shared_resource_path = {
+                    let dir_in_container_path: PathBuf = res.dir.clone().into();
+                    let first_part_of_path = run_dir.join(&res.name).join(&res.version.to_string());
+
+                    let src_dir = dir_in_container_path
+                        .strip_prefix("/")
+                        .map(|dir_in_resource_container| {
+                            first_part_of_path.join(dir_in_resource_container)
+                        })
+                        .unwrap_or(first_part_of_path);
+
+                    if src_dir.exists().await {
+                        Ok(src_dir)
+                    } else {
+                        Err(anyhow!(format!(
+                            "Resource folder {} is missing",
+                            src_dir.display()
+                        )))
+                    }
+                }?;
+
+                let target: PathBuf = res.mountpoint.clone().into();
+                mount_bind(jail, &shared_resource_path, target.as_path(), false)?;
+            }
+        }
+        Ok(())
+    }
+
     fn mount_bind(
         jail: &mut ::minijail::Minijail,
-        src: &Path,
+        source: &Path,
         target: &Path,
-        writable: bool,
+        rw: bool,
     ) -> Result<()> {
-        let src: &std::path::Path = src.into();
+        let source: &std::path::Path = source.into();
         let target: &std::path::Path = target.into();
-        jail.mount_bind(&src, &target, writable).with_context(|| {
+        debug!(
+            "Bind mounting {} to {}{}",
+            source.display(),
+            target.display(),
+            if rw { " (rw)" } else { "" }
+        );
+        jail.mount_bind(&source, &target, rw).with_context(|| {
             format!(
-                "Failed to add bind mount of {} to {}",
-                src.display(),
+                "Failed to add bind mount {} to {}",
+                source.display(),
                 target.display(),
             )
         })
