@@ -12,13 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::{fs, io};
+use std::{env, fs, io};
 
 fn main() -> io::Result<()> {
-    let args = std::env::args();
-    println!("args: {:?}", args);
-    for arg in args.skip(1) {
-        let greet = fs::read_to_string(&arg).unwrap_or(format!("no such file: {}", arg));
+    for arg in env::args().skip(1) {
+        let greet = fs::read_to_string(&arg).unwrap_or(format!("No such file: {}", arg));
         ferris_says::say(greet.as_bytes(), 100, &mut std::io::stdout())?;
     }
     Ok(())
