@@ -159,13 +159,13 @@ pub enum MountFlag {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Mount {
     /// Mount source
-    source: std::path::PathBuf,
+    pub source: std::path::PathBuf,
     /// Mount target
-    target: std::path::PathBuf,
+    pub target: std::path::PathBuf,
     /// Mount type
-    r#type: MountType,
+    pub r#type: MountType,
     /// Mount flags,
-    flags: Option<HashSet<MountFlag>>,
+    pub flags: Option<HashSet<MountFlag>>,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
