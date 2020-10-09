@@ -20,6 +20,7 @@ use crate::{
 use anyhow::{anyhow, Context, Result};
 use async_std::{
     fs,
+    os::unix,
     path::{Path, PathBuf},
 };
 use futures::stream::StreamExt;
@@ -133,18 +134,40 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
         let output = cmd.output()?;
         if !output.status.success() {
             return Err(anyhow!(
-                "Failed to unsquash: {:?}",
+                "Failed to unsquash: {}",
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
 
         if let Some(ref mounts) = manifest.mounts {
             for mount in mounts {
-                if mount.r#type == MountType::Data {
-                    let dir = root.join(&mount.target);
-                    fs::create_dir_all(&dir)
-                        .await
-                        .with_context(|| format!("Failed to create {}", dir.display()))?;
+                match mount.r#type {
+                    MountType::Bind => {
+                        if let Some(ref source) = mount.source {
+                            let target = root.join(mount.target.strip_prefix("/")?);
+                            // The mount points are part of the squashfs - remove them and symlink
+                            if target.exists().await {
+                                fs::remove_dir(&target).await.with_context(|| {
+                                    format!("Failed to rmdir {}", target.display())
+                                })?;
+                            }
+                            unix::fs::symlink(source, &target).await.with_context(|| {
+                                format!(
+                                    "Failed to link {} to {}",
+                                    source.display(),
+                                    target.display()
+                                )
+                            })?;
+                        } else {
+                            return Err(anyhow!("Cannot mount of type bind without source"));
+                        }
+                    }
+                    MountType::Data => {
+                        let dir = root.join(mount.target.strip_prefix("/")?);
+                        fs::create_dir_all(&dir)
+                            .await
+                            .with_context(|| format!("Failed to create {}", dir.display()))?;
+                    }
                 }
             }
         }
