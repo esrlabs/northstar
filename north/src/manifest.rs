@@ -182,11 +182,10 @@ pub struct Manifest {
     pub args: Option<Vec<String>>,
     /// Environment passed to container
     pub env: Option<HashMap<String, String>>,
+    /// List of consumed resources
     pub resources: Option<Vec<Resource>>,
     /// Autostart this container upon north startup
     pub autostart: Option<bool>,
-    /// Action on application exit
-    pub on_exit: Option<OnExit>,
     /// CGroup config
     pub cgroups: Option<CGroups>,
     /// Seccomp configuration
@@ -200,16 +199,7 @@ pub struct Manifest {
 
 impl Manifest {
     fn verify(&self) -> Result<()> {
-        if let Some(OnExit::Restart(n)) = self.on_exit {
-            if self.init.is_none() {
-                return Err(anyhow!(
-                    "An `on_exit` tag is not allowed in resource container"
-                ));
-            }
-            if n == 0 {
-                return Err(anyhow!("Invalid on_exit value in manifest"));
-            }
-        }
+        // TODO: check for none on env, autostart, cgroups, seccomp, instances
         if self.init.is_none() && self.args.is_some() {
             return Err(anyhow!("Arguments not allowed in resource container"));
         }
@@ -271,8 +261,6 @@ resources:
       dir: /bin/foo
       mountpoint: /here/we/go
 autostart: true
-on_exit:
-    restart: 3
 cgroups:
   mem:
     limit: 30
@@ -306,7 +294,6 @@ log:
     assert_eq!(resources.len(), 1);
     assert_eq!(resources[0].name, "bla".to_owned());
     assert!(manifest.autostart.unwrap());
-    assert_eq!(manifest.on_exit, Some(OnExit::Restart(3)));
     let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
     assert_eq!(
         env.get("LD_LIBRARY_PATH"),
@@ -337,35 +324,6 @@ log:
     seccomp.insert("waitpid".to_string(), "1".to_string());
     assert_eq!(manifest.seccomp, Some(seccomp));
 
-    Ok(())
-}
-
-#[async_std::test]
-async fn parse_invalid_on_exit() -> std::io::Result<()> {
-    use async_std::path::PathBuf;
-    use std::{fs::File, io::Write};
-
-    let file = tempfile::NamedTempFile::new()?;
-    let path = file.path();
-
-    let m = "
-name: hello
-version: 0.0.0
-arch: aarch64-linux-android
-init: /binary
-args: [one, two]
-env:
-    LD_LIBRARY_PATH: /lib
-on_exit:
-    Restart: 0
-";
-
-    let mut file = File::create(path)?;
-    file.write_all(m.as_bytes())?;
-    drop(file);
-
-    let manifest = Manifest::from_path(&PathBuf::from(path)).await;
-    assert!(manifest.is_err());
     Ok(())
 }
 
