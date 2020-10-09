@@ -39,7 +39,6 @@ pub use mock::{install, install_all, uninstall};
 pub struct Container {
     pub manifest: Manifest,
     pub root: PathBuf,
-    pub data: PathBuf,
     #[cfg(any(target_os = "android", target_os = "linux"))]
     pub dm_dev: PathBuf,
 }

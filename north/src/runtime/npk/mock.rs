@@ -14,7 +14,7 @@
 
 use super::Container;
 use crate::{
-    manifest::{Manifest, Name, Version},
+    manifest::{Manifest, MountType, Name, Version},
     runtime::state::State,
 };
 use anyhow::{anyhow, Context, Result};
@@ -138,28 +138,20 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
             ));
         }
 
-        let data_dir: PathBuf = state.config.directories.data_dir.as_path().into();
-        let data = if state.config.global_data_dir {
-            data_dir.clone()
-        } else {
-            data_dir.join(&manifest.name)
-        };
-
-        if !data.exists().await {
-            fs::create_dir_all(&data)
-                .await
-                .with_context(|| format!("Failed to create {}", data.display()))?;
+        if let Some(ref mounts) = manifest.mounts {
+            for mount in mounts {
+                if mount.r#type == MountType::Data {
+                    let dir = root.join(&mount.target);
+                    fs::create_dir_all(&dir)
+                        .await
+                        .with_context(|| format!("Failed to create {}", dir.display()))?;
+                }
+            }
         }
-
-        // TODO: Should root/data be symlinked to SETTINGS.data_dir.manifest.name?
 
         info!("Installed {}:{}", manifest.name, manifest.version);
 
-        let container = Container {
-            root,
-            data,
-            manifest,
-        };
+        let container = Container { root, manifest };
 
         state.add(container)?;
     }
