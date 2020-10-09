@@ -291,7 +291,9 @@ fn main() -> Result<()> {
         loop {
             match rl.readline(PROMPT) {
                 Ok(line) => {
-                    if line.trim() == "help" {
+                    if line.trim().is_empty() {
+                        continue;
+                    } else if line.trim() == "help" {
                         println!("{}", help());
                     } else if let Some(response) = run_cmd(&line, &stream)? {
                         rl.add_history_entry(line);
