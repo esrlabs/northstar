@@ -141,6 +141,9 @@ pub enum MountType {
     /// Bind mount
     #[serde(rename = "bind")]
     Bind,
+    /// A container specific directory created by the runtime in directories.data_dir
+    #[serde(rename = "data")]
+    Data,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
@@ -148,18 +151,18 @@ pub enum MountFlag {
     /// Bind mount
     #[serde(rename = "rw")]
     Rw,
-    /// Mount noexec
-    #[serde(rename = "noexec")]
-    NoExec,
-    /// Mount noexec
-    #[serde(rename = "nosuid")]
-    NoSuid,
+    // Mount noexec
+    // #[serde(rename = "noexec")]
+    // NoExec,
+    // Mount noexec
+    // #[serde(rename = "nosuid")]
+    // NoSuid,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Mount {
     /// Mount source
-    pub source: std::path::PathBuf,
+    pub source: Option<std::path::PathBuf>,
     /// Mount target
     pub target: std::path::PathBuf,
     /// Mount type
@@ -244,7 +247,9 @@ name: hello
 version: 0.0.0
 arch: aarch64-linux-android
 init: /binary
-args: [one, two]
+args: 
+    - one
+    - two
 env:
     LD_LIBRARY_PATH: /lib
 mounts:
@@ -252,9 +257,9 @@ mounts:
       target: /lib
       type: bind
       flags: 
-        - rw
-        - noexec
-        - nosuid
+          - rw
+    - target: /data
+      type: data
 resources:
     - name: bla
       version: 1.0.0
@@ -299,18 +304,21 @@ log:
         env.get("LD_LIBRARY_PATH"),
         Some("/lib".to_string()).as_ref()
     );
-    let mount = Mount {
-        source: std::path::PathBuf::from("/lib"),
-        target: std::path::PathBuf::from("/lib"),
-        r#type: MountType::Bind,
-        flags: Some(
-            [MountFlag::Rw, MountFlag::NoExec, MountFlag::NoSuid]
-                .iter()
-                .cloned()
-                .collect(),
-        ),
-    };
-    assert_eq!(manifest.mounts.unwrap(), vec!(mount));
+    let mounts = vec![
+        Mount {
+            source: Some(std::path::PathBuf::from("/lib")),
+            target: std::path::PathBuf::from("/lib"),
+            r#type: MountType::Bind,
+            flags: Some([MountFlag::Rw].iter().cloned().collect()),
+        },
+        Mount {
+            source: None,
+            target: std::path::PathBuf::from("/data"),
+            r#type: MountType::Data,
+            flags: None,
+        },
+    ];
+    assert_eq!(manifest.mounts.unwrap(), mounts);
     assert_eq!(
         manifest.cgroups,
         Some(CGroups {

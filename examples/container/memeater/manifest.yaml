@@ -1,8 +1,16 @@
 name: memeater
 version: 0.0.1
 init: /memeater
-on_exit:
-  restart: 3
+mounts:
+    - source: /lib
+      target: /lib
+      type: bind
+    - source: /lib64
+      target: /lib64
+      type: bind
+    - source: /system
+      target: /system
+      type: bind
 cgroups:
   mem:
     limit: 10000000
