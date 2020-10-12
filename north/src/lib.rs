@@ -14,7 +14,7 @@
 
 #![deny(clippy::all)]
 
-#[cfg(any(target_os = "android", target_os = "linux"))]
+#[cfg(all(feature = "runtime", any(target_os = "android", target_os = "linux")))]
 #[macro_use]
 extern crate structure;
 
