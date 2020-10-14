@@ -35,8 +35,8 @@ pub type Pid = u32;
 pub enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
-    /// Process was killed
-    Killed,
+    /// Process was terminated by a signal
+    Signaled(signal::Signal),
 }
 
 #[derive(Debug)]
@@ -163,7 +163,7 @@ pub mod os {
                 }, // This is the happy path...
                 _ = timeout => {
                     signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))?;
-                    ExitStatus::Killed
+                    ExitStatus::Signaled(signal::Signal::SIGKILL)
                 }
             })
         }
@@ -581,7 +581,7 @@ pub mod minijail {
                 }, // This is the happy path...
                 _ = timeout => {
                     signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))?;
-                    ExitStatus::Killed
+                    ExitStatus::Signaled(signal::Signal::SIGKILL)
                 }
             })
         }
@@ -593,7 +593,7 @@ pub mod minijail {
 async fn waitpid(name: &str, pid: u32, mut exit_handle: ExitHandleSignal, event_handle: EventTx) {
     let name = name.to_string();
     task::spawn(async move {
-        let exit_code: i32 = task::spawn_blocking(move || {
+        let status: ExitStatus = task::spawn_blocking(move || {
             let pid = unistd::Pid::from_raw(pid as i32);
             loop {
                 let result = wait::waitpid(Some(pid), None);
@@ -602,15 +602,12 @@ async fn waitpid(name: &str, pid: u32, mut exit_handle: ExitHandleSignal, event_
                 match result {
                     // The process exited normally (as with exit() or returning from main) with the given exit code.
                     // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
-                    Ok(WaitStatus::Exited(_pid, code)) => return code,
+                    Ok(WaitStatus::Exited(_pid, code)) => return ExitStatus::Exit(code),
 
                     // The process was killed by the given signal.
                     // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
                     Ok(WaitStatus::Signaled(_pid, signal, _dump)) => {
-                        return match signal {
-                            signal::Signal::SIGTERM => 0,
-                            _ => 1,
-                        }
+                        return ExitStatus::Signaled(signal);
                     }
 
                     // The process is alive, but was stopped by the given signal.
@@ -641,8 +638,6 @@ async fn waitpid(name: &str, pid: u32, mut exit_handle: ExitHandleSignal, event_
             }
         })
         .await;
-
-        let status = ExitStatus::Exit(exit_code);
 
         exit_handle.signal(status.clone()).await;
         event_handle
