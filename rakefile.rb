@@ -138,7 +138,7 @@ namespace :test_container do
     require './tooling.rb'
 
     target_arch = 'x86_64-unknown-linux-gnu'
-    dir = `pwd`.strip + '/integration_tests/test_container'
+    dir = `pwd`.strip + '/tests/test_container'
     target_dir = "#{dir}/root-x86_64-unknown-linux-gnu"
     registry = `pwd`.strip + '/target/north/registry'
     key_directory = `pwd`.strip + '/target/north/keys'

@@ -1,4 +1,0 @@
-name: test_container
-version: 0.0.1
-init: /test_container
-instances: 5

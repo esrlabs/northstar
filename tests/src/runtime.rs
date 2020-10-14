@@ -14,7 +14,10 @@
 
 //! Controls North runtime instances
 
-use crate::{capture_reader::CaptureReader, process_assert::ProcessAssert, util::Timeout};
+use crate::{
+    process_assert::ProcessAssert,
+    util::{CaptureReader, Timeout},
+};
 use anyhow::{anyhow, Context, Result};
 use assert_cmd::cargo::CommandCargoExt;
 use log::{error, info};
@@ -36,8 +39,8 @@ async fn nstar(command: &str) -> Result<()> {
         // TODO sometimes the shutdown command won't get a reply
         if command != "shutdown" && !output.status.success() {
             let error_msg = String::from_utf8(output.stderr)?;
-            error!("Failed nstar {}: {}", command, error_msg);
-            Err(anyhow!("Failed nstar {}: {}", command, error_msg))
+            error!("Failed to run nstar {}: {}", command, error_msg);
+            Err(anyhow!("Failed to run nstar {}: {}", command, error_msg))
         } else {
             info!("nstar {}: {}", command, String::from_utf8(output.stdout)?);
             Ok(())
@@ -47,12 +50,12 @@ async fn nstar(command: &str) -> Result<()> {
 }
 
 /// A running instance of north.
-pub struct NorthRuntime {
+pub struct Runtime {
     child: Child,
     output: CaptureReader,
 }
 
-impl NorthRuntime {
+impl Runtime {
     /// Launches an instance of north
     ///
     /// # Examples
@@ -60,15 +63,15 @@ impl NorthRuntime {
     /// ```no_run
     /// use async_std::prelude::*;
     /// use anyhow::Result;
-    /// use integration_tests::north_runtime::NorthRuntime;
+    /// use tests::runtime::Runtime;
     ///
     /// #[async_std::main]
     /// async fn main() -> Result<()> {
-    ///     let north = NorthRuntime::launch().await?;
+    ///     let north = Runtime::launch().await?;
     ///     Ok(())
     /// }
     /// ```
-    pub async fn launch() -> Result<NorthRuntime> {
+    pub async fn launch() -> Result<Runtime> {
         async move {
             let mut child = Command::cargo_bin("north")
                 .context("Could not locate the north binary")?
@@ -88,7 +91,7 @@ impl NorthRuntime {
                 .await
                 .context("Failed to open north console")?;
 
-            Ok(NorthRuntime { child, output })
+            Ok(Runtime { child, output })
         }
         .or_timeout(TIMEOUT)
         .await
@@ -186,7 +189,7 @@ impl NorthRuntime {
     }
 }
 
-impl Drop for NorthRuntime {
+impl Drop for Runtime {
     fn drop(&mut self) {
         if let Ok(None) = self.child.try_wait() {
             self.child.kill().expect("Could not kill north");

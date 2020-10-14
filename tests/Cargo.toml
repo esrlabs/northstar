@@ -1,9 +1,8 @@
 [package]
-name = "integration_tests"
+name = "tests"
 version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2018"
-build = "build.rs"
 
 [dependencies]
 anyhow = "1.0.31"

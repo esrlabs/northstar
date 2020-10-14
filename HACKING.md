@@ -33,12 +33,11 @@ rake check
 
 ## Unit tests code coverage
 
-### install grcov
+### Install grcov
 
 ```shell
 cargo install grcov
 ```
-
 
 Generate a report of the unit tests code coverage with the following command:
 
@@ -46,8 +45,12 @@ Generate a report of the unit tests code coverage with the following command:
 rake coverage
 ```
 
-## Integration tests
+## Tests
+
+Integration tests can be run on `Linux` targets:
 
 ```shell
-cargo test -p integration_tests -- --test-threads 1 --ignored
+cargo build --bin north
+cargo build --bin nstar
+cargo test -p tests -- --test-threads 1 --ignored
 ```

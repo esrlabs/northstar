@@ -12,16 +12,38 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-//! Utils to execute assertions on process's standard output.
+//! Extends Future with timeout methods
 
 use anyhow::{Context, Result};
 use async_std::{
+    future::{timeout, Future},
     sync::{channel, Receiver},
     task,
 };
+use async_trait::async_trait;
 use log::debug;
 use regex::Regex;
-use std::io::{self, BufRead, BufReader};
+use std::{
+    io::{self, BufRead, BufReader},
+    time::Duration,
+};
+
+/// Extends Future with timeout methods
+#[async_trait]
+pub trait Timeout: Sized + Future {
+    /// Times out if the tasks takes longer than `duration`
+    async fn or_timeout(self, duration: Duration) -> Result<Self::Output> {
+        timeout(duration, self).await.map_err(anyhow::Error::new)
+    }
+
+    /// Times out if the tasks takes longer than the `secs`
+    async fn or_timeout_in_secs(self, secs: u64) -> Result<Self::Output> {
+        self.or_timeout(Duration::from_secs(secs)).await
+    }
+}
+
+#[async_trait]
+impl<T: Sized + Future> Timeout for T {}
 
 pub struct CaptureReader {
     receiver: Receiver<String>,

@@ -12,14 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-pub mod capture_reader;
-pub mod north_runtime;
 pub mod process_assert;
+pub mod runtime;
 pub mod util;
 
 #[cfg(test)]
 mod test {
-    use crate::{north_runtime::NorthRuntime, util::Timeout};
+    use crate::{runtime::Runtime, util::Timeout};
     use anyhow::{Context, Result};
     use async_std::{fs, path::Path};
 
@@ -31,32 +30,32 @@ mod test {
     #[async_std::test]
     async fn check_hello() -> Result<()> {
         init_logger();
-        let mut north = NorthRuntime::launch().await?;
+        let mut runtime = Runtime::launch().await?;
 
-        let hello = north.start("hello").await?;
+        let hello = runtime.start("hello").await?;
 
         // Here goes some kind of health check for the spawned process
         assert!(hello.is_running().await?);
 
-        north.stop("hello").await?;
-        north.shutdown().await
+        runtime.stop("hello").await?;
+        runtime.shutdown().await
     }
 
     #[ignore]
     #[async_std::test]
     async fn check_cpueater() -> Result<()> {
         init_logger();
-        let mut north = NorthRuntime::launch().await?;
+        let mut runtime = Runtime::launch().await?;
 
-        let cpueater = north.start("cpueater").await?;
+        let cpueater = runtime.start("cpueater").await?;
 
         // Here goes some kind of health check for the spawned process
         assert_eq!(cpueater.get_cpu_shares().await?, 100);
         assert!(cpueater.is_running().or_timeout_in_secs(1).await??);
 
         // Stop the cpueater process
-        north.stop("cpueater").await?;
-        north.shutdown().await
+        runtime.stop("cpueater").await?;
+        runtime.shutdown().await
     }
 
     #[ignore]
@@ -64,9 +63,9 @@ mod test {
     async fn check_memeater() -> Result<()> {
         init_logger();
 
-        let mut north = NorthRuntime::launch().await?;
+        let mut runtime = Runtime::launch().await?;
 
-        let memeater = north.start("memeater").await?;
+        let memeater = runtime.start("memeater").await?;
 
         // Here goes some kind of health check for the spawned process
         assert!(memeater.is_running().or_timeout_in_secs(1).await??);
@@ -75,8 +74,8 @@ mod test {
         // println!("{} != {}", memeater.get_limit_in_bytes().await?, 100000000);
 
         // stop the memeater process
-        north.stop("memeater").await?;
-        north.shutdown().await
+        runtime.stop("memeater").await?;
+        runtime.shutdown().await
     }
 
     #[ignore]
@@ -84,7 +83,7 @@ mod test {
     async fn check_datarw_mount() -> Result<()> {
         init_logger();
 
-        let mut north = NorthRuntime::launch().await?;
+        let mut runtime = Runtime::launch().await?;
 
         let data_dir = Path::new("../target/north/data/test_container-000/")
             .canonicalize()
@@ -95,20 +94,20 @@ mod test {
         fs::write(&input_file, b"echo hello there!").await?;
 
         // Start the test_container process
-        north.start("test_container-000").await.map(drop)?;
+        runtime.start("test_container-000").await.map(drop)?;
 
-        north
+        runtime
             .expect_output("hello there!")
             .or_timeout_in_secs(5)
             .await?
             .context("Failed to find expected test_container output")?;
 
-        north.try_stop("test_container-000").await?;
+        runtime.try_stop("test_container-000").await?;
 
         // Remove the temporary data directory
         fs::remove_file(input_file).await?;
 
-        north.shutdown().await
+        runtime.shutdown().await
     }
 
     #[ignore]
@@ -118,17 +117,15 @@ mod test {
 
         let data_dir = Path::new("../target/north/data/").canonicalize().await?;
 
-        let mut north = NorthRuntime::launch().await?;
+        let mut runtime = Runtime::launch().await?;
 
         for i in 0..5 {
-            fs::write(
-                data_dir.join(format!("test_container-0{:02}/input.txt", i)),
-                b"crash",
-            )
-            .await?;
+            let dir = data_dir.join(format!("test_container-0{:02}", i));
+            fs::create_dir_all(&dir).await?;
+            fs::write(dir.join("input.txt"), b"crash").await?;
 
             // Start the test_container process
-            north
+            runtime
                 .start(&format!("test_container-0{:02}", i))
                 .await
                 .map(drop)?;
@@ -136,9 +133,11 @@ mod test {
 
         // Try to stop the containers before issuing the shutdown
         for i in 0..5 {
-            north.try_stop(&format!("test_container-0{:02}", i)).await?;
+            runtime
+                .try_stop(&format!("test_container-0{:02}", i))
+                .await?;
         }
 
-        north.shutdown().await
+        runtime.shutdown().await
     }
 }

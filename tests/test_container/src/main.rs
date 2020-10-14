@@ -14,7 +14,7 @@
 
 use anyhow::{Context, Result};
 use std::{
-    env, fs,
+    fs,
     io::{self, Write},
     iter,
     path::{Path, PathBuf},
@@ -35,8 +35,7 @@ enum TestCommands {
 
 #[allow(clippy::all)]
 fn main() -> Result<()> {
-    let data = env::var("DATA").context("Failed to read environment variable DATA")?;
-    let data = Path::new(&data).join("input.txt");
+    let data = Path::new("/data").join("input.txt");
     let commands = fs::read_to_string(&data)
         .with_context(|| format!("Failed to read commands from {}", data.display()))?;
 
