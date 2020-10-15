@@ -172,7 +172,7 @@ async fn install_internal(
         Manifest::from_str(&manifest)?
     };
     debug!("Manifest loaded for \"{}\"", manifest.name);
-    if let Some(resources) = &manifest.resources {
+    if let Some(resources) = &manifest.mounts.as_ref().map(|m| m.resources()) {
         debug!("Referencing {} resources:", resources.len());
         for res in resources {
             debug!("- {}", res);

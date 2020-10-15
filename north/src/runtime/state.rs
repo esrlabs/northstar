@@ -195,12 +195,18 @@ impl State {
             return Err(Error::UnknownApplication);
         }
 
+        let resource_names: Vec<String> = app
+            .container
+            .manifest
+            .mounts
+            .as_ref()
+            .map(|m| m.resources().into_iter().map(|r| r.name).collect())
+            .unwrap_or_default();
+
         // Check for all required resources
-        if let Some(required_resources) = &app.container.manifest.resources {
-            for r in required_resources {
-                if !resources.contains(&r.name) {
-                    return Err(Error::MissingResource(r.name.clone()));
-                }
+        for name in resource_names {
+            if !resources.contains(&name) {
+                return Err(Error::MissingResource(name));
             }
         }
 

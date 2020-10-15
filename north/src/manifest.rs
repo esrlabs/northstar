@@ -19,6 +19,7 @@ use serde::{
     ser::Serializer,
     Deserialize, Serialize,
 };
+use std::convert::TryFrom;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -172,6 +173,156 @@ pub struct Mount {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct NewBind {
+    pub host: std::path::PathBuf,
+    pub flags: Option<HashSet<MountFlag>>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct NewData {
+    pub tmpfs: String,
+    pub flags: Option<HashSet<MountFlag>>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct NewResource {
+    pub resource: String,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MountSource {
+    Bind(NewBind),
+    Data(NewData),
+    Resource(NewResource),
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize)]
+pub struct MountEntry {
+    pub target: std::path::PathBuf,
+    pub source: MountSource,
+}
+
+impl MountEntry {
+    pub fn is_resource(&self) -> bool {
+        matches!(self.source, MountSource::Resource(_))
+    }
+}
+
+#[derive(Default, Clone, Eq, PartialEq, Debug, Serialize)]
+pub struct MountEntries {
+    pub entries: Vec<MountEntry>,
+}
+
+impl MountEntries {
+    pub fn resources(&self) -> Vec<Resource> {
+        self.entries
+            .iter()
+            .filter(|e| e.is_resource())
+            .cloned()
+            .filter_map(|e| Resource::try_from(e).ok())
+            .collect()
+    }
+
+    pub fn mounts(&self) -> Vec<Mount> {
+        self.entries
+            .iter()
+            .filter(|e| !e.is_resource())
+            .cloned()
+            .filter_map(|e| Mount::try_from(e).ok())
+            .collect()
+    }
+}
+
+/// Serde deserialization for `MountEntries`
+impl<'de> Deserialize<'de> for MountEntries {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MountEntriesVisitor;
+
+        impl<'de> Visitor<'de> for MountEntriesVisitor {
+            type Value = MountEntries;
+            fn visit_map<A>(self, mut map: A) -> Result<MountEntries, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some((target, source)) = map.next_entry()? {
+                    entries.push(MountEntry { target, source });
+                }
+                Ok(MountEntries { entries })
+            }
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
+                formatter.write_str("mount entry")
+            }
+        }
+
+        deserializer.deserialize_map(MountEntriesVisitor)
+    }
+}
+
+impl TryFrom<MountEntry> for Mount {
+    type Error = anyhow::Error;
+    fn try_from(value: MountEntry) -> Result<Mount> {
+        match value.source {
+            MountSource::Bind(m) => Ok(Mount {
+                source: Some(m.host.clone()),
+                target: value.target,
+                r#type: MountType::Bind,
+                flags: m.flags,
+            }),
+            MountSource::Data(m) => Ok(Mount {
+                source: None,
+                target: value.target,
+                r#type: MountType::Data,
+                flags: m.flags,
+            }),
+            MountSource::Resource(_) => {
+                Err(anyhow!("Can't convert a resource mount entry to a Mount"))
+            }
+        }
+    }
+}
+
+impl TryFrom<MountEntry> for Resource {
+    type Error = anyhow::Error;
+    fn try_from(value: MountEntry) -> Result<Resource> {
+        match value.source {
+            MountSource::Resource(r) => {
+                let re = regex::Regex::new(r"(?P<name>\w+):(?P<version>[\w.]+)(?P<dir>[\w/]+)?")?;
+                let caps = re
+                    .captures(&r.resource)
+                    .ok_or_else(|| anyhow!("Invalid resource: {}", r.resource))?;
+
+                let name = caps
+                    .name("name")
+                    .map(|m| m.as_str().to_owned())
+                    .unwrap_or_default();
+                let version: Version =
+                    Version::parse(caps.name("version").map(|m| m.as_str()).unwrap_or(""))?;
+                let mountpoint = value.target;
+                let dir = caps
+                    .name("dir")
+                    .map(|m| std::path::Path::new(m.as_str()).to_owned())
+                    .unwrap_or_else(|| std::path::Path::new("/").to_owned());
+
+                Ok(Resource {
+                    name,
+                    version,
+                    mountpoint,
+                    dir,
+                })
+            }
+            MountSource::Bind(_) => Err(anyhow!("Can't convert a bind mount entry to a Resource")),
+            MountSource::Data(_) => Err(anyhow!("Can't convert a data mount entry to a Resource")),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container
     pub name: Name,
@@ -185,8 +336,6 @@ pub struct Manifest {
     pub args: Option<Vec<String>>,
     /// Environment passed to container
     pub env: Option<HashMap<String, String>>,
-    /// List of consumed resources
-    pub resources: Option<Vec<Resource>>,
     /// Autostart this container upon north startup
     pub autostart: Option<bool>,
     /// CGroup config
@@ -196,8 +345,8 @@ pub struct Manifest {
     /// Number of instances to mount of this container
     /// The name get's extended with the instance id.
     pub instances: Option<u32>,
-    /// Extra mounts
-    pub mounts: Option<Vec<Mount>>,
+    /// List of bind mounts and resources
+    pub mounts: Option<MountEntries>,
 }
 
 impl Manifest {
@@ -247,24 +396,20 @@ name: hello
 version: 0.0.0
 arch: aarch64-linux-android
 init: /binary
-args: 
+args:
     - one
     - two
 env:
     LD_LIBRARY_PATH: /lib
 mounts:
-    - source: /lib
-      target: /lib
-      type: bind
-      flags: 
+    /lib:
+      host: /lib
+      flags:
           - rw
-    - target: /data
-      type: data
-resources:
-    - name: bla
-      version: 1.0.0
-      dir: /bin/foo
-      mountpoint: /here/we/go
+    /data:
+        tmpfs: size=25
+    /here/we/go:
+        resource: bla:1.0.0/bin/foo
 autostart: true
 cgroups:
   mem:
@@ -294,7 +439,9 @@ log:
     assert_eq!(args[1], "two");
 
     let resources = manifest
-        .resources
+        .mounts
+        .as_ref()
+        .map(|m| m.resources())
         .ok_or_else(|| anyhow!("Missing resource containers"))?;
     assert_eq!(resources.len(), 1);
     assert_eq!(resources[0].name, "bla".to_owned());
@@ -318,7 +465,12 @@ log:
             flags: None,
         },
     ];
-    assert_eq!(manifest.mounts.unwrap(), mounts);
+    let manifest_mounts = manifest
+        .mounts
+        .as_ref()
+        .map(|m| m.mounts())
+        .ok_or_else(|| anyhow!("Missing resource containers"))?;
+    assert_eq!(manifest_mounts, mounts);
     assert_eq!(
         manifest.cgroups,
         Some(CGroups {

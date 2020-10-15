@@ -2,16 +2,13 @@ name: datarw
 version: 0.0.1
 init: /datarw
 mounts:
-    - target: /data
-      type: data
-      flags:
-          - rw
-    - source: /lib
-      target: /lib
-      type: bind
-    - source: /lib64
-      target: /lib64
-      type: bind
-    - source: /system
-      target: /system
-      type: bind
+  /data:
+    tmpfs: size=25M
+    flags:
+        - rw
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system

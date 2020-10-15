@@ -433,10 +433,9 @@ pub mod minijail {
         // with MS_NODEV | MS_NOEXEC | MS_NOSUID
         jail.remount_proc_readonly();
 
-        let mounts = if let Some(ref mounts) = container.manifest.mounts {
-            mounts
-        } else {
-            return Ok(());
+        let mounts = match container.manifest.mounts.as_ref().map(|m| m.mounts()) {
+            Some(m) => m,
+            None => return Ok(()),
         };
 
         for mount in mounts {
@@ -501,7 +500,9 @@ pub mod minijail {
         container: &Container,
         run_dir: &Path,
     ) -> Result<()> {
-        if let Some(ref resources) = container.manifest.resources {
+        let resources = container.manifest.mounts.as_ref().map(|m| m.resources());
+
+        if let Some(ref resources) = resources {
             for res in resources {
                 let shared_resource_path = {
                     let dir_in_container_path: PathBuf = res.dir.clone().into();
