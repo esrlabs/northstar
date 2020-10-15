@@ -3,16 +3,12 @@ version: 0.0.1
 init: /test_container
 instances: 5
 mounts:
-    - target: /data
-      type: data
+    /data:
       flags:
           - rw
-    - source: /lib
-      target: /lib
-      type: bind
-    - source: /lib64
-      target: /lib64
-      type: bind
-    - source: /system
-      target: /system
-      type: bind
+    /lib:
+      host: /lib
+    /lib64:
+      host: /lib64
+    /system:
+      host: /system

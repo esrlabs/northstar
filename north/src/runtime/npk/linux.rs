@@ -23,7 +23,7 @@ use super::{
     },
     Container, Hashes,
 };
-use crate::manifest::{Manifest, Name, Version};
+use crate::manifest::{Manifest, Mount, Name, Version};
 use anyhow::{anyhow, Context, Result};
 use async_std::{
     fs, io,
@@ -172,7 +172,17 @@ async fn install_internal(
         Manifest::from_str(&manifest)?
     };
     debug!("Manifest loaded for \"{}\"", manifest.name);
-    if let Some(resources) = &manifest.resources {
+
+    let resources: Vec<String> = manifest
+        .mounts
+        .iter()
+        .filter_map(|m| match m {
+            Mount::Resource { name, version, .. } => Some(format!("{} ({})", name, version)),
+            _ => None,
+        })
+        .collect();
+
+    if !resources.is_empty() {
         debug!("Referencing {} resources:", resources.len());
         for res in resources {
             debug!("- {}", res);
