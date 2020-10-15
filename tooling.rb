@@ -159,19 +159,17 @@ def create_npk(src_dir, npk, manifest, arch_dir, pack_config)
     end
 
     if manifest['mounts']
-      manifest['mounts'].each do |m| 
+      manifest['mounts'].each do |target, m|
         mode = m['flags'] && m['flags'].include?('rw') ? 777 : 444
-        pseudofiles << [m['target'], mode]
-      end
-    end
+        pseudofiles << [target, mode]
 
-    if has_resources
-      manifest['resources'].each do |res|
-        # in order to support mountpoints with multiple path segments, we need to call mksquashfs multiple times:
-        # e.gl to support res/foo in our image, we need to add /res/foo AND /res
-        # ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000"
-        trail = path_trail res['mountpoint']
-        trail.each { |part| pseudofiles << [part, 555] }
+        if m.key?('resource')
+          # in order to support mountpoints with multiple path segments, we need to call mksquashfs multiple times:
+          # e.gl to support res/foo in our image, we need to add /res/foo AND /res
+          # ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000"
+          trail = path_trail target
+          trail.each { |part| pseudofiles << [part, 555] }
+        end
       end
     end
 

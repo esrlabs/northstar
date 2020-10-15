@@ -1,18 +1,18 @@
 use anyhow::{anyhow, Context, Result};
 use itertools::Itertools;
-use north::manifest::{Manifest, MountFlag};
+use north::manifest::{Manifest, Mount, MountFlag};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use sodiumoxide::crypto::{
     sign,
     sign::{ed25519::SecretKey, keypair_from_seed, Seed, SEEDBYTES},
 };
-use std::path::Path;
 use std::{
     fs,
     fs::{File, OpenOptions},
     io,
     io::{BufReader, Read, Seek, SeekFrom::Start, Write},
+    path::Path,
     process::Command,
 };
 use tempdir::TempDir;
@@ -183,33 +183,33 @@ fn gen_pseudo_dir_list(manifest: &Manifest) -> Result<Vec<(&str, i32)>> {
     if manifest.init.is_some() {
         pseudo_dirs = vec![("/dev", 444), ("/proc", 444), ("/tmp", 444)];
     }
-    if let Some(mounts) = &manifest.mounts {
-        for mount in mounts {
-            let mode = match mount.flags.as_ref() {
-                Some(set) if set.contains(&MountFlag::Rw) => 777,
-                _ => 444,
-            };
-            pseudo_dirs.push((
-                mount
-                    .target
-                    .to_str()
-                    .with_context(|| "Mount point in manifest is not convertible to string")?,
-                mode,
-            ));
-        }
-    }
-    if let Some(resources) = &manifest.resources {
-        for resource in resources {
-            /* # in order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
-             * e.gl to support res/foo in our image, we need to add /res/foo AND /res
-             * ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
-            let trail = path_trail(&resource.mountpoint);
-            for path in trail {
+    for mount in manifest.mounts.iter() {
+        match mount {
+            Mount::Resource { target, .. } => {
+                /* # in order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
+                 * e.gl to support res/foo in our image, we need to add /res/foo AND /res
+                 * ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
+                let trail = path_trail(&target);
+                for path in trail {
+                    pseudo_dirs.push((
+                        path.as_os_str()
+                            .to_str()
+                            .with_context(|| "Cannot convert pseudo file path to string")?,
+                        555,
+                    ));
+                }
+            }
+            Mount::Bind { target, flags, .. } | Mount::Persist { target, flags, .. } => {
+                let mode = if flags.contains(&MountFlag::Rw) {
+                    777
+                } else {
+                    444
+                };
                 pseudo_dirs.push((
-                    path.as_os_str()
+                    target
                         .to_str()
-                        .with_context(|| "Cannot convert pseudo file path to string")?,
-                    555,
+                        .with_context(|| "Mount point in manifest is not convertible to string")?,
+                    mode,
                 ));
             }
         }
@@ -300,7 +300,7 @@ fn sign_hashes(signing_key: &SecretKey, hashes_yaml: &str) -> String {
 }
 
 /// Return the list of sub-paths to the given directory except the root.
-/// For example, the path '/res/dir/subdir' returns ('/res/dir/subdir', /res/dir/', '/res/').   
+/// For example, the path '/res/dir/subdir' returns ('/res/dir/subdir', /res/dir/', '/res/').
 fn path_trail(path: &Path) -> Vec<&Path> {
     let mut current_path = path;
     let mut ret = vec![];

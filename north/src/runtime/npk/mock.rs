@@ -14,7 +14,7 @@
 
 use super::Container;
 use crate::{
-    manifest::{Manifest, MountType, Name, Version},
+    manifest::{Manifest, Mount, Name, Version},
     runtime::state::State,
 };
 use anyhow::{anyhow, Context, Result};
@@ -139,36 +139,34 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
             ));
         }
 
-        if let Some(ref mounts) = manifest.mounts {
-            for mount in mounts {
-                match mount.r#type {
-                    MountType::Bind => {
-                        if let Some(ref source) = mount.source {
-                            let target = root.join(mount.target.strip_prefix("/")?);
-                            // The mount points are part of the squashfs - remove them and symlink
-                            if target.exists().await {
-                                fs::remove_dir(&target).await.with_context(|| {
-                                    format!("Failed to rmdir {}", target.display())
-                                })?;
-                            }
-                            unix::fs::symlink(source, &target).await.with_context(|| {
-                                format!(
-                                    "Failed to link {} to {}",
-                                    source.display(),
-                                    target.display()
-                                )
-                            })?;
-                        } else {
-                            return Err(anyhow!("Cannot mount of type bind without source"));
-                        }
-                    }
-                    MountType::Data => {
-                        let dir = root.join(mount.target.strip_prefix("/")?);
-                        fs::create_dir_all(&dir)
+        for mount in manifest.mounts.iter() {
+            match mount {
+                Mount::Bind { target, host, .. } => {
+                    let source = &host;
+                    let target = root.join(target.strip_prefix("/")?);
+                    // The mount points are part of the squashfs - remove them and symlink
+                    if target.exists().await {
+                        fs::remove_dir(&target)
                             .await
-                            .with_context(|| format!("Failed to create {}", dir.display()))?;
+                            .with_context(|| format!("Failed to rmdir {}", target.display()))?;
                     }
+                    unix::fs::symlink(source, &target).await.with_context(|| {
+                        format!(
+                            "Failed to link {} to {}",
+                            source.display(),
+                            target.display()
+                        )
+                    })?;
                 }
+
+                Mount::Persist { target, .. } => {
+                    let dir = root.join(target.strip_prefix("/")?);
+                    fs::create_dir_all(&dir)
+                        .await
+                        .with_context(|| format!("Failed to create {}", dir.display()))?;
+                }
+
+                _ => continue,
             }
         }
 

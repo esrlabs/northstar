@@ -14,9 +14,10 @@
 
 use anyhow::{anyhow, Context, Error, Result};
 use async_std::{path::Path, task};
+use lazy_static::lazy_static;
 use serde::{
     de::{Deserializer, Visitor},
-    ser::Serializer,
+    ser::{SerializeMap, Serializer},
     Deserialize, Serialize,
 };
 use std::{
@@ -123,31 +124,6 @@ pub struct CGroups {
     pub cpu: Option<CGroupCpu>,
 }
 
-// TODO: Remove?
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Resource {
-    pub name: Name,
-    pub version: Version,
-    pub dir: std::path::PathBuf,
-    pub mountpoint: std::path::PathBuf,
-}
-
-impl fmt::Display for Resource {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Resource \"{} ({})\"", self.name, self.version)
-    }
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum MountType {
-    /// Bind mount
-    #[serde(rename = "bind")]
-    Bind,
-    /// A container specific directory created by the runtime in directories.data_dir
-    #[serde(rename = "data")]
-    Data,
-}
-
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub enum MountFlag {
     /// Bind mount
@@ -161,16 +137,23 @@ pub enum MountFlag {
     // NoSuid,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Mount {
-    /// Mount source
-    pub source: Option<std::path::PathBuf>,
-    /// Mount target
-    pub target: std::path::PathBuf,
-    /// Mount type
-    pub r#type: MountType,
-    /// Mount flags,
-    pub flags: Option<HashSet<MountFlag>>,
+#[derive(Clone, Eq, PartialEq, Debug, Serialize)]
+pub enum Mount {
+    Resource {
+        target: std::path::PathBuf,
+        name: String,
+        version: Version,
+        dir: std::path::PathBuf,
+    },
+    Bind {
+        target: std::path::PathBuf,
+        host: std::path::PathBuf,
+        flags: HashSet<MountFlag>,
+    },
+    Persist {
+        target: std::path::PathBuf,
+        flags: HashSet<MountFlag>,
+    },
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -191,9 +174,6 @@ pub struct Manifest {
     /// Environment passed to container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
-    /// List of consumed resources
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resources: Option<Vec<Resource>>,
     /// Autostart this container upon north startup
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
@@ -210,8 +190,123 @@ pub struct Manifest {
     /// The name get's extended with the instance id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instances: Option<u32>,
-    /// Extra mounts
-    pub mounts: Option<Vec<Mount>>,
+    /// List of bind mounts and resources
+    #[serde(with = "MountsSerialization")]
+    #[serde(default)]
+    pub mounts: Vec<Mount>,
+}
+
+struct MountsSerialization;
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum MountSource {
+    Resource {
+        resource: String,
+    },
+    Bind {
+        host: std::path::PathBuf,
+        #[serde(default)]
+        flags: HashSet<MountFlag>,
+    },
+    Persist {
+        #[serde(default)]
+        flags: HashSet<MountFlag>,
+    },
+}
+
+impl MountsSerialization {
+    fn serialize<S>(mounts: &[Mount], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(mounts.len()))?;
+        for mount in mounts {
+            match mount.clone() {
+                Mount::Bind {
+                    target,
+                    host,
+                    flags,
+                } => map.serialize_entry(&target, &MountSource::Bind { host, flags })?,
+                Mount::Persist { target, flags } => {
+                    map.serialize_entry(&target, &MountSource::Persist { flags })?
+                }
+                Mount::Resource {
+                    target,
+                    name,
+                    version,
+                    dir,
+                } => map.serialize_entry(
+                    &target,
+                    &MountSource::Resource {
+                        resource: format!("{}:{}{}", name, version, dir.display()),
+                    },
+                )?,
+            }
+        }
+        map.end()
+    }
+
+    fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Mount>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MountVectorVisitor;
+        impl<'de> Visitor<'de> for MountVectorVisitor {
+            type Value = Vec<Mount>;
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some((target, source)) = map.next_entry()? {
+                    entries.push(match source {
+                        MountSource::Bind { host, flags } => Mount::Bind {
+                            target,
+                            host,
+                            flags,
+                        },
+                        MountSource::Persist { flags } => Mount::Persist { target, flags },
+                        MountSource::Resource { resource } => {
+                            lazy_static! {
+                                static ref RE: regex::Regex = regex::Regex::new(
+                                    r"(?P<name>\w+):(?P<version>[\d.]+)(?P<dir>[\w/]+)?"
+                                )
+                                .expect("Invalid regex");
+                            }
+
+                            let caps = RE
+                                .captures(&resource)
+                                .ok_or_else(|| anyhow!("Invalid resource: {}", resource))
+                                .map_err(serde::de::Error::custom)?;
+
+                            let name = caps.name("name").unwrap().as_str().to_string();
+                            let version = Version::parse(caps.name("version").unwrap().as_str())
+                                .map_err(serde::de::Error::custom)?;
+                            let dir = std::path::PathBuf::from(
+                                caps.name("dir").map_or("/", |m| m.as_str()),
+                            );
+
+                            Mount::Resource {
+                                target,
+                                name,
+                                version,
+                                dir,
+                            }
+                        }
+                    })
+                }
+                Ok(entries)
+            }
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
+                formatter.write_str("{ /path/a: Bind {} | Persist {} | Resource {}, /path/b: ... }")
+            }
+        }
+
+        deserializer.deserialize_map(MountVectorVisitor)
+    }
 }
 
 impl Manifest {
@@ -261,24 +356,22 @@ name: hello
 version: 0.0.0
 arch: aarch64-linux-android
 init: /binary
-args: 
+args:
     - one
     - two
 env:
     LD_LIBRARY_PATH: /lib
 mounts:
-    - source: /lib
-      target: /lib
-      type: bind
-      flags: 
+    /lib:
+      host: /lib
+      flags:
           - rw
-    - target: /data
-      type: data
-resources:
-    - name: bla
-      version: 1.0.0
-      dir: /bin/foo
-      mountpoint: /here/we/go
+    /data: {}
+    /data_rw:
+      flags:
+          - rw
+    /here/we/go:
+        resource: bla:1.0.0/bin/foo
 autostart: true
 cgroups:
   mem:
@@ -307,11 +400,6 @@ log:
     assert_eq!(args[0], "one");
     assert_eq!(args[1], "two");
 
-    let resources = manifest
-        .resources
-        .ok_or_else(|| anyhow!("Missing resource containers"))?;
-    assert_eq!(resources.len(), 1);
-    assert_eq!(resources[0].name, "bla".to_owned());
     assert!(manifest.autostart.unwrap());
     let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
     assert_eq!(
@@ -319,20 +407,27 @@ log:
         Some("/lib".to_string()).as_ref()
     );
     let mounts = vec![
-        Mount {
-            source: Some(std::path::PathBuf::from("/lib")),
+        Mount::Bind {
             target: std::path::PathBuf::from("/lib"),
-            r#type: MountType::Bind,
-            flags: Some([MountFlag::Rw].iter().cloned().collect()),
+            host: std::path::PathBuf::from("/lib"),
+            flags: [MountFlag::Rw].iter().cloned().collect(),
         },
-        Mount {
-            source: None,
+        Mount::Persist {
             target: std::path::PathBuf::from("/data"),
-            r#type: MountType::Data,
-            flags: None,
+            flags: HashSet::new(),
+        },
+        Mount::Persist {
+            target: std::path::PathBuf::from("/data_rw"),
+            flags: [MountFlag::Rw].iter().cloned().collect(),
+        },
+        Mount::Resource {
+            target: std::path::PathBuf::from("/here/we/go"),
+            name: "bla".to_string(),
+            version: Version::parse("1.0.0")?,
+            dir: PathBuf::from("/bin/foo").into(),
         },
     ];
-    assert_eq!(manifest.mounts.unwrap(), mounts);
+    assert_eq!(manifest.mounts, mounts);
     assert_eq!(
         manifest.cgroups,
         Some(CGroups {
@@ -346,6 +441,52 @@ log:
     seccomp.insert("waitpid".to_string(), "1".to_string());
     assert_eq!(manifest.seccomp, Some(seccomp));
 
+    Ok(())
+}
+
+#[test]
+fn serialize_back_and_forth() -> Result<()> {
+    let m = "
+name: hello
+version: 0.0.0
+arch: aarch64-linux-android
+init: /binary
+args:
+    - one
+    - two
+env:
+    LD_LIBRARY_PATH: /lib
+mounts:
+    /lib:
+      host: /lib
+      flags:
+          - rw
+    /data: {}
+    /data_rw:
+      flags:
+          - rw
+    /here/we/go:
+        resource: bla:1.0.0/bin/foo
+autostart: true
+cgroups:
+  mem:
+    limit: 30
+  cpu:
+    shares: 100
+seccomp:
+    fork: 1
+    waitpid: 1
+log:
+    tag: test
+    buffer:
+        custom: 8
+";
+
+    let manifest = serde_yaml::from_str::<Manifest>(m)?;
+    let string_copie = serde_yaml::to_string(&manifest)?;
+    let manifest_copie = serde_yaml::from_str::<Manifest>(&string_copie)?;
+
+    assert_eq!(manifest, manifest_copie);
     Ok(())
 }
 

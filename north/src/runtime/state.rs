@@ -19,7 +19,7 @@ use super::{
     process::{ExitStatus, Process},
 };
 use crate::{
-    manifest::{Manifest, Name, Version},
+    manifest::{Manifest, Mount, Name, Version},
     runtime::{Event, EventTx},
 };
 use anyhow::{Error as AnyhowError, Result};
@@ -196,10 +196,10 @@ impl State {
         }
 
         // Check for all required resources
-        if let Some(required_resources) = &app.container.manifest.resources {
-            for r in required_resources {
-                if !resources.contains(&r.name) {
-                    return Err(Error::MissingResource(r.name.clone()));
+        for mount in app.container.manifest.mounts.iter() {
+            if let Mount::Resource { name, .. } = mount {
+                if !resources.contains(name) {
+                    return Err(Error::MissingResource(name.clone()));
                 }
             }
         }
