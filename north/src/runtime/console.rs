@@ -16,7 +16,7 @@ use super::state::State;
 use crate::{
     api,
     api::{InstallationResult, MessageId},
-    runtime::{Event, EventTx},
+    runtime::{Event, EventTx, NotificationRx, SystemNotification},
 };
 use anyhow::{Context, Result};
 use api::{
@@ -33,6 +33,7 @@ use async_std::{
     task,
 };
 use byteorder::{BigEndian, ByteOrder};
+use futures::stream::StreamExt;
 use io::ErrorKind;
 use log::{debug, error, info, warn};
 use tempfile::tempdir;
@@ -41,8 +42,12 @@ use tempfile::tempdir;
 pub struct Console;
 
 impl Console {
-    pub async fn new(address: &str, tx: &EventTx) -> Result<Console> {
-        Self::start(address, tx.clone()).await?;
+    pub async fn new(
+        address: &str,
+        tx: &EventTx,
+        notification_rx: NotificationRx,
+    ) -> Result<Console> {
+        Self::start(address, tx.clone(), notification_rx).await?;
         Ok(Console::default())
     }
 
@@ -56,6 +61,7 @@ impl Console {
         if let Payload::Request(ref request) = payload {
             let response = match request {
                 Request::Containers => {
+                    debug!("Request::Containers received");
                     let containers = state
                         .applications()
                         .map(|app| {
@@ -149,7 +155,7 @@ impl Console {
     }
 
     /// Open a TCP socket and read lines terminated with `\n`.
-    async fn start(address: &str, tx: EventTx) -> Result<()> {
+    async fn start(address: &str, tx: EventTx, notification_rx: NotificationRx) -> Result<()> {
         debug!("Starting console on {}", address);
 
         let listener = TcpListener::bind(address)
@@ -162,7 +168,7 @@ impl Console {
             // Spawn a task for each incoming connection.
             while let Some(stream) = incoming.next().await {
                 if let Ok(stream) = stream {
-                    task::spawn(connection(stream, tx.clone()));
+                    task::spawn(connection_loop(stream, tx.clone(), notification_rx.clone()));
                 }
             }
         });
@@ -173,7 +179,7 @@ impl Console {
         &self,
         success: InstallationResult,
         msg_id: MessageId,
-        response_tx: sync::Sender<Message>,
+        response_message_tx: sync::Sender<Message>,
         registry_path: Option<std::path::PathBuf>,
         npk: &std::path::Path,
     ) {
@@ -193,11 +199,170 @@ impl Console {
             id: msg_id,
             payload: Payload::Response(Response::Install { result: success }),
         };
-        response_tx.send(response_message).await
+        response_message_tx.send(response_message).await
     }
 }
 
-async fn connection(stream: TcpStream, mut tx_main: EventTx) {
+// struct NotificationCatcher {
+//     notification_rx: NotificationReceiver,
+// }
+
+// impl futures::Stream for NotificationCatcher {
+//     type Item = Option<SystemNotification>;
+//     fn poll_next(
+//         mut self: std::pin::Pin<&mut Self>,
+//         _cx: &mut std::task::Context,
+//     ) -> futures::task::Poll<Option<Self::Item>> {
+//         self.notification_rx.receive()
+//         let mut buffer = vec![0; 20];
+//         let message: Message = serde_json::from_slice(&buffer).unwrap();
+//         futures::task::Poll::Ready(Some(Some(Ok(message))))
+//     }
+// }
+
+// struct MessageReceiver<R: Unpin + Read> {
+//     reader: R,
+// }
+
+// impl<R: Unpin + Read> futures::Stream for MessageReceiver<R> {
+//     type Item = Option<Result<Message>>;
+//     fn poll_next(
+//         mut self: std::pin::Pin<&mut Self>,
+//         _cx: &mut std::task::Context,
+//     ) -> futures::task::Poll<Option<Self::Item>> {
+//         // // Read frame length
+//         // let mut buf = [0u8; 4];
+//         // self.reader.read_exact(&mut buf).await.unwrap();
+//         // let frame_len = BigEndian::read_u32(&buf) as usize;
+
+//         // // Read payload
+//         // let mut buffer = vec![0; frame_len];
+//         // self.reader.read_exact(&mut buffer).await.unwrap();
+
+//         // let message: Message = serde_json::from_slice(&buffer).unwrap();
+//         // futures::task::Poll::Ready(Some(Some(Ok(message))))
+//         futures::task::Poll::Ready(Some(None))
+//     }
+// }
+
+struct MessageWithData {
+    message: Message,
+    path: Option<std::path::PathBuf>,
+}
+
+async fn receive_message_from_socket<R: Read + Unpin>(
+    buf_reader: &mut R,
+    message_tx: &sync::Sender<MessageWithData>,
+    tmp_installation_dir: &std::path::Path,
+) -> Result<()> {
+    // Read frame length
+    let mut buf = [0u8; 4];
+    buf_reader.read_exact(&mut buf).await?;
+    let frame_len = BigEndian::read_u32(&buf) as usize;
+
+    // Read payload
+    let mut buffer = vec![0; frame_len];
+    buf_reader.read_exact(&mut buffer).await?;
+
+    let message: Message = serde_json::from_slice(&buffer)?;
+    let msg_with_data = match &message.payload {
+        Payload::Installation(size, name) => {
+            let tmp_installation_file_path = tmp_installation_dir.join(&name);
+            let mut tmpfile = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&tmp_installation_file_path)
+                .await?;
+            let mut received_bytes = 0usize;
+            while received_bytes < *size {
+                let received = buf_reader.read(&mut buffer).await?;
+                if received > 0 {
+                    tmpfile.write_all(&buffer[..received]).await?;
+                    received_bytes += received;
+                }
+            }
+            tmpfile.flush().await?;
+            debug!(
+                "Received a total of {} bytes, start installation",
+                received_bytes
+            );
+            MessageWithData {
+                message,
+                path: Some(tmp_installation_file_path),
+            }
+        }
+        _ => MessageWithData {
+            message,
+            path: None,
+        },
+    };
+    message_tx.send(msg_with_data).await;
+    Ok(())
+}
+
+async fn send_reply<W: Unpin + Write>(reply: &Message, writer: &mut W) -> io::Result<()> {
+    // Serialize reply
+    let reply =
+        serde_json::to_string_pretty(&reply).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+    // Send reply
+    let mut buffer = [0u8; 4];
+    BigEndian::write_u32(&mut buffer, reply.len() as u32);
+    writer.write_all(&buffer).await?;
+    writer.write_all(reply.as_bytes()).await?;
+    Ok(())
+}
+
+fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Message>) -> Result<()> {
+    // setup send functionality
+    let mut writer = writer.clone();
+    let _ = task::spawn(async move {
+        loop {
+            match client_rx.recv().await {
+                Ok(msg_to_send) => {
+                    if let Err(e) = send_reply(&msg_to_send, &mut writer).await {
+                        warn!("Error sending back to client: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    warn!("Error receiving send job: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+    Ok(())
+}
+
+fn start_receiving_from_socket(
+    reader: &TcpStream,
+    tmp_installation_dir: std::path::PathBuf,
+    message_tx: sync::Sender<MessageWithData>,
+) -> Result<()> {
+    let reader = reader.clone();
+    let _ = task::spawn(async move {
+        let mut buf_reader: io::BufReader<&TcpStream> = io::BufReader::new(&reader);
+        // TODO listen for shutdown
+        loop {
+            if let Err(e) =
+                receive_message_from_socket(&mut buf_reader, &message_tx, &tmp_installation_dir)
+                    .await
+            {
+                warn!("Error receiving from socket: {}", e);
+                break;
+            }
+        }
+    });
+    debug!("Stopped receiving from socket");
+    Ok(())
+}
+
+async fn connection_loop(
+    stream: TcpStream,
+    mut event_tx: EventTx,
+    notification_rx: NotificationRx,
+) {
     let peer = match stream.peer_addr() {
         Ok(peer) => peer,
         Err(e) => {
@@ -207,47 +372,91 @@ async fn connection(stream: TcpStream, mut tx_main: EventTx) {
     };
     debug!("Client {:?} connected", peer);
 
-    let (reader, writer) = &mut (&stream, &stream);
-    let mut reader: io::BufReader<&TcpStream> = io::BufReader::new(reader);
-    let (mut tx, mut rx) = sync::channel::<Message>(1);
+    enum ConsoleEvent {
+        SystemEvent(SystemNotification),
+        ApiMessage(MessageWithData),
+    }
 
-    async fn connection<R: Unpin + Read, W: Unpin + Write>(
-        reader: &mut R,
-        writer: &mut W,
-        tx: &mut EventTx,
+    let (reader, writer) = &mut (&stream, &stream);
+    let (mut message_tx, mut message_rx) = sync::channel::<Message>(1);
+    // channel for sending messages back to client
+    let (client_tx, client_rx) = sync::channel::<Message>(1000);
+    let (socket_tx, socket_rx) = sync::channel::<MessageWithData>(1);
+    let tmp_installation_dir = tempdir().unwrap();
+    start_receiving_from_socket(
+        reader,
+        std::path::PathBuf::from(tmp_installation_dir.path()),
+        socket_tx,
+    )
+    .unwrap();
+
+    start_sending_over_socket(writer, client_rx).unwrap();
+
+    let message_event_stream: futures::stream::Map<async_std::sync::Receiver<MessageWithData>, _> =
+        socket_rx.map(ConsoleEvent::ApiMessage);
+    let runtime_event_stream: futures::stream::Map<
+        async_std::sync::Receiver<SystemNotification>,
+        _,
+    > = notification_rx.map(ConsoleEvent::SystemEvent);
+    let mut event_stream = futures::stream::select(message_event_stream, runtime_event_stream);
+
+    while let Some(event) = event_stream.next().await {
+        debug!("received something");
+        match event {
+            ConsoleEvent::SystemEvent(_notification) => {
+                info!("handle system notification");
+                let reply = Message {
+                    id: "Notification".to_owned(),
+                    payload: Payload::Notification(api::Notification {}),
+                };
+                client_tx.send(reply).await;
+            }
+            ConsoleEvent::ApiMessage(m) => {
+                info!("handle ApiMessage");
+                if let Err(e) = handle_api_request(
+                    m,
+                    client_tx.clone(),
+                    &mut event_tx,
+                    &mut message_rx,
+                    &mut message_tx,
+                )
+                .await
+                {
+                    match e.kind() {
+                        ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
+                        _ => warn!("Error on handle_request to {:?}: {:?}", peer, e),
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    async fn handle_api_request(
+        m: MessageWithData,
+        sender_to_client: Sender<Message>,
+        event_tx: &mut EventTx,
         rx_reply: &mut Receiver<Message>,
         tx_reply: &mut Sender<Message>,
     ) -> io::Result<()> {
-        // Read frame length
-        let mut buf = [0u8; 4];
-        reader.read_exact(&mut buf).await?;
-        let frame_len = BigEndian::read_u32(&buf) as usize;
-
-        // Read payload
-        let mut buffer = vec![0; frame_len];
-        reader.read_exact(&mut buffer).await?;
-
-        // Deserialize message
-        let message: Message = serde_json::from_slice(&buffer)?;
-        let tmp_installation_dir = tempdir()?;
-        tx.send(match message.payload {
-            Payload::Installation(size, name) => {
-                debug!("Was an installation message for {} ({} bytes)", name, size);
-                create_installation_event(
-                    reader,
-                    &tmp_installation_dir.path(),
-                    message.id,
-                    size,
-                    name,
-                    tx_reply.clone(),
-                )
-                .await?
+        let event = match m {
+            MessageWithData {
+                message:
+                    Message {
+                        id,
+                        payload: Payload::Installation(_, name),
+                    },
+                path: Some(p),
+            } => {
+                info!("was installation");
+                Event::Install(id, PathBuf::from(&p), name, tx_reply.clone())
             }
-            _ => Event::Console(message, tx_reply.clone()),
-        })
-        .await;
-
-        // Send message and response handle to main loop
+            _ => {
+                info!("was consol event");
+                Event::Console(m.message, tx_reply.clone())
+            }
+        };
+        event_tx.send(event).await;
 
         // Wait for reply of main loop
         // TODO: timeout
@@ -256,64 +465,7 @@ async fn connection(stream: TcpStream, mut tx_main: EventTx) {
             .await
             .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
-        // Serialize reply
-        let reply = serde_json::to_string_pretty(&reply)
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
-
-        // Send reply
-        let mut buffer = [0u8; 4];
-        BigEndian::write_u32(&mut buffer, reply.len() as u32);
-        writer.write_all(&buffer).await?;
-        writer.write_all(reply.as_bytes()).await?;
-
+        sender_to_client.send(reply).await;
         Ok(())
-    }
-
-    loop {
-        if let Err(e) = connection(&mut reader, writer, &mut tx_main, &mut rx, &mut tx).await {
-            match e.kind() {
-                ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
-                _ => warn!("Error on connection to {:?}: {:?}", peer, e),
-            }
-            break;
-        }
-    }
-
-    async fn create_installation_event<R: Unpin + Read>(
-        mut reader: R,
-        tmp_installation_dir: &std::path::Path,
-        msg_id: MessageId,
-        size: usize,
-        install_file_name: String,
-        tx: sync::Sender<api::Message>,
-    ) -> io::Result<Event> {
-        const BUF_SIZE: usize = 4096;
-        let mut buffer = [0u8; BUF_SIZE];
-        // now we will receive the file with [size] bytes
-        let tmp_installation_file_path = tmp_installation_dir.join(&install_file_name);
-        let mut tmpfile = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&tmp_installation_file_path)
-            .await?;
-        let mut received_bytes = 0usize;
-        while received_bytes < size {
-            let received = reader.read(&mut buffer).await?;
-            if received > 0 {
-                tmpfile.write_all(&buffer[..received]).await?;
-                received_bytes += received;
-            }
-        }
-        tmpfile.flush().await?;
-        debug!(
-            "Received a total of {} bytes, start installation",
-            received_bytes
-        );
-        Ok(Event::Install(
-            msg_id,
-            PathBuf::from(tmp_installation_file_path),
-            install_file_name,
-            tx,
-        ))
     }
 }

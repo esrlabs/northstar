@@ -18,6 +18,8 @@ use super::{
     npk::Container,
     process::{ExitStatus, Process},
 };
+use crate::runtime::NotificationTx;
+use crate::runtime::SystemNotification;
 use crate::{
     api::{InstallationResult, Message, MessageId},
     manifest::{Manifest, Mount, Name, Version},
@@ -43,7 +45,8 @@ use time::Duration;
 
 #[derive(Debug)]
 pub struct State {
-    tx: EventTx,
+    events_tx: EventTx,
+    notification_tx: NotificationTx,
     pub signing_keys: HashMap<String, PublicKey>,
     pub applications: HashMap<Name, Application>,
     pub config: Config,
@@ -115,13 +118,18 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub async fn new(config: &Config, tx: EventTx) -> Result<State> {
+    pub async fn new(
+        config: &Config,
+        tx: EventTx,
+        notification_tx: NotificationTx,
+    ) -> Result<State> {
         // Load keys for manifest verification
         let key_dir: PathBuf = config.directories.key_dir.clone().into();
         let signing_keys = keys::load(&key_dir).await?;
 
         Ok(State {
-            tx,
+            events_tx: tx,
+            notification_tx,
             signing_keys,
             applications: HashMap::new(),
             config: config.clone(),
@@ -129,8 +137,8 @@ impl State {
     }
 
     /// Return an owned copy of the main loop tx handle
-    pub fn _tx(&self) -> EventTx {
-        self.tx.clone()
+    pub fn _event_tx(&self) -> EventTx {
+        self.events_tx.clone()
     }
 
     /// Return an iterator over all known applications
@@ -203,7 +211,7 @@ impl State {
         #[cfg(any(target_os = "android", target_os = "linux"))]
         let process = super::process::minijail::MinijailProcess::start(
             &app.container,
-            self.tx.clone(),
+            self.events_tx.clone(),
             self.config.directories.run_dir.as_path().into(),
             self.config.directories.data_dir.as_path().into(),
             self.config.container_uid,
@@ -228,7 +236,7 @@ impl State {
                 &self.config.cgroups,
                 app.name(),
                 c,
-                self.tx.clone(),
+                self.events_tx.clone(),
             )
             .await
             .map_err(Error::ProcessError)?;
@@ -300,7 +308,7 @@ impl State {
                     .map_err(Error::ProcessError)?;
             }
 
-            self.tx.send(Event::Shutdown).await;
+            self.events_tx.send(Event::Shutdown).await;
             Ok(())
         } else {
             let apps = self
@@ -312,9 +320,15 @@ impl State {
         }
     }
 
-    async fn is_installed(&self, npk: &Path) -> Result<bool, InstallFailure> {
+    // checks if the applicaion within the npk has an id (name) that is the same
+    // as on of the already installed applications
+    // returns the application id if it was installed, otherwise None
+    async fn is_installed(&self, npk: &Path) -> Result<Option<String>, InstallFailure> {
         let container_id = extract_manifest(npk.into(), &self.signing_keys)?.name;
-        Ok(self.applications.get(&container_id).is_some())
+        Ok(self
+            .applications
+            .get(&container_id)
+            .map(|app| app.container.manifest.name.to_owned()))
     }
 
     /// Install a npk from give path
@@ -335,10 +349,10 @@ impl State {
         }
         let registry_path = container_dir.map(|p| p.join(&install_file_name));
         match self.is_installed(&npk).await {
-            Ok(was_installed) if was_installed => {
+            Ok(Some(installed_id)) => {
                 warn!("Cannot install already installed application");
                 let _ = self
-                    .tx
+                    .events_tx
                     .send(Event::InstallationFinished(
                         InstallationResult::ApplicationAlreadyInstalled,
                         std::path::PathBuf::from(npk),
@@ -347,12 +361,18 @@ impl State {
                         registry_path,
                     ))
                     .await;
+                self.notification_tx
+                    .send(SystemNotification::Status(format!(
+                        "Application {} was already installed",
+                        installed_id
+                    )))
+                    .await;
                 return;
             }
             Err(e) => {
                 warn!("Error reading manifest info for package");
                 let _ = self
-                    .tx
+                    .events_tx
                     .send(Event::InstallationFinished(
                         e.into(),
                         std::path::PathBuf::from(npk),
@@ -369,7 +389,7 @@ impl State {
             Ok(_) => {
                 info!("Installation succeeded!");
                 let _ = self
-                    .tx
+                    .events_tx
                     .send(Event::InstallationFinished(
                         InstallationResult::Success,
                         std::path::PathBuf::from(npk),
@@ -382,7 +402,7 @@ impl State {
             Err(e) => {
                 warn!("Installation failed");
                 let _ = self
-                    .tx
+                    .events_tx
                     .send(Event::InstallationFinished(
                         e.into(),
                         std::path::PathBuf::from(npk),
@@ -449,6 +469,9 @@ impl State {
                     .stop(Duration::from_secs(1))
                     .await
                     .map_err(Error::ProcessError)?;
+                self.notification_tx
+                    .send(SystemNotification::Status("OOM".to_string()))
+                    .await;
             }
         }
         Ok(())
