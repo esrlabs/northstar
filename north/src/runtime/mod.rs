@@ -35,6 +35,14 @@ use process::ExitStatus;
 use state::State;
 
 pub type EventTx = sync::Sender<Event>;
+pub type NotificationTx = sync::Sender<SystemNotification>;
+
+#[derive(Debug)]
+pub enum SystemNotification {
+    Status(String),
+}
+
+pub type NotificationRx = sync::Receiver<SystemNotification>;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -80,8 +88,11 @@ pub async fn run(config: &Config) -> Result<()> {
 
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
-    let (tx, rx) = sync::channel::<Event>(1000);
-    let mut state = State::new(config, tx.clone()).await?;
+    let (event_tx, event_rx) = sync::channel::<Event>(1000);
+    // The notification channel can be used to propagate notifications
+    let (notification_tx, notification_rx) = sync::channel::<SystemNotification>(1000);
+
+    let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
 
     // Ensure the configured run_dir exists
     // TODO: permission check of SETTINGS.directories.run_dir
@@ -107,7 +118,8 @@ pub async fn run(config: &Config) -> Result<()> {
     );
 
     // Initialize console
-    let console = console::Console::new(&config.console_address, &tx).await?;
+    let console =
+        console::Console::new(&config.console_address, &event_tx, notification_rx).await?;
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
@@ -125,7 +137,7 @@ pub async fn run(config: &Config) -> Result<()> {
     }
 
     // Enter main loop
-    while let Ok(event) = rx.recv().await {
+    while let Ok(event) = event_rx.recv().await {
         match event {
             Event::ChildOutput { name, fd, line } => {
                 on_child_output(&mut state, &name, fd, &line).await
@@ -152,7 +164,7 @@ pub async fn run(config: &Config) -> Result<()> {
             Event::InstallationFinished(success, npk, msg_id, txr, container_dir) => {
                 console
                     .installation_finished(success, msg_id, txr, container_dir, &npk)
-                    .await
+                    .await;
             }
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
