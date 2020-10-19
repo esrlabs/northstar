@@ -1482,7 +1482,11 @@ static int mount_dev(char **dev_path_ret)
 	 * Create a temp path for the /dev init.  We'll relocate this to the
 	 * final location later on in the startup process.
 	 */
+#ifdef ANDROID
+	dev_path = *dev_path_ret = strdup("/data/local/tmp/minijail.dev.XXXXXX");
+#else
 	dev_path = *dev_path_ret = strdup("/tmp/minijail.dev.XXXXXX");
+#endif
 	if (dev_path == NULL || mkdtemp(dev_path) == NULL)
 		pdie("could not create temp path for /dev");
 
