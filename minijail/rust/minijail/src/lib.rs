@@ -367,6 +367,11 @@ impl Minijail {
             minijail_log_seccomp_filter_failures(self.jail);
         }
     }
+    pub fn log_to_fd(fd: std::os::raw::c_int, priority: std::os::raw::c_int) {
+        unsafe {
+            minijail_log_to_fd(fd, priority);
+        }
+    }
     pub fn use_caps(&mut self, capmask: u64) {
         unsafe {
             minijail_use_caps(self.jail, capmask);
