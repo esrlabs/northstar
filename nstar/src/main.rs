@@ -18,10 +18,7 @@ use byteorder::{BigEndian, ByteOrder};
 use itertools::Itertools;
 use log::{info, warn};
 use net::TcpStream;
-use north::api::{
-    InstallationResult, Message, Payload, Request, Response, ShutdownResult, StartResult,
-    StopResult, UninstallResult,
-};
+use north::api::{Message, Payload, Request, Response};
 use prettytable::{format, Attr, Cell, Row, Table};
 use rustyline::{
     completion::{Completer, FilenameCompleter, Pair},
@@ -57,10 +54,6 @@ struct Opt {
     /// Disable history
     #[structopt(short, long)]
     disable_history: bool,
-
-    /// Print raw json payload
-    #[structopt(short, long)]
-    json: bool,
 
     /// Run command and exit
     cmd: Vec<String>,
@@ -154,7 +147,7 @@ where
     }
 }
 
-fn run<S: Read + Write>(mut stream: S, req: Request) -> Result<Response> {
+fn run<S: Read + Write>(stream: &mut S, req: Request) -> Result<Response> {
     // Send request
     let request_msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
@@ -200,30 +193,118 @@ stop <name>:    Stop application"
         .into()
 }
 
-fn run_cmd<S: Read + Write>(cmd: &str, stream: S) -> Result<Option<Response>> {
+fn run_cmd<S: Read + Write>(cmd: &str, stream: &mut S) -> Result<()> {
     let mut cmd = cmd.trim().split_whitespace();
     let c = cmd.next().ok_or_else(|| anyhow!("Invalid command"))?;
 
-    let response = match c {
-        "containers" => Some(run(stream, Request::Containers)?),
-        "shutdown" => Some(run(stream, Request::Shutdown)?),
-        "start" => {
-            if let Some(name) = cmd.next() {
-                Some(run(stream, Request::Start(name.into()))?)
-            } else {
-                None
-            }
+    match c {
+        "containers" => containers(stream)?,
+        "shutdown" => shutdown(stream)?,
+        "start" => start(cmd, stream)?,
+        "stop" => stop(cmd, stream)?,
+        _ => (),
+    }
+    Ok(())
+}
+
+fn containers<S: Read + Write>(stream: &mut S) -> Result<()> {
+    if let Response::Containers(containers) = run(stream, Request::Containers)? {
+        let mut table = Table::new();
+        table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+        table.set_titles(Row::new(vec![
+            Cell::new("Name").with_style(Attr::Bold),
+            Cell::new("Version").with_style(Attr::Bold),
+            Cell::new("Type").with_style(Attr::Bold),
+            Cell::new("PID").with_style(Attr::Bold),
+            Cell::new("Uptime").with_style(Attr::Bold),
+        ]));
+        for container in containers
+            .iter()
+            .sorted_by_key(|c| &c.manifest.name) // Sort by name
+            .sorted_by_key(|c| c.manifest.init.is_none())
+        {
+            table.add_row(Row::new(vec![
+                Cell::new(&container.manifest.name).with_style(Attr::Bold),
+                Cell::new(&container.manifest.version.to_string()),
+                Cell::new(
+                    container
+                        .manifest
+                        .init
+                        .as_ref()
+                        .map(|_| "App")
+                        .unwrap_or("Resource"),
+                ),
+                Cell::new(
+                    &container
+                        .process
+                        .as_ref()
+                        .map(|p| p.pid.to_string())
+                        .unwrap_or_default(),
+                )
+                .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
+                Cell::new(
+                    &container
+                        .process
+                        .as_ref()
+                        .map(|p| format!("{:?}", Duration::from_nanos(p.uptime)))
+                        .unwrap_or_default(),
+                ),
+            ]));
         }
-        "stop" => {
-            if let Some(name) = cmd.next() {
-                Some(run(stream, Request::Stop(name.into()))?)
-            } else {
-                None
-            }
+        table.printstd();
+    }
+    Ok(())
+}
+
+fn shutdown<S: Read + Write>(stream: &mut S) -> Result<()> {
+    let response = run(stream, Request::Shutdown)?;
+    println!("Shutdown result {:?}", response);
+    Ok(())
+}
+
+fn start<'a, S: Read + Write, I: Iterator<Item = &'a str>>(
+    mut cmd: I,
+    stream: &mut S,
+) -> Result<()> {
+    let pattern = cmd.next().unwrap_or(".*");
+    let re = regex::Regex::new(pattern).context("Invalid regex")?;
+    if let Response::Containers(containers) = run(stream, Request::Containers)? {
+        for container in containers
+            .iter()
+            .filter(|ref c| c.manifest.init.is_some()) // Filter resource container
+            .filter(|ref c| c.process.is_none()) // Filter running containers
+            .filter(|ref c| re.is_match(&c.manifest.name))
+        {
+            let response = run(stream, Request::Start(container.manifest.name.clone()))?;
+            println!(
+                "Started {}:{}: {:?}",
+                container.manifest.name, container.manifest.version, response
+            );
         }
-        _ => None,
-    };
-    Ok(response)
+    }
+    Ok(())
+}
+
+fn stop<'a, S: Read + Write, I: Iterator<Item = &'a str>>(
+    mut cmd: I,
+    stream: &mut S,
+) -> Result<()> {
+    let pattern = cmd.next().unwrap_or(".*");
+    let re = regex::Regex::new(pattern).context("Invalid regex")?;
+    if let Response::Containers(containers) = run(stream, Request::Containers)? {
+        for container in containers
+            .iter()
+            .filter(|ref c| c.process.is_some()) // Filter not running containers
+            .filter(|ref c| re.is_match(&c.manifest.name))
+        {
+            let response = run(stream, Request::Stop(container.manifest.name.clone()))?;
+            println!(
+                "Stopped {}:{}: {:?}",
+                container.manifest.name, container.manifest.version, response
+            );
+        }
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -238,21 +319,12 @@ fn main() -> Result<()> {
         env_logger::init();
     }
 
-    let stream = TcpStream::connect(&opt.host)
+    let mut stream = TcpStream::connect(&opt.host)
         .with_context(|| format!("Failed to connect to {}", opt.host))?;
 
     if !opt.cmd.is_empty() {
         let cmd_str = opt.cmd.join(" ");
-        if let Some(response) = run_cmd(cmd_str.trim(), &stream)? {
-            if opt.json {
-                println!("{}", serde_json::to_string_pretty(&response)?);
-            } else {
-                print_response(&response);
-            }
-        } else {
-            eprintln!("Invalid cmd \"{}\"", cmd_str);
-        }
-        Ok(())
+        run_cmd(cmd_str.trim(), &mut stream)
     } else {
         let config = Config::builder()
             .auto_add_history(false)
@@ -296,7 +368,8 @@ fn main() -> Result<()> {
                         continue;
                     } else if line.trim() == "help" {
                         println!("{}", help());
-                    } else if let Some(response) = run_cmd(&line, &stream)? {
+                    } else {
+                        run_cmd(&line, &mut stream)?;
                         rl.add_history_entry(line);
                         if !opt.disable_history {
                             if let Some(ref history) = history {
@@ -312,9 +385,6 @@ fn main() -> Result<()> {
                                 }
                             }
                         }
-                        print_response(&response);
-                    } else {
-                        println!("Invalid command: {}", line);
                     }
                 }
                 Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
@@ -325,76 +395,5 @@ fn main() -> Result<()> {
             }
         }
         Ok(())
-    }
-}
-
-// TODO: This can be done smarter
-fn print_response(response: &Response) {
-    match response {
-        Response::Containers(containers) => {
-            let mut table = Table::new();
-            table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-            table.set_titles(Row::new(vec![
-                Cell::new("Name").with_style(Attr::Bold),
-                Cell::new("Version").with_style(Attr::Bold),
-                Cell::new("Type").with_style(Attr::Bold),
-                Cell::new("PID").with_style(Attr::Bold),
-                Cell::new("Uptime").with_style(Attr::Bold),
-            ]));
-            for container in containers
-                .iter()
-                .sorted_by_key(|c| &c.manifest.name) // Sort by name
-                .sorted_by_key(|c| c.manifest.init.is_none())
-            {
-                table.add_row(Row::new(vec![
-                    Cell::new(&container.manifest.name).with_style(Attr::Bold),
-                    Cell::new(&container.manifest.version.to_string()),
-                    Cell::new(
-                        container
-                            .manifest
-                            .init
-                            .as_ref()
-                            .map(|_| "App")
-                            .unwrap_or("Resource"),
-                    ),
-                    Cell::new(
-                        &container
-                            .process
-                            .as_ref()
-                            .map(|p| p.pid.to_string())
-                            .unwrap_or_default(),
-                    )
-                    .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
-                    Cell::new(
-                        &container
-                            .process
-                            .as_ref()
-                            .map(|p| format!("{:?}", Duration::from_nanos(p.uptime)))
-                            .unwrap_or_default(),
-                    ),
-                ]));
-            }
-            table.printstd();
-        }
-        Response::Start { result } => match result {
-            StartResult::Success => println!("Success"),
-            StartResult::Error(e) => println!("Failed: {}", e),
-        },
-        Response::Stop { result } => match result {
-            StopResult::Success => println!("Success"),
-            StopResult::Error(e) => println!("Failed: {}", e),
-        },
-        Response::Uninstall { result } => match result {
-            UninstallResult::Success => println!("Success"),
-            UninstallResult::Error(e) => println!("Failed: {}", e),
-        },
-        Response::Install { result } => match result {
-            InstallationResult::Success => println!("Success"),
-            InstallationResult::Error(e) => println!("Failed: {}", e),
-        },
-        Response::Shutdown { result } => match result {
-            ShutdownResult::Success => println!("Success"),
-            ShutdownResult::Error(e) => println!("Failed: {}", e),
-        },
     }
 }
