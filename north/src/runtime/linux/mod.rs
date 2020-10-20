@@ -15,7 +15,7 @@
 use super::config::Config;
 use anyhow::{Context, Result};
 use async_std::path::PathBuf;
-use log::debug;
+use log::{debug, log, Level};
 use nix::sched;
 
 pub(super) mod cgroups;
@@ -42,6 +42,52 @@ pub async fn init(config: &Config) -> Result<()> {
 
     debug!("Entering mount namespace");
     sched::unshare(sched::CloneFlags::CLONE_NEWNS).context("Failed to enter mount namespace")?;
+
+    // Pipe minijail log to the runtime
+    capture_minijail_log().await?;
+
+    Ok(())
+}
+
+async fn capture_minijail_log() -> Result<()> {
+    use async_std::{io::prelude::BufReadExt, os::unix::io::FromRawFd, stream::StreamExt};
+
+    #[allow(non_camel_case_types)]
+    #[allow(dead_code)]
+    #[repr(i32)]
+    enum SyslogLevel {
+        LOG_EMERG = 0,
+        LOG_ALERT = 1,
+        LOG_CRIT = 2,
+        LOG_ERR = 3,
+        LOG_WARNING = 4,
+        LOG_NOTICE = 5,
+        LOG_INFO = 6,
+        LOG_DEBUG = 7,
+        MAX = i32::MAX,
+    }
+
+    if let Some(log_level) = log::max_level().to_level() {
+        let minijail_log_level = match log_level {
+            Level::Error => SyslogLevel::LOG_ERR,
+            Level::Warn => SyslogLevel::LOG_WARNING,
+            Level::Info => SyslogLevel::LOG_INFO,
+            Level::Debug => SyslogLevel::LOG_DEBUG,
+            Level::Trace => SyslogLevel::MAX,
+        };
+
+        let (readfd, writefd) = nix::unistd::pipe()?;
+        let pipe = unsafe { async_std::fs::File::from_raw_fd(readfd) };
+        minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);
+
+        async_std::task::spawn(async move {
+            let reader = async_std::io::BufReader::new(pipe);
+            let mut lines = reader.lines();
+            while let Some(Ok(line)) = lines.next().await {
+                log!(log_level, "{}", line);
+            }
+        });
+    }
 
     Ok(())
 }
