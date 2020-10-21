@@ -15,8 +15,8 @@
 use super::state::State;
 use crate::{
     api,
-    api::{InstallationResult, MessageId},
-    runtime::{Event, EventTx, NotificationRx, SystemNotification},
+    api::{InstallationResult, MessageId, Notification},
+    runtime::{Event, EventTx, NotificationRx},
 };
 use anyhow::{Context, Result};
 use api::{
@@ -208,7 +208,7 @@ impl Console {
 // }
 
 // impl futures::Stream for NotificationCatcher {
-//     type Item = Option<SystemNotification>;
+//     type Item = Option<Notification>;
 //     fn poll_next(
 //         mut self: std::pin::Pin<&mut Self>,
 //         _cx: &mut std::task::Context,
@@ -373,7 +373,7 @@ async fn connection_loop(
     debug!("Client {:?} connected", peer);
 
     enum ConsoleEvent {
-        SystemEvent(SystemNotification),
+        SystemEvent(Notification),
         ApiMessage(MessageWithData),
     }
 
@@ -394,20 +394,18 @@ async fn connection_loop(
 
     let message_event_stream: futures::stream::Map<async_std::sync::Receiver<MessageWithData>, _> =
         socket_rx.map(ConsoleEvent::ApiMessage);
-    let runtime_event_stream: futures::stream::Map<
-        async_std::sync::Receiver<SystemNotification>,
-        _,
-    > = notification_rx.map(ConsoleEvent::SystemEvent);
+    let runtime_event_stream: futures::stream::Map<async_std::sync::Receiver<Notification>, _> =
+        notification_rx.map(ConsoleEvent::SystemEvent);
     let mut event_stream = futures::stream::select(message_event_stream, runtime_event_stream);
 
     while let Some(event) = event_stream.next().await {
         debug!("received something");
         match event {
-            ConsoleEvent::SystemEvent(_notification) => {
+            ConsoleEvent::SystemEvent(n) => {
                 info!("handle system notification");
                 let reply = Message {
                     id: "Notification".to_owned(),
-                    payload: Payload::Notification(api::Notification {}),
+                    payload: Payload::Notification(n),
                 };
                 client_tx.send(reply).await;
             }
