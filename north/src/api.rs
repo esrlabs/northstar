@@ -20,8 +20,9 @@ pub enum Payload {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Notification {
-    // TODO
+pub enum Notification {
+    OutOfMemory(Name),
+    InstallationFinished(Name),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

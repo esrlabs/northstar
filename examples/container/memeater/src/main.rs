@@ -22,7 +22,7 @@ fn main() {
             chunk.push((i % 8) as u8);
         }
         mem.push(chunk);
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        std::thread::sleep(std::time::Duration::from_millis(400));
     }
 
     // just something to make the compiler not optimize....
