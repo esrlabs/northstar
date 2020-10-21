@@ -18,16 +18,14 @@ use super::{
     npk::Container,
     process::{ExitStatus, Process},
 };
-use crate::runtime::NotificationTx;
-use crate::runtime::SystemNotification;
 use crate::{
-    api::{InstallationResult, Message, MessageId},
+    api::{InstallationResult, Message, MessageId, Notification},
     manifest::{Manifest, Mount, Name, Version},
     runtime::{
         error::{Error, InstallFailure},
         npk,
         npk::extract_manifest,
-        Event, EventTx,
+        Event, EventTx, NotificationTx,
     },
 };
 use anyhow::Result;
@@ -362,10 +360,7 @@ impl State {
                     ))
                     .await;
                 self.notification_tx
-                    .send(SystemNotification::Status(format!(
-                        "Application {} was already installed",
-                        installed_id
-                    )))
+                    .send(Notification::InstallationFinished(installed_id.to_string()))
                     .await;
                 return;
             }
@@ -470,7 +465,7 @@ impl State {
                     .await
                     .map_err(Error::ProcessError)?;
                 self.notification_tx
-                    .send(SystemNotification::Status("OOM".to_string()))
+                    .send(Notification::OutOfMemory(name.to_owned()))
                     .await;
             }
         }

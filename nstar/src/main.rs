@@ -12,14 +12,16 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::communication::containers;
+use crate::communication::shutdown;
+use crate::communication::start;
+use crate::communication::start_receiving_from_socket;
+use crate::communication::stop;
+use crate::communication::stream_update;
 use ansi_term::Color;
 use anyhow::{anyhow, Context, Result};
-use byteorder::{BigEndian, ByteOrder};
-use itertools::Itertools;
 use log::{info, warn};
-use net::TcpStream;
-use north::api::{Message, Payload, Request, Response};
-use prettytable::{format, Attr, Cell, Row, Table};
+use north::api::Response;
 use rustyline::{
     completion::{Completer, FilenameCompleter, Pair},
     config::OutputStreamType,
@@ -32,11 +34,11 @@ use rustyline_derive::Validator;
 use std::{
     borrow::Cow::{self, Owned},
     env, fs,
-    io::{Read, Write},
-    net::{self},
-    time::Duration,
 };
 use structopt::StructOpt;
+use tokio::{io::AsyncWriteExt, net::TcpStream, sync};
+
+mod communication;
 
 static PROMPT: &str = ">> ";
 
@@ -119,7 +121,11 @@ impl Highlighter for NstarHelper {
 impl Helper for NstarHelper {}
 
 fn command_hint(line: &str, pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
-    did_you_mean(&line, &["containers", "shutdown", "start", "stop"]).and_then(|s| {
+    did_you_mean(
+        &line,
+        &["containers", "shutdown", "start", "stop", "install"],
+    )
+    .and_then(|s| {
         if s.len() > pos {
             Some(s[pos..].into())
         } else {
@@ -147,167 +153,37 @@ where
     }
 }
 
-fn run<S: Read + Write>(stream: &mut S, req: Request) -> Result<Response> {
-    // Send request
-    let request_msg = Message {
-        id: uuid::Uuid::new_v4().to_string(),
-        payload: Payload::Request(req),
-    };
-    let request = serde_json::to_string(&request_msg).context("Failed to serialize")?;
-    let mut buf = [0u8; 4];
-    BigEndian::write_u32(&mut buf, request.as_bytes().len() as u32);
-    stream
-        .write_all(&buf)
-        .context("Failed to write to stream")?;
-    stream
-        .write_all(request.as_bytes())
-        .context("Failed to write to stream")?;
-
-    // Receive reply
-    let mut buffer = [0u8; 4];
-    stream
-        .read_exact(&mut buffer)
-        .context("Failed to read frame length")?;
-    let frame_len = BigEndian::read_u32(&buffer) as usize;
-    let mut buffer = vec![0; frame_len];
-    stream
-        .read_exact(&mut buffer)
-        .context("Failed to read frame")?;
-
-    // Deserialize message
-    let message: Message = serde_json::from_slice(&buffer).context("Failed to parse reply")?;
-
-    match message.payload {
-        Payload::Request(_) => Err(anyhow!("Invalid response")),
-        Payload::Response(r) => Ok(r),
-        Payload::Notification(_) => Err(anyhow!("Invalid response")),
-    }
-}
-
 fn help() -> String {
     r"
 containers:     List installed containers
 shutdown:       Stop the northstar runtime
 start <name>:   Start application
-stop <name>:    Stop application"
+stop <name>:    Stop application
+install <file>: Install/Update npk"
         .into()
 }
 
-fn run_cmd<S: Read + Write>(cmd: &str, stream: &mut S) -> Result<()> {
+async fn run_cmd<S: AsyncWriteExt + Unpin>(
+    cmd: &str,
+    stream: &mut S,
+    response_receiver: sync::broadcast::Receiver<Response>,
+) -> Result<()> {
     let mut cmd = cmd.trim().split_whitespace();
     let c = cmd.next().ok_or_else(|| anyhow!("Invalid command"))?;
 
     match c {
-        "containers" => containers(stream)?,
-        "shutdown" => shutdown(stream)?,
-        "start" => start(cmd, stream)?,
-        "stop" => stop(cmd, stream)?,
+        "containers" => containers(stream, response_receiver).await?,
+        "shutdown" => shutdown(stream, response_receiver).await?,
+        "start" => start(cmd, stream, response_receiver).await?,
+        "stop" => stop(cmd, stream, response_receiver).await?,
+        "install" => stream_update(cmd.next(), stream, response_receiver).await?,
         _ => (),
     }
     Ok(())
 }
 
-fn containers<S: Read + Write>(stream: &mut S) -> Result<()> {
-    if let Response::Containers(containers) = run(stream, Request::Containers)? {
-        let mut table = Table::new();
-        table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-        table.set_titles(Row::new(vec![
-            Cell::new("Name").with_style(Attr::Bold),
-            Cell::new("Version").with_style(Attr::Bold),
-            Cell::new("Type").with_style(Attr::Bold),
-            Cell::new("PID").with_style(Attr::Bold),
-            Cell::new("Uptime").with_style(Attr::Bold),
-        ]));
-        for container in containers
-            .iter()
-            .sorted_by_key(|c| &c.manifest.name) // Sort by name
-            .sorted_by_key(|c| c.manifest.init.is_none())
-        {
-            table.add_row(Row::new(vec![
-                Cell::new(&container.manifest.name).with_style(Attr::Bold),
-                Cell::new(&container.manifest.version.to_string()),
-                Cell::new(
-                    container
-                        .manifest
-                        .init
-                        .as_ref()
-                        .map(|_| "App")
-                        .unwrap_or("Resource"),
-                ),
-                Cell::new(
-                    &container
-                        .process
-                        .as_ref()
-                        .map(|p| p.pid.to_string())
-                        .unwrap_or_default(),
-                )
-                .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
-                Cell::new(
-                    &container
-                        .process
-                        .as_ref()
-                        .map(|p| format!("{:?}", Duration::from_nanos(p.uptime)))
-                        .unwrap_or_default(),
-                ),
-            ]));
-        }
-        table.printstd();
-    }
-    Ok(())
-}
-
-fn shutdown<S: Read + Write>(stream: &mut S) -> Result<()> {
-    let response = run(stream, Request::Shutdown)?;
-    println!("Shutdown result {:?}", response);
-    Ok(())
-}
-
-fn start<'a, S: Read + Write, I: Iterator<Item = &'a str>>(
-    mut cmd: I,
-    stream: &mut S,
-) -> Result<()> {
-    let pattern = cmd.next().unwrap_or(".*");
-    let re = regex::Regex::new(pattern).context("Invalid regex")?;
-    if let Response::Containers(containers) = run(stream, Request::Containers)? {
-        for container in containers
-            .iter()
-            .filter(|ref c| c.manifest.init.is_some()) // Filter resource container
-            .filter(|ref c| c.process.is_none()) // Filter running containers
-            .filter(|ref c| re.is_match(&c.manifest.name))
-        {
-            let response = run(stream, Request::Start(container.manifest.name.clone()))?;
-            println!(
-                "Started {}:{}: {:?}",
-                container.manifest.name, container.manifest.version, response
-            );
-        }
-    }
-    Ok(())
-}
-
-fn stop<'a, S: Read + Write, I: Iterator<Item = &'a str>>(
-    mut cmd: I,
-    stream: &mut S,
-) -> Result<()> {
-    let pattern = cmd.next().unwrap_or(".*");
-    let re = regex::Regex::new(pattern).context("Invalid regex")?;
-    if let Response::Containers(containers) = run(stream, Request::Containers)? {
-        for container in containers
-            .iter()
-            .filter(|ref c| c.process.is_some()) // Filter not running containers
-            .filter(|ref c| re.is_match(&c.manifest.name))
-        {
-            let response = run(stream, Request::Stop(container.manifest.name.clone()))?;
-            println!(
-                "Stopped {}:{}: {:?}",
-                container.manifest.name, container.manifest.version, response
-            );
-        }
-    }
-    Ok(())
-}
-
-fn main() -> Result<()> {
+#[tokio::main]
+pub async fn main() -> Result<()> {
     let opt = Opt::from_args();
 
     if opt.verbose {
@@ -319,12 +195,15 @@ fn main() -> Result<()> {
         env_logger::init();
     }
 
-    let mut stream = TcpStream::connect(&opt.host)
+    let stream = TcpStream::connect(&opt.host)
+        .await
         .with_context(|| format!("Failed to connect to {}", opt.host))?;
+    let (read_half, mut write_half) = stream.into_split();
+    let response_sender = start_receiving_from_socket(read_half)?;
 
     if !opt.cmd.is_empty() {
         let cmd_str = opt.cmd.join(" ");
-        run_cmd(cmd_str.trim(), &mut stream)
+        run_cmd(cmd_str.trim(), &mut write_half, response_sender.subscribe()).await
     } else {
         let config = Config::builder()
             .auto_add_history(false)
@@ -369,7 +248,7 @@ fn main() -> Result<()> {
                     } else if line.trim() == "help" {
                         println!("{}", help());
                     } else {
-                        run_cmd(&line, &mut stream)?;
+                        run_cmd(&line, &mut write_half, response_sender.subscribe()).await?;
                         rl.add_history_entry(line);
                         if !opt.disable_history {
                             if let Some(ref history) = history {

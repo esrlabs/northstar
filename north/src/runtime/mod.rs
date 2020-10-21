@@ -24,7 +24,7 @@ pub(super) mod state;
 
 use crate::{
     api,
-    api::{InstallationResult, MessageId},
+    api::{InstallationResult, MessageId, Notification},
     manifest::Name,
 };
 use anyhow::{Context, Error, Result};
@@ -35,14 +35,9 @@ use process::ExitStatus;
 use state::State;
 
 pub type EventTx = sync::Sender<Event>;
-pub type NotificationTx = sync::Sender<SystemNotification>;
+pub type NotificationTx = sync::Sender<Notification>;
 
-#[derive(Debug)]
-pub enum SystemNotification {
-    Status(String),
-}
-
-pub type NotificationRx = sync::Receiver<SystemNotification>;
+pub type NotificationRx = sync::Receiver<Notification>;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -90,7 +85,7 @@ pub async fn run(config: &Config) -> Result<()> {
     // loop.
     let (event_tx, event_rx) = sync::channel::<Event>(1000);
     // The notification channel can be used to propagate notifications
-    let (notification_tx, notification_rx) = sync::channel::<SystemNotification>(1000);
+    let (notification_tx, notification_rx) = sync::channel::<Notification>(1000);
 
     let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
 
