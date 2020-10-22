@@ -19,10 +19,13 @@ EXAMPLES=(
   "${EXAMPLES_DIR}/resource/ferris_says_hello"
   "${EXAMPLES_DIR}/resource/hello_message"
 )
-PLATFORMS=(
+ALL_PLATFORMS=(
   "aarch64-linux-android"
   "aarch64-unknown-linux-gnu"
   "aarch64-unknown-linux-musl"
+  "x86_64-unknown-linux-gnu"
+)
+PLATFORMS=(
   "x86_64-unknown-linux-gnu"
 )
 REGISTRY_DIR="./target/north/registry"
@@ -69,13 +72,15 @@ for example_dir in "${EXAMPLES[@]}"; do
 
     # cross compile and store artifacts
     if [ -f "${example_dir}/Cargo.toml" ]; then
-      echo "cross build --release --bin ${name} --target ${platform}"
-      cross build --release --bin "${name}" --target "${platform}"
-      cp "./target/$platform/release/$name" "${ROOT_DIR}"
+      cd ${example_dir}
+        echo "cross build --release --bin ${name} --target ${platform}"
+        cross build --release --bin "${name}" --target "${platform}"
+        cp "target/$platform/release/$name" "${ROOT_DIR}"
+      cd -
     fi
 
     echo "Creating NPK (${name})"
-    cargo run --bin sextant -- \
+    ./sextant/target/release/sextant \
       pack \
       --dir "${TMP_DIR}" \
       --out "${REGISTRY_DIR}" \

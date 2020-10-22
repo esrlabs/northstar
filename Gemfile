@@ -1,7 +1,0 @@
-source 'https://rubygems.org'
-gem 'colored'
-gem 'fileutils'
-gem 'os'
-gem 'rbnacl'
-gem 'rubyzip'
-gem 'yaml'
