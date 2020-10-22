@@ -5,15 +5,15 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("No application found")]
-    UnknownApplication,
+    ApplicationNotFound,
     #[error("Missing resouce {0}")]
     MissingResource(String),
     #[error("Failed to spawn process: {0}")]
     ProcessError(AnyhowError),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
-    // #[error("Failed to uninstall")]
-    // UninstallationError(AnyhowError),
+    #[error("Failed to uninstall")]
+    UninstallationError(AnyhowError),
     #[error("Application is not running")]
     ApplicationNotRunning,
 }
