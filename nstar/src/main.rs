@@ -12,12 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::communication::containers;
-use crate::communication::shutdown;
-use crate::communication::start;
-use crate::communication::start_receiving_from_socket;
-use crate::communication::stop;
-use crate::communication::stream_update;
+use crate::communication::{
+    containers, shutdown, start, start_receiving_from_socket, stop, stream_update, uninstall,
+};
 use ansi_term::Color;
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
@@ -123,7 +120,14 @@ impl Helper for NstarHelper {}
 fn command_hint(line: &str, pos: usize, _ctx: &rustyline::Context<'_>) -> Option<String> {
     did_you_mean(
         &line,
-        &["containers", "shutdown", "start", "stop", "install"],
+        &[
+            "containers",
+            "shutdown",
+            "start",
+            "stop",
+            "install",
+            "uninstall",
+        ],
     )
     .and_then(|s| {
         if s.len() > pos {
@@ -159,7 +163,8 @@ containers:     List installed containers
 shutdown:       Stop the northstar runtime
 start <name>:   Start application
 stop <name>:    Stop application
-install <file>: Install/Update npk"
+install <file>: Install/Update npk
+uninstall <id>: Unstall npk"
         .into()
 }
 
@@ -177,6 +182,7 @@ async fn run_cmd<S: AsyncWriteExt + Unpin>(
         "start" => start(cmd, stream, response_receiver).await?,
         "stop" => stop(cmd, stream, response_receiver).await?,
         "install" => stream_update(cmd.next(), stream, response_receiver).await?,
+        "uninstall" => uninstall(cmd, stream, response_receiver).await?,
         _ => (),
     }
     Ok(())
@@ -248,7 +254,11 @@ pub async fn main() -> Result<()> {
                     } else if line.trim() == "help" {
                         println!("{}", help());
                     } else {
-                        run_cmd(&line, &mut write_half, response_sender.subscribe()).await?;
+                        if let Err(e) =
+                            run_cmd(&line, &mut write_half, response_sender.subscribe()).await
+                        {
+                            println!("{} resulted in an error: {}", line, e);
+                        }
                         rl.add_history_entry(line);
                         if !opt.disable_history {
                             if let Some(ref history) = history {

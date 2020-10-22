@@ -1,11 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use byteorder::{BigEndian, ByteOrder};
 use itertools::Itertools;
-use north::api::Container;
-use north::api::{Message, Payload, Request, Response};
+use north::api::{Container, Message, Payload, Request, Response};
+use north::manifest::Version;
 use prettytable::{format, Attr, Cell, Row, Table};
-use std::path::Path;
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 use tokio::{
     fs::{self, File},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -251,7 +250,7 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
     mut stream: S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
 ) -> Result<()> {
-    let path_s = path_str.ok_or_else(|| anyhow!("hi"))?;
+    let path_s = path_str.ok_or_else(|| anyhow!("Path to npk missing"))?;
     let path = Path::new(path_s);
     log::debug!("stream_update");
     let file_size = fs::metadata(&path).await?.len();
@@ -304,4 +303,32 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
         Err(e) => println!("Error waiting for installation response: {}", e),
     }
     Ok(())
+}
+
+pub(crate) async fn uninstall<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a str>>(
+    mut cmd: I,
+    stream: &mut S,
+    mut response_receiver: sync::broadcast::Receiver<Response>,
+) -> Result<()> {
+    log::debug!("uninstall");
+
+    let id = cmd.next().context("Container id missing")?.to_owned();
+    let version_str = cmd.next().context("Version missing")?;
+    let version = Version::parse(version_str).context("Version has wrong format")?;
+
+    run(stream, Request::Uninstall { name: id, version }).await?;
+    match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
+        Ok(Response::Containers(cs)) => {
+            render_containers(cs);
+            Ok(())
+        }
+        Ok(r) => Err(anyhow!(
+            "Did receive wrong response for uninstall request: {:?}",
+            r
+        )),
+        Err(e) => Err(anyhow!(
+            "Did not receive correct response for uninstall request: {}",
+            e
+        )),
+    }
 }

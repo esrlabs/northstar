@@ -62,44 +62,7 @@ impl Console {
             let response = match request {
                 Request::Containers => {
                     debug!("Request::Containers received");
-                    let containers = state
-                        .applications()
-                        .map(|app| {
-                            Container {
-                                manifest: app.manifest().clone(),
-                                process: app.process_context().map(|f| Process {
-                                    pid: f.process().pid(),
-                                    uptime: f.uptime().as_nanos() as u64,
-                                    memory: {
-                                        #[cfg(not(any(
-                                            target_os = "linux",
-                                            target_os = "android"
-                                        )))]
-                                        {
-                                            None
-                                        }
-                                        #[cfg(any(target_os = "linux", target_os = "android"))]
-                                        {
-                                            // TODO
-                                            const PAGE_SIZE: usize = 4096;
-                                            let pid = f.process().pid();
-                                            let statm = procinfo::pid::statm(pid as i32)
-                                                .expect("Failed get statm");
-                                            Some(api::Memory {
-                                                size: (statm.size * PAGE_SIZE) as u64,
-                                                resident: (statm.resident * PAGE_SIZE) as u64,
-                                                shared: (statm.share * PAGE_SIZE) as u64,
-                                                text: (statm.text * PAGE_SIZE) as u64,
-                                                data: (statm.data * PAGE_SIZE) as u64,
-                                            })
-                                        }
-                                    },
-                                }),
-                            }
-                        })
-                        .collect();
-
-                    Response::Containers(containers)
+                    Response::Containers(list_containers(&state))
                 }
                 Request::Start(name) => match state.start(&name).await {
                     Ok(_) => Response::Start {
@@ -126,10 +89,16 @@ impl Console {
                     }
                 }
                 Request::Uninstall { name, version } => {
-                    let _ = name;
-                    let _ = version;
-                    Response::Uninstall {
-                        result: api::UninstallResult::Error("unimplemented".into()),
+                    match state.uninstall(name, version).await {
+                        Ok(_) => Response::Uninstall {
+                            result: api::UninstallResult::Success,
+                        },
+                        Err(e) => {
+                            error!("Failed to uninstall {}: {}", name, e);
+                            Response::Uninstall {
+                                result: api::UninstallResult::Error(e.to_string()),
+                            }
+                        }
                     }
                 }
                 Request::Shutdown => match state.shutdown().await {
@@ -201,6 +170,40 @@ impl Console {
         };
         response_message_tx.send(response_message).await
     }
+}
+fn list_containers(state: &State) -> Vec<Container> {
+    state
+        .applications()
+        .map(|app| {
+            Container {
+                manifest: app.manifest().clone(),
+                process: app.process_context().map(|f| Process {
+                    pid: f.process().pid(),
+                    uptime: f.uptime().as_nanos() as u64,
+                    memory: {
+                        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                        {
+                            None
+                        }
+                        #[cfg(any(target_os = "linux", target_os = "android"))]
+                        {
+                            // TODO
+                            const PAGE_SIZE: usize = 4096;
+                            let pid = f.process().pid();
+                            let statm = procinfo::pid::statm(pid as i32).expect("Failed get statm");
+                            Some(api::Memory {
+                                size: (statm.size * PAGE_SIZE) as u64,
+                                resident: (statm.resident * PAGE_SIZE) as u64,
+                                shared: (statm.share * PAGE_SIZE) as u64,
+                                text: (statm.text * PAGE_SIZE) as u64,
+                                data: (statm.data * PAGE_SIZE) as u64,
+                            })
+                        }
+                    },
+                }),
+            }
+        })
+        .collect()
 }
 
 // struct NotificationCatcher {
@@ -390,6 +393,7 @@ async fn connection_loop(
     )
     .unwrap();
 
+    // TODO error handling
     start_sending_over_socket(writer, client_rx).unwrap();
 
     let message_event_stream: futures::stream::Map<async_std::sync::Receiver<MessageWithData>, _> =
