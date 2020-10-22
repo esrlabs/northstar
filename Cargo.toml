@@ -1,20 +1,23 @@
 [workspace]
 
 members = [
+    "minijail/rust/minijail",
+    "minijail/rust/minijail-sys",
+    "north",
+    "nstar",
+    "tests",
+    "tests/test_container",
+]
+exclude = [
     "examples/container/cpueater",
     "examples/container/crashing",
     "examples/container/datarw",
     "examples/container/hello",
     "examples/container/memeater",
     "examples/container/resource/ferris",
-    "minijail/rust/minijail",
-    "minijail/rust/minijail-sys",
-    "north",
-    "nstar",
     "sextant",
-    "tests",
-    "tests/test_container",
 ]
+
 
 [profile.release]
 lto = true
