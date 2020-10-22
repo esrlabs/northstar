@@ -1,52 +1,43 @@
 #!/bin/bash
+# Build example containers. Expected to be called from the northstar root directory e.g ./examples/build_examples.sh <target>
+
 set -o errexit
 set -o pipefail
 set -o nounset
 
-# Build all example containers for all supported platforms. Expected to be called from the northstar
-# root directory:
-#     ./examples/build_examples.sh
-# from the directory 'northstar'.
+exe() { echo " + $@" ; "$@" ; }
+bold=$(tput bold)
+normal=$(tput sgr0)
 
-EXAMPLES_DIR="./examples/container"
+if [ "$#" -eq  "0" ]
+then
+  PLATFORMS=(
+    "aarch64-linux-android"
+    "aarch64-unknown-linux-gnu"
+    "aarch64-unknown-linux-musl"
+    "x86_64-unknown-linux-gnu"
+  )
+else
+  PLATFORMS=$1
+fi
+
+OUTPUT_DIR="./target/north/registry"
 EXAMPLES=(
-  "${EXAMPLES_DIR}/cpueater"
-  "${EXAMPLES_DIR}/crashing"
-  "${EXAMPLES_DIR}/datarw"
-  "${EXAMPLES_DIR}/hello"
-  "${EXAMPLES_DIR}/memeater"
-  "${EXAMPLES_DIR}/resource/ferris"
-  "${EXAMPLES_DIR}/resource/ferris_says_hello"
-  "${EXAMPLES_DIR}/resource/hello_message"
+  "./examples/container/cpueater"
+  "./examples/container/crashing"
+  "./examples/container/datarw"
+  "./examples/container/hello"
+  "./examples/container/memeater"
+  "./examples/container/resource/ferris"
+  "./examples/container/resource/ferris_says_hello"
+  "./examples/container/resource/hello_message"
 )
-PLATFORMS=(
-  "aarch64-linux-android"
-  "aarch64-unknown-linux-gnu"
-  "aarch64-unknown-linux-musl"
-  "x86_64-unknown-linux-gnu"
-)
-REGISTRY_DIR="./target/north/registry"
-KEY_DIR="./target/north/keys"
-EXAMPLE_PUB_KEY="./examples/keys/north.pub"
-EXAMPLE_PRV_KEY="./examples/keys/north.key"
 
-# create registry and key directories
-if [ ! -d "${REGISTRY_DIR}" ]; then
-  echo "Creating registry in ${REGISTRY_DIR}"
-  mkdir -p "${REGISTRY_DIR}"
-fi
-if [ ! -d "${KEY_DIR}" ]; then
-  echo "Creating key directory in ${KEY_DIR}"
-  mkdir -p "${KEY_DIR}"
-fi
-if [ ! -f "${KEY_DIR}" ]; then
-  echo "Populating key directory"
-  cp -n "${EXAMPLE_PUB_KEY}" "${KEY_DIR}"
-fi
+echo "${bold}Creating ${OUTPUT_DIR}${normal}"
+exe mkdir -p "${OUTPUT_DIR}"
 
-# build and pack all examples for all platforms
-for example_dir in "${EXAMPLES[@]}"; do
-  # create tmp directory and ensure its removal
+for EXAMPLE in ${EXAMPLES[*]}; do
+  # Create tmp directory and ensure its removal
   TMP_DIR=$(mktemp -d)
   if [ ! -e "${TMP_DIR}" ]; then
     echo >&2 "Failed to create tmp directory"
@@ -55,31 +46,24 @@ for example_dir in "${EXAMPLES[@]}"; do
   trap "exit 1" HUP INT PIPE QUIT TERM
   trap 'rm -rf "${TMP_DIR}"' EXIT
 
-  for platform in "${PLATFORMS[@]}"; do
-    name="$(basename "${example_dir}")"
-    echo "Building (${name}, ${platform})"
+  for PLATFORM in ${PLATFORMS[*]}; do
+    NAME="$(basename "${EXAMPLE}")"
+    echo "${bold}Building ${NAME}${normal} (target: ${PLATFORM})"
     ROOT_DIR="${TMP_DIR}/root"
-    mkdir -p "${ROOT_DIR}"
+    exe mkdir -p "${ROOT_DIR}"
 
-    # copy manifest and root to tmp
-    cp "${example_dir}/manifest.yaml" "${TMP_DIR}"
-    if [ -d "${example_dir}/root/" ]; then
-      cp -r "${example_dir}/root/." "${ROOT_DIR}/"
+    # Copy manifest and root to tmp
+    cp "${EXAMPLE}/manifest.yaml" "${TMP_DIR}"
+    if [ -d "${EXAMPLE}/root/" ]; then
+      cp -r "${EXAMPLE}/root/." "${ROOT_DIR}/"
     fi
 
-    # cross compile and store artifacts
-    if [ -f "${example_dir}/Cargo.toml" ]; then
-      echo "cross build --release --bin ${name} --target ${platform}"
-      cross build --release --bin "${name}" --target "${platform}"
-      cp "./target/$platform/release/$name" "${ROOT_DIR}"
+    # Cross compile and store artifacts
+    if [ -f "${EXAMPLE}/Cargo.toml" ]; then
+      exe cross build --release --bin "${NAME}" --target "${PLATFORM}"
+      exe cp "./target/$PLATFORM/release/$NAME" "${ROOT_DIR}"
     fi
 
-    echo "Creating NPK (${name})"
-    cargo run --bin sextant -- \
-      pack \
-      --dir "${TMP_DIR}" \
-      --out "${REGISTRY_DIR}" \
-      --key "${EXAMPLE_PRV_KEY}" \
-      --platform "${platform}"
+    exe cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/north.key" --platform "${PLATFORM}"
   done
 done
