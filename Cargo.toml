@@ -1,12 +1,6 @@
 [workspace]
 
 members = [
-    "examples/container/cpueater",
-    "examples/container/crashing",
-    "examples/container/datarw",
-    "examples/container/hello",
-    "examples/container/memeater",
-    "examples/container/resource/ferris",
     "minijail/rust/minijail",
     "minijail/rust/minijail-sys",
     "north",
@@ -14,6 +8,12 @@ members = [
     "sextant",
     "tests",
     "tests/test_container",
+    "examples/container/cpueater",
+    "examples/container/crashing",
+    "examples/container/datarw",
+    "examples/container/hello",
+    "examples/container/memeater",
+    "examples/container/resource/ferris",
 ]
 
 [profile.release]
