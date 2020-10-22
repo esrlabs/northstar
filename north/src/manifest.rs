@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use anyhow::{anyhow, Context, Error, Result};
-use async_std::{path::Path, task};
+use async_std::{fs, path::Path};
 use lazy_static::lazy_static;
 use serde::{
     de::{Deserializer, Visitor},
@@ -23,7 +23,6 @@ use serde::{
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    fs::File,
     str::FromStr,
 };
 
@@ -222,15 +221,24 @@ impl MountsSerialization {
     {
         let mut map = serializer.serialize_map(Some(mounts.len()))?;
         for mount in mounts {
-            match mount.clone() {
+            match mount {
                 Mount::Bind {
                     target,
                     host,
                     flags,
-                } => map.serialize_entry(&target, &MountSource::Bind { host, flags })?,
-                Mount::Persist { target, flags } => {
-                    map.serialize_entry(&target, &MountSource::Persist { flags })?
-                }
+                } => map.serialize_entry(
+                    &target,
+                    &MountSource::Bind {
+                        host: host.clone(),
+                        flags: flags.clone(),
+                    },
+                )?,
+                Mount::Persist { target, flags } => map.serialize_entry(
+                    &target,
+                    &MountSource::Persist {
+                        flags: flags.clone(),
+                    },
+                )?,
                 Mount::Resource {
                     target,
                     name,
@@ -320,27 +328,21 @@ impl Manifest {
 
     pub async fn from_path(f: &Path) -> Result<Manifest> {
         let f = f.to_owned();
-        task::spawn_blocking(move || {
-            let file = File::open(&f)?;
-            let manifest: Manifest = serde_yaml::from_reader(file)
-                .with_context(|| format!("Failed to parse manifest from {}", f.display()))?;
-            manifest.verify()?;
-
-            Ok(manifest)
-        })
-        .await
+        let manifest = fs::read_to_string(&f)
+            .await
+            .with_context(|| format!("Failed to read manifest from {}", f.display()))?;
+        let manifest: Manifest = Manifest::from_str(&manifest)?;
+        manifest.verify()?;
+        Ok(manifest)
     }
 }
 
 impl FromStr for Manifest {
     type Err = Error;
     fn from_str(s: &str) -> std::result::Result<Manifest, Error> {
-        let parse_res: std::result::Result<Manifest, Error> =
-            serde_yaml::from_str(s).context("Failed to parse manifest");
-        if let Ok(manifest) = &parse_res {
-            manifest.verify()?;
-        }
-        parse_res
+        let manifest: Manifest = serde_yaml::from_str(s).context("Failed to parse manifest")?;
+        manifest.verify()?;
+        Ok(manifest)
     }
 }
 
