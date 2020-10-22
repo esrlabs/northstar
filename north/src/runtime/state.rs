@@ -30,6 +30,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_std::{
+    fs,
     path::{Path, PathBuf},
     sync,
 };
@@ -99,12 +100,16 @@ impl Application {
         &self.container.manifest
     }
 
-    // pub fn container(&self) -> &Container {
-    //     &self.container
-    // }
+    pub fn container(&self) -> &Container {
+        &self.container
+    }
 
     pub fn process_context(&self) -> Option<&ProcessContext> {
         self.process.as_ref()
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.process.is_some()
     }
 }
 
@@ -178,7 +183,7 @@ impl State {
         let app = if let Some(app) = self.applications.get_mut(name) {
             app
         } else {
-            return Err(Error::UnknownApplication);
+            return Err(Error::ApplicationNotFound);
         };
 
         // Check if application is already running
@@ -190,7 +195,7 @@ impl State {
         // Check if app is a resource container that cannot be started
         if app.container.is_resource_container() {
             warn!("Cannot start resource containers ({})", app);
-            return Err(Error::UnknownApplication);
+            return Err(Error::ApplicationNotFound);
         }
 
         // Check for all required resources
@@ -288,7 +293,7 @@ impl State {
                 Err(Error::ApplicationNotRunning)
             }
         } else {
-            Err(Error::UnknownApplication)
+            Err(Error::ApplicationNotFound)
         }
     }
 
@@ -321,12 +326,14 @@ impl State {
     // checks if the applicaion within the npk has an id (name) that is the same
     // as on of the already installed applications
     // returns the application id if it was installed, otherwise None
-    async fn is_installed(&self, npk: &Path) -> Result<Option<String>, InstallFailure> {
-        let container_id = extract_manifest(npk.into(), &self.signing_keys)?.name;
-        Ok(self
-            .applications
-            .get(&container_id)
-            .map(|app| app.container.manifest.name.to_owned()))
+    async fn installed_application_id(&self, npk: &Path) -> Option<String> {
+        extract_manifest(npk.into(), &self.signing_keys)
+            .ok()
+            .and_then(|manifest| {
+                self.applications
+                    .get(&manifest.name)
+                    .map(|app| app.container.manifest.name.to_owned())
+            })
     }
 
     /// Install a npk from give path
@@ -346,39 +353,19 @@ impl State {
             info!("- {}", app);
         }
         let registry_path = container_dir.map(|p| p.join(&install_file_name));
-        match self.is_installed(&npk).await {
-            Ok(Some(installed_id)) => {
-                warn!("Cannot install already installed application");
-                let _ = self
-                    .events_tx
-                    .send(Event::InstallationFinished(
-                        InstallationResult::ApplicationAlreadyInstalled,
-                        std::path::PathBuf::from(npk),
-                        msg_id,
-                        tx,
-                        registry_path,
-                    ))
-                    .await;
-                self.notification_tx
-                    .send(Notification::InstallationFinished(installed_id.to_string()))
-                    .await;
-                return;
-            }
-            Err(e) => {
-                warn!("Error reading manifest info for package");
-                let _ = self
-                    .events_tx
-                    .send(Event::InstallationFinished(
-                        e.into(),
-                        std::path::PathBuf::from(npk),
-                        msg_id,
-                        tx,
-                        registry_path,
-                    ))
-                    .await;
-                return;
-            }
-            _ => (),
+        if let Some(_installed_id) = self.installed_application_id(&npk).await {
+            warn!("Cannot install already installed application");
+            let _ = self
+                .events_tx
+                .send(Event::InstallationFinished(
+                    InstallationResult::ApplicationAlreadyInstalled,
+                    std::path::PathBuf::from(npk),
+                    msg_id,
+                    tx,
+                    registry_path,
+                ))
+                .await;
+            return;
         }
         match npk::install(self, npk).await {
             Ok(_) => {
@@ -391,6 +378,14 @@ impl State {
                         msg_id,
                         tx,
                         registry_path,
+                    ))
+                    .await;
+                // generate notification for installation event
+                self.notification_tx
+                    .send(Notification::InstallationFinished(
+                        self.installed_application_id(&npk)
+                            .await
+                            .unwrap_or(format!("{}", npk.to_string_lossy())),
                     ))
                     .await;
             }
@@ -410,20 +405,39 @@ impl State {
         }
     }
 
+    fn is_app_installed(&self, name: &str, version: &Version) -> bool {
+        match self.applications.get(name) {
+            None => false,
+            Some(app) => app.container.manifest.version == *version,
+        }
+    }
+
     /// Remove and umount a specific app
-    // pub async fn uninstall(&mut self, app: &Application) -> result::Result<(), Error> {
-    //     if app.process_context().is_none() {
-    //         info!("Removing {}", app);
-    //         npk::uninstall(app.container())
-    //             .await
-    //             .map_err(Error::UninstallationError)?;
-    //         self.applications.remove(&app.manifest().name);
-    //         Ok(())
-    //     } else {
-    //         warn!("Cannot uninstall running container {}", app);
-    //         Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]))
-    //     }
-    // }
+    /// app has to be stopped before it can be uninstalled
+    pub async fn uninstall(&mut self, name: &str, version: &Version) -> result::Result<(), Error> {
+        if !self.is_app_installed(name, version) {
+            return Err(Error::ApplicationNotFound);
+        }
+        if let Some(app) = self.applications.get(name) {
+            if app.is_running() {
+                warn!("Cannot uninstall running container {}", app);
+                return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
+            }
+            info!("Removing {}", app);
+            npk::uninstall(app.container())
+                .await
+                .map_err(Error::UninstallationError)?;
+            self.applications.remove(name);
+            // TODO remove npk from registry
+            // let registry_path = self.config.directories.container_dirs.filter(|d| {
+            //     let p = d.join(Path::new())
+            //     path::is_file();
+            // });
+            // fs::remove_file(registry_path).await?;
+        }
+
+        Ok(())
+    }
 
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally

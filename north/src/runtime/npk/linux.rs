@@ -24,7 +24,7 @@ use super::{
     Container,
 };
 use crate::{
-    manifest::{Manifest, Mount, Name, Version},
+    manifest::{Mount, Name, Version},
     runtime::npk::{ArchiveReader, InstallFailure},
 };
 use anyhow::{Context, Result};
