@@ -161,7 +161,7 @@ pub struct Manifest {
     pub name: Name,
     /// Container version
     pub version: Version,
-    /// Target arch
+    /// Target platform
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
     /// Path to init

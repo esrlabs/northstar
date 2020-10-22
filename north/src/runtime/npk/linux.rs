@@ -100,7 +100,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
 }
 
 #[allow(dead_code)]
-pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
+pub async fn install(state: &mut State, npk: &Path) -> Result<Option<(Name, Version)>> {
     debug!("Installing {}", npk.display());
 
     let dm = &state.config.devices.device_mapper.clone();
@@ -110,9 +110,7 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
         .await
         .context("Failed to open loop control")?;
 
-    let (name, version) = install_internal(state, &dm, &lc, npk).await?;
-
-    Ok((name, version))
+    Ok(install_internal(state, &dm, &lc, npk).await?)
 }
 
 #[allow(dead_code)]
@@ -137,7 +135,7 @@ async fn install_internal(
     dm: &dm::Dm,
     lc: &LoopControl,
     npk: &Path,
-) -> Result<(Name, Version)> {
+) -> Result<Option<(Name, Version)>> {
     let start = time::Instant::now();
 
     if let Some(npk_name) = npk.file_name() {
@@ -172,6 +170,25 @@ async fn install_internal(
         Manifest::from_str(&manifest)?
     };
     debug!("Manifest loaded for \"{}\"", manifest.name);
+
+    // If a platform string is configured on the north configuration,
+    // check if this npk matches
+    if let Some(ref platform) = state.config.platform {
+        if let Some(ref manifest_platform) = manifest.platform {
+            if platform != manifest_platform {
+                warn!(
+                    "Skipping installtion of {} because platform {} doesn't match host platform {}",
+                    manifest.name, manifest_platform, platform
+                );
+                return Ok(None);
+            }
+        } else {
+            warn!(
+                "Platform configured, but manifest of {} is missing platform entry. Continuing",
+                manifest.name
+            );
+        }
+    }
 
     let resources: Vec<String> = manifest
         .mounts
@@ -220,7 +237,7 @@ async fn install_internal(
         let root: PathBuf = root.into();
 
         if !root.exists().await {
-            info!("Creating mountpoint {}", root.display());
+            debug!("Creating mountpoint {}", root.display());
             fs::create_dir_all(&root)
                 .await
                 .context("Failed to create mountpoint")?;
@@ -267,7 +284,7 @@ async fn install_internal(
         state.add(container)?;
     }
 
-    Ok((manifest.name, manifest.version))
+    Ok(Some((manifest.name, manifest.version)))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -61,6 +61,8 @@ pub struct Devices {
 pub struct Config {
     /// Print debug logs
     pub debug: bool,
+    /// Platform key. Identifies host platform northstar is running on
+    pub platform: Option<String>,
     /// Console address
     pub console_address: String,
     /// Container UID

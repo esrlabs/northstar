@@ -66,9 +66,6 @@ pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path, platform: &s
     let tmp_root_path = tmp.path().join("root");
 
     // write platform to manifest
-    if platform.to_string().contains(' ') {
-        return Err(anyhow!("Invalid character in platform string"));
-    }
     let mut manifest = read_manifest(src_path)?;
     manifest.platform = Some(platform.to_string());
 

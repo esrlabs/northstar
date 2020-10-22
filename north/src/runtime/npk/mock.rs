@@ -24,7 +24,7 @@ use async_std::{
     path::{Path, PathBuf},
 };
 use futures::stream::StreamExt;
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::{io::Read, process::Command, str::FromStr};
 
 const MANIFEST: &str = "manifest.yaml";
@@ -33,29 +33,11 @@ const FS_IMAGE: &str = "fs.img";
 pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
     info!("Installing containers from {}", dir.display());
 
-    lazy_static::lazy_static! {
-        static ref RE: regex::Regex = regex::Regex::new(
-            format!(
-                r"^.*-{}-\d+\.\d+\.\d+\.npk$",
-                env!("VERGEN_TARGET_TRIPLE")
-            )
-            .as_str(),
-        )
-        .expect("Invalid regex");
-    }
-
     let containers = fs::read_dir(&dir)
         .await
         .with_context(|| format!("Failed to read {}", dir.display()))?
         .filter_map(move |d| async move { d.ok() })
-        .map(|d| d.path())
-        .filter_map(move |d| async move {
-            if RE.is_match(&d.display().to_string()) {
-                Some(d)
-            } else {
-                None
-            }
-        });
+        .map(|d| d.path());
 
     let mut containers = Box::pin(containers);
     while let Some(container) = containers.next().await {
@@ -64,7 +46,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
+pub async fn install(state: &mut State, npk: &Path) -> Result<Option<(Name, Version)>> {
     if let Some(npk_name) = npk.file_name() {
         info!("Loading {}", npk_name.to_string_lossy());
     }
@@ -83,6 +65,25 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
         manifest_file.read_to_string(&mut manifest)?;
         Manifest::from_str(&manifest)?
     };
+
+    // If a platform string is configured on the north configuration,
+    // check if this npk matches
+    if let Some(ref platform) = state.config.platform {
+        if let Some(ref manifest_platform) = manifest.platform {
+            if platform != manifest_platform {
+                warn!(
+                    "Skipping installtion of {} because platform {} doesn't match host platform {}",
+                    manifest.name, manifest_platform, platform
+                );
+                return Ok(None);
+            }
+        } else {
+            warn!(
+                "Platform configured, but manifest of {} is missing platform entry. Continuing",
+                manifest.name
+            );
+        }
+    }
 
     if state.applications.contains_key(&manifest.name) {
         return Err(anyhow!(
@@ -177,7 +178,7 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version)> {
         state.add(container)?;
     }
 
-    Ok((manifest.name, manifest.version))
+    Ok(Some((manifest.name, manifest.version)))
 }
 
 pub async fn uninstall(container: &Container) -> Result<()> {
