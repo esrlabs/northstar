@@ -148,23 +148,10 @@ impl Runtime {
     }
 
     pub async fn try_stop(&mut self, container_name: &str) -> Result<()> {
-        async move {
-            nstar(&format!("stop {}", container_name)).await?;
-
-            // Check that the container stopped
-            self.output
-                .captures(&format!(
-                    "(Stopped {}|is not running|Failed to stop)",
-                    container_name
-                ))
-                .await
-                .context(format!("Failed to wait for {} to stop", container_name))?;
-
-            Ok(())
-        }
-        .or_timeout(TIMEOUT)
-        .await
-        .context(format!("Failed to stop container {}", container_name))?
+        nstar(&format!("stop {}", container_name))
+            .or_timeout(TIMEOUT)
+            .await
+            .context(format!("Failed to stop container {}", container_name))?
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
