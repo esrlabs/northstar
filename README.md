@@ -139,14 +139,21 @@ choice. The configuration of the runtime is done with a `*.toml` configuration f
 Here is an example:
 
 ```toml
+debug = true
+console_address = "localhost:4200"
+global_data_dir = false
+container_uid = 1000
+container_gid = 1000
+
 [directories]
-container_dirs= [ "target/north/registry" ]
+container_dirs = [ "target/north/registry" ]
 run_dir = "target/north/run"
 data_dir = "target/north/data"
+key_dir = "examples/keys"
 
 [cgroups]
-memory = "/sys/fs/cgroup/memory/north"
-cpu = "/sys/fs/cgroup/cpu/north"
+memory = "north"
+cpu = "north"
 
 [devices]
 unshare_root = "/"
