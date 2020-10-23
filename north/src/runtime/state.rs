@@ -28,10 +28,11 @@ use crate::{
         Event, EventTx, NotificationTx,
     },
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_std::{
     fs,
     path::{Path, PathBuf},
+    stream::StreamExt,
     sync,
 };
 use ed25519_dalek::PublicKey;
@@ -428,12 +429,32 @@ impl State {
                 .await
                 .map_err(Error::UninstallationError)?;
             self.applications.remove(name);
-            // TODO remove npk from registry
-            // let registry_path = self.config.directories.container_dirs.filter(|d| {
-            //     let p = d.join(Path::new())
-            //     path::is_file();
-            // });
-            // fs::remove_file(registry_path).await?;
+
+            // remove npk from registry
+            for d in &self.config.directories.container_dirs {
+                let mut dir = fs::read_dir(&d)
+                    .await
+                    .map_err(|_| Error::UninstallationError(anyhow!("Could not read directory")))?;
+                while let Some(res) = dir.next().await {
+                    let entry = res.map_err(|_| {
+                        Error::UninstallationError(anyhow!("Could not read directory"))
+                    })?;
+                    let manifest =
+                        extract_manifest(entry.path().as_path().into(), &self.signing_keys)
+                            .map_err(|_| {
+                                Error::UninstallationError(anyhow!("Trouble with npk path"))
+                            })?;
+
+                    if manifest.name == name && manifest.version == *version {
+                        fs::remove_file(&entry.path()).await.map_err(|_| {
+                            Error::UninstallationError(anyhow!(
+                                "Could not remove npk {}",
+                                entry.path().to_string_lossy()
+                            ))
+                        })?;
+                    }
+                }
+            }
         }
 
         Ok(())

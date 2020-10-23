@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use byteorder::{BigEndian, ByteOrder};
 use itertools::Itertools;
-use north::api::{Container, Message, Payload, Request, Response};
-use north::manifest::Version;
+use north::{
+    api::{self, Container, Message, Payload, Request, Response},
+    manifest::Version,
+};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{path::Path, time::Duration};
 use tokio::{
@@ -318,8 +320,11 @@ pub(crate) async fn uninstall<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &
 
     run(stream, Request::Uninstall { name: id, version }).await?;
     match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
-        Ok(Response::Containers(cs)) => {
-            render_containers(cs);
+        Ok(Response::Uninstall { result }) => {
+            match result {
+                api::UninstallResult::Success => println!("uninstall succeeded"),
+                api::UninstallResult::Error(s) => println!("uninstall failed: {}", s),
+            }
             Ok(())
         }
         Ok(r) => Err(anyhow!(
