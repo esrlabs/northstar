@@ -72,15 +72,11 @@ init: /bin/ferris
 # Pass the filename with the hello message
 args:
   - /message/hello
-resources:
-  - name: ferris
-    version: 0.0.2
-    dir: /
-    mountpoint: /bin
-  - name: hello_message
-    version: 0.1.2
-    dir: /
-    mountpoint: /message
+mounts:
+  /bin:
+    resource: ferris:0.0.2
+  /message:
+    resource: hello_message:0.1.2
 ```
 
 The `signature.yaml` contains signatures that are used to verify the package and the included file system. It is automatically created by the tooling.
