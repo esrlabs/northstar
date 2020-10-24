@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2020-10-22
+### Added
+- Added sextant -- new command line utility to create npk-packages
+
+### Changed
+- Mounts ands resources are now specified together inside  the manifest's
+  `mounts:` section. The format of the entries also changes.
+
+  ```yaml
+    mounts:
+      - source: /lib
+        target: /lib
+        type: bind
+      - source: /lib64
+        target: /lib64
+        type: bind
+      - target: /data
+        type: data
+      - target: /data_rw
+        type: data
+        flags:
+          - rw
+
+    resources:
+      - name: hello
+        version: 0.1.2
+        dir: /hello
+        mountpoint: /message
+  ```
+
+  becomes:
+
+  ```yaml
+    mounts:
+      /lib:
+        host: /lib
+      /lib64:
+        host: /lib64
+      /data: {}
+      /data_rw:
+        flags:
+          - rw
+      /message:
+        resource: hello:0.1.2/hello
+  ```
+
+## [0.3.0] - 2020-10-21
+### Changed
+- nstar can now start/stop containers by regex
+
+## [0.2.3] - 2020-10-12
+### Changed
+- Use mounts from manifest
+  Bind mounts and data mounts are now specified in the manifest.
+  Bind mounts are mounted as before. The data mounts in the
+  mount list in the manifest is a replacement for the default
+  data dir. The global data dir option is obsolete because this can
+  be configured via a custom bind mount.
+- The optional `OnExit` section was removed
+
+## [0.2.2] - 2020-10-07
+### Changed
+- Change manifest env settings to a map
+  Using a map for env variables in manifest feels more natural
+  than a list.
+  Instead of using a list here:
+    env: [[THREADS, 4]]
+  we now use a map
+    env:
+      THREADS: 4
+
+## [0.2.1] - 2020-10-01
+### Added
+- Add shell script to check kernel config
+  The shell script is meant as a guide for people configuring
+  their kernel to run northstar. It attempts to check specific
+  functionality provided by the various kernel config options.
+
+### Changed
+- Unmount verity devices on shutdown
+  This change uninstalls every container on shutdown. This translates to an
+  umount of the verity devices and removal of their mount point. A wait
+  for the corresponding `/dev/dm-*` is performed afterward using `inotify`.
 - Split runtime into lib and bin modules
 - Move api and manifest to north crate
 
