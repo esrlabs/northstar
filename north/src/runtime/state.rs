@@ -343,55 +343,11 @@ impl State {
         npk: &Path,
         msg_id: MessageId,
         container_dir: Option<std::path::PathBuf>,
-        install_file_name: String,
         tx: sync::Sender<Message>,
     ) {
-        info!(
-            "try to install {}, checking the installed apps:",
-            install_file_name,
-        );
-        for app in self.applications() {
-            info!("- {}", app);
-        }
-        let registry_path = container_dir.map(|p| p.join(&install_file_name));
-        if let Some(_installed_id) = self.installed_application_id(&npk).await {
-            warn!("Cannot install already installed application");
-            let _ = self
-                .events_tx
-                .send(Event::InstallationFinished(
-                    InstallationResult::ApplicationAlreadyInstalled,
-                    std::path::PathBuf::from(npk),
-                    msg_id,
-                    tx,
-                    registry_path,
-                ))
-                .await;
-            return;
-        }
-        match npk::install(self, npk).await {
-            Ok(_) => {
-                info!("Installation succeeded!");
-                let _ = self
-                    .events_tx
-                    .send(Event::InstallationFinished(
-                        InstallationResult::Success,
-                        std::path::PathBuf::from(npk),
-                        msg_id,
-                        tx,
-                        registry_path,
-                    ))
-                    .await;
-                // generate notification for installation event
-                self.notification_tx
-                    .send(Notification::InstallationFinished(
-                        self.installed_application_id(&npk)
-                            .await
-                            .unwrap_or(format!("{}", npk.to_string_lossy())),
-                    ))
-                    .await;
-            }
+        match extract_manifest(npk.into(), &self.signing_keys) {
             Err(e) => {
-                warn!("Installation failed");
+                warn!("Could not get package name from manifest");
                 let _ = self
                     .events_tx
                     .send(Event::InstallationFinished(
@@ -402,6 +358,69 @@ impl State {
                         None,
                     ))
                     .await;
+            }
+            Ok(manifest) => {
+                let pkg_file_name = format!(
+                    "{}_{}_{}.npk",
+                    manifest.name,
+                    manifest.version,
+                    manifest.platform.unwrap_or_else(|| "".to_string())
+                );
+                log::debug!(
+                    "Try to install {}, checking the installed apps",
+                    manifest.name
+                );
+                let registry_path = container_dir.map(|p| p.join(&pkg_file_name));
+                if let Some(_installed_id) = self.installed_application_id(&npk).await {
+                    warn!("Cannot install already installed application");
+                    let _ = self
+                        .events_tx
+                        .send(Event::InstallationFinished(
+                            InstallationResult::ApplicationAlreadyInstalled,
+                            std::path::PathBuf::from(npk),
+                            msg_id,
+                            tx,
+                            registry_path,
+                        ))
+                        .await;
+                    return;
+                }
+                match npk::install(self, npk).await {
+                    Ok(_) => {
+                        info!("Installation succeeded!");
+                        let _ = self
+                            .events_tx
+                            .send(Event::InstallationFinished(
+                                InstallationResult::Success,
+                                std::path::PathBuf::from(npk),
+                                msg_id,
+                                tx,
+                                registry_path,
+                            ))
+                            .await;
+                        // generate notification for installation event
+                        self.notification_tx
+                            .send(Notification::InstallationFinished(
+                                self.installed_application_id(&npk)
+                                    .await
+                                    .unwrap_or(format!("{}", npk.to_string_lossy())),
+                            ))
+                            .await;
+                    }
+                    Err(e) => {
+                        warn!("Installation failed");
+                        let _ = self
+                            .events_tx
+                            .send(Event::InstallationFinished(
+                                e.into(),
+                                std::path::PathBuf::from(npk),
+                                msg_id,
+                                tx,
+                                None,
+                            ))
+                            .await;
+                    }
+                }
             }
         }
     }
