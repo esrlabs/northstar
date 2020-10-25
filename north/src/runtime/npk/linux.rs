@@ -58,24 +58,13 @@ struct VerityHeader {
 pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
     info!("Installing containers from {}", dir.display());
 
-    lazy_static::lazy_static! {
-        static ref RE: regex::Regex = regex::Regex::new(
-            format!(
-                r"^.*-{}-\d+\.\d+\.\d+\.(npk|tgz)$",
-                env!("VERGEN_TARGET_TRIPLE")
-            )
-            .as_str(),
-        )
-        .expect("Invalid regex");
-    }
-
     let npks = fs::read_dir(&dir)
         .await
         .with_context(|| format!("Failed to read {}", dir.display()))?
         .filter_map(move |d| async move { d.ok() })
         .map(|d| d.path())
         .filter_map(move |d| async move {
-            if RE.is_match(&d.display().to_string()) {
+            if d.extension().and_then(std::ffi::OsStr::to_str) == Some("npk") {
                 Some(d)
             } else {
                 None

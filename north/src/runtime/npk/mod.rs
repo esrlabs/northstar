@@ -17,7 +17,7 @@ use anyhow::{anyhow, Context, Result};
 use async_std::path::PathBuf;
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
-use log::{debug, trace};
+use log::trace;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::{
@@ -87,7 +87,6 @@ impl Hashes {
             .map_err(|e| InstallFailure::MalformedSignature)?;
 
         // Check signature
-        debug!("Using key {}", signature.key);
         let key = keys.get(&signature.key).ok_or_else(|| {
             InstallFailure::KeyNotFound(format!("Key {} not found", &signature.key))
         })?;
@@ -220,7 +219,6 @@ impl<'a> ArchiveReader<'a> {
     }
 
     pub fn extract_hashes(&mut self) -> std::result::Result<Hashes, InstallFailure> {
-        debug!("extract_hashes");
         let mut signature_file = self
             .archive
             .by_name(SIGNATURE)
@@ -236,7 +234,6 @@ impl<'a> ArchiveReader<'a> {
     pub fn extract_manifest_from_archive(
         &mut self,
     ) -> std::result::Result<Manifest, InstallFailure> {
-        debug!("extract_manifest_from_archive");
         let hashes = self.extract_hashes()?;
         let mut manifest_file = self.archive.by_name(MANIFEST).map_err(|e| {
             InstallFailure::ArchiveError(format!("Failed to read manifest ({})", e))

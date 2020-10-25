@@ -7,6 +7,7 @@ use north::{
 };
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{path::Path, time::Duration};
+use thiserror::Error;
 use tokio::{
     fs::{self, File},
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,6 +16,33 @@ use tokio::{
 };
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_millis(1000);
+
+#[derive(Error, Debug)]
+pub enum NstarError {
+    #[error("Problem with the connection to the runtime")]
+    ConnectionError(String),
+    #[error("Error reading package or manifest")]
+    FormatError(String),
+    #[error("Error in communication protocol")]
+    ProtocolError(String),
+    #[error("General error during an operation")]
+    OperationError(String),
+    #[error("Io Error")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+    #[error("Tokio Error")]
+    TimoutError {
+        #[from]
+        source: tokio::time::error::Elapsed,
+    },
+    #[error("Anyhow Error")]
+    Anyhow {
+        #[from]
+        source: anyhow::Error,
+    },
+}
 
 pub fn start_receiving_from_socket(
     mut reader: OwnedReadHalf,
@@ -39,28 +67,39 @@ pub fn start_receiving_from_socket(
             }
         }
     });
-    log::debug!("Stopped receiving from socket");
     Ok(sender)
 }
 
-pub(crate) async fn run<S: AsyncWriteExt + Unpin>(stream: &mut S, req: Request) -> Result<()> {
+pub(crate) async fn run<S: AsyncWriteExt + Unpin>(
+    stream: &mut S,
+    req: Request,
+) -> Result<(), NstarError> {
     // Send request
     let request_msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
         payload: Payload::Request(req),
     };
-    let request = serde_json::to_string(&request_msg).context("Failed to serialize")?;
+    let request = serde_json::to_string(&request_msg)
+        .map_err(|_e| NstarError::FormatError("Failed to serialize".to_string()))?;
     let mut buf = [0u8; 4];
     BigEndian::write_u32(&mut buf, request.as_bytes().len() as u32);
-    stream
-        .write_all(&buf)
-        .await
-        .context("Failed to write to stream")?;
+    stream.write_all(&buf).await.map_err(|e| {
+        NstarError::ConnectionError(format!("Failed to write size to stream ({})", e))
+    })?;
     stream
         .write_all(request.as_bytes())
         .await
-        .context("Failed to write to stream")
-    // receive_reply(stream).await
+        .context(format!(
+            "Failed to write {} bytes request to stream",
+            request.as_bytes().len(),
+        ))
+        .map_err(|e| {
+            NstarError::ConnectionError(format!(
+                "Failed to write {} bytes request to stream ({})",
+                request.as_bytes().len(),
+                e,
+            ))
+        })
 }
 
 async fn receive_reply<S: AsyncReadExt + Unpin>(mut stream: S) -> Result<Message> {
@@ -131,20 +170,23 @@ fn render_containers(containers: Vec<Container>) {
 pub(crate) async fn containers<S: AsyncWriteExt + Unpin>(
     stream: &mut S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     run(stream, Request::Containers).await?;
-    match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
-        Ok(Response::Containers(cs)) => {
+    match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await {
+        Ok(Ok(Response::Containers(cs))) => {
             render_containers(cs);
             Ok(())
         }
-        Ok(r) => Err(anyhow!(
+        Ok(Ok(r)) => Err(NstarError::ProtocolError(format!(
             "Did receive wrong response for container request: {:?}",
             r
-        )),
-        Err(e) => Err(anyhow!(
+        ))),
+        Ok(Err(e)) => Err(NstarError::ProtocolError(format!(
             "Did not receive correct response for container request: {}",
             e
+        ))),
+        Err(_) => Err(NstarError::OperationError(
+            "Error during timeout".to_string(),
         )),
     }
 }
@@ -152,21 +194,21 @@ pub(crate) async fn containers<S: AsyncWriteExt + Unpin>(
 pub(crate) async fn shutdown<S: AsyncWriteExt + Unpin>(
     stream: &mut S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     run(stream, Request::Shutdown).await?;
     match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
         Ok(Response::Shutdown { result }) => {
             println!("Shutdown response: {:?}", result);
             Ok(())
         }
-        Ok(r) => Err(anyhow!(
+        Ok(r) => Err(NstarError::ProtocolError(format!(
             "Did receive wrong response for shutdown request: {:?}",
             r
-        )),
-        Err(e) => Err(anyhow!(
+        ))),
+        Err(e) => Err(NstarError::OperationError(format!(
             "Did not receive correct response for shutdown request: {}",
             e
-        )),
+        ))),
     }
 }
 
@@ -174,7 +216,7 @@ pub(crate) async fn start<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a s
     mut cmd: I,
     stream: &mut S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     let pattern = cmd.next().unwrap_or(".*");
     let re = regex::Regex::new(pattern).context("Invalid regex")?;
     run(stream, Request::Containers).await?;
@@ -198,14 +240,14 @@ pub(crate) async fn start<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a s
             }
             Ok(())
         }
-        Ok(r) => Err(anyhow!(
+        Ok(r) => Err(NstarError::ProtocolError(format!(
             "Did receive wrong response for start request: {:?}",
             r
-        )),
-        Err(e) => Err(anyhow!(
-            "Did not receive correct response for start request: {}",
+        ))),
+        Err(e) => Err(NstarError::OperationError(format!(
+            "Error receiving response for start request: {}",
             e
-        )),
+        ))),
     }
 }
 
@@ -213,7 +255,7 @@ pub(crate) async fn stop<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a st
     mut cmd: I,
     stream: &mut S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     let pattern = cmd.next().unwrap_or(".*");
     let re = regex::Regex::new(pattern).context("Invalid regex")?;
     run(stream, Request::Containers).await?;
@@ -236,14 +278,14 @@ pub(crate) async fn stop<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a st
             }
             Ok(())
         }
-        Ok(r) => Err(anyhow!(
+        Ok(r) => Err(NstarError::ProtocolError(format!(
             "Did receive wrong response for stop request: {:?}",
             r
-        )),
-        Err(e) => Err(anyhow!(
-            "Did not receive correct response for stop request: {}",
+        ))),
+        Err(e) => Err(NstarError::OperationError(format!(
+            "Error receiving response for stop request: {}",
             e
-        )),
+        ))),
     }
 }
 
@@ -251,21 +293,15 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
     path_str: Option<&str>,
     mut stream: S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     let path_s = path_str.ok_or_else(|| anyhow!("Path to npk missing"))?;
     let path = Path::new(path_s);
     log::debug!("stream_update");
     let file_size = fs::metadata(&path).await?.len();
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| anyhow!("Could not get filename from path"))?
-        .to_str()
-        .ok_or_else(|| anyhow!("Invalid filename"))?
-        .to_string();
 
     let request_msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
-        payload: Payload::Installation(file_size as usize, file_name),
+        payload: Payload::Installation(file_size as usize),
     };
     let request = serde_json::to_string(&request_msg).context("Failed to serialize")?;
     let mut buf = [0u8; 4];
@@ -273,11 +309,10 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
     stream
         .write_all(&buf)
         .await
-        .context("Failed to write to stream")?;
-    stream
-        .write_all(request.as_bytes())
-        .await
-        .context("Failed to write to stream")?;
+        .context("Failed to write size to stream (for installation)")?;
+    stream.write_all(request.as_bytes()).await.map_err(|_e| {
+        NstarError::ConnectionError("Failed to write file to install to stream".to_string())
+    })?;
 
     let mut file = File::open(&path).await?;
 
@@ -311,7 +346,7 @@ pub(crate) async fn uninstall<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &
     mut cmd: I,
     stream: &mut S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     log::debug!("uninstall");
 
     let id = cmd.next().context("Container id missing")?.to_owned();
@@ -327,13 +362,13 @@ pub(crate) async fn uninstall<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &
             }
             Ok(())
         }
-        Ok(r) => Err(anyhow!(
+        Ok(r) => Err(NstarError::ProtocolError(format!(
             "Did receive wrong response for uninstall request: {:?}",
-            r
-        )),
-        Err(e) => Err(anyhow!(
+            r,
+        ))),
+        Err(e) => Err(NstarError::OperationError(format!(
             "Did not receive correct response for uninstall request: {}",
-            e
-        )),
+            e,
+        ))),
     }
 }
