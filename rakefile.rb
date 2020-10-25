@@ -90,9 +90,7 @@ namespace :build do
 
   desc 'Build sextant tool'
   task :sextant do
-    cd 'sextant' do
-      sh 'cargo build --release'
-    end
+    sh 'cargo build --release --bin sextant'
   end
 
   desc 'Release-Build everything'
@@ -133,14 +131,12 @@ def examples
 end
 
 def create_arch_package_sextant(container_src, out_dir, target_arch)
-  sh "./sextant/target/release/sextant pack '\
+  sh "./target/release/sextant pack '\
       '-d #{container_src} -o #{out_dir} -k #{KEY_FILE} -p #{target_arch}"
 end
 
 file SEXTANT do
-  cd 'sextant' do
-    sh 'cargo build --release'
-  end
+  sh 'cargo build --release --bin sextant'
 end
 
 namespace :examples do
@@ -216,13 +212,18 @@ namespace :examples do
     registry_info = []
     pkgs.each do |pkg|
       file_name = File.basename(pkg, '.*')
-      captured = file_name.match(/(?<name>^.*)-(?<version>\d+\.\d+\.\d+)/i).named_captures
+      begin
+        m = file_name.match(/(?<name>^.*)-(?<version>\d+\.\d+\.\d+)/i)
+        captured = m.named_captures
 
-      name = captured['name']
-      supported_targets.each do |arch|
-        if name.end_with?(arch)
-          registry_info << { name: name.chomp(arch).chomp('-'), arch: arch, version: captured['version'] }
+        name = captured['name']
+        supported_targets.each do |arch|
+          if name.end_with?(arch)
+            registry_info << { name: name.chomp(arch).chomp('-'), arch: arch, version: captured['version'] }
+          end
         end
+      rescue
+        puts "Problems parsing file name #{file_name}"
       end
     end
     sorted = registry_info.sort_by { |entry| entry[:name] }

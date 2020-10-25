@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::manifest::{Manifest, Version};
 
-type Name = String;
+pub type Name = String;
 pub type MessageId = String; // UUID
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -15,7 +15,7 @@ pub struct Message {
 pub enum Payload {
     Request(Request),
     Response(Response),
-    Installation(usize, String), // size of npk that will be sent + it's name
+    Installation(usize), // size of npk that will be sent
     Notification(Notification),
 }
 

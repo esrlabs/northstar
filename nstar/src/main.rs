@@ -14,6 +14,7 @@
 
 use crate::communication::{
     containers, shutdown, start, start_receiving_from_socket, stop, stream_update, uninstall,
+    NstarError,
 };
 use ansi_term::Color;
 use anyhow::{anyhow, Context, Result};
@@ -172,9 +173,11 @@ async fn run_cmd<S: AsyncWriteExt + Unpin>(
     cmd: &str,
     stream: &mut S,
     response_receiver: sync::broadcast::Receiver<Response>,
-) -> Result<()> {
+) -> Result<(), NstarError> {
     let mut cmd = cmd.trim().split_whitespace();
-    let c = cmd.next().ok_or_else(|| anyhow!("Invalid command"))?;
+    let c = cmd
+        .next()
+        .ok_or_else(|| NstarError::OperationError("Invalid command".to_string()))?;
 
     match c {
         "containers" => containers(stream, response_receiver).await?,
@@ -209,7 +212,7 @@ pub async fn main() -> Result<()> {
 
     if !opt.cmd.is_empty() {
         let cmd_str = opt.cmd.join(" ");
-        run_cmd(cmd_str.trim(), &mut write_half, response_sender.subscribe()).await
+        run_cmd(cmd_str.trim(), &mut write_half, response_sender.subscribe()).await?;
     } else {
         let config = Config::builder()
             .auto_add_history(false)
@@ -254,10 +257,13 @@ pub async fn main() -> Result<()> {
                     } else if line.trim() == "help" {
                         println!("{}", help());
                     } else {
-                        if let Err(e) =
-                            run_cmd(&line, &mut write_half, response_sender.subscribe()).await
-                        {
-                            println!("{} resulted in an error: {}", line, e);
+                        match run_cmd(&line, &mut write_half, response_sender.subscribe()).await {
+                            Err(NstarError::ConnectionError(s)) => {
+                                log::error!("Error with the connection: {}", s);
+                                break;
+                            } // println!("{} resulted in an error: {}", line, e);
+                            Err(e) => warn!("Error processing command: {}", e),
+                            Ok(_) => (),
                         }
                         rl.add_history_entry(line);
                         if !opt.disable_history {
@@ -270,7 +276,12 @@ pub async fn main() -> Result<()> {
                                         })?;
                                     }
                                     info!("Saving history to {:?}", history);
-                                    rl.save_history(history)?;
+                                    rl.save_history(history).map_err(|e| {
+                                        NstarError::OperationError(format!(
+                                            "Error saving history: {}",
+                                            e
+                                        ))
+                                    })?;
                                 }
                             }
                         }
@@ -283,6 +294,6 @@ pub async fn main() -> Result<()> {
                 }
             }
         }
-        Ok(())
     }
+    Ok(())
 }

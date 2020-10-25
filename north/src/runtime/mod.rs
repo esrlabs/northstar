@@ -45,7 +45,7 @@ pub enum Event {
     /// Incomming command
     Console(api::Message, sync::Sender<api::Message>),
     /// Installation Event
-    Install(api::MessageId, PathBuf, String, sync::Sender<api::Message>),
+    Install(api::MessageId, PathBuf, sync::Sender<api::Message>),
     /// Installation finished event
     InstallationFinished(
         InstallationResult,
@@ -143,13 +143,12 @@ pub async fn run(config: &Config) -> Result<()> {
             // in the console module but with access to `state`.
             Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await?,
             // Installation event that triggers the installation of a received file
-            Event::Install(msg_id, path, install_file_name, txr) => {
+            Event::Install(msg_id, path, txr) => {
                 state
                     .install(
                         &path,
                         msg_id,
                         config.directories.container_dirs.first().cloned(),
-                        install_file_name,
                         txr,
                     )
                     .await

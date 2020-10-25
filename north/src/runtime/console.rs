@@ -136,8 +136,16 @@ impl Console {
 
             // Spawn a task for each incoming connection.
             while let Some(stream) = incoming.next().await {
+                let tx_clone = tx.clone();
+                let notification_rx_clone = notification_rx.clone();
                 if let Ok(stream) = stream {
-                    task::spawn(connection_loop(stream, tx.clone(), notification_rx.clone()));
+                    task::spawn(async move {
+                        if let Err(e) =
+                            connection_loop(stream, tx_clone, notification_rx_clone).await
+                        {
+                            warn!("Error servicing connection: {}", e);
+                        }
+                    });
                 }
             }
         });
@@ -206,48 +214,6 @@ fn list_containers(state: &State) -> Vec<Container> {
         .collect()
 }
 
-// struct NotificationCatcher {
-//     notification_rx: NotificationReceiver,
-// }
-
-// impl futures::Stream for NotificationCatcher {
-//     type Item = Option<Notification>;
-//     fn poll_next(
-//         mut self: std::pin::Pin<&mut Self>,
-//         _cx: &mut std::task::Context,
-//     ) -> futures::task::Poll<Option<Self::Item>> {
-//         self.notification_rx.receive()
-//         let mut buffer = vec![0; 20];
-//         let message: Message = serde_json::from_slice(&buffer).unwrap();
-//         futures::task::Poll::Ready(Some(Some(Ok(message))))
-//     }
-// }
-
-// struct MessageReceiver<R: Unpin + Read> {
-//     reader: R,
-// }
-
-// impl<R: Unpin + Read> futures::Stream for MessageReceiver<R> {
-//     type Item = Option<Result<Message>>;
-//     fn poll_next(
-//         mut self: std::pin::Pin<&mut Self>,
-//         _cx: &mut std::task::Context,
-//     ) -> futures::task::Poll<Option<Self::Item>> {
-//         // // Read frame length
-//         // let mut buf = [0u8; 4];
-//         // self.reader.read_exact(&mut buf).await.unwrap();
-//         // let frame_len = BigEndian::read_u32(&buf) as usize;
-
-//         // // Read payload
-//         // let mut buffer = vec![0; frame_len];
-//         // self.reader.read_exact(&mut buffer).await.unwrap();
-
-//         // let message: Message = serde_json::from_slice(&buffer).unwrap();
-//         // futures::task::Poll::Ready(Some(Some(Ok(message))))
-//         futures::task::Poll::Ready(Some(None))
-//     }
-// }
-
 struct MessageWithData {
     message: Message,
     path: Option<std::path::PathBuf>,
@@ -269,8 +235,14 @@ async fn receive_message_from_socket<R: Read + Unpin>(
 
     let message: Message = serde_json::from_slice(&buffer)?;
     let msg_with_data = match &message.payload {
-        Payload::Installation(size, name) => {
-            let tmp_installation_file_path = tmp_installation_dir.join(&name);
+        Payload::Installation(size) => {
+            let tmp_installation_file_path = tmp_installation_dir.join(&format!(
+                "tmp_install_file_{}.npk",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| format!("{}", d.as_millis()))
+                    .unwrap_or_else(|_| "".to_string())
+            ));
             let mut tmpfile = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -357,7 +329,6 @@ fn start_receiving_from_socket(
             }
         }
     });
-    debug!("Stopped receiving from socket");
     Ok(())
 }
 
@@ -365,14 +336,10 @@ async fn connection_loop(
     stream: TcpStream,
     mut event_tx: EventTx,
     notification_rx: NotificationRx,
-) {
-    let peer = match stream.peer_addr() {
-        Ok(peer) => peer,
-        Err(e) => {
-            warn!("Failed to get peer from command connection: {}", e);
-            return;
-        }
-    };
+) -> Result<()> {
+    let peer = stream
+        .peer_addr()
+        .context("Failed to get peer from command connection")?;
     debug!("Client {:?} connected", peer);
 
     enum ConsoleEvent {
@@ -385,16 +352,14 @@ async fn connection_loop(
     // channel for sending messages back to client
     let (client_tx, client_rx) = sync::channel::<Message>(1000);
     let (socket_tx, socket_rx) = sync::channel::<MessageWithData>(1);
-    let tmp_installation_dir = tempdir().unwrap();
+    let tmp_installation_dir = tempdir()?;
     start_receiving_from_socket(
         reader,
         std::path::PathBuf::from(tmp_installation_dir.path()),
         socket_tx,
-    )
-    .unwrap();
+    )?;
 
-    // TODO error handling
-    start_sending_over_socket(writer, client_rx).unwrap();
+    start_sending_over_socket(writer, client_rx)?;
 
     let message_event_stream: futures::stream::Map<async_std::sync::Receiver<MessageWithData>, _> =
         socket_rx.map(ConsoleEvent::ApiMessage);
@@ -446,12 +411,12 @@ async fn connection_loop(
                 message:
                     Message {
                         id,
-                        payload: Payload::Installation(_, name),
+                        payload: Payload::Installation(_),
                     },
                 path: Some(p),
             } => {
                 info!("was installation");
-                Event::Install(id, PathBuf::from(&p), name, tx_reply.clone())
+                Event::Install(id, PathBuf::from(&p), tx_reply.clone())
             }
             _ => {
                 info!("was consol event");
@@ -470,4 +435,6 @@ async fn connection_loop(
         sender_to_client.send(reply).await;
         Ok(())
     }
+
+    Ok(())
 }
