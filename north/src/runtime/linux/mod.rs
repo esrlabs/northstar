@@ -14,9 +14,12 @@
 
 use super::config::Config;
 use anyhow::{Context, Result};
-use async_std::path::PathBuf;
+use async_std::{
+    fs, io, io::prelude::BufReadExt, os::unix::io::FromRawFd, path::PathBuf, stream::StreamExt,
+    task,
+};
 use log::{debug, log, Level};
-use nix::sched;
+use nix::{sched, unistd::pipe};
 
 pub(super) mod cgroups;
 #[allow(unused)]
@@ -43,15 +46,15 @@ pub async fn init(config: &Config) -> Result<()> {
     debug!("Entering mount namespace");
     sched::unshare(sched::CloneFlags::CLONE_NEWNS).context("Failed to enter mount namespace")?;
 
-    // Pipe minijail log to the runtime
-    capture_minijail_log().await?;
+    // Pipe minijail log to rust log
+    init_minijail_log()
+        .await
+        .context("Failed to initialize minijail logging")?;
 
     Ok(())
 }
 
-async fn capture_minijail_log() -> Result<()> {
-    use async_std::{io::prelude::BufReadExt, os::unix::io::FromRawFd, stream::StreamExt};
-
+async fn init_minijail_log() -> Result<()> {
     #[allow(non_camel_case_types)]
     #[allow(dead_code)]
     #[repr(i32)]
@@ -76,13 +79,12 @@ async fn capture_minijail_log() -> Result<()> {
             Level::Trace => SyslogLevel::MAX,
         };
 
-        let (readfd, writefd) = nix::unistd::pipe()?;
-        let pipe = unsafe { async_std::fs::File::from_raw_fd(readfd) };
+        let (readfd, writefd) = pipe().context("Failed to create pipe for minijail logs")?;
+        let pipe = unsafe { fs::File::from_raw_fd(readfd) };
         minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);
+        let mut lines = io::BufReader::new(pipe).lines();
 
-        async_std::task::spawn(async move {
-            let reader = async_std::io::BufReader::new(pipe);
-            let mut lines = reader.lines();
+        task::spawn(async move {
             while let Some(Ok(line)) = lines.next().await {
                 log!(log_level, "{}", line);
             }
