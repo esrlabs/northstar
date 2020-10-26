@@ -1,0 +1,47 @@
+on: [push, pull_request]
+
+name: Cross
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-linux-android
+          - aarch64-unknown-linux-gnu
+          # - aarch64-unknown-linux-musl
+        package:
+          - cpueater
+          - crashing
+          - datarw
+          - ferris
+          - hello
+          - memeater
+          - minijail
+          - north
+          - test_container
+    steps:
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --target=${{ matrix.target }} -p ${{ matrix.package }}
