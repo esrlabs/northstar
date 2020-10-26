@@ -74,7 +74,7 @@ desc 'Setup build environment'
 task :setup_environment do
   sh 'bundle install'
   sh 'cargo install --path nstar'
-  sh 'cargo install --version 0.2.0 cross'
+  sh 'cargo install --version 0.2.1 cross'
   require 'os'
   if OS.linux?
     system 'sudo apt install squashfs-tools'
@@ -83,7 +83,7 @@ task :setup_environment do
   end
   cd 'docker' do
     supported_targets.each do |t|
-      sh "docker build -t north/#{t}:0.2.0 -f Dockerfile.#{t} ."
+      sh "docker build -t esrlabs/#{t}:0.2.1 -f Dockerfile.#{t} ."
     end
   end
 end

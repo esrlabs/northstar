@@ -1,4 +1,4 @@
-FROM rustembedded/cross:aarch64-linux-android-0.2.0
+FROM rustembedded/cross:aarch64-linux-android-0.2.1
 
 RUN rm -r /android-ndk
 
