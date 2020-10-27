@@ -66,14 +66,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallFai
             error: e,
         })?
         .filter_map(move |d| async move { d.ok() })
-        .map(|d| d.path())
-        .filter_map(move |d| async move {
-            if d.extension().and_then(std::ffi::OsStr::to_str) == Some("npk") {
-                Some(d)
-            } else {
-                None
-            }
-        });
+        .map(|d| d.path());
 
     let dm = state.config.devices.device_mapper.clone();
     let dm = dm::Dm::new(&dm).map_err(InstallFailure::DeviceMapperProblem)?;

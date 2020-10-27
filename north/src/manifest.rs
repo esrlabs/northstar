@@ -161,9 +161,6 @@ pub struct Manifest {
     pub name: Name,
     /// Container version
     pub version: Version,
-    /// Target arch
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub platform: Option<String>,
     /// Path to init
     #[serde(skip_serializing_if = "Option::is_none")]
     pub init: Option<std::path::PathBuf>,
@@ -473,7 +470,6 @@ log:
         let m = "
 name: hello
 version: 0.0.0
-arch: aarch64-linux-android
 init: /binary
 args:
     - one
