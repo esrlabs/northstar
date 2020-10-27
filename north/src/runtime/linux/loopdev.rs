@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::runtime::error::LoopDeviceError;
-use anyhow::Result;
 use async_std::{
     fs,
     path::{Path, PathBuf},
@@ -44,7 +43,7 @@ impl LoopControl {
                 .write(true)
                 .open(&control)
                 .await
-                .map_err(|_| LoopDeviceError::ControlFileError)?,
+                .map_err(LoopDeviceError::ControlFileNotCreated)?,
             dev: dev.into(),
         })
     }
@@ -83,7 +82,7 @@ impl LoopDevice {
             .write(true)
             .open(dev.as_ref())
             .await
-            .map_err(|_| LoopDeviceError::ControlFileError)?;
+            .map_err(LoopDeviceError::ControlFileNotCreated)?;
         Ok(LoopDevice {
             device: f,
             path: PathBuf::from(dev.as_ref()),
@@ -115,7 +114,7 @@ impl LoopDevice {
         let code = unsafe { ioctl(device_fd, LOOP_SET_FD.into(), file_fd) };
 
         if code < 0 {
-            return Err(LoopDeviceError::AssociateError);
+            return Err(LoopDeviceError::AssociateWithOpenFile);
         }
 
         // Set offset and limit for backing_file
@@ -143,9 +142,9 @@ impl LoopDevice {
                     // this error means the call should be retried
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
-                nix::Result::Err(_e) => {
+                nix::Result::Err(e) => {
                     self.detach()?;
-                    return Err(LoopDeviceError::SetStatusError);
+                    return Err(LoopDeviceError::SetStatusFailed(e));
                 }
             }
         }
@@ -158,7 +157,7 @@ impl LoopDevice {
         let fd = self.device.as_raw_fd() as c_int;
         let code = unsafe { ioctl(fd, LOOP_CLR_FD.into(), 0) };
         if code < 0 {
-            Err(LoopDeviceError::ClearError)
+            Err(LoopDeviceError::ClearFailed)
         } else {
             Ok(())
         }
@@ -172,7 +171,7 @@ impl LoopDevice {
                 if enable { 1 } else { 0 },
             ) < 0
             {
-                Err(LoopDeviceError::DirectIoError)
+                Err(LoopDeviceError::DirectIoModeFailed)
             } else {
                 Ok(())
             }
@@ -187,7 +186,7 @@ impl LoopDevice {
     }
 
     /// Get major and minor number of device
-    pub async fn dev_id(&self) -> Result<(u64, u64)> {
+    pub async fn dev_id(&self) -> Result<(u64, u64), LoopDeviceError> {
         let attr = self.device.metadata().await?;
         let rdev = attr.rdev();
         let major = ((rdev >> 32) & 0xFFFF_F000) | ((rdev >> 8) & 0xFFF);

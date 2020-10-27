@@ -1,5 +1,20 @@
+// Copyright (c) 2019 - 2020 ESRLabs
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
 use crate::runtime::{InstallationResult, Name};
 use anyhow::Error as AnyhowError;
+use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -52,10 +67,18 @@ pub enum InstallFailure {
     KeyNotFound(String),
     #[error("Cannot install application {0}, already exists")]
     ApplicationAlreadyInstalled(String),
-    #[error("Failure to mount: {0}")]
-    MountError(String),
-    #[error("Internal error: {0}")]
-    InternalError(String),
+    #[error("Failure to mount: {context}")]
+    MountError {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+    #[error("Internal error: {context}")]
+    InternalError {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
 }
 
 impl From<InstallFailure> for InstallationResult {
@@ -70,7 +93,7 @@ impl From<InstallFailure> for InstallationResult {
             InstallFailure::VerityProblem(s) => InstallationResult::VerityProblem(s),
             InstallFailure::ArchiveError(s) => InstallationResult::ArchiveError(s),
             InstallFailure::DeviceMapperProblem(e) => {
-                InstallationResult::DeviceMapperProblem(format!("{}", e))
+                InstallationResult::DeviceMapperProblem(format!("{:?}", e))
             }
             InstallFailure::LoopDeviceError(e) => {
                 InstallationResult::LoopDeviceError(format!("{}", e))
@@ -80,8 +103,12 @@ impl From<InstallFailure> for InstallationResult {
             InstallFailure::ApplicationAlreadyInstalled(_) => {
                 InstallationResult::ApplicationAlreadyInstalled
             }
-            InstallFailure::InternalError(s) => InstallationResult::InternalError(s),
-            InstallFailure::MountError(s) => InstallationResult::MountError(s),
+            InstallFailure::InternalError { context, error: _ } => {
+                InstallationResult::InternalError(context)
+            }
+            InstallFailure::MountError { context, error: _ } => {
+                InstallationResult::MountError(context)
+            }
             InstallFailure::NoVerityHeader => InstallationResult::NoVerityHeader,
             InstallFailure::UnexpectedVerityAlgorithm(s) => {
                 InstallationResult::UnexpectedVerityAlgorithm(s)
@@ -96,35 +123,31 @@ impl From<InstallFailure> for InstallationResult {
 #[derive(Error, Debug)]
 pub enum DeviceMapperError {
     #[error("Failure opening file for device mapper")]
-    OpenDmError,
+    OpenDmFailed(#[from] io::Error),
     #[error("Failure issuing an IO-CTL call")]
-    IoCtrlError,
+    IoCtrlFailed(#[from] nix::Error),
     #[error("Response DM buffer requires too much space")]
     BufferFull,
-    #[error("Could not create device")]
-    CreateDeviceFailed,
-    #[error("Failure to remove device")]
-    DeviceRemovalFailed,
     #[error("Failure to suspend device")]
-    SuspendDeviceError,
+    SuspendDeviceFailed,
 }
 
 #[derive(Error, Debug)]
 pub enum LoopDeviceError {
     #[error("Control file for loop device could not be created")]
-    ControlFileError,
+    ControlFileNotCreated(#[from] io::Error),
     #[error("Failure to find or allocate free loop device")]
     NoFreeDeviceFound,
     #[error("Failure adding new loop device")]
     DeviceAlreadyAllocated,
     #[error("Failure to associate loop device with open file")]
-    AssociateError,
+    AssociateWithOpenFile,
     #[error("Set Loop status exceeded number of retries ({0})")]
     StatusWriteBusy(usize),
     #[error("Set Loop status failed")]
-    SetStatusError,
+    SetStatusFailed(#[from] nix::Error),
     #[error("Failure to set DIRECT I/O mode")]
-    DirectIoError,
+    DirectIoModeFailed,
     #[error("Failure to dis-associate loop device from file descriptor")]
-    ClearError,
+    ClearFailed,
 }

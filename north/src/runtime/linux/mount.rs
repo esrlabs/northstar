@@ -32,12 +32,13 @@ pub async fn mount(
         flags,
         data,
     )
-    .map_err(|_| {
-        InstallFailure::MountError(format!(
+    .map_err(|e| InstallFailure::MountError {
+        context: format!(
             "Failed to mount {} on {}",
             source.display(),
             target.display()
-        ))
+        ),
+        error: e,
     })
 }
 

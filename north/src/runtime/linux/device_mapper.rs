@@ -144,7 +144,7 @@ impl Dm {
             .read(true)
             .write(true)
             .open(&dm)
-            .map_err(|e| DeviceMapperError::OpenDmError)?;
+            .map_err(DeviceMapperError::OpenDmFailed)?;
         Ok(Dm { file })
     }
 
@@ -186,8 +186,7 @@ impl Dm {
         Self::hdr_set_name(&mut hdr, name);
 
         self.do_ioctl(DM_DEV_CREATE_CMD as u8, &mut hdr, None)
-            .await
-            .map_err(|_| DeviceMapperError::CreateDeviceFailed);
+            .await?;
 
         Ok(DeviceInfo::new(hdr))
     }
@@ -207,8 +206,7 @@ impl Dm {
         let mut hdr = options.to_ioctl_hdr(Some(id), DmFlags::DM_DEFERRED_REMOVE);
 
         self.do_ioctl(DM_DEV_REMOVE_CMD as u8, &mut hdr, None)
-            .await
-            .map_err(|_| DeviceMapperError::DeviceRemovalFailed);
+            .await?;
 
         Ok(DeviceInfo::new(hdr))
     }
@@ -303,7 +301,7 @@ impl Dm {
 
         self.do_ioctl(DM_DEV_SUSPEND_CMD as u8, &mut hdr, None)
             .await
-            .map_err(|_| DeviceMapperError::SuspendDeviceError);
+            .map_err(|_| DeviceMapperError::SuspendDeviceFailed);
 
         Ok(DeviceInfo::new(hdr))
     }
@@ -365,7 +363,7 @@ impl Dm {
                     let op = op as i32;
                     nix::convert_ioctl_res!(nix_ioctl(fd, op, v.as_mut_ptr()))
                 } {
-                    return Err(DeviceMapperError::IoCtrlError);
+                    return Err(DeviceMapperError::IoCtrlFailed(e));
                 }
                 // If DM was able to write the requested data into the provided buffer, break the loop
                 if (hdr.flags & DmFlags::DM_BUFFER_FULL.bits()) == 0 {

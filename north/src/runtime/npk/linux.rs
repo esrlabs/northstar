@@ -29,7 +29,9 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use async_std::{
-    fs, io,
+    fs,
+    fs::metadata,
+    io,
     path::{Path, PathBuf},
     prelude::*,
     task,
@@ -72,11 +74,11 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
         });
 
     let dm = state.config.devices.device_mapper.clone();
-    let dm = dm::Dm::new(&dm).context("Failed to open device mapper")?;
+    let dm = dm::Dm::new(&dm).map_err(InstallFailure::DeviceMapperProblem)?;
     let lc: PathBuf = state.config.devices.loop_control.clone().into();
     let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
         .await
-        .context("Failed to open loop control")?;
+        .map_err(InstallFailure::LoopDeviceError)?;
 
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
@@ -136,13 +138,9 @@ async fn install_internal(
         );
     }
 
-    debug!(
-        "npk size: {}",
-        async_std::fs::metadata(&npk)
-            .await
-            .expect("Could not get metadata of file")
-            .len()
-    );
+    if let Ok(md) = metadata(&npk).await {
+        debug!("Installing an NPK with size: {}", md.len());
+    }
     let p: &std::path::Path = npk.into();
     let mut archive_reader = ArchiveReader::new(&p, &state.signing_keys)?;
 
@@ -169,9 +167,13 @@ async fn install_internal(
 
     let (fs_offset, fs_size) = archive_reader.extract_fs_start_and_size()?;
 
-    let mut fs = async_std::fs::File::open(&npk)
-        .await
-        .map_err(|e| InstallFailure::InternalError(format!("Failed to open {:?} ({})", npk, e)))?;
+    let mut fs =
+        async_std::fs::File::open(&npk)
+            .await
+            .map_err(|e| InstallFailure::InternalError {
+                context: format!("Failed to open {:?} ({})", npk, e),
+                error: e,
+            })?;
 
     let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset)
         .await
@@ -196,9 +198,12 @@ async fn install_internal(
 
         if !root.exists().await {
             info!("Creating mountpoint {}", root.display());
-            fs::create_dir_all(&root).await.map_err(|e| {
-                InstallFailure::InternalError(format!("Failed to create mountpoint: {}", e))
-            })?;
+            fs::create_dir_all(&root)
+                .await
+                .map_err(|e| InstallFailure::InternalError {
+                    context: format!("Failed to create mountpoint: {}", e),
+                    error: e,
+                })?;
         }
 
         let name = format!(
@@ -239,9 +244,7 @@ async fn install_internal(
             duration.as_fractional_secs(),
         );
 
-        state
-            .add(container)
-            .map_err(|e| InstallFailure::InternalError(format!("Failed to add container {}", e)))?;
+        state.add(container)?;
     }
 
     Ok((manifest.name, manifest.version))
@@ -277,21 +280,21 @@ async fn setup_and_mount(
     lo_size: u64,
     root: &Path,
 ) -> std::result::Result<PathBuf, InstallFailure> {
-    let fs_type = get_fs_type(&mut fs, fs_offset)
-        .await
-        .map_err(|e| InstallFailure::InternalError(format!("Failed get file-system-type {}", e)))?;
+    let fs_type =
+        get_fs_type(&mut fs, fs_offset)
+            .await
+            .map_err(|e| InstallFailure::InternalError {
+                context: format!("Failed get file-system-type {}", e),
+                error: e,
+            })?;
 
-    let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size)
-        .await
-        .map_err(|e| InstallFailure::InternalError(format!("Failed to setup loop-device {}", e)))?;
+    let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size).await?;
 
     let loop_device_id = loop_device
         .dev_id()
         .await
         .map(|(major, minor)| format!("{}:{}", major, minor))
-        .map_err(|e| {
-            InstallFailure::InternalError(format!("Failed to get loop-device id {}", e))
-        })?;
+        .map_err(InstallFailure::LoopDeviceError)?;
 
     let dm_dev = veritysetup(
         &dm,
@@ -305,23 +308,19 @@ async fn setup_and_mount(
     .await
     .map_err(|e| InstallFailure::VerityProblem(format!("Failed to find file-system {}", e)))?;
 
-    mount(dm_dev.as_path(), root, fs_type).await.map_err(|e| {
-        InstallFailure::InternalError(format!("Failed to mount verity device: {}", e))
-    })?;
+    mount(dm_dev.as_path(), root, fs_type).await?;
 
     dm.device_remove(
         &name.to_string(),
         &dm::DmOptions::new().set_flags(dm::DmFlags::DM_DEFERRED_REMOVE),
     )
     .await
-    .map_err(|e| {
-        InstallFailure::InternalError(format!("Failed to set defered remove flag {}", e))
-    })?;
+    .map_err(InstallFailure::DeviceMapperProblem)?;
 
     Ok(dm_dev)
 }
 
-async fn get_fs_type(fs: &mut fs::File, fs_offset: u64) -> Result<&'static str> {
+async fn get_fs_type(fs: &mut fs::File, fs_offset: u64) -> Result<&'static str, io::Error> {
     let mut fstype = [0u8; 4];
     fs.seek(io::SeekFrom::Start(fs_offset)).await?;
     fs.read_exact(&mut fstype).await?;
@@ -380,21 +379,18 @@ async fn losetup(
     fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
-) -> Result<LoopDevice> {
+) -> Result<LoopDevice, InstallFailure> {
     let start = time::Instant::now();
     let loop_device = lc
         .next_free()
         .await
-        .context("Failed to acquire free loopdev")?;
+        .map_err(InstallFailure::LoopDeviceError)?;
 
-    debug!(
-        "Using loop device {}",
-        loop_device.path().await.unwrap().display()
-    );
+    debug!("Using loop device {:?}", loop_device.path().await);
 
     loop_device
         .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
-        .context("Failed to attach loopback")?;
+        .map_err(InstallFailure::LoopDeviceError)?;
 
     if let Err(error) = loop_device.set_direct_io(true) {
         warn!("Failed to enable direct io: {:?}", error);
