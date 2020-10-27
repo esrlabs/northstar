@@ -207,8 +207,9 @@ impl<'a> ArchiveReader<'a> {
         npk: &std::path::Path,
         signing_keys: &'a HashMap<String, PublicKey>,
     ) -> std::result::Result<Self, InstallFailure> {
-        let file = std::fs::File::open(&npk).map_err(|e| {
-            InstallFailure::InternalError(format!("Failed to open {:?} ({})", npk, e))
+        let file = std::fs::File::open(&npk).map_err(|e| InstallFailure::InternalError {
+            context: format!("Failed to open {:?} ({})", npk, e),
+            error: e,
         })?;
 
         let reader: std::io::BufReader<std::fs::File> = std::io::BufReader::new(file);

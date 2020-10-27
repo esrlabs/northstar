@@ -23,10 +23,9 @@ use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
     StopResult,
 };
-use async_std::io::BufWriter;
 use async_std::{
     fs::OpenOptions,
-    io::{self, Read, Write},
+    io::{self, BufWriter, Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
     prelude::*,
@@ -249,20 +248,10 @@ async fn receive_message_from_socket<R: Read + Unpin>(
                 .append(true)
                 .open(&tmp_installation_file_path)
                 .await?;
-            let mut buf_writer = BufWriter::new(tmpfile);
-            let mut received_bytes = 0usize;
-            while received_bytes < *size {
-                let received = reader.read(&mut buffer).await?;
-                if received > 0 {
-                    buf_writer.write_all(&buffer[..received]).await?;
-                    received_bytes += received;
-                }
-            }
-            buf_writer.flush().await?;
-            debug!(
-                "Received a total of {} bytes, start installation",
-                received_bytes
-            );
+            let buf_writer = BufWriter::new(tmpfile);
+            let received_bytes = io::copy(reader.take(*size as u64), buf_writer).await?;
+            // buf_writer.flush().await?;
+            debug!("Received {} bytes. Starting installation", received_bytes);
             MessageWithData {
                 message,
                 path: Some(tmp_installation_file_path),
@@ -354,7 +343,7 @@ async fn connection_loop(
     // channel for sending messages back to client
     let (client_tx, client_rx) = sync::channel::<Message>(1000);
     let (socket_tx, socket_rx) = sync::channel::<MessageWithData>(1);
-    let tmp_installation_dir = tempdir()?;
+    let tmp_installation_dir = tempdir().context("Error creating temp installation dir")?;
     start_receiving_from_socket(
         reader,
         std::path::PathBuf::from(tmp_installation_dir.path()),
@@ -416,14 +405,8 @@ async fn connection_loop(
                         payload: Payload::Installation(_),
                     },
                 path: Some(p),
-            } => {
-                info!("was installation");
-                Event::Install(id, PathBuf::from(&p), tx_reply.clone())
-            }
-            _ => {
-                info!("was consol event");
-                Event::Console(m.message, tx_reply.clone())
-            }
+            } => Event::Install(id, PathBuf::from(&p), tx_reply.clone()),
+            _ => Event::Console(m.message, tx_reply.clone()),
         };
         event_tx.send(event).await;
 
