@@ -93,6 +93,7 @@ fn generate_syscall_constants(target_os: &str) -> io::Result<PathBuf> {
 
 fn main() -> io::Result<()> {
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Failed to get CARGO_CFG_TARGET_OS");
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").expect("Failed to get CARGO_CFG_TARGET_ENV");
 
     match target_os.as_str() {
         "linux" | "android" => (),
@@ -114,7 +115,12 @@ fn main() -> io::Result<()> {
         "../../util.c",
     ];
 
-    cc::Build::new()
+    let mut build = cc::Build::new();
+    if target_env == "musl" {
+        build.define("MUSL_C", "1");
+    }
+
+    build
         .define("ALLOW_DEBUG_LOGGING", "1")
         .define("PRELOADPATH", "\"invalid\"")
         .flag("-Wno-implicit-function-declaration")
