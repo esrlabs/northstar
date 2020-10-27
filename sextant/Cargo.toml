@@ -22,7 +22,7 @@ log = "0.4.8"
 rand = "0.7.3"
 serde_yaml = "0.8.13"
 sha2 = "0.9.1"
-sodiumoxide = { version = "0.2.6", default-features = false, features = ["std"]}
+ed25519-dalek = "1.0.1"
 structopt = "0.3.14"
 tempdir = "0.3.7"
 uuid = "0.8.1"
