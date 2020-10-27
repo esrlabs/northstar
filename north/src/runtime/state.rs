@@ -240,7 +240,7 @@ impl State {
 
         // Not Android or Linux
         #[cfg(not(any(target_os = "android", target_os = "linux")))]
-        let process = super::process::os::OsProcess::start(&app.container, self.tx.clone())
+        let process = super::process::os::OsProcess::start(&app.container, self.events_tx.clone())
             .await
             .map_err(Error::ProcessError)?;
 

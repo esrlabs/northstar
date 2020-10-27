@@ -14,7 +14,7 @@
 
 use super::Container;
 use crate::{
-    manifest::{MountType, Name, Version},
+    manifest::{Mount, Name, Version},
     runtime::{error::InstallFailure, npk::ArchiveReader, state::State},
 };
 use anyhow::{Context, Result};
@@ -25,7 +25,7 @@ use async_std::{
 };
 use futures::stream::StreamExt;
 use log::{debug, info};
-use std::process::Command;
+use std::{io, process::Command};
 
 pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
     info!("Installing containers from {}", dir.display());
@@ -98,9 +98,12 @@ pub async fn install(
 
         if root.exists().await {
             debug!("Removing {}", root.display());
-            fs::remove_dir_all(&root).await.map_err(|_| {
-                InstallFailure::InternalError(format!("Failed to remove {}", root.display()))
-            })?;
+            fs::remove_dir_all(&root)
+                .await
+                .map_err(|e| InstallFailure::InternalError {
+                    context: format!("Failed to remove {}", root.display()),
+                    error: e,
+                })?;
         }
 
         debug!("Unsquashing {} to {}", npk.display(), root.display());
@@ -111,41 +114,64 @@ pub async fn install(
         cmd.arg("-d");
         cmd.arg(root.display().to_string());
         cmd.arg(npk.display().to_string());
-        let output = cmd
-            .output()
-            .map_err(|e| InstallFailure::InternalError(format!("Output error: {}", e)))?;
+        let output = cmd.output().map_err(|e| InstallFailure::InternalError {
+            context: format!("Output error: {}", e),
+            error: e,
+        })?;
         if !output.status.success() {
-            return Err(InstallFailure::InternalError(format!(
-                "Failed to unsquash: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
+            return Err(InstallFailure::InternalError {
+                context: format!(
+                    "Failed to unsquash: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+                error: io::Error::new(io::ErrorKind::Other, "unsquash failed"),
+            });
         }
 
         for mount in manifest.mounts.iter() {
             match mount {
                 Mount::Bind { target, host, .. } => {
                     let source = &host;
-                    let target = root.join(target.strip_prefix("/")?);
+                    let target = root.join(target.strip_prefix("/").map_err(|_| {
+                        InstallFailure::InternalError {
+                            context: "join error".to_string(),
+                            error: io::Error::new(io::ErrorKind::Other, "join error"),
+                        }
+                    })?);
                     // The mount points are part of the squashfs - remove them and symlink
                     if target.exists().await {
-                        fs::remove_dir(&target)
-                            .await
-                            .with_context(|| format!("Failed to rmdir {}", target.display()))?;
+                        fs::remove_dir(&target).await.map_err(|e| {
+                            InstallFailure::InternalError {
+                                context: format!("Failed to rmdir {}", target.display()),
+                                error: e,
+                            }
+                        })?;
                     }
-                    unix::fs::symlink(source, &target).await.with_context(|| {
-                        format!(
-                            "Failed to link {} to {}",
-                            source.display(),
-                            target.display()
-                        )
+                    unix::fs::symlink(source, &target).await.map_err(|e| {
+                        InstallFailure::InternalError {
+                            context: format!(
+                                "Failed to link {} to {}",
+                                source.display(),
+                                target.display()
+                            ),
+                            error: e,
+                        }
                     })?;
                 }
 
                 Mount::Persist { target, .. } => {
-                    let dir = root.join(target.strip_prefix("/")?);
+                    let dir = root.join(target.strip_prefix("/").map_err(|_| {
+                        InstallFailure::InternalError {
+                            context: "Failed to join".to_string(),
+                            error: io::Error::new(io::ErrorKind::Other, "join error"),
+                        }
+                    })?);
                     fs::create_dir_all(&dir)
                         .await
-                        .with_context(|| format!("Failed to create {}", dir.display()))?;
+                        .map_err(|e| InstallFailure::InternalError {
+                            context: format!("Failed to create {}", dir.display()),
+                            error: e,
+                        })?;
                 }
 
                 _ => continue,
