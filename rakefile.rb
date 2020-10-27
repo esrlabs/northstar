@@ -195,9 +195,12 @@ end
       sh 'sudo ./target/release/north --config north.toml'
 =======
 namespace :test do
-  desc 'Build test container'
-  task :build do
+  desc 'Prepare integration test run'
+  task :prepare do
     mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
+    `./examples/build_examples.sh`
+    `cargo build -p north`
+    `cargo build -p nstar`
     `cargo build --release -p test_container`
 
     Dir.mktmpdir do |dir| 
