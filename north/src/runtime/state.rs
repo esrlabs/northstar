@@ -49,6 +49,7 @@ pub struct State {
     notification_tx: NotificationTx,
     pub signing_keys: HashMap<String, PublicKey>,
     pub applications: HashMap<Name, Application>,
+    pub resources: HashMap<(Name, Version), Application>,
     pub config: Config,
 }
 
@@ -136,6 +137,7 @@ impl State {
             notification_tx,
             signing_keys,
             applications: HashMap::new(),
+            resources: HashMap::new(),
             config: config.clone(),
         })
     }
@@ -150,6 +152,11 @@ impl State {
         self.applications.values()
     }
 
+    /// Return an iterator over all known resources
+    pub fn resources(&self) -> impl iter::Iterator<Item = &Application> {
+        self.resources.values()
+    }
+
     /// Try to find a application with name `name`
     pub fn application(&mut self, name: &str) -> Option<&Application> {
         self.applications.get(name)
@@ -158,26 +165,33 @@ impl State {
     /// Add a container instance the list of known containers
     pub fn add(&mut self, container: Container) -> Result<(), InstallFailure> {
         let name = container.manifest.name.clone();
-        if self.applications.get(&name).is_some() {
-            return Err(InstallFailure::ApplicationAlreadyInstalled(name));
+        let version = container.manifest.version.clone();
+        if container.is_resource_container() {
+            if self
+                .resources
+                .get(&(name.clone(), version.clone()))
+                .is_some()
+            {
+                return Err(InstallFailure::ApplicationAlreadyInstalled(name));
+            }
+            let app = Application::new(container);
+            self.resources.insert((name, version), app);
+        } else {
+            if self.applications.get(&name).is_some() {
+                return Err(InstallFailure::ApplicationAlreadyInstalled(name));
+            }
+            let app = Application::new(container);
+            self.applications.insert(name, app);
         }
-        let app = Application::new(container);
-        self.applications.insert(name, app);
         Ok(())
     }
 
     pub async fn start(&mut self, name: &str) -> result::Result<(), Error> {
         // Setup set of available resources
         let resources = self
-            .applications
+            .resources
             .values()
-            .filter_map(|app| {
-                if app.container.is_resource_container() {
-                    Some(app.container.manifest.name.clone())
-                } else {
-                    None
-                }
-            })
+            .map(|app| app.container.manifest.name.clone())
             .collect::<HashSet<Name>>();
 
         // Look for app
@@ -331,12 +345,6 @@ impl State {
         id_and_version(npk.into(), &self.signing_keys)
     }
 
-    fn installed_version(&self, id: &str) -> Option<Version> {
-        self.applications
-            .get(id)
-            .map(|app| app.container.manifest.version.clone())
-    }
-
     /// Install a npk from give path
     pub async fn install(
         &mut self,
@@ -372,25 +380,11 @@ impl State {
                 );
                 let registry_path = container_dir.map(|p| p.join(&pkg_file_name));
                 log::debug!("Try to install..., registry_path: {:?}", registry_path);
-                if let Some(installed_version) = self.installed_version(&manifest.name) {
-                    log::debug!(
-                        "A container with this id is already installed: {}",
-                        manifest.name
-                    );
-                    // a container with this id is already installed
-                    if !manifest.is_resource_image() {
-                        warn!("Cannot install already installed application");
-                        let _ = self
-                            .events_tx
-                            .send(Event::InstallationFinished(
-                                InstallationResult::ApplicationAlreadyInstalled,
-                                std::path::PathBuf::from(npk),
-                                msg_id,
-                                tx,
-                                registry_path,
-                            ))
-                            .await;
-                    } else if installed_version == manifest.version {
+                if manifest.is_resource_image() {
+                    if self
+                        .resources
+                        .contains_key(&(manifest.name, manifest.version))
+                    {
                         warn!("Resource container with same version already installed");
                         let _ = self
                             .events_tx
@@ -402,8 +396,24 @@ impl State {
                                 registry_path,
                             ))
                             .await;
+                        return;
                     }
-                    return;
+                } else {
+                    // regular application
+                    if self.applications.contains_key(&manifest.name) {
+                        warn!("Cannot install already installed application");
+                        let _ = self
+                            .events_tx
+                            .send(Event::InstallationFinished(
+                                InstallationResult::ApplicationAlreadyInstalled,
+                                std::path::PathBuf::from(npk),
+                                msg_id,
+                                tx,
+                                registry_path,
+                            ))
+                            .await;
+                        return;
+                    }
                 }
                 match npk::install(self, npk).await {
                     Ok(_) => {
@@ -429,7 +439,7 @@ impl State {
                             .await;
                     }
                     Err(e) => {
-                        warn!("Installation failed");
+                        warn!("Installation failed: {}", e);
                         let _ = self
                             .events_tx
                             .send(Event::InstallationFinished(
@@ -448,18 +458,33 @@ impl State {
 
     fn is_app_installed(&self, name: &str, version: &Version) -> bool {
         match self.applications.get(name) {
-            None => false,
+            None => self
+                .resources
+                .get(&(name.to_string(), version.clone())) // TODO get rid of copy
+                .is_some(),
             Some(app) => app.container.manifest.version == *version,
         }
     }
 
     /// Remove and umount a specific app
     /// app has to be stopped before it can be uninstalled
+    // TODO uninstall resource
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> result::Result<(), Error> {
         if !self.is_app_installed(name, version) {
             return Err(Error::ApplicationNotFound);
         }
-        if let Some(app) = self.applications.get(name) {
+        let installed_app = self.applications.get(name);
+        let to_uninstall = match installed_app {
+            Some(app) => {
+                if app.is_running() {
+                    warn!("Cannot uninstall running container {}", app);
+                    return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
+                }
+                Some(app)
+            }
+            None => self.resources.get(&(name.to_string(), version.clone())),
+        };
+        if let Some(app) = to_uninstall {
             if app.is_running() {
                 warn!("Cannot uninstall running container {}", app);
                 return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
@@ -469,6 +494,7 @@ impl State {
                 .await
                 .map_err(Error::UninstallationError)?;
             self.applications.remove(name);
+            self.resources.remove(&(name.to_string(), version.clone()));
 
             // remove npk from registry
             for d in &self.config.directories.container_dirs {

@@ -178,8 +178,9 @@ impl Console {
         response_message_tx.send(response_message).await
     }
 }
+
 fn list_containers(state: &State) -> Vec<Container> {
-    state
+    let mut app_containers: Vec<Container> = state
         .applications()
         .map(|app| {
             Container {
@@ -210,7 +211,16 @@ fn list_containers(state: &State) -> Vec<Container> {
                 }),
             }
         })
-        .collect()
+        .collect();
+    let mut resource_containers: Vec<Container> = state
+        .resources()
+        .map(|app| Container {
+            manifest: app.manifest().clone(),
+            process: None,
+        })
+        .collect();
+    app_containers.append(&mut resource_containers);
+    app_containers
 }
 
 struct MessageWithData {
