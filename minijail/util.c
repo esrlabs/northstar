@@ -102,6 +102,18 @@ static void attribute_no_optimize alias(const void *var)
 	(void)var;
 }
 
+void print_log_level(int priority, int fd) {
+	if (priority == LOG_INFO) {
+		dprintf(fd, "INFO ");
+	} else if (priority == LOG_WARNING) {
+		dprintf(fd, "WARN ");
+	} else if (priority == LOG_ERR) {
+		dprintf(fd, "ERR ");
+	} else {
+		dprintf(fd, "DEBUG ");
+	}
+}
+
 void do_fatal_log(int priority, const char *format, ...)
 {
 	va_list args, stack_args;
@@ -110,6 +122,8 @@ void do_fatal_log(int priority, const char *format, ...)
 	if (logging_config.logger == LOG_TO_SYSLOG) {
 		vsyslog(priority, format, args);
 	} else {
+		print_log_level(priority, logging_config.fd);
+
 		vdprintf(logging_config.fd, format, args);
 		dprintf(logging_config.fd, "\n");
 	}
@@ -141,6 +155,8 @@ void do_log(int priority, const char *format, ...)
 
 	if (logging_config.min_priority < priority)
 		return;
+
+	print_log_level(priority, logging_config.fd);
 
 	va_list args;
 	va_start(args, format);
