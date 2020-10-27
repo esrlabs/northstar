@@ -25,9 +25,9 @@ pub enum NstarError {
     FormatError(String),
     #[error("Error in communication protocol")]
     ProtocolError(String),
-    #[error("General error during an operation")]
+    #[error("General error during an operation ({0})")]
     OperationError(String),
-    #[error("Io Error")]
+    #[error("Io Error ({source})")]
     Io {
         #[from]
         source: std::io::Error,
@@ -294,9 +294,8 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
     mut stream: S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
 ) -> Result<(), NstarError> {
-    let path_s = path_str.ok_or_else(|| anyhow!("Path to npk missing"))?;
+    let path_s = path_str.ok_or_else(|| anyhow!("Argument <path to npk> missing"))?;
     let path = Path::new(path_s);
-    log::debug!("stream_update");
     let file_size = fs::metadata(&path).await?.len();
 
     let request_msg = Message {
@@ -337,7 +336,10 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
 
     match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await {
         Ok(r) => println!("Installation of {} {:?}", path_s, r),
-        Err(e) => println!("Error waiting for installation response: {}", e),
+        Err(_) => println!(
+            "Timeout while waiting for installation response: {}ms",
+            RESPONSE_TIMEOUT.as_millis()
+        ),
     }
     Ok(())
 }

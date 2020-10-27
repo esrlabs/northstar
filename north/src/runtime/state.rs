@@ -371,7 +371,12 @@ impl State {
                     manifest.name
                 );
                 let registry_path = container_dir.map(|p| p.join(&pkg_file_name));
+                log::debug!("Try to install..., registry_path: {:?}", registry_path);
                 if let Some(installed_version) = self.installed_version(&manifest.name) {
+                    log::debug!(
+                        "A container with this id is already installed: {}",
+                        manifest.name
+                    );
                     // a container with this id is already installed
                     if !manifest.is_resource_image() {
                         warn!("Cannot install already installed application");
