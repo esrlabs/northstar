@@ -84,6 +84,9 @@ pub struct Runtime {
     // sent to this channel.
     stopped: oneshot::Receiver<RuntimeResult>,
     event_tx: mpsc::Sender<Event>,
+    // Closes the pipe on drop, terminating the spawned task that reads the minijail log.
+    #[allow(dead_code)]
+    minijail_log_handle: Option<MinijailLogHandle>,
 }
 
 impl Runtime {
@@ -92,7 +95,7 @@ impl Runtime {
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
         // Initialize minijails static functionality
-        minijail_init().await?;
+        let minijail_log_handle = minijail_init().await?;
 
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.directories.data_dir).await?;
@@ -115,6 +118,7 @@ impl Runtime {
             stop: Some(stop_tx),
             stopped: stopped_rx,
             event_tx,
+            minijail_log_handle,
         })
     }
 
@@ -311,9 +315,20 @@ fn is_rw(path: &Path) -> bool {
     }
 }
 
+use std::os::unix::io::{FromRawFd, RawFd};
+
+struct MinijailLogHandle(RawFd);
+
+// Closes the pipe on drop, causing the spawned task that forwards the minijail log to terminate.
+impl Drop for MinijailLogHandle {
+    fn drop(&mut self) {
+        let _ = nix::unistd::close(self.0);
+    }
+}
+
 /// Initialize minijail logging
-pub async fn minijail_init() -> Result<(), Error> {
-    use std::{io::BufRead, os::unix::io::FromRawFd};
+async fn minijail_init() -> Result<Option<MinijailLogHandle>, Error> {
+    use std::io::BufRead;
 
     #[allow(non_camel_case_types)]
     #[allow(dead_code)]
@@ -330,8 +345,8 @@ pub async fn minijail_init() -> Result<(), Error> {
         MAX = i32::MAX,
     }
 
-    if let Some(log_level) = log::max_level().to_level() {
-        let minijail_log_level = match log_level {
+    let handle = log::max_level().to_level().map(|level| {
+        let minijail_log_level = match level {
             Level::Error => SyslogLevel::LOG_ERR,
             Level::Warn => SyslogLevel::LOG_WARNING,
             Level::Info => SyslogLevel::LOG_INFO,
@@ -341,18 +356,33 @@ pub async fn minijail_init() -> Result<(), Error> {
 
         let (readfd, writefd) =
             pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
-
-        let pipe = unsafe { std::fs::File::from_raw_fd(readfd) };
         ::minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);
 
+        let pipe = unsafe { std::fs::File::from_raw_fd(readfd) };
         let mut lines = std::io::BufReader::new(pipe).lines();
         task::spawn_blocking(move || {
+            let prefix_re = regex::Regex::new(r"libminijail\[\d+\]: ").expect("Invalid regex");
             while let Some(Ok(line)) = lines.next() {
-                // TODO: Format the logs to make them seemless
-                log::log!(log_level, "{}", line);
+                let mut parts = prefix_re.split(&line);
+                let level = parts.next().unwrap_or_default();
+                let msg = parts.next().unwrap_or_default();
+
+                if level.starts_with("INFO") {
+                    log::info!("{}", msg);
+                } else if level.starts_with("WARN") {
+                    log::warn!("{}", msg);
+                } else if level.starts_with("DEBUG") {
+                    log::debug!("{}", msg);
+                } else if level.starts_with("ERR") {
+                    log::error!("{}", msg);
+                } else {
+                    log::trace!("{}", msg);
+                }
             }
         });
-    }
 
-    Ok(())
+        Ok(MinijailLogHandle(writefd))
+    });
+
+    handle.map_or(Ok(None), |r| r.map(Some))
 }
