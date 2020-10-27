@@ -38,7 +38,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallFai
         .filter_map(move |d| async move { d.ok() })
         .map(|d| d.path());
 
-    let mut npks= Box::pin(npks);
+    let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
         install(state, &npk).await?;
     }
