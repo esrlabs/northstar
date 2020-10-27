@@ -14,27 +14,10 @@
 
 #![deny(clippy::all)]
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::Result;
 use sextant::npk;
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 use structopt::StructOpt;
-
-#[derive(Debug)]
-enum Format {
-    Text,
-    Json,
-}
-
-impl FromStr for Format {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "json" => Ok(Format::Json),
-            "text" | "txt" => Ok(Format::Text),
-            _ => Err(anyhow!("Invalid format {}", s)),
-        }
-    }
-}
 
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Northstar CLI")]
@@ -65,10 +48,7 @@ enum Opt {
     Inspect {
         /// Container to inspect
         #[structopt(short, long)]
-        container: PathBuf,
-        /// Output format
-        #[structopt(short, long)]
-        format: Format,
+        npk: PathBuf,
     },
 }
 
@@ -82,6 +62,7 @@ fn main() -> Result<()> {
             key,
             platform,
         } => npk::pack(&dir, &out, &key, &platform),
+        Opt::Inspect { npk } => npk::inspect(&npk),
         _ => {
             unimplemented!();
         }
