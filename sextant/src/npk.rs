@@ -3,7 +3,7 @@ use colored::Colorize;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use north::manifest::{Manifest, Mount, MountFlag};
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -82,7 +82,7 @@ pub fn inspect(npk_path: &Path) -> Result<()> {
     // print NPK file list
     println!(
         "{}",
-        format!("# inspection of {}", &npk_path.display()).green()
+        format!("# inspection of '{}'", &npk_path.display()).green()
     );
     let npk_file = File::open(&npk_path)
         .with_context(|| format!("Cannot open NPK '{}'", &npk_path.display()))?;
@@ -110,6 +110,26 @@ pub fn inspect(npk_path: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn gen_key(key_name: &str, key_path: &Path) -> Result<()> {
+    let key_pair = gen_key_pair();
+    let pub_key_path = key_path.join(key_name).with_extension("pub");
+    let prv_key_path = key_path.join(key_name).with_extension("key");
+    assume_non_existing(&pub_key_path)?;
+    assume_non_existing(&prv_key_path)?;
+    write_to_file(&key_pair.public.to_bytes(), &pub_key_path)?;
+    write_to_file(&key_pair.secret.to_bytes(), &prv_key_path)?;
+    Ok(())
+}
+
+fn write_to_file(data: &[u8], path: &Path) -> Result<()> {
+    let mut pub_key_file =
+        File::create(&path).with_context(|| format!("Cannot create '{}'", &path.display()))?;
+    pub_key_file
+        .write(&data)
+        .with_context(|| format!("Cannot write to '{}'", &path.display()))?;
+    Ok(())
+}
+
 fn read_manifest(src_path: &Path) -> Result<Manifest> {
     let manifest_path = src_path.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
     let manifest = std::fs::File::open(&manifest_path)
@@ -131,16 +151,15 @@ fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf> {
     Ok(tmp_manifest_path)
 }
 
-fn read_signing_key(key_file_path: &Path) -> Result<Keypair> {
-    let mut seed = [0u8; SECRET_KEY_LENGTH];
-    let mut key_file = File::open(&key_file_path)
-        .with_context(|| format!("Cannot open '{}'", &key_file_path.display()))?;
-    key_file
-        .read_exact(&mut seed)
-        .with_context(|| format!("Cannot read seed value from '{}'", &key_file_path.display()))?;
-    let secret_key = SecretKey::from_bytes(&seed).with_context(|| {
+fn read_keypair(key_file_path: &Path) -> Result<Keypair> {
+    let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
+    File::open(&key_file_path)
+        .with_context(|| format!("Cannot open '{}'", &key_file_path.display()))?
+        .read_exact(&mut secret_key_bytes)
+        .with_context(|| format!("Cannot read key data from '{}'", &key_file_path.display()))?;
+    let secret_key = SecretKey::from_bytes(&secret_key_bytes).with_context(|| {
         format!(
-            "Cannot derive secret key from seed found in'{}'",
+            "Cannot derive secret key from '{}'",
             &key_file_path.display()
         )
     })?;
@@ -149,6 +168,11 @@ fn read_signing_key(key_file_path: &Path) -> Result<Keypair> {
         secret: secret_key,
         public: public_key,
     })
+}
+
+fn gen_key_pair() -> Keypair {
+    let mut csprng = OsRng {};
+    Keypair::generate(&mut csprng)
 }
 
 fn gen_salt() -> [u8; SHA256_SIZE] {
@@ -167,13 +191,13 @@ fn gen_hashes_yaml(
     let mut sha256 = Sha256::new();
     io::copy(
         &mut File::open(&tmp_manifest_path)
-            .with_context(|| format!("Cannot open {}", &tmp_manifest_path.display()))?,
+            .with_context(|| format!("Cannot open '{}'", &tmp_manifest_path.display()))?,
         &mut sha256,
     )?;
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
     let mut fsimg = File::open(&fsimg_path)
-        .with_context(|| format!("Cannot open {}", &fsimg_path.display()))?;
+        .with_context(|| format!("Cannot open '{}'", &fsimg_path.display()))?;
     io::copy(&mut fsimg, &mut sha256)?;
 
     let fs_hash = sha256.finalize();
@@ -199,7 +223,7 @@ fn gen_signature_yaml(
         .with_context(|| format!("Cannot read read size of '{}'", &fsimg_path.display()))?
         .len();
     let verity_hash = create_verity_header(&fsimg_path, fsimg_size)?;
-    let key_pair = read_signing_key(&key_file_path)?;
+    let key_pair = read_keypair(&key_file_path)?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest_path, &fsimg_path, fsimg_size, &verity_hash)?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
     Ok(signature_yaml)
@@ -326,23 +350,6 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     signature_yaml
 }
 
-/// Return the list of sub-paths to the given directory except the root.
-/// For example, the path '/res/dir/subdir' returns ('/res/dir/subdir', /res/dir/', '/res/').
-fn path_trail(path: &Path) -> Vec<&Path> {
-    let mut current_path = path;
-    let mut ret = vec![];
-    while let Some(parent_path) = current_path.parent() {
-        ret.push(current_path);
-        current_path = parent_path;
-    }
-    ret
-}
-
-fn round_up_to_multiple(number: usize, factor: usize) -> usize {
-    let round_down_to_multiple = number + factor - 1;
-    round_down_to_multiple - (round_down_to_multiple % factor)
-}
-
 fn calc_hash_level_offsets(
     image_size: usize,
     block_size: usize,
@@ -397,10 +404,6 @@ fn copy_src_root_to_tmp(src_path: &Path, tmp: &TempDir) -> Result<PathBuf> {
     Ok(tmp_root_path)
 }
 
-fn create_tmp_dir() -> Result<TempDir> {
-    TempDir::new("").with_context(|| "Cannot create temporary directory")
-}
-
 fn create_fs_img(tmp_root_path: &Path, manifest: &Manifest, fsimg_path: &Path) -> Result<()> {
     let pseudo_dirs =
         gen_pseudo_dir_list(&manifest).with_context(|| "Cannot generate list of pseudo files")?;
@@ -414,7 +417,7 @@ fn create_verity_header(fsimg_path: &Path, fsimg_size: u64) -> Result<Vec<u8>> {
     let (hash_level_offsets, tree_size) =
         calc_hash_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
     let (verity_hash, hash_tree) = gen_hash_tree(
-        &File::open(&fsimg_path).with_context(|| format!("Cannot open {}", &FS_IMG_NAME))?,
+        &File::open(&fsimg_path).with_context(|| format!("Cannot open '{}'", &FS_IMG_NAME))?,
         fsimg_size,
         BLOCK_SIZE as u64,
         &salt,
@@ -469,9 +472,9 @@ fn create_squashfs(
         ));
     }
     cmd.output()
-        .with_context(|| format!("Error while executing {}", &MKSQUASHFS_BIN))?;
+        .with_context(|| format!("Error while executing '{}'", &MKSQUASHFS_BIN))?;
     if !fsimg_path.exists() {
-        println!("{} did not write {}", &MKSQUASHFS_BIN, &FS_IMG_NAME);
+        println!("'{}' did not write '{}'", &MKSQUASHFS_BIN, &FS_IMG_NAME);
     }
     Ok(())
 }
@@ -573,10 +576,10 @@ fn print_file(file_path: &Path) -> Result<()> {
         println!(
             "{}",
             fs::read_to_string(&file_path)
-                .with_context(|| format!("Cannot read at {}", &file_path.display()))?
+                .with_context(|| format!("Cannot read '{}'", &file_path.display()))?
         );
+        println!();
     }
-    println!();
     Ok(())
 }
 
@@ -588,18 +591,46 @@ fn print_squashfs(fsimg_path: &PathBuf) -> Result<()> {
     cmd.arg("-ll")
         .arg(fsimg_path.as_os_str().to_str().with_context(|| {
             format!(
-                "Cannot convert {} path '{}' to string",
+                "Cannot convert '{}' path '{}' to string",
                 &FS_IMG_NAME,
                 &fsimg_path.display()
             )
         })?);
     let output = cmd
         .output()
-        .with_context(|| format!("Error while executing {}", &UNSQUASHFS_BIN))?;
+        .with_context(|| format!("Error while executing '{}'", &UNSQUASHFS_BIN))?;
     println!(
         "{}",
         String::from_utf8(output.stdout)
-            .with_context(|| format!("Cannot print {} output", &UNSQUASHFS_BIN))?
+            .with_context(|| format!("Cannot print '{}' output", &UNSQUASHFS_BIN))?
     );
     Ok(())
+}
+
+/// Return the list of sub-paths to the given directory except the root.
+/// For example, the path '/res/dir/subdir' returns ('/res/dir/subdir', /res/dir/', '/res/').
+fn path_trail(path: &Path) -> Vec<&Path> {
+    let mut current_path = path;
+    let mut ret = vec![];
+    while let Some(parent_path) = current_path.parent() {
+        ret.push(current_path);
+        current_path = parent_path;
+    }
+    ret
+}
+
+fn create_tmp_dir() -> Result<TempDir> {
+    TempDir::new("").with_context(|| "Cannot create temporary directory")
+}
+
+fn assume_non_existing(path: &Path) -> Result<()> {
+    if path.exists() {
+        return Err(anyhow!("File '{}' already exists", &path.display()));
+    }
+    Ok(())
+}
+
+fn round_up_to_multiple(number: usize, factor: usize) -> usize {
+    let round_down_to_multiple = number + factor - 1;
+    round_down_to_multiple - (round_down_to_multiple % factor)
 }
