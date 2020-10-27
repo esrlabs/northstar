@@ -370,9 +370,8 @@ impl State {
             }
             Ok(manifest) => {
                 let pkg_file_name = format!(
-                    "{}-{}-{}.npk",
+                    "{}-{}.npk",
                     manifest.name,
-                    manifest.platform.clone().unwrap_or_else(|| "".to_string()),
                     manifest.version,
                 );
                 log::debug!(
