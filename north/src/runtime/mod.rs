@@ -152,7 +152,6 @@ pub async fn run(config: &Config) -> Result<()> {
                         txr,
                     )
                     .await
-                // TODO handle installation error here
             }
             // Once the installation has finished, the file can be added to the registry
             Event::InstallationFinished(success, npk, msg_id, txr, container_dir) => {

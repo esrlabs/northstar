@@ -23,6 +23,7 @@ use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
     StopResult,
 };
+use async_std::io::BufWriter;
 use async_std::{
     fs::OpenOptions,
     io::{self, Read, Write},
@@ -154,27 +155,26 @@ impl Console {
 
     pub async fn installation_finished(
         &self,
-        success: InstallationResult,
+        install_result: InstallationResult,
         msg_id: MessageId,
         response_message_tx: sync::Sender<Message>,
         registry_path: Option<std::path::PathBuf>,
         npk: &std::path::Path,
     ) {
-        debug!(
-            "Installation finished, registry_path: {:?}, npk path: {}",
-            registry_path,
-            npk.display()
-        );
-        let mut success = success;
-        if let (InstallationResult::Success, Some(new_path)) = (&success, registry_path) {
+        debug!("Installation finished, registry_path: {:?}", registry_path,);
+        let mut install_result = install_result;
+        if let (InstallationResult::Success, Some(new_path)) = (&install_result, registry_path) {
             // move npk into container dir
             if let Err(e) = async_std::fs::rename(npk, new_path).await {
-                success = InstallationResult::InternalError(format!("Could not place npk: {}", e));
+                install_result =
+                    InstallationResult::InternalError(format!("Could not replace npk: {}", e));
             }
         }
         let response_message = Message {
             id: msg_id,
-            payload: Payload::Response(Response::Install { result: success }),
+            payload: Payload::Response(Response::Install {
+                result: install_result,
+            }),
         };
         response_message_tx.send(response_message).await
     }
@@ -220,22 +220,23 @@ struct MessageWithData {
 }
 
 async fn receive_message_from_socket<R: Read + Unpin>(
-    buf_reader: &mut R,
+    reader: &mut R,
     message_tx: &sync::Sender<MessageWithData>,
     tmp_installation_dir: &std::path::Path,
 ) -> Result<()> {
     // Read frame length
     let mut buf = [0u8; 4];
-    buf_reader.read_exact(&mut buf).await?;
+    reader.read_exact(&mut buf).await?;
     let frame_len = BigEndian::read_u32(&buf) as usize;
 
     // Read payload
     let mut buffer = vec![0; frame_len];
-    buf_reader.read_exact(&mut buffer).await?;
+    reader.read_exact(&mut buffer).await?;
 
     let message: Message = serde_json::from_slice(&buffer)?;
     let msg_with_data = match &message.payload {
         Payload::Installation(size) => {
+            debug!("Incoming installation ({} bytes)", size);
             let tmp_installation_file_path = tmp_installation_dir.join(&format!(
                 "tmp_install_file_{}.npk",
                 std::time::SystemTime::now()
@@ -243,20 +244,21 @@ async fn receive_message_from_socket<R: Read + Unpin>(
                     .map(|d| format!("{}", d.as_millis()))
                     .unwrap_or_else(|_| "".to_string())
             ));
-            let mut tmpfile = OpenOptions::new()
+            let tmpfile = OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&tmp_installation_file_path)
                 .await?;
+            let mut buf_writer = BufWriter::new(tmpfile);
             let mut received_bytes = 0usize;
             while received_bytes < *size {
-                let received = buf_reader.read(&mut buffer).await?;
+                let received = reader.read(&mut buffer).await?;
                 if received > 0 {
-                    tmpfile.write_all(&buffer[..received]).await?;
+                    buf_writer.write_all(&buffer[..received]).await?;
                     received_bytes += received;
                 }
             }
-            tmpfile.flush().await?;
+            buf_writer.flush().await?;
             debug!(
                 "Received a total of {} bytes, start installation",
                 received_bytes
