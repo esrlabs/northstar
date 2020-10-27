@@ -46,9 +46,17 @@ enum Opt {
     },
     /// Print information about a Northstar container
     Inspect {
-        /// Container to inspect
+        /// NPK file to inspect
         #[structopt(short, long)]
         npk: PathBuf,
+    },
+    GenKey {
+        /// Name of key
+        #[structopt(short, long)]
+        name: String,
+        /// Path to key directory
+        #[structopt(short, long)]
+        path: PathBuf,
     },
 }
 
@@ -63,6 +71,7 @@ fn main() -> Result<()> {
             platform,
         } => npk::pack(&dir, &out, &key, &platform),
         Opt::Inspect { npk } => npk::inspect(&npk),
+        Opt::GenKey { name, path } => npk::gen_key(&name, &path),
         _ => {
             unimplemented!();
         }
