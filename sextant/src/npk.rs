@@ -66,13 +66,8 @@ const ROOT_DIR_NAME: &str = "root";
 /// --out target/north/registry \
 /// --key examples/keys/north.key \
 /// --platform x86_64-unknown-linux-gnu
-pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path, platform: &str) -> Result<()> {
-    // write platform to manifest
-    if platform.to_string().contains(' ') {
-        return Err(anyhow!("Invalid character in platform string"));
-    }
-    let mut manifest = read_manifest(src_path)?;
-    manifest.platform = Some(platform.to_string());
+pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path) -> Result<()> {
+    let manifest = read_manifest(src_path)?;
 
     // add manifest and root dir to tmp dir
     let tmp = create_tmp_dir()?;
@@ -86,7 +81,7 @@ pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path, platform: &s
     // create NPK
     let signature = gen_signature_yaml(&key_file_path, &fsimg_path, &tmp_manifest_path)?;
 
-    write_npk(&out_path, &platform, &manifest, &fsimg_path, &signature)
+    write_npk(&out_path, &manifest, &fsimg_path, &signature)
         .with_context(|| format!("Failed to create NPK in {}", &out_path.display()))?;
     Ok(())
 }
@@ -257,7 +252,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<Vec<(&str, u32)>> {
     for mount in manifest.mounts.iter() {
         match mount {
             Mount::Resource { target, .. } => {
-                /* # in order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
+                /* In order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
                  * e.gl to support res/foo in our image, we need to add /res/foo AND /res
                  * ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
                 let trail = path_trail(&target);
@@ -548,16 +543,12 @@ fn write_verity_header(
 
 fn write_npk(
     out_path: &Path,
-    platform: &str,
     manifest: &Manifest,
     fsimg_path: &Path,
     signature_yaml: &str,
 ) -> Result<()> {
     let npk_path = out_path
-        .join(format!(
-            "{}-{}-{}.",
-            &manifest.name, &platform, &manifest.version
-        ))
+        .join(format!("{}-{}.", &manifest.name, &manifest.version))
         .with_extension(&NPK_EXT);
     let npk_file = File::create(&npk_path)
         .with_context(|| format!("Failed to create NPK at '{}'", &npk_path.display()))?;

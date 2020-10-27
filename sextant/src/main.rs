@@ -33,9 +33,6 @@ enum Opt {
         /// Output directory
         #[structopt(short, long)]
         out: PathBuf,
-        /// Platform
-        #[structopt(short, long)]
-        platform: String,
     },
     /// Unpack Northstar containers
     Unpack {
@@ -65,14 +62,8 @@ fn main() -> Result<()> {
     env_logger::init();
     let opt = Opt::from_args();
     match opt {
-        Opt::Pack {
-            dir,
-            out,
-            key,
-            platform,
-        } => npk::pack(&dir, &out, &key, &platform),
+        Opt::Pack { dir, out, key } => npk::pack(&dir, &out, &key),
         Opt::Inspect { npk } => npk::inspect(&npk),
-        Opt::GenKey { name, path } => npk::gen_key(&name, &path),
         _ => {
             unimplemented!();
         }
