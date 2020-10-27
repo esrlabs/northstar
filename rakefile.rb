@@ -1,11 +1,9 @@
-# frozen_string_literal: true
+require 'tmpdir'
 
-LEVEL_WARN = 1
-LEVEL_INFO = 2
-LEVEL_DEBUG = 3
-LEVEL_TRACE = 4
-VERBOSITY = LEVEL_DEBUG
+REGISTRY = `pwd`.strip + '/target/north/registry'
+KEY = `pwd`.strip + '/examples/keys/north.key'
 
+<<<<<<< HEAD
 EXAMPLE_DIR = `pwd`.strip + '/examples'
 KEY_DIRECTORY = "#{EXAMPLE_DIR}/keys"
 KEY_ID = 'north'
@@ -105,31 +103,32 @@ end
 
 def runtime_targets
   targets = %w[
+=======
+def cross_targets
+  %w[
+>>>>>>> Cleanup of rakefile
     aarch64-linux-android
     aarch64-unknown-linux-gnu
     aarch64-unknown-linux-musl
     x86_64-unknown-linux-gnu
   ]
-
-  # Building for x86_64-apple-darwin is not possible via cross
-  targets << 'x86_64-apple-darwin' if OS.mac?
-
-  targets
 end
 
-def examples
+def cross_packages
   %w[
     cpueater
     crashing
     datarw
+    ferris
     hello
     memeater
-    resource/ferris
-    resource/ferris_says_hello
-    resource/hello_message
+    minijail
+    north
+    test_container
   ]
 end
 
+<<<<<<< HEAD
 def create_arch_package_sextant(container_src, out_dir, target_arch)
   sh "./target/release/sextant pack '\
       '-d #{container_src} -o #{out_dir} -k #{KEY_FILE} -p #{target_arch}"
@@ -154,54 +153,98 @@ namespace :examples do
       examples.each do |dir|
         dir = "#{EXAMPLE_DIR}/container/#{dir}"
         next unless File.exist?("#{dir}/Cargo.toml") # skip non rust projects
+=======
+desc 'Check'
+task :check do
+  sh 'cargo +nightly fmt -- --color=always --check'
+  sh 'cargo clippy'
+  sh 'cargo check'
+  sh 'cargo test'
 
-        target_dir = "#{dir}/root-#{target_arch}"
-        rm_rf target_dir
-      end
+  cross_targets.each do |target|
+    cross_packages.each do |package|
+      sh "cross build --target #{target} -p #{package}"
     end
   end
+end
 
+desc 'Check and insteall local development setup'
+task :setup do
+  def which(command)
+    system("which #{command} > /dev/null 2>&1")
+  end
+
+  raise 'Rust is required' unless which('rustc')
+  raise 'Cargo is required' unless which('cargo')
+  raise 'Docker is required' unless which('docker')
+>>>>>>> Cleanup of rakefile
+
+  unless which('mksquashfs')
+      system 'sudo apt install squashfs-tools' if OS.linux?
+      system 'brew install squashfs' if OS.mac?
+  end
+  'cargo install --version 0.2.1 cross' unless which('cross')
+end
+
+<<<<<<< HEAD
   desc 'Execute runtime with examples (use with sudo on linux)'
   task run: 'build:north' do
     if OS.mac?
       sh './target/release/north --config north.toml'
     else
       sh 'sudo ./target/release/north --config north.toml'
+=======
+namespace :test do
+  desc 'Build test container'
+  task :build do
+    mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
+    `cargo build --release -p test_container`
+
+    Dir.mktmpdir do |dir| 
+      cp './tests/test_container/manifest.yaml', dir
+      root = "#{dir}/root"
+      mkdir_p root
+      cp 'target/release/test_container', root
+      `cargo run --bin sextant -- pack --dir #{dir} --key #{KEY} --out #{REGISTRY}`
+>>>>>>> Cleanup of rakefile
     end
   end
 
-  desc 'Clean example registry'
-  task :drop do
-    rm_rf registry
-    rm_rf run_dir
+  desc 'Run integration tests'
+  task :run do
+    `cargo test -p tests -- --test-threads 1 --ignored`
   end
 
-  def write_header(columns)
-    puts "| #{columns.map { |_, g| g[:label].ljust(g[:width]) }.join(' | ')} |"
+  desc 'Test coverage'
+  task :coverage do
+    raise 'Test coverage runs on Linux only!' unless OS.linux?
+    sh 'cargo clean'
+    rust_flags = ['-Zprofile',
+                  '-Ccodegen-units=1',
+                  '-Copt-level=0',
+                  '-Clink-dead-code',
+                  '-Coverflow-checks=off'].join(' ')
+    sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly build', verbose: false)
+    sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly test', verbose: false)
+    cov_dir = 'target/debug/coverage'
+    sh "mkdir #{cov_dir}"
+    sh "grcov ./target/debug/ -s north/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/north"
+    info "Code coverage report for north in: ./#{cov_dir}/north/index.html"
+  end
+end
+
+desc 'Format code with nightly cargo fmt'
+task :rustfmt do
+  sh 'cargo +nightly fmt'
+end
+
+# os detection
+module OS
+  def self.windows?
+    (/cygwin|mswin|mingw|bccwin|wince|emx/ =~ RUBY_PLATFORM) != nil
   end
 
-  def write_divider(columns)
-    puts "+-#{columns.map { |_, g| '-' * g[:width] }.join('-+-')}-+"
-  end
-
-  def write_line(h, columns)
-    str = h.keys.map { |k| h[k].ljust(columns[k][:width]) }.join(' | ')
-    puts "| #{str} |"
-  end
-
-  def table(col_labels, arr)
-    @columns = col_labels.each_with_object({}) do |(col, label), h|
-      h[col] = { label: label,
-                 width: [arr.map { |g| g[col].size }.max, label.size].max }
-    end
-
-    write_divider(@columns)
-    write_header(@columns)
-    write_divider(@columns)
-    arr.each { |h| write_line(h, @columns) }
-    write_divider(@columns)
-  end
-
+<<<<<<< HEAD
   desc 'Show registry'
   task :registry do
     col_labels = { name: 'Name', arch: 'Arch', version: 'Version' }
@@ -228,9 +271,14 @@ namespace :examples do
     end
     sorted = registry_info.sort_by { |entry| entry[:name] }
     table(col_labels, sorted)
+=======
+  def self.mac?
+    (/darwin/ =~ RUBY_PLATFORM) != nil
+>>>>>>> Cleanup of rakefile
   end
 end
 
+<<<<<<< HEAD
 namespace :test_container do
   desc 'Build test container'
   task :build do
@@ -260,13 +308,13 @@ namespace :test_container do
     FileUtils.cp_r "#{target_dir}/.", root_dir
     sh "tree #{tmp_dir}"
     create_arch_package_sextant(tmp_dir, registry, target_arch)
+=======
+  def self.unix?
+    !OS.windows?
+>>>>>>> Cleanup of rakefile
   end
-end
 
-task :clean => ['examples:drop'] do
-  sh 'cargo clean'
-end
-
+<<<<<<< HEAD
 desc 'Check'
 task :check do
   check_program('docker info >/dev/null', 'Docker is needed to run the check task')
@@ -315,3 +363,9 @@ module OS
     OS.unix? && !OS.mac?
   end
 end
+=======
+  def self.linux?
+    OS.unix? && !OS.mac?
+  end
+end
+>>>>>>> Cleanup of rakefile

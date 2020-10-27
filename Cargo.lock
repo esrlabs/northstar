@@ -1219,6 +1219,7 @@ checksum = "0f2d26ec3309788e423cfbf68ad1800f061638098d76a83681af979dc4eda19d"
 dependencies = [
  "adler",
  "autocfg",
+<<<<<<< HEAD
 ]
 
 [[package]]
@@ -1242,6 +1243,8 @@ checksum = "07b88fb9795d4d36d62a012dfbf49a8f5cf12751f36d31a9dbe66d528e58979e"
 dependencies = [
  "socket2",
  "winapi",
+=======
+>>>>>>> Cleanup of rakefile
 ]
 
 [[package]]
