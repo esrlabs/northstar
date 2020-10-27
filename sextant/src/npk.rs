@@ -9,7 +9,7 @@ use std::{
     fs::{File, OpenOptions},
     io,
     io::{BufReader, Read, Seek, SeekFrom::Start, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 use tempdir::TempDir;
@@ -25,7 +25,7 @@ const PSEUDO_DIR_GID: u32 = 1000;
 const SHA256_SIZE: usize = 32;
 const BLOCK_SIZE: usize = 4096;
 
-// file name components
+// file name and directory components
 const NPK_EXT: &str = "npk";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
@@ -34,6 +34,7 @@ const MANIFEST_BASE: &str = "manifest";
 const MANIFEST_EXT: &str = "yaml";
 const MANIFEST_NAME: &str = "manifest.yaml";
 const SIGNATURE_NAME: &str = "signature.yaml";
+const ROOT_DIR_NAME: &str = "root";
 
 /// Create an NPK for the north runtime.
 /// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
@@ -53,15 +54,6 @@ pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path, platform: &s
         return Err(anyhow!("Cannot find '{}' in PATH", &MKSQUASHFS_BIN));
     }
 
-    let tmp = TempDir::new("").with_context(|| "Cannot create tmp dir")?;
-    let fsimg_path = &tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-    let tmp_manifest_path = tmp
-        .path()
-        .join(&MANIFEST_BASE)
-        .with_extension(&MANIFEST_EXT);
-    let src_root_path = src_path.join("root");
-    let tmp_root_path = tmp.path().join("root");
-
     // write platform to manifest
     if platform.to_string().contains(' ') {
         return Err(anyhow!("Invalid character in platform string"));
@@ -69,27 +61,19 @@ pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path, platform: &s
     let mut manifest = read_manifest(src_path)?;
     manifest.platform = Some(platform.to_string());
 
-    // copy root dir and manifest to new tmp dir
-    write_manifest(&tmp_manifest_path, &manifest)?;
-    copy_src_root_to_tmp(&src_root_path, &tmp)?;
+    // add manifest and root dir to tmp dir
+    let tmp = TempDir::new("").with_context(|| "Cannot create temporary directory")?;
+    let tmp_root_path = copy_src_root_to_tmp(&src_path, &tmp)?;
+    let tmp_manifest_path = write_manifest(&manifest, &tmp)?;
 
     // create filesystem image
+    let fsimg_path = &tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
     create_fs_img(&tmp_root_path, &manifest, &fsimg_path)?;
-    let fsimg_size = fs::metadata(&fsimg_path)
-        .with_context(|| format!("Cannot read read size of '{}'", &fsimg_path.display()))?
-        .len();
 
     // create NPK
-    let signatures_yaml =
-        gen_signatures_yaml(&key_file_path, &fsimg_path, &tmp_manifest_path, fsimg_size)?;
-    write_npk(
-        &out_path,
-        &platform,
-        &manifest,
-        &fsimg_path,
-        &signatures_yaml,
-    )
-    .with_context(|| format!("Cannot write NPK to '{}'", &out_path.display()))?;
+    let signs_yaml = gen_signatures_yaml(&key_file_path, &fsimg_path, &tmp_manifest_path)?;
+    write_npk(&out_path, &platform, &manifest, &fsimg_path, &signs_yaml)
+        .with_context(|| format!("Cannot write NPK to '{}'", &out_path.display()))?;
     Ok(())
 }
 
@@ -102,12 +86,16 @@ fn read_manifest(src_path: &Path) -> Result<Manifest> {
     Ok(manifest)
 }
 
-fn write_manifest(tmp_manifest_path: &Path, manifest: &Manifest) -> Result<()> {
+fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf> {
+    let tmp_manifest_path = tmp
+        .path()
+        .join(&MANIFEST_BASE)
+        .with_extension(&MANIFEST_EXT);
     let tmp_manifest = File::create(&tmp_manifest_path)
         .with_context(|| format!("Cannot create '{}'", &tmp_manifest_path.display()))?;
     serde_yaml::to_writer(&tmp_manifest, &manifest)
         .with_context(|| "Cannot convert manifest to YAML")?;
-    Ok(())
+    Ok(tmp_manifest_path)
 }
 
 fn read_signing_key(key_file_path: &Path) -> Result<Keypair> {
@@ -139,7 +127,7 @@ fn gen_salt() -> [u8; SHA256_SIZE] {
 fn gen_hashes_yaml(
     tmp_manifest_path: &Path,
     fsimg_path: &Path,
-    filesystem_size: u64,
+    fsimg_size: u64,
     verity_hash: &[u8],
 ) -> Result<String> {
     // create hashes YAML
@@ -164,7 +152,7 @@ fn gen_hashes_yaml(
         &FS_IMG_NAME,
         fs_hash.iter().format(""),
         verity_hash.iter().format(""),
-        filesystem_size
+        fsimg_size
     );
     Ok(hashes)
 }
@@ -173,8 +161,10 @@ fn gen_signatures_yaml(
     key_file_path: &&Path,
     fsimg_path: &Path,
     tmp_manifest_path: &Path,
-    fsimg_size: u64,
 ) -> Result<String> {
+    let fsimg_size = fs::metadata(&fsimg_path)
+        .with_context(|| format!("Cannot read read size of '{}'", &fsimg_path.display()))?
+        .len();
     let verity_hash = create_verity_header(&fsimg_path, fsimg_size)?;
     let key_pair = read_signing_key(&key_file_path)?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest_path, &fsimg_path, fsimg_size, &verity_hash)?;
@@ -354,23 +344,24 @@ fn calc_hash_level_offsets(
     (level_offsets, tree_size)
 }
 
-fn copy_src_root_to_tmp(src_root_path: &Path, tmp: &TempDir) -> Result<()> {
-    if !src_root_path.exists() {
-        return Err(anyhow!(
-            "Source root directory at '{}' dir does not exist",
-            &src_root_path.display()
-        ));
+fn copy_src_root_to_tmp(src_path: &Path, tmp: &TempDir) -> Result<PathBuf> {
+    let src_root_path = src_path.join(&ROOT_DIR_NAME);
+    let tmp_root_path = tmp.path().join(&ROOT_DIR_NAME);
+    if src_root_path.exists() {
+        fs_extra::dir::copy(&src_root_path, &tmp, &fs_extra::dir::CopyOptions::new())
+            .with_context(|| {
+                format!(
+                    "Cannot copy from '{}' to '{}'",
+                    &src_root_path.display(),
+                    &tmp.path().display()
+                )
+            })?;
+    } else {
+        // create empty root dir at destination if we have nothing to copy
+        fs_extra::dir::create(&tmp_root_path, false)
+            .with_context(|| format!("Cannot create directory '{}'", &tmp_root_path.display()))?;
     }
-    fs_extra::dir::copy(&src_root_path, &tmp, &fs_extra::dir::CopyOptions::new()).with_context(
-        || {
-            format!(
-                "Cannot copy from '{}' to '{}'",
-                &src_root_path.display(),
-                &tmp.path().display()
-            )
-        },
-    )?;
-    Ok(())
+    Ok(tmp_root_path)
 }
 
 fn create_fs_img(tmp_root_path: &Path, manifest: &Manifest, fsimg_path: &Path) -> Result<()> {
