@@ -29,36 +29,18 @@ use std::{io, process::Command};
 pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallFailure> {
     info!("Installing containers from {}", dir.display());
 
-    lazy_static::lazy_static! {
-        static ref RE: regex::Regex = regex::Regex::new(
-            format!(
-                r"^.*-{}-\d+\.\d+\.\d+\.npk$",
-                env!("VERGEN_TARGET_TRIPLE")
-            )
-            .as_str(),
-        )
-        .expect("Invalid regex");
-    }
-
-    let containers = fs::read_dir(&dir)
+    let npks = fs::read_dir(&dir)
         .await
         .map_err(|e| InstallFailure::FileIoProblem {
             context: format!("Failed to read {}", dir.display()),
             error: e,
         })?
         .filter_map(move |d| async move { d.ok() })
-        .map(|d| d.path())
-        .filter_map(move |d| async move {
-            if RE.is_match(&d.display().to_string()) {
-                Some(d)
-            } else {
-                None
-            }
-        });
+        .map(|d| d.path());
 
-    let mut containers = Box::pin(containers);
-    while let Some(container) = containers.next().await {
-        install(state, &container).await?;
+    let mut npks= Box::pin(npks);
+    while let Some(npk) = npks.next().await {
+        install(state, &npk).await?;
     }
     Ok(())
 }
