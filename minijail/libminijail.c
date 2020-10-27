@@ -12,7 +12,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <grp.h>
-#include <linux/capability.h>
 #include <linux/filter.h>
 #include <sched.h>
 #include <signal.h>
@@ -21,7 +20,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if MUSL_C
+#include <linux/capability.h>
+#else
 #include <sys/capability.h>
+#endif
 #include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/prctl.h>
