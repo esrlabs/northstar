@@ -1,12 +1,9 @@
 use anyhow::{anyhow, Context, Result};
+use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use north::manifest::{Manifest, Mount, MountFlag};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use sodiumoxide::crypto::{
-    sign,
-    sign::{ed25519::SecretKey, keypair_from_seed, Seed, SEEDBYTES},
-};
 use std::{
     fs,
     fs::{File, OpenOptions},
@@ -113,17 +110,24 @@ fn write_manifest(tmp_manifest_path: &Path, manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
-fn read_signing_key(key_file_path: &Path) -> Result<SecretKey> {
-    let mut seed = [0u8; SEEDBYTES];
-    let mut sign_key_file = File::open(&key_file_path)
+fn read_signing_key(key_file_path: &Path) -> Result<Keypair> {
+    let mut seed = [0u8; SECRET_KEY_LENGTH];
+    let mut key_file = File::open(&key_file_path)
         .with_context(|| format!("Cannot open '{}'", &key_file_path.display()))?;
-    sign_key_file
+    key_file
         .read_exact(&mut seed)
         .with_context(|| format!("Cannot read seed value from '{}'", &key_file_path.display()))?;
-    let signing_key_seed = Seed::from_slice(&seed)
-        .with_context(|| format!("Cannot read seed value from '{}'", &key_file_path.display()))?;
-    let (_, signing_key) = keypair_from_seed(&signing_key_seed);
-    Ok(signing_key)
+    let secret_key = SecretKey::from_bytes(&seed).with_context(|| {
+        format!(
+            "Cannot derive secret key from seed found in'{}'",
+            &key_file_path.display()
+        )
+    })?;
+    let public_key = PublicKey::from(&secret_key);
+    Ok(Keypair {
+        secret: secret_key,
+        public: public_key,
+    })
 }
 
 fn gen_salt() -> [u8; SHA256_SIZE] {
@@ -172,9 +176,9 @@ fn gen_signatures_yaml(
     fsimg_size: u64,
 ) -> Result<String> {
     let verity_hash = create_verity_header(&fsimg_path, fsimg_size)?;
-    let signing_key = read_signing_key(&key_file_path)?;
+    let key_pair = read_signing_key(&key_file_path)?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest_path, &fsimg_path, fsimg_size, &verity_hash)?;
-    let signatures_yaml = sign_hashes(&signing_key, &hashes_yaml);
+    let signatures_yaml = sign_hashes(&key_pair, &hashes_yaml);
     Ok(signatures_yaml)
 }
 
@@ -288,8 +292,8 @@ fn gen_hash_tree(
     Ok((digest.to_vec(), hash_tree))
 }
 
-fn sign_hashes(signing_key: &SecretKey, hashes_yaml: &str) -> String {
-    let signature = sign::sign_detached(hashes_yaml.as_bytes(), &signing_key);
+fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
+    let signature = key_pair.sign(hashes_yaml.as_bytes());
     let signature_base64 = base64::encode(signature);
     let key_id = "north";
     let signatures_yaml = format!(
