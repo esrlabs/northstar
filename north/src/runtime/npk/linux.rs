@@ -138,7 +138,8 @@ async fn install_internal(
 
     debug!(
         "npk size: {}",
-        std::fs::metadata(&npk)
+        async_std::fs::metadata(&npk)
+            .await
             .expect("Could not get metadata of file")
             .len()
     );

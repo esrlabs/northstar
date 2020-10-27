@@ -24,7 +24,7 @@ use crate::{
     runtime::{
         error::{Error, InstallFailure},
         npk,
-        npk::extract_manifest,
+        npk::{extract_manifest, id_and_version},
         Event, EventTx, NotificationTx,
     },
 };
@@ -324,17 +324,17 @@ impl State {
         }
     }
 
-    // checks if the applicaion within the npk has an id (name) that is the same
-    // as on of the already installed applications
+    // checks if the application within the npk has an id (name) that is the same
+    // as one of the already installed applications
     // returns the application id if it was installed, otherwise None
-    async fn installed_application_id(&self, npk: &Path) -> Option<String> {
-        extract_manifest(npk.into(), &self.signing_keys)
-            .ok()
-            .and_then(|manifest| {
-                self.applications
-                    .get(&manifest.name)
-                    .map(|app| app.container.manifest.name.to_owned())
-            })
+    async fn npk_id_and_version(&self, npk: &Path) -> Result<(Name, Version)> {
+        id_and_version(npk.into(), &self.signing_keys)
+    }
+
+    fn installed_version(&self, id: &str) -> Option<Version> {
+        self.applications
+            .get(id)
+            .map(|app| app.container.manifest.version.clone())
     }
 
     /// Install a npk from give path
@@ -363,7 +363,7 @@ impl State {
                 let pkg_file_name = format!(
                     "{}-{}-{}.npk",
                     manifest.name,
-                    manifest.platform.unwrap_or_else(|| "".to_string()),
+                    manifest.platform.clone().unwrap_or_else(|| "".to_string()),
                     manifest.version,
                 );
                 log::debug!(
@@ -371,18 +371,33 @@ impl State {
                     manifest.name
                 );
                 let registry_path = container_dir.map(|p| p.join(&pkg_file_name));
-                if let Some(_installed_id) = self.installed_application_id(&npk).await {
-                    warn!("Cannot install already installed application");
-                    let _ = self
-                        .events_tx
-                        .send(Event::InstallationFinished(
-                            InstallationResult::ApplicationAlreadyInstalled,
-                            std::path::PathBuf::from(npk),
-                            msg_id,
-                            tx,
-                            registry_path,
-                        ))
-                        .await;
+                if let Some(installed_version) = self.installed_version(&manifest.name) {
+                    // a container with this id is already installed
+                    if !manifest.is_resource_image() {
+                        warn!("Cannot install already installed application");
+                        let _ = self
+                            .events_tx
+                            .send(Event::InstallationFinished(
+                                InstallationResult::ApplicationAlreadyInstalled,
+                                std::path::PathBuf::from(npk),
+                                msg_id,
+                                tx,
+                                registry_path,
+                            ))
+                            .await;
+                    } else if installed_version == manifest.version {
+                        warn!("Resource container with same version already installed");
+                        let _ = self
+                            .events_tx
+                            .send(Event::InstallationFinished(
+                                InstallationResult::DuplicateResource,
+                                std::path::PathBuf::from(npk),
+                                msg_id,
+                                tx,
+                                registry_path,
+                            ))
+                            .await;
+                    }
                     return;
                 }
                 match npk::install(self, npk).await {
@@ -401,8 +416,9 @@ impl State {
                         // generate notification for installation event
                         self.notification_tx
                             .send(Notification::InstallationFinished(
-                                self.installed_application_id(&npk)
+                                self.npk_id_and_version(&npk)
                                     .await
+                                    .map(|(name, _version)| name)
                                     .unwrap_or(format!("{}", npk.to_string_lossy())),
                             ))
                             .await;

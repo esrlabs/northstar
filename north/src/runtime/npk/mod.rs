@@ -12,7 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{manifest::Manifest, runtime::error::InstallFailure};
+use crate::{
+    api::Name,
+    manifest::{Manifest, Version},
+    runtime::error::InstallFailure,
+};
 use anyhow::{anyhow, Context, Result};
 use async_std::path::PathBuf;
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
@@ -48,7 +52,7 @@ pub struct Container {
 
 impl Container {
     pub fn is_resource_container(&self) -> bool {
-        self.manifest.init.is_none()
+        self.manifest.is_resource_image()
     }
 }
 
@@ -188,6 +192,14 @@ pub fn extract_manifest(
 ) -> Result<Manifest, InstallFailure> {
     let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
     archive_reader.extract_manifest_from_archive()
+}
+
+pub fn id_and_version(
+    npk: &std::path::Path,
+    signing_keys: &HashMap<String, PublicKey>,
+) -> Result<(Name, Version)> {
+    let manifest = extract_manifest(&npk, &signing_keys)?;
+    Ok((manifest.name.clone(), manifest.version))
 }
 
 impl<'a> ArchiveReader<'a> {

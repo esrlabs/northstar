@@ -168,7 +168,7 @@ impl Console {
         let mut success = success;
         if let (InstallationResult::Success, Some(new_path)) = (&success, registry_path) {
             // move npk into container dir
-            if let Err(e) = std::fs::rename(npk, new_path) {
+            if let Err(e) = async_std::fs::rename(npk, new_path).await {
                 success = InstallationResult::InternalError(format!("Could not place npk: {}", e));
             }
         }
