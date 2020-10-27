@@ -88,6 +88,7 @@ pub enum UninstallResult {
 pub enum InstallationResult {
     Success,
     ApplicationAlreadyInstalled,
+    DuplicateResource,
     FileCorrupted,
     SignatureNotFound,
     InvalidSignatureYaml,

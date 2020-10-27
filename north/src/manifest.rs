@@ -346,6 +346,11 @@ impl Manifest {
         manifest.verify()?;
         Ok(manifest)
     }
+
+    /// used to find out if this manifest describes a resource container
+    pub fn is_resource_image(&self) -> bool {
+        self.init.is_none()
+    }
 }
 
 impl FromStr for Manifest {
