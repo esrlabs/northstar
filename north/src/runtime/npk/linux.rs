@@ -31,7 +31,7 @@ use floating_duration::TimeAsFloat;
 use fmt::Debug;
 use log::*;
 use std::{
-    fmt::{self},
+    fmt,
     path::{Path, PathBuf},
     process,
 };

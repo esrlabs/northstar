@@ -63,6 +63,8 @@ pub enum Error {
     KeyError(super::keys::Error),
     #[error("Internal error: {0}")]
     Internal(&'static str),
+    #[error("Wrong permissions: {0}")]
+    Permissions(String),
 }
 
 #[derive(Error, Debug)]

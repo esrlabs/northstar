@@ -30,6 +30,7 @@ use process::ExitStatus;
 use state::State;
 use std::{
     future::Future,
+    path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -90,21 +91,7 @@ impl Runtime {
         linux::minijail::init().await.map_err(Error::Minijail)?;
 
         // Ensure the configured run_dir exists
-        // TODO: permission check of SETTINGS.directories.run_dir
-        fs::create_dir_all(&config.directories.run_dir)
-            .await
-            .map_err(|e| Error::Io {
-                context: format!("Failed to create {}", config.directories.run_dir.display()),
-                error: e,
-            })?;
-
-        // Ensure the configured data_dir exists
-        fs::create_dir_all(&config.directories.data_dir)
-            .await
-            .map_err(|e| Error::Io {
-                context: format!("Failed to create {}", config.directories.data_dir.display()),
-                error: e,
-            })?;
+        init_data_and_run_directories(&config).await?;
 
         // Start a task that drives the main loop and wait for shutdown results
         task::spawn(async {
@@ -128,6 +115,49 @@ impl Runtime {
         self.stop.take();
         self
     }
+}
+
+async fn init_data_and_run_directories(config: &Config) -> Result<(), Error> {
+    tokio::try_join!(
+        create_if_not_exists(config.directories.data_dir.as_path()),
+        create_if_not_exists(config.directories.run_dir.as_path()),
+    )?;
+    Ok(())
+}
+
+async fn create_if_not_exists(path: &Path) -> Result<(), Error> {
+    if path.exists() && !is_rw(&path) {
+        Err(Error::Permissions(format!(
+            "Directory {} is not RW",
+            path.display()
+        )))
+    } else {
+        debug!("Creating directory {}", path.display());
+        fs::create_dir_all(&path).await.map_err(|error| Error::Io {
+            context: format!("Could not create directory {}", path.display()),
+            error,
+        })
+    }
+}
+
+fn is_rw(path: &Path) -> bool {
+    let stat = match nix::sys::stat::stat(path.as_os_str()) {
+        Ok(stat) => stat,
+        Err(_) => return false,
+    };
+
+    let same_uid = stat.st_uid == nix::unistd::getuid().as_raw();
+    let same_gid = stat.st_gid == nix::unistd::getgid().as_raw();
+    let mode = nix::sys::stat::Mode::from_bits_truncate(stat.st_mode);
+
+    let is_readable = (same_uid && mode.contains(nix::sys::stat::Mode::S_IRUSR))
+        || (same_gid && mode.contains(nix::sys::stat::Mode::S_IRGRP))
+        || mode.contains(nix::sys::stat::Mode::S_IROTH);
+    let is_writable = (same_uid && mode.contains(nix::sys::stat::Mode::S_IWUSR))
+        || (same_gid && mode.contains(nix::sys::stat::Mode::S_IWGRP))
+        || mode.contains(nix::sys::stat::Mode::S_IWOTH);
+
+    is_readable && is_writable
 }
 
 impl Future for Runtime {
