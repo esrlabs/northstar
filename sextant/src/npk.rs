@@ -1,3 +1,17 @@
+// Copyright (c) 2020 ESRLabs
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
@@ -66,31 +80,31 @@ pub fn pack(src_path: &Path, out_path: &Path, key_file_path: &Path, platform: &s
     let tmp_manifest_path = write_manifest(&manifest, &tmp)?;
 
     // create filesystem image
-    let fsimg_path = &tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
+    let fsimg_path = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
     create_fs_img(&tmp_root_path, &manifest, &fsimg_path)?;
 
     // create NPK
-    let signs_yaml = gen_signature_yaml(&key_file_path, &fsimg_path, &tmp_manifest_path)?;
-    write_npk(&out_path, &platform, &manifest, &fsimg_path, &signs_yaml)
-        .with_context(|| format!("Cannot write NPK to '{}'", &out_path.display()))?;
+    let signature = gen_signature_yaml(&key_file_path, &fsimg_path, &tmp_manifest_path)?;
+
+    write_npk(&out_path, &platform, &manifest, &fsimg_path, &signature)
+        .with_context(|| format!("Failed to create NPK in {}", &out_path.display()))?;
     Ok(())
 }
 
-pub fn inspect(npk_path: &Path) -> Result<()> {
+pub fn inspect(npk: &Path) -> Result<()> {
     let tmp = create_tmp_dir()?;
 
-    // print NPK file list
+    // Print NPK file list
     println!(
         "{}",
-        format!("# inspection of '{}'", &npk_path.display()).green()
+        format!("# inspection of '{}'", &npk.display()).green()
     );
-    let npk_file = File::open(&npk_path)
-        .with_context(|| format!("Cannot open NPK '{}'", &npk_path.display()))?;
-    let mut zip_writer = zip::ZipArchive::new(&npk_file)?;
+    let npk = File::open(&npk).with_context(|| format!("Cannot open NPK '{}'", &npk.display()))?;
+    let mut zip_writer = zip::ZipArchive::new(&npk)?;
     println!("{}", "## NPK Content".to_string().green());
     print_zip(&mut zip_writer)?;
 
-    // extract NPK and print contents
+    // Extract NPK and print contents
     zip_writer.extract(&tmp)?;
     let manifest_path = tmp.path().join(&MANIFEST_NAME);
     let signature_path = tmp.path().join(&SIGNATURE_NAME);
@@ -98,45 +112,51 @@ pub fn inspect(npk_path: &Path) -> Result<()> {
     if manifest_path.exists() {
         println!("{}", format!("## {}", &MANIFEST_NAME).green());
         print_file(&manifest_path)?;
+    } else {
+        return Err(anyhow!("Missing manifest"));
     }
     if signature_path.exists() {
         println!("{}", format!("## {}", &SIGNATURE_NAME).green());
         print_file(&signature_path)?;
+    } else {
+        return Err(anyhow!("Missing signature"));
     }
     if fsimg_path.exists() {
         println!("{}", format!("## {}", &FS_IMG_NAME).green());
         print_squashfs(&fsimg_path)?;
+    } else {
+        return Err(anyhow!("Missing file system image"));
     }
+
     Ok(())
 }
 
-pub fn gen_key(key_name: &str, key_path: &Path) -> Result<()> {
-    let key_pair = gen_key_pair();
-    let pub_key_path = key_path.join(key_name).with_extension("pub");
-    let prv_key_path = key_path.join(key_name).with_extension("key");
-    assume_non_existing(&pub_key_path)?;
-    assume_non_existing(&prv_key_path)?;
-    write_to_file(&key_pair.public.to_bytes(), &pub_key_path)?;
-    write_to_file(&key_pair.secret.to_bytes(), &prv_key_path)?;
-    Ok(())
-}
+pub fn gen_key(name: &str, path: &Path) -> Result<()> {
+    let mut csprng = OsRng {};
+    let key_pair = Keypair::generate(&mut csprng);
+    let pub_key = path.join(name).with_extension("pub");
+    let prv_key = path.join(name).with_extension("key");
+    assume_non_existing(&pub_key)?;
+    assume_non_existing(&prv_key)?;
 
-fn write_to_file(data: &[u8], path: &Path) -> Result<()> {
-    let mut pub_key_file =
-        File::create(&path).with_context(|| format!("Cannot create '{}'", &path.display()))?;
-    pub_key_file
-        .write(&data)
-        .with_context(|| format!("Cannot write to '{}'", &path.display()))?;
+    fn write(data: &[u8], path: &Path) -> Result<()> {
+        let mut file = File::create(&path)
+            .with_context(|| format!("Failed to create '{}'", &path.display()))?;
+        file.write_all(&data)
+            .with_context(|| format!("Failed to write to '{}'", &path.display()))?;
+        Ok(())
+    }
+    write(&key_pair.public.to_bytes(), &pub_key)?;
+    write(&key_pair.secret.to_bytes(), &prv_key)?;
     Ok(())
 }
 
 fn read_manifest(src_path: &Path) -> Result<Manifest> {
     let manifest_path = src_path.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
     let manifest = std::fs::File::open(&manifest_path)
-        .with_context(|| format!("Cannot open '{}'", &manifest_path.display()))?;
-    let manifest: Manifest = serde_yaml::from_reader(manifest)
-        .with_context(|| format!("Cannot parse manifest at '{}'", &manifest_path.display()))?;
-    Ok(manifest)
+        .with_context(|| format!("Failed to open '{}'", &manifest_path.display()))?;
+    serde_yaml::from_reader(manifest)
+        .with_context(|| format!("Failed to parse manifest '{}'", &manifest_path.display()))
 }
 
 fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf> {
@@ -145,21 +165,26 @@ fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf> {
         .join(&MANIFEST_BASE)
         .with_extension(&MANIFEST_EXT);
     let tmp_manifest = File::create(&tmp_manifest_path)
-        .with_context(|| format!("Cannot create '{}'", &tmp_manifest_path.display()))?;
+        .with_context(|| format!("Failed to create '{}'", &tmp_manifest_path.display()))?;
     serde_yaml::to_writer(&tmp_manifest, &manifest)
-        .with_context(|| "Cannot convert manifest to YAML")?;
+        .with_context(|| "Failed to serialize manifest")?;
     Ok(tmp_manifest_path)
 }
 
 fn read_keypair(key_file_path: &Path) -> Result<Keypair> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     File::open(&key_file_path)
-        .with_context(|| format!("Cannot open '{}'", &key_file_path.display()))?
+        .with_context(|| format!("Fail to open '{}'", &key_file_path.display()))?
         .read_exact(&mut secret_key_bytes)
-        .with_context(|| format!("Cannot read key data from '{}'", &key_file_path.display()))?;
+        .with_context(|| {
+            format!(
+                "Failed to read key data from '{}'",
+                &key_file_path.display()
+            )
+        })?;
     let secret_key = SecretKey::from_bytes(&secret_key_bytes).with_context(|| {
         format!(
-            "Cannot derive secret key from '{}'",
+            "Failed to derive secret key from '{}'",
             &key_file_path.display()
         )
     })?;
@@ -168,11 +193,6 @@ fn read_keypair(key_file_path: &Path) -> Result<Keypair> {
         secret: secret_key,
         public: public_key,
     })
-}
-
-fn gen_key_pair() -> Keypair {
-    let mut csprng = OsRng {};
-    Keypair::generate(&mut csprng)
 }
 
 fn gen_salt() -> [u8; SHA256_SIZE] {
@@ -187,18 +207,18 @@ fn gen_hashes_yaml(
     fsimg_size: u64,
     verity_hash: &[u8],
 ) -> Result<String> {
-    // create hashes YAML
+    // Create hashes YAML
     let mut sha256 = Sha256::new();
     io::copy(
         &mut File::open(&tmp_manifest_path)
-            .with_context(|| format!("Cannot open '{}'", &tmp_manifest_path.display()))?,
+            .with_context(|| format!("Failed to open '{}'", &tmp_manifest_path.display()))?,
         &mut sha256,
     )?;
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
     let mut fsimg = File::open(&fsimg_path)
-        .with_context(|| format!("Cannot open '{}'", &fsimg_path.display()))?;
-    io::copy(&mut fsimg, &mut sha256)?;
+        .with_context(|| format!("Failed to open '{}'", &fsimg_path.display()))?;
+    io::copy(&mut fsimg, &mut sha256).context("Failed to read fs image")?;
 
     let fs_hash = sha256.finalize();
     let hashes = format!(
@@ -215,12 +235,12 @@ fn gen_hashes_yaml(
 }
 
 fn gen_signature_yaml(
-    key_file_path: &&Path,
+    key_file_path: &Path,
     fsimg_path: &Path,
     tmp_manifest_path: &Path,
 ) -> Result<String> {
     let fsimg_size = fs::metadata(&fsimg_path)
-        .with_context(|| format!("Cannot read read size of '{}'", &fsimg_path.display()))?
+        .with_context(|| format!("Fail to read read size of '{}'", &fsimg_path.display()))?
         .len();
     let verity_hash = create_verity_header(&fsimg_path, fsimg_size)?;
     let key_pair = read_keypair(&key_file_path)?;
@@ -229,10 +249,10 @@ fn gen_signature_yaml(
     Ok(signature_yaml)
 }
 
-fn gen_pseudo_dir_list(manifest: &Manifest) -> Result<Vec<(&str, i32)>> {
-    let mut pseudo_dirs = vec![];
+fn gen_pseudo_files(manifest: &Manifest) -> Result<Vec<(&str, u32)>> {
+    let mut pseudo_files = vec![];
     if manifest.init.is_some() {
-        pseudo_dirs = vec![("/dev", 444), ("/proc", 444), ("/tmp", 444)];
+        pseudo_files = vec![("/dev", 444), ("/proc", 444), ("/tmp", 444)];
     }
     for mount in manifest.mounts.iter() {
         match mount {
@@ -242,7 +262,7 @@ fn gen_pseudo_dir_list(manifest: &Manifest) -> Result<Vec<(&str, i32)>> {
                  * ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
                 let trail = path_trail(&target);
                 for path in trail {
-                    pseudo_dirs.push((
+                    pseudo_files.push((
                         path.as_os_str()
                             .to_str()
                             .with_context(|| "Cannot convert pseudo file path to string")?,
@@ -256,7 +276,7 @@ fn gen_pseudo_dir_list(manifest: &Manifest) -> Result<Vec<(&str, i32)>> {
                 } else {
                     444
                 };
-                pseudo_dirs.push((
+                pseudo_files.push((
                     target
                         .to_str()
                         .with_context(|| "Cannot convert manifest mount point to string")?,
@@ -265,7 +285,7 @@ fn gen_pseudo_dir_list(manifest: &Manifest) -> Result<Vec<(&str, i32)>> {
             }
         }
     }
-    Ok(pseudo_dirs)
+    Ok(pseudo_files)
 }
 
 fn gen_hash_tree(
@@ -398,17 +418,18 @@ fn copy_src_root_to_tmp(src_path: &Path, tmp: &TempDir) -> Result<PathBuf> {
             })?;
     } else {
         // create empty root dir at destination if we have nothing to copy
-        fs_extra::dir::create(&tmp_root_path, false)
-            .with_context(|| format!("Cannot create directory '{}'", &tmp_root_path.display()))?;
+        fs_extra::dir::create(&tmp_root_path, false).with_context(|| {
+            format!("Failed to create directory '{}'", &tmp_root_path.display())
+        })?;
     }
     Ok(tmp_root_path)
 }
 
 fn create_fs_img(tmp_root_path: &Path, manifest: &Manifest, fsimg_path: &Path) -> Result<()> {
-    let pseudo_dirs =
-        gen_pseudo_dir_list(&manifest).with_context(|| "Cannot generate list of pseudo files")?;
-    create_squashfs(&tmp_root_path, &fsimg_path, &pseudo_dirs)
-        .with_context(|| format!("Cannot create squashfs at '{}'", &fsimg_path.display()))?;
+    let pseudo_files =
+        gen_pseudo_files(&manifest).with_context(|| "Failed to generate list of pseudo files")?;
+    create_squashfs(&tmp_root_path, &fsimg_path, &pseudo_files)
+        .with_context(|| format!("Failed to create squashfs in '{}'", &fsimg_path.display()))?;
     Ok(())
 }
 
@@ -433,25 +454,26 @@ fn create_verity_header(fsimg_path: &Path, fsimg_size: u64) -> Result<Vec<u8>> {
 fn create_squashfs(
     tmp_root_path: &Path,
     fsimg_path: &Path,
-    pseudo_dirs: &[(&str, i32)],
+    pseudo_dirs: &[(&str, u32)],
 ) -> Result<()> {
-    let compression_alg = match std::env::consts::OS {
-        "linux" => "gzip",
-        _ => "zstd",
-    };
+    #[cfg(target_os = "linux")]
+    let compression_alg = "gzip";
+    #[cfg(not(target_os = "linux"))]
+    let compression_alg = "zstd";
+
     if which::which(&MKSQUASHFS_BIN).is_err() {
-        return Err(anyhow!("Cannot find '{}' in PATH", &MKSQUASHFS_BIN));
+        return Err(anyhow!("Failed to find '{}'", &MKSQUASHFS_BIN));
     }
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
     cmd.arg(tmp_root_path.as_os_str().to_str().with_context(|| {
         format!(
-            "Cannot convert tmp root path '{}' to string",
+            "Failed to convert tmp root path '{}' to string",
             &tmp_root_path.display()
         )
     })?)
     .arg(fsimg_path.as_os_str().to_str().with_context(|| {
         format!(
-            "Cannot convert '{}' path '{}' to string",
+            "Failed to convert '{}' path '{}' to string",
             &FS_IMG_NAME,
             &fsimg_path.display()
         )
@@ -472,11 +494,17 @@ fn create_squashfs(
         ));
     }
     cmd.output()
-        .with_context(|| format!("Error while executing '{}'", &MKSQUASHFS_BIN))?;
+        .with_context(|| format!("Failed to execute '{}'", &MKSQUASHFS_BIN))?;
+
     if !fsimg_path.exists() {
-        println!("'{}' did not write '{}'", &MKSQUASHFS_BIN, &FS_IMG_NAME);
+        Err(anyhow!(
+            "'{}' did not create '{}'",
+            &MKSQUASHFS_BIN,
+            &FS_IMG_NAME
+        ))
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 fn write_verity_header(
@@ -532,7 +560,7 @@ fn write_npk(
         ))
         .with_extension(&NPK_EXT);
     let npk_file = File::create(&npk_path)
-        .with_context(|| format!("Cannot create NPK at '{}'", &npk_path.display()))?;
+        .with_context(|| format!("Failed to create NPK at '{}'", &npk_path.display()))?;
     let zip_options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let mut zip_writer = zip::ZipWriter::new(&npk_file);
@@ -555,7 +583,7 @@ fn write_npk(
 
     zip_writer.start_file_with_extra_data(FS_IMG_NAME, zip_options, &zero_padding)?;
     let mut fsimg = File::open(&fsimg_path)
-        .with_context(|| format!("Cannot open '{}'", &fsimg_path.display()))?;
+        .with_context(|| format!("Failed to open '{}'", &fsimg_path.display()))?;
     let mut fsimg_cont: Vec<u8> = vec![0u8; fs::metadata(&fsimg_path)?.len() as usize];
     fsimg.read_exact(&mut fsimg_cont)?;
     zip_writer.write_all(&fsimg_cont)?;
@@ -571,27 +599,23 @@ fn print_zip(zip_writer: &mut ZipArchive<&File>) -> Result<()> {
     Ok(())
 }
 
-fn print_file(file_path: &Path) -> Result<()> {
-    if file_path.exists() {
-        println!(
-            "{}",
-            fs::read_to_string(&file_path)
-                .with_context(|| format!("Cannot read '{}'", &file_path.display()))?
-        );
-        println!();
-    }
+fn print_file(path: &Path) -> Result<()> {
+    let mut file =
+        File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    io::copy(&mut file, &mut io::stdout())?;
+    println!();
     Ok(())
 }
 
-fn print_squashfs(fsimg_path: &PathBuf) -> Result<()> {
+fn print_squashfs(fsimg_path: &Path) -> Result<()> {
     if which::which(&UNSQUASHFS_BIN).is_err() {
-        return Err(anyhow!("Cannot find '{}' in PATH", &UNSQUASHFS_BIN));
+        return Err(anyhow!("Failed to find '{}'", &UNSQUASHFS_BIN));
     }
     let mut cmd = Command::new(&UNSQUASHFS_BIN);
     cmd.arg("-ll")
         .arg(fsimg_path.as_os_str().to_str().with_context(|| {
             format!(
-                "Cannot convert '{}' path '{}' to string",
+                "Failed to convert '{}' path '{}' to string",
                 &FS_IMG_NAME,
                 &fsimg_path.display()
             )
@@ -620,14 +644,15 @@ fn path_trail(path: &Path) -> Vec<&Path> {
 }
 
 fn create_tmp_dir() -> Result<TempDir> {
-    TempDir::new("").with_context(|| "Cannot create temporary directory")
+    TempDir::new("sextant").with_context(|| "Cannot create temporary directory")
 }
 
 fn assume_non_existing(path: &Path) -> Result<()> {
     if path.exists() {
-        return Err(anyhow!("File '{}' already exists", &path.display()));
+        Err(anyhow!("File '{}' already exists", &path.display()))
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 fn round_up_to_multiple(number: usize, factor: usize) -> usize {
