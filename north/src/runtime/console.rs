@@ -38,25 +38,31 @@ use io::ErrorKind;
 use log::{debug, error, info, warn};
 use tempfile::tempdir;
 
-#[derive(Default)]
-pub struct Console;
+pub struct Console {
+    notification_rx: NotificationRx,
+    event_tx: EventTx,
+    address: String,
+}
 
 impl Console {
-    pub async fn new(
-        address: &str,
-        tx: &EventTx,
-        notification_rx: NotificationRx,
-    ) -> Result<Console> {
-        Self::start(address, tx.clone(), notification_rx).await?;
-        Ok(Console::default())
+    pub fn new(address: &str, tx: &EventTx, notification_rx: NotificationRx) -> Self {
+        // Self::start_listening(address, tx.clone(), notification_rx).await?;
+        Self {
+            notification_rx,
+            event_tx: tx.clone(),
+            address: address.to_owned(),
+        }
     }
 
+    /// process a remote API request
+    /// if the request was valid, it is executed and the result is
+    /// sent back to the sender
     pub async fn process(
         &self,
         state: &mut State,
         message: &Message,
         response_tx: sync::Sender<Message>,
-    ) -> Result<()> {
+    ) {
         let payload = &message.payload;
         if let Payload::Request(ref request) = payload {
             let response = match request {
@@ -116,27 +122,28 @@ impl Console {
                 payload: Payload::Response(response),
             };
             response_tx.send(response_message).await;
-            Ok(())
         } else {
-            // TODO
-            panic!("Received message is not a request");
+            warn!("Received message is not a request");
         }
     }
 
-    /// Open a TCP socket and read lines terminated with `\n`.
-    async fn start(address: &str, tx: EventTx, notification_rx: NotificationRx) -> Result<()> {
-        debug!("Starting console on {}", address);
+    /// Open a TCP socket and listen for incoming connections
+    /// spawn a task for each connection
+    pub async fn start_listening(&self) -> Result<()> {
+        debug!("Starting console on {}", self.address);
+        let event_tx = self.event_tx.clone();
+        let notification_rx = self.notification_rx.clone();
 
-        let listener = TcpListener::bind(address)
+        let listener = TcpListener::bind(&self.address)
             .await
-            .with_context(|| format!("Failed to open listener on {}", address))?;
+            .with_context(|| format!("Failed to open listener on {}", self.address))?;
 
         task::spawn(async move {
             let mut incoming = listener.incoming();
 
             // Spawn a task for each incoming connection.
             while let Some(stream) = incoming.next().await {
-                let tx_clone = tx.clone();
+                let tx_clone = event_tx.clone();
                 let notification_rx_clone = notification_rx.clone();
                 if let Ok(stream) = stream {
                     task::spawn(async move {
@@ -369,10 +376,9 @@ async fn connection_loop(
     let mut event_stream = futures::stream::select(message_event_stream, runtime_event_stream);
 
     while let Some(event) = event_stream.next().await {
-        debug!("received something");
         match event {
             ConsoleEvent::SystemEvent(n) => {
-                info!("handle system notification");
+                debug!("Handle system notification");
                 let reply = Message {
                     id: "Notification".to_owned(),
                     payload: Payload::Notification(n),
@@ -380,7 +386,7 @@ async fn connection_loop(
                 client_tx.send(reply).await;
             }
             ConsoleEvent::ApiMessage(m) => {
-                info!("handle ApiMessage");
+                debug!("Handle incoming ApiMessage");
                 if let Err(e) = handle_api_request(
                     m,
                     client_tx.clone(),
