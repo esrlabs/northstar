@@ -28,6 +28,7 @@ use proc_mounts::MountIter;
 use std::time::Duration;
 use thiserror::Error;
 
+const SWAPPINESS: &str = "memory.swappiness";
 const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
 const OOM_CONTROL: &str = "memory.oom_control";
 const UNDER_OOM: &str = "under_oom 1";
@@ -129,6 +130,8 @@ impl CGroupMem {
         );
         write(&limit_in_bytes, &cgroup.limit.to_string()).await?;
 
+        try_disable_memory_swap(&path).await?;
+
         // Configure oom
         let oom_control = path.join(OOM_CONTROL);
         write(&oom_control, "1").await?;
@@ -168,6 +171,15 @@ impl CGroupMem {
         debug!("Created {}", path.display());
         Ok(CGroupMem { path, monitor })
     }
+}
+
+async fn try_disable_memory_swap(path: &Path) -> Result<(), Error> {
+    let swappiness = path.join(SWAPPINESS);
+    if swappiness.exists().await {
+        debug!("Disabling memory swap");
+        write(&swappiness, "0").await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
