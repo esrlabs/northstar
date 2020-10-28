@@ -30,9 +30,10 @@ enum Opt {
         /// Key file
         #[structopt(short, long)]
         key: PathBuf,
-        /// Registry dir
+        /// Output directory
         #[structopt(short, long)]
         out: PathBuf,
+        /// Platform
         #[structopt(short, long)]
         platform: String,
     },
@@ -41,20 +42,20 @@ enum Opt {
         /// Container source dir
         #[structopt(short, long)]
         dir: PathBuf,
+        /// Output directory
         #[structopt(short, long)]
         out: PathBuf,
     },
     /// Print information about a Northstar container
     Inspect {
-        /// NPK file to inspect
-        #[structopt(short, long)]
+        /// NPK to inspect
         npk: PathBuf,
     },
     GenKey {
         /// Name of key
         #[structopt(short, long)]
         name: String,
-        /// Path to key directory
+        /// Key directory
         #[structopt(short, long)]
         path: PathBuf,
     },
