@@ -84,7 +84,8 @@ pub async fn run(config: &Config) -> Result<()> {
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
     let (event_tx, event_rx) = sync::channel::<Event>(1000);
-    // The notification channel can be used to propagate notifications
+
+    // The notification channel is used to propagate notifications from the runtime
     let (notification_tx, notification_rx) = sync::channel::<Notification>(1000);
 
     let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
@@ -112,10 +113,6 @@ pub async fn run(config: &Config) -> Result<()> {
         state.applications.len()
     );
 
-    // Initialize console
-    let console =
-        console::Console::new(&config.console_address, &event_tx, notification_rx).await?;
-
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
     let autostart_apps = state
@@ -131,6 +128,11 @@ pub async fn run(config: &Config) -> Result<()> {
         }
     }
 
+    // Initialize console
+    let console = console::Console::new(&config.console_address, &event_tx, notification_rx);
+    // and start servicing clients
+    console.start_listening().await?;
+
     // Enter main loop
     while let Ok(event) = event_rx.recv().await {
         match event {
@@ -141,7 +143,7 @@ pub async fn run(config: &Config) -> Result<()> {
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
-            Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await?,
+            Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await,
             // Installation event that triggers the installation of a received file
             Event::Install(msg_id, path, txr) => {
                 state
