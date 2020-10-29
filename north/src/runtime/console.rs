@@ -16,9 +16,8 @@ use super::state::State;
 use crate::{
     api,
     api::{InstallationResult, MessageId, Notification},
-    runtime::{Event, EventTx, NotificationRx},
+    runtime::{error::Error, Event, EventTx, NotificationRx},
 };
-use anyhow::{Context, Result};
 use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
     StopResult,
@@ -46,7 +45,6 @@ pub struct Console {
 
 impl Console {
     pub fn new(address: &str, tx: &EventTx, notification_rx: NotificationRx) -> Self {
-        // Self::start_listening(address, tx.clone(), notification_rx).await?;
         Self {
             notification_rx,
             event_tx: tx.clone(),
@@ -129,14 +127,18 @@ impl Console {
 
     /// Open a TCP socket and listen for incoming connections
     /// spawn a task for each connection
-    pub async fn start_listening(&self) -> Result<()> {
+    pub async fn start_listening(&self) -> Result<(), Error> {
         debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
         let notification_rx = self.notification_rx.clone();
 
-        let listener = TcpListener::bind(&self.address)
-            .await
-            .with_context(|| format!("Failed to open listener on {}", self.address))?;
+        let listener =
+            TcpListener::bind(&self.address)
+                .await
+                .map_err(|e| Error::GeneralIoProblem {
+                    context: format!("Failed to open listener on {}", self.address),
+                    error: e,
+                })?;
 
         task::spawn(async move {
             let mut incoming = listener.incoming();
@@ -173,7 +175,7 @@ impl Console {
             // move npk into container dir
             if let Err(e) = async_std::fs::rename(npk, new_path).await {
                 install_result =
-                    InstallationResult::InternalError(format!("Could not replace npk: {}", e));
+                    InstallationResult::FileIoProblem(format!("Could not replace npk: {}", e));
             }
         }
         let response_message = Message {
@@ -189,34 +191,31 @@ impl Console {
 fn list_containers(state: &State) -> Vec<Container> {
     let mut app_containers: Vec<Container> = state
         .applications()
-        .map(|app| {
-            Container {
-                manifest: app.manifest().clone(),
-                process: app.process_context().map(|f| Process {
-                    pid: f.process().pid(),
-                    uptime: f.uptime().as_nanos() as u64,
-                    memory: {
-                        #[cfg(not(any(target_os = "linux", target_os = "android")))]
-                        {
-                            None
-                        }
-                        #[cfg(any(target_os = "linux", target_os = "android"))]
-                        {
-                            // TODO
-                            const PAGE_SIZE: usize = 4096;
-                            let pid = f.process().pid();
-                            let statm = procinfo::pid::statm(pid as i32).expect("Failed get statm");
-                            Some(api::Memory {
-                                size: (statm.size * PAGE_SIZE) as u64,
-                                resident: (statm.resident * PAGE_SIZE) as u64,
-                                shared: (statm.share * PAGE_SIZE) as u64,
-                                text: (statm.text * PAGE_SIZE) as u64,
-                                data: (statm.data * PAGE_SIZE) as u64,
-                            })
-                        }
-                    },
-                }),
-            }
+        .map(|app| Container {
+            manifest: app.manifest().clone(),
+            process: app.process_context().map(|f| Process {
+                pid: f.process().pid(),
+                uptime: f.uptime().as_nanos() as u64,
+                memory: {
+                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+                    {
+                        None
+                    }
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    {
+                        const PAGE_SIZE: usize = 4096;
+                        let pid = f.process().pid();
+                        let statm = procinfo::pid::statm(pid as i32).expect("Failed get statm");
+                        Some(api::Memory {
+                            size: (statm.size * PAGE_SIZE) as u64,
+                            resident: (statm.resident * PAGE_SIZE) as u64,
+                            shared: (statm.share * PAGE_SIZE) as u64,
+                            text: (statm.text * PAGE_SIZE) as u64,
+                            data: (statm.data * PAGE_SIZE) as u64,
+                        })
+                    }
+                },
+            }),
         })
         .collect();
     let mut resource_containers: Vec<Container> = state
@@ -239,17 +238,30 @@ async fn receive_message_from_socket<R: Read + Unpin>(
     reader: &mut R,
     message_tx: &sync::Sender<MessageWithData>,
     tmp_installation_dir: &std::path::Path,
-) -> Result<()> {
+) -> Result<(), Error> {
     // Read frame length
     let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf).await?;
+    reader
+        .read_exact(&mut buf)
+        .await
+        .map_err(|e| Error::GeneralIoProblem {
+            context: "Could not read length of network package".to_string(),
+            error: e,
+        })?;
     let frame_len = BigEndian::read_u32(&buf) as usize;
 
     // Read payload
     let mut buffer = vec![0; frame_len];
-    reader.read_exact(&mut buffer).await?;
+    reader
+        .read_exact(&mut buffer)
+        .await
+        .map_err(|e| Error::GeneralIoProblem {
+            context: "Could not read network package".to_string(),
+            error: e,
+        })?;
 
-    let message: Message = serde_json::from_slice(&buffer)?;
+    let message: Message = serde_json::from_slice(&buffer)
+        .map_err(|_| Error::ProtocolError("Could not parse protocol message".to_string()))?;
     let msg_with_data = match &message.payload {
         Payload::Installation(size) => {
             debug!("Incoming installation ({} bytes)", size);
@@ -264,9 +276,21 @@ async fn receive_message_from_socket<R: Read + Unpin>(
                 .create(true)
                 .append(true)
                 .open(&tmp_installation_file_path)
-                .await?;
+                .await
+                .map_err(|e| Error::GeneralIoProblem {
+                    context: format!(
+                        "Failed to create file {}",
+                        tmp_installation_file_path.display()
+                    ),
+                    error: e,
+                })?;
             let buf_writer = BufWriter::new(tmpfile);
-            let received_bytes = io::copy(reader.take(*size as u64), buf_writer).await?;
+            let received_bytes = io::copy(reader.take(*size as u64), buf_writer)
+                .await
+                .map_err(|e| Error::GeneralIoProblem {
+                    context: format!("Could not receive {} bytes", size),
+                    error: e,
+                })?;
             // buf_writer.flush().await?;
             debug!("Received {} bytes. Starting installation", received_bytes);
             MessageWithData {
@@ -296,13 +320,14 @@ async fn send_reply<W: Unpin + Write>(reply: &Message, writer: &mut W) -> io::Re
     Ok(())
 }
 
-fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Message>) -> Result<()> {
+fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Message>) {
     // setup send functionality
     let mut writer = writer.clone();
     let _ = task::spawn(async move {
         loop {
             match client_rx.recv().await {
                 Ok(msg_to_send) => {
+                    debug!("Need to send something to client");
                     if let Err(e) = send_reply(&msg_to_send, &mut writer).await {
                         warn!("Error sending back to client: {}", e);
                         break;
@@ -315,14 +340,13 @@ fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Messa
             }
         }
     });
-    Ok(())
 }
 
 fn start_receiving_from_socket(
     reader: &TcpStream,
     tmp_installation_dir: std::path::PathBuf,
     message_tx: sync::Sender<MessageWithData>,
-) -> Result<()> {
+) {
     let reader = reader.clone();
     let _ = task::spawn(async move {
         let mut buf_reader: io::BufReader<&TcpStream> = io::BufReader::new(&reader);
@@ -337,17 +361,17 @@ fn start_receiving_from_socket(
             }
         }
     });
-    Ok(())
 }
 
 async fn connection_loop(
     stream: TcpStream,
     mut event_tx: EventTx,
     notification_rx: NotificationRx,
-) -> Result<()> {
-    let peer = stream
-        .peer_addr()
-        .context("Failed to get peer from command connection")?;
+) -> Result<(), Error> {
+    let peer = stream.peer_addr().map_err(|e| Error::GeneralIoProblem {
+        context: "Failed to get peer from command connection".to_string(),
+        error: e,
+    })?;
     debug!("Client {:?} connected", peer);
 
     enum ConsoleEvent {
@@ -357,17 +381,23 @@ async fn connection_loop(
 
     let (reader, writer) = &mut (&stream, &stream);
     let (mut message_tx, mut message_rx) = sync::channel::<Message>(1);
+
     // channel for sending messages back to client
-    let (client_tx, client_rx) = sync::channel::<Message>(1000);
+    let (client_tx, client_rx) = sync::channel::<Message>(100);
+
     let (socket_tx, socket_rx) = sync::channel::<MessageWithData>(1);
-    let tmp_installation_dir = tempdir().context("Error creating temp installation dir")?;
+    let tmp_installation_dir = tempdir().map_err(|e| Error::GeneralIoProblem {
+        context: "Error creating temp installation dir".to_string(),
+        error: e,
+    })?;
+
     start_receiving_from_socket(
         reader,
         std::path::PathBuf::from(tmp_installation_dir.path()),
         socket_tx,
-    )?;
+    );
 
-    start_sending_over_socket(writer, client_rx)?;
+    start_sending_over_socket(writer, client_rx);
 
     let message_event_stream: futures::stream::Map<async_std::sync::Receiver<MessageWithData>, _> =
         socket_rx.map(ConsoleEvent::ApiMessage);

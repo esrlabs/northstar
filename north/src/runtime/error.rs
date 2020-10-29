@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::runtime::{InstallationResult, Name};
-use anyhow::Error as AnyhowError;
 use std::io;
 use thiserror::Error;
 
@@ -23,30 +22,113 @@ pub enum Error {
     ApplicationNotFound,
     #[error("Missing resouce {0}")]
     MissingResource(String),
-    #[error("Failed to spawn process: {0}")]
-    ProcessError(AnyhowError),
+    #[error("Problem with handling process: {0}")]
+    ProcessError(ProcessError),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
+    #[error("Failed to install")]
+    InstallationError(InstallFailure),
     #[error("Failed to uninstall")]
-    UninstallationError(AnyhowError),
+    UninstallationError(InstallFailure),
     #[error("Application is not running")]
     ApplicationNotRunning,
+    #[error("Problem with cgroups")]
+    CGroupProblem(CGroupError),
+    #[error("Problem with keys: {0}")]
+    KeyError(KeyError),
+    #[error("OS level problem: {context}")]
+    OsProblem {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+    #[error("Io problem: {context}")]
+    GeneralIoProblem {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+    #[error("Error with communication protocol: {0}")]
+    ProtocolError(String),
+    #[error("Configuration of runtime incorrect: {0}")]
+    ConfigurationError(String),
+}
+
+#[derive(Error, Debug)]
+pub enum ProcessError {
+    #[error("Problem starting the process: {0}")]
+    StartupError(String),
+    #[error("Problem with stopping the process")]
+    StopProblem,
+    #[error("Wrong container type: {0}")]
+    WrongContainerType(String),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Problem creating a minijail: {0}")]
+    MinijailProblem(#[from] minijail::Error),
+    #[error("IO problem: {context}")]
+    IoProblem {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+    #[error("Linux problem: {context}")]
+    LinuxProblem {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum CGroupError {
+    #[error("No such cgroup found: {0}")]
+    CGroupNotFound(String),
+    #[error("Problem destroying cgroug: {context}")]
+    DestroyError {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+    #[error("Problem mounting cgroup: {context}")]
+    MountProblem {
+        context: String,
+        #[source]
+        error: Option<io::Error>,
+    },
+    #[error("File problem cgroup: {context}")]
+    FileProblem {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum KeyError {
+    #[error("File problem {context}")]
+    ProblemWithFile {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+    #[error("Key signature problen: {0}")]
+    SignatureCorrupt(String),
 }
 
 #[derive(Error, Debug)]
 pub enum InstallFailure {
     #[error("File seems to be corrupted")]
-    FileCorrupted,
-    #[error("No signature found")]
-    SignatureNotFound,
-    #[error("Signature file invalid")]
-    InvalidSignatureYaml,
+    FileCorrupted(#[from] zip::result::ZipError),
+    #[error("Signature file invalid ({0})")]
+    SignatureFileInvalid(String),
     #[error("Signature malformed")]
     MalformedSignature,
-    #[error("Hashes malformed")]
-    MalformedHashes,
+    #[error("Hashes malformed ({0})")]
+    MalformedHashes(String),
     #[error("Problem verifiing the manifest ({0})")]
     MalformedManifest(String),
+    #[error("Problem verifiing content with signature ({0})")]
+    SignatureVerificationFailed(String),
     #[error("Verity device mapper problem ({0})")]
     VerityProblem(String),
     #[error("Verity header not found")]
@@ -73,22 +155,29 @@ pub enum InstallFailure {
         #[source]
         error: nix::Error,
     },
-    #[error("Internal error: {context}")]
-    InternalError {
+    #[error("Failure to mount: {context}")]
+    INotifyError {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+    #[error("Problem with file system: {context}")]
+    FileIoProblem {
         context: String,
         #[source]
         error: io::Error,
     },
+    #[error("Timeout error: {0}")]
+    TimeoutError(String),
 }
 
 impl From<InstallFailure> for InstallationResult {
     fn from(failure: InstallFailure) -> InstallationResult {
         match failure {
-            InstallFailure::FileCorrupted => InstallationResult::FileCorrupted,
-            InstallFailure::SignatureNotFound => InstallationResult::SignatureNotFound,
-            InstallFailure::InvalidSignatureYaml => InstallationResult::InvalidSignatureYaml,
+            InstallFailure::FileCorrupted(_) => InstallationResult::FileCorrupted,
+            InstallFailure::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
             InstallFailure::MalformedSignature => InstallationResult::MalformedSignature,
-            InstallFailure::MalformedHashes => InstallationResult::MalformedHashes,
+            InstallFailure::MalformedHashes(_) => InstallationResult::MalformedHashes,
             InstallFailure::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
             InstallFailure::VerityProblem(s) => InstallationResult::VerityProblem(s),
             InstallFailure::ArchiveError(s) => InstallationResult::ArchiveError(s),
@@ -103,18 +192,27 @@ impl From<InstallFailure> for InstallationResult {
             InstallFailure::ApplicationAlreadyInstalled(_) => {
                 InstallationResult::ApplicationAlreadyInstalled
             }
-            InstallFailure::InternalError { context, error: _ } => {
-                InstallationResult::InternalError(context)
+            InstallFailure::FileIoProblem { context, error: _ } => {
+                InstallationResult::FileIoProblem(context)
             }
             InstallFailure::MountError { context, error: _ } => {
                 InstallationResult::MountError(context)
             }
-            InstallFailure::NoVerityHeader => InstallationResult::NoVerityHeader,
+            InstallFailure::INotifyError { context, error: _ } => {
+                InstallationResult::INotifyError(context)
+            }
+            InstallFailure::TimeoutError(s) => InstallationResult::TimeoutError(s),
+            InstallFailure::NoVerityHeader => {
+                InstallationResult::VerityProblem("Verity header missing".to_string())
+            }
             InstallFailure::UnexpectedVerityAlgorithm(s) => {
-                InstallationResult::UnexpectedVerityAlgorithm(s)
+                InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
             }
             InstallFailure::UnexpectedVerityVersion(n) => {
-                InstallationResult::UnexpectedVerityVersion(n)
+                InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
+            }
+            InstallFailure::SignatureVerificationFailed(s) => {
+                InstallationResult::SignatureVerificationFailed(s)
             }
         }
     }

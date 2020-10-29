@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use super::config::Config;
-use anyhow::{Context, Result};
+use crate::runtime::Error;
 use async_std::{
     fs, io, io::prelude::BufReadExt, os::unix::io::FromRawFd, path::PathBuf, stream::StreamExt,
     task,
@@ -28,7 +28,7 @@ pub(super) mod inotify;
 pub(super) mod loopdev;
 pub(super) mod mount;
 
-pub async fn init(config: &Config) -> Result<()> {
+pub async fn init(config: &Config) -> Result<(), Error> {
     // Set mount propagation to PRIVATE on /data
     // Mounting with MS_PRIVATE fails on Android on
     // a non private tree.
@@ -41,20 +41,19 @@ pub async fn init(config: &Config) -> Result<()> {
         None,
     )
     .await
-    .context("Failed to set mount propagation")?;
+    .map_err(Error::InstallationError)?;
 
     debug!("Entering mount namespace");
-    sched::unshare(sched::CloneFlags::CLONE_NEWNS).context("Failed to enter mount namespace")?;
+    sched::unshare(sched::CloneFlags::CLONE_NEWNS).map_err(|e| Error::OsProblem {
+        context: "Failed to enter mount namespace".to_string(),
+        error: e,
+    })?;
 
     // Pipe minijail log to rust log
-    init_minijail_log()
-        .await
-        .context("Failed to initialize minijail logging")?;
-
-    Ok(())
+    init_minijail_log().await
 }
 
-async fn init_minijail_log() -> Result<()> {
+async fn init_minijail_log() -> Result<(), Error> {
     #[allow(non_camel_case_types)]
     #[allow(dead_code)]
     #[repr(i32)]
@@ -79,7 +78,10 @@ async fn init_minijail_log() -> Result<()> {
             Level::Trace => SyslogLevel::MAX,
         };
 
-        let (readfd, writefd) = pipe().context("Failed to create pipe for minijail logs")?;
+        let (readfd, writefd) = pipe().map_err(|e| Error::OsProblem {
+            context: "Failed to create pipe for minijail logs".to_string(),
+            error: e,
+        })?;
         let pipe = unsafe { fs::File::from_raw_fd(readfd) };
         minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);
         let mut lines = io::BufReader::new(pipe).lines();

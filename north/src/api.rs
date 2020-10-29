@@ -22,7 +22,12 @@ pub enum Payload {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
     OutOfMemory(Name),
+    ApplicationExited(Name),
     InstallationFinished(Name),
+    Uninstalled(Name),
+    ApplicationStarted(Name, Version),
+    ApplicationStopped(Name, Version),
+    ShutdownOccurred,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -84,28 +89,47 @@ pub enum UninstallResult {
     Error(String), // TODO
 }
 
+/// A lot can go wrong when trying to install an NPK
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum InstallationResult {
+    /// Everything went smooth
     Success,
+    /// Cannot install an already installed application (only 1 version can be installed)
     ApplicationAlreadyInstalled,
+    /// Cannot install the same version a resource container (multiple versions permitted)
     DuplicateResource,
+    /// The npk file seems to be corrupted
     FileCorrupted,
-    SignatureNotFound,
-    InvalidSignatureYaml,
+    /// The signature file in the npk is invalid
+    SignatureFileInvalid,
+    /// The signature file in the npk contains malformed signatures
     MalformedSignature,
+    /// Signature check failed
+    SignatureVerificationFailed(String),
+    /// The hashes in the npk file could not be read
     MalformedHashes,
+    /// There was a problem reading the manifest in the npk package
     MalformedManifest(String),
+    /// Problem with the verity device
     VerityProblem(String),
+    /// npk archive seems to be incorrecxt
     ArchiveError(String),
+    /// Problems with the device mapper
     DeviceMapperProblem(String),
+    /// Problems with the loopback device
     LoopDeviceError(String),
+    /// cryptographic hash check failed
     HashInvalid(String),
+    /// keyfile seems to be missing
     KeyNotFound(String),
-    InternalError(String),
+    /// Some problem with managing files
+    FileIoProblem(String),
+    /// Mount or Un-mount problem
     MountError(String),
-    NoVerityHeader,
-    UnexpectedVerityAlgorithm(String),
-    UnexpectedVerityVersion(u32),
+    /// A timeout occurred
+    TimeoutError(String),
+    /// Problems with Inotify
+    INotifyError(String),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

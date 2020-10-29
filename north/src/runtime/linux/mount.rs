@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::runtime::error::InstallFailure;
-use anyhow::{Context, Result};
 use async_std::path::Path;
 
 pub use nix::mount::MsFlags as MountFlags;
@@ -42,6 +41,9 @@ pub async fn mount(
     })
 }
 
-pub async fn unmount(target: &Path) -> Result<()> {
-    nix::mount::umount(target.as_os_str()).context(format!("Failed to umount {}", target.display()))
+pub async fn unmount(target: &Path) -> Result<(), InstallFailure> {
+    nix::mount::umount(target.as_os_str()).map_err(|e| InstallFailure::MountError {
+        context: format!("Failed to unmount {}", target.display()),
+        error: e,
+    })
 }

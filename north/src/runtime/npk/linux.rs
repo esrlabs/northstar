@@ -27,7 +27,6 @@ use crate::{
     manifest::{Mount, Name, Version},
     runtime::npk::{ArchiveReader, InstallFailure},
 };
-use anyhow::{Context, Result};
 use async_std::{
     fs,
     fs::metadata,
@@ -57,12 +56,15 @@ struct VerityHeader {
     pub salt: String,
 }
 
-pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
+pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallFailure> {
     info!("Installing containers from {}", dir.display());
 
     let npks = fs::read_dir(&dir)
         .await
-        .with_context(|| format!("Failed to read {}", dir.display()))?
+        .map_err(|e| InstallFailure::FileIoProblem {
+            context: format!("Failed to read {}", dir.display()),
+            error: e,
+        })?
         .filter_map(move |d| async move { d.ok() })
         .map(|d| d.path())
         .filter_map(move |d| async move {
@@ -108,13 +110,16 @@ pub async fn install(
 }
 
 #[allow(dead_code)]
-pub async fn uninstall(container: &Container) -> Result<()> {
+pub async fn uninstall(container: &Container) -> Result<(), InstallFailure> {
     debug!("Unmounting {}", container.root.display());
     linux_mount::unmount(&container.root).await?;
     debug!("Removing {}", container.root.display());
     fs::remove_dir_all(&container.root)
         .await
-        .with_context(|| format!("Failed to remove {}", container.root.display()))?;
+        .map_err(|e| InstallFailure::FileIoProblem {
+            context: format!("Failed to remove {}", container.root.display()),
+            error: e,
+        })?;
 
     crate::runtime::linux::inotify::wait_for_file_deleted(
         container.dm_dev.as_path().into(),
@@ -170,7 +175,7 @@ async fn install_internal(
     let mut fs =
         async_std::fs::File::open(&npk)
             .await
-            .map_err(|e| InstallFailure::InternalError {
+            .map_err(|e| InstallFailure::FileIoProblem {
                 context: format!("Failed to open {:?} ({})", npk, e),
                 error: e,
             })?;
@@ -200,7 +205,7 @@ async fn install_internal(
             info!("Creating mountpoint {}", root.display());
             fs::create_dir_all(&root)
                 .await
-                .map_err(|e| InstallFailure::InternalError {
+                .map_err(|e| InstallFailure::FileIoProblem {
                     context: format!("Failed to create mountpoint: {}", e),
                     error: e,
                 })?;
@@ -283,7 +288,7 @@ async fn setup_and_mount(
     let fs_type =
         get_fs_type(&mut fs, fs_offset)
             .await
-            .map_err(|e| InstallFailure::InternalError {
+            .map_err(|e| InstallFailure::FileIoProblem {
                 context: format!("Failed get file-system-type {}", e),
                 error: e,
             })?;
@@ -338,11 +343,16 @@ async fn read_verity_header(
     fs: &mut fs::File,
     fs_offset: u64,
     verity_offset: u64,
-) -> Result<VerityHeader> {
+) -> Result<VerityHeader, InstallFailure> {
     let mut header = [0u8; 512];
     fs.seek(std::io::SeekFrom::Start(fs_offset + verity_offset))
-        .await?;
-    fs.read_exact(&mut header).await?;
+        .await
+        .map_err(|e| {
+            InstallFailure::VerityProblem(format!("Could not seek to verity header: {}", e))
+        })?;
+    fs.read_exact(&mut header).await.map_err(|e| {
+        InstallFailure::VerityProblem(format!("Could not read verity header: {}", e))
+    })?;
     #[allow(clippy::too_many_arguments)]
     let s = structure::structure!("=6s2xII16s6s26xIIQH6x256s168x"); // "a8 L L a16 A32 L L Q S x6 a256"
     let (
@@ -356,15 +366,17 @@ async fn read_verity_header(
         data_blocks,
         salt_size,
         salt,
-    ) = s
-        .unpack(header.to_vec())
-        .context("Failed to decode verity block")?;
+    ) = s.unpack(header.to_vec()).map_err(|e| {
+        InstallFailure::VerityProblem(format!("Failed to decode verity block: {}", e))
+    })?;
 
     Ok(VerityHeader {
         header,
         version,
         algorithm: std::str::from_utf8(&algorithm)
-            .context("Invalid algorithm in verity block")?
+            .map_err(|e| {
+                InstallFailure::VerityProblem(format!("Invalid algorithm in verity block: {}", e))
+            })?
             .to_string(),
         data_block_size,
         hash_block_size,
