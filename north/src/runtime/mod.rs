@@ -26,8 +26,8 @@ use crate::{
     api,
     api::{InstallationResult, MessageId, Notification},
     manifest::Name,
+    runtime::error::Error,
 };
-use anyhow::{Context, Error, Result};
 use async_std::{fs, path::PathBuf, sync};
 use config::Config;
 use log::*;
@@ -74,7 +74,7 @@ pub enum TerminationReason {
     OutOfMemory,
 }
 
-pub async fn run(config: &Config) -> Result<()> {
+pub async fn run(config: &Config) -> Result<(), Error> {
     // On Linux systems north enters a mount namespace for automatic
     // umounting of npks. Next the mount propagation of the the parent
     // mount of the run dir is set to private. See linux::init for details.
@@ -94,18 +94,26 @@ pub async fn run(config: &Config) -> Result<()> {
     // TODO: permission check of SETTINGS.directories.run_dir
     fs::create_dir_all(&config.directories.run_dir)
         .await
-        .with_context(|| format!("Failed to create {}", config.directories.run_dir.display()))?;
+        .map_err(|e| Error::GeneralIoProblem {
+            context: format!("Failed to create {}", config.directories.run_dir.display()),
+            error: e,
+        })?;
 
     // Ensure the configured data_dir exists
     fs::create_dir_all(&config.directories.data_dir)
         .await
-        .with_context(|| format!("Failed to create {}", config.directories.data_dir.display()))?;
+        .map_err(|e| Error::GeneralIoProblem {
+            context: format!("Failed to create {}", config.directories.data_dir.display()),
+            error: e,
+        })?;
 
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to load/install the npks.
     for d in &config.directories.container_dirs {
         let d: PathBuf = d.into();
-        npk::install_all(&mut state, &d.as_path()).await?;
+        npk::install_all(&mut state, &d.as_path())
+            .await
+            .map_err(Error::InstallationError)?;
     }
 
     info!(

@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{anyhow, Context, Result};
 use async_std::{fs, path::Path};
 use lazy_static::lazy_static;
 use serde::{
@@ -35,7 +34,7 @@ pub type Name = String;
 
 impl Version {
     #[allow(dead_code)]
-    pub fn parse(s: &str) -> Result<Version> {
+    pub fn parse(s: &str) -> Result<Version, semver::SemVerError> {
         Ok(Version(semver::Version::parse(s)?))
     }
 }
@@ -285,10 +284,9 @@ impl MountsSerialization {
                                 .expect("Invalid regex");
                             }
 
-                            let caps = RE
-                                .captures(&resource)
-                                .ok_or_else(|| anyhow!("Invalid resource: {}", resource))
-                                .map_err(serde::de::Error::custom)?;
+                            let caps = RE.captures(&resource).ok_or_else(|| {
+                                serde::de::Error::custom(format!("Invalid resource: {}", resource))
+                            })?;
 
                             let name = caps.name("name").unwrap().as_str().to_string();
                             let version = Version::parse(caps.name("version").unwrap().as_str())
@@ -337,11 +335,11 @@ impl Manifest {
         Ok(())
     }
 
-    pub async fn from_path(f: &Path) -> Result<Manifest> {
+    pub async fn from_path(f: &Path) -> Result<Manifest, ManifestError> {
         let f = f.to_owned();
-        let manifest = fs::read_to_string(&f)
-            .await
-            .with_context(|| format!("Failed to read manifest from {}", f.display()))?;
+        let manifest = fs::read_to_string(&f).await.map_err(|_| {
+            ManifestError::CouldNotParse(format!("Failed to read manifest from {}", f.display()))
+        })?;
         let manifest: Manifest = Manifest::from_str(&manifest)?;
         manifest.verify()?;
         Ok(manifest)
@@ -365,15 +363,19 @@ impl FromStr for Manifest {
     }
 }
 
-#[async_std::test]
-async fn parse() -> Result<()> {
-    use anyhow::anyhow;
-    use async_std::path::PathBuf;
-    use std::{fs::File, io::Write};
+#[cfg(test)]
+mod tests {
+    use crate::manifest::*;
+    use anyhow::{anyhow, Result};
 
-    let file = tempfile::NamedTempFile::new()?;
-    let path = file.path();
-    let m = "
+    #[async_std::test]
+    async fn parse() -> Result<()> {
+        use async_std::path::PathBuf;
+        use std::{fs::File, io::Write};
+
+        let file = tempfile::NamedTempFile::new()?;
+        let path = file.path();
+        let m = "
 name: hello
 version: 0.0.0
 arch: aarch64-linux-android
@@ -409,66 +411,66 @@ log:
         custom: 8
 ";
 
-    let mut file = File::create(path)?;
-    file.write_all(m.as_bytes())?;
-    drop(file);
+        let mut file = File::create(path)?;
+        file.write_all(m.as_bytes())?;
+        drop(file);
 
-    let manifest = Manifest::from_path(&PathBuf::from(path)).await?;
+        let manifest = Manifest::from_path(&PathBuf::from(path)).await?;
 
-    assert_eq!(manifest.init, Some(std::path::PathBuf::from("/binary")));
-    assert_eq!(manifest.name, "hello");
-    let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
-    assert_eq!(args.len(), 2);
-    assert_eq!(args[0], "one");
-    assert_eq!(args[1], "two");
+        assert_eq!(manifest.init, Some(std::path::PathBuf::from("/binary")));
+        assert_eq!(manifest.name, "hello");
+        let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "one");
+        assert_eq!(args[1], "two");
 
-    assert!(manifest.autostart.unwrap());
-    let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
-    assert_eq!(
-        env.get("LD_LIBRARY_PATH"),
-        Some("/lib".to_string()).as_ref()
-    );
-    let mounts = vec![
-        Mount::Bind {
-            target: std::path::PathBuf::from("/lib"),
-            host: std::path::PathBuf::from("/lib"),
-            flags: [MountFlag::Rw].iter().cloned().collect(),
-        },
-        Mount::Persist {
-            target: std::path::PathBuf::from("/data"),
-            flags: HashSet::new(),
-        },
-        Mount::Persist {
-            target: std::path::PathBuf::from("/data_rw"),
-            flags: [MountFlag::Rw].iter().cloned().collect(),
-        },
-        Mount::Resource {
-            target: std::path::PathBuf::from("/here/we/go"),
-            name: "bla".to_string(),
-            version: Version::parse("1.0.0")?,
-            dir: PathBuf::from("/bin/foo").into(),
-        },
-    ];
-    assert_eq!(manifest.mounts, mounts);
-    assert_eq!(
-        manifest.cgroups,
-        Some(CGroups {
-            mem: Some(CGroupMem { limit: 30 }),
-            cpu: Some(CGroupCpu { shares: 100 }),
-        })
-    );
+        assert!(manifest.autostart.unwrap());
+        let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
+        assert_eq!(
+            env.get("LD_LIBRARY_PATH"),
+            Some("/lib".to_string()).as_ref()
+        );
+        let mounts = vec![
+            Mount::Bind {
+                target: std::path::PathBuf::from("/lib"),
+                host: std::path::PathBuf::from("/lib"),
+                flags: [MountFlag::Rw].iter().cloned().collect(),
+            },
+            Mount::Persist {
+                target: std::path::PathBuf::from("/data"),
+                flags: HashSet::new(),
+            },
+            Mount::Persist {
+                target: std::path::PathBuf::from("/data_rw"),
+                flags: [MountFlag::Rw].iter().cloned().collect(),
+            },
+            Mount::Resource {
+                target: std::path::PathBuf::from("/here/we/go"),
+                name: "bla".to_string(),
+                version: Version::parse("1.0.0")?,
+                dir: PathBuf::from("/bin/foo").into(),
+            },
+        ];
+        assert_eq!(manifest.mounts, mounts);
+        assert_eq!(
+            manifest.cgroups,
+            Some(CGroups {
+                mem: Some(CGroupMem { limit: 30 }),
+                cpu: Some(CGroupCpu { shares: 100 }),
+            })
+        );
 
-    let mut seccomp = HashMap::new();
-    seccomp.insert("fork".to_string(), "1".to_string());
-    seccomp.insert("waitpid".to_string(), "1".to_string());
-    assert_eq!(manifest.seccomp, Some(seccomp));
+        let mut seccomp = HashMap::new();
+        seccomp.insert("fork".to_string(), "1".to_string());
+        seccomp.insert("waitpid".to_string(), "1".to_string());
+        assert_eq!(manifest.seccomp, Some(seccomp));
 
-    Ok(())
-}
+        Ok(())
+    }
 
-#[test]
-fn serialize_back_and_forth() -> Result<()> {
-    let m = "
+    #[test]
+    fn serialize_back_and_forth() -> Result<()> {
+        let m = "
 name: hello
 version: 0.0.0
 arch: aarch64-linux-android
@@ -504,24 +506,25 @@ log:
         custom: 8
 ";
 
-    let manifest = serde_yaml::from_str::<Manifest>(m)?;
-    let string_copie = serde_yaml::to_string(&manifest)?;
-    let manifest_copie = serde_yaml::from_str::<Manifest>(&string_copie)?;
+        let manifest = serde_yaml::from_str::<Manifest>(m)?;
+        let string_copie = serde_yaml::to_string(&manifest)?;
+        let manifest_copie = serde_yaml::from_str::<Manifest>(&string_copie)?;
 
-    assert_eq!(manifest, manifest_copie);
-    Ok(())
-}
+        assert_eq!(manifest, manifest_copie);
+        Ok(())
+    }
 
-#[test]
-fn version() -> Result<()> {
-    let v1 = Version::parse("1.0.0")?;
-    let v2 = Version::parse("2.0.0")?;
-    let v3 = Version::parse("3.0.0")?;
-    assert!(v2 > v1);
-    assert!(v2 < v3);
-    let v1_1 = Version::parse("1.1.0")?;
-    assert!(v1_1 > v1);
-    let v1_1_1 = Version::parse("1.1.1")?;
-    assert!(v1_1_1 > v1_1);
-    Ok(())
+    #[test]
+    fn version() -> Result<()> {
+        let v1 = Version::parse("1.0.0")?;
+        let v2 = Version::parse("2.0.0")?;
+        let v3 = Version::parse("3.0.0")?;
+        assert!(v2 > v1);
+        assert!(v2 < v3);
+        let v1_1 = Version::parse("1.1.0")?;
+        assert!(v1_1 > v1);
+        let v1_1_1 = Version::parse("1.1.1")?;
+        assert!(v1_1_1 > v1_1);
+        Ok(())
+    }
 }

@@ -14,7 +14,7 @@
 
 #![deny(clippy::all)]
 
-use anyhow::{Context, Result};
+use crate::runtime::error::Error;
 use async_std::{fs::read_to_string, path::PathBuf};
 use log::{error, info};
 use north::runtime;
@@ -45,12 +45,21 @@ async fn main() {
     })
 }
 
-async fn run() -> Result<()> {
+async fn run() -> Result<(), Error> {
     let opt = Opt::from_args();
-    let config: Config = toml::from_str(&read_to_string(&opt.config).await?).context(format!(
-        "Failed to read configuration file {}",
-        opt.config.display()
-    ))?;
+    let config_string =
+        &read_to_string(&opt.config)
+            .await
+            .map_err(|e| Error::GeneralIoProblem {
+                context: format!("Failed to read configuration file {}", opt.config.display()),
+                error: e,
+            })?;
+    let config: Config = toml::from_str(config_string).map_err(|_| {
+        Error::ConfigurationError(format!(
+            "Failed to read configuration file {}",
+            opt.config.display()
+        ))
+    })?;
 
     let log_filter = if opt.debug || config.debug {
         "north=debug"

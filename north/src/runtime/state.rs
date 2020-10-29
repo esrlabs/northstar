@@ -28,7 +28,6 @@ use crate::{
         Event, EventTx, NotificationTx,
     },
 };
-use anyhow::{anyhow, Result};
 use async_std::{
     fs,
     path::{Path, PathBuf},
@@ -127,10 +126,10 @@ impl State {
         config: &Config,
         tx: EventTx,
         notification_tx: NotificationTx,
-    ) -> Result<State> {
+    ) -> Result<State, Error> {
         // Load keys for manifest verification
         let key_dir: PathBuf = config.directories.key_dir.clone().into();
-        let signing_keys = keys::load(&key_dir).await?;
+        let signing_keys = keys::load(&key_dir).await.map_err(Error::KeyError)?;
 
         Ok(State {
             events_tx: tx,
@@ -257,13 +256,13 @@ impl State {
                 self.events_tx.clone(),
             )
             .await
-            .map_err(Error::ProcessError)?;
+            .map_err(Error::CGroupProblem)?;
 
             log::debug!("Assigning {} to cgroup {}", process.pid(), app);
             cgroups
                 .assign(process.pid())
                 .await
-                .map_err(Error::ProcessError)?;
+                .map_err(Error::CGroupProblem)?;
             Some(cgroups)
         } else {
             None
@@ -276,6 +275,12 @@ impl State {
             #[cfg(any(target_os = "android", target_os = "linux"))]
             cgroups,
         });
+        self.notification_tx
+            .send(Notification::ApplicationStarted(
+                name.to_owned(),
+                app.container.manifest.version.clone(),
+            ))
+            .await;
         info!("Started {}", app);
 
         Ok(())
@@ -297,10 +302,16 @@ impl State {
                 {
                     if let Some(cgroups) = context.cgroups {
                         log::debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::ProcessError)?;
+                        cgroups.destroy().await.map_err(Error::CGroupProblem)?;
                     }
                 }
 
+                self.notification_tx
+                    .send(Notification::ApplicationStopped(
+                        name.to_owned(),
+                        app.container.manifest.version.clone(),
+                    ))
+                    .await;
                 info!("Stopped {} {:?}", app, status);
                 Ok(())
             } else {
@@ -323,9 +334,12 @@ impl State {
                 info!("Removing {}", name);
                 crate::runtime::npk::uninstall(container)
                     .await
-                    .map_err(Error::ProcessError)?;
+                    .map_err(Error::UninstallationError)?;
             }
 
+            self.notification_tx
+                .send(Notification::ShutdownOccurred)
+                .await;
             self.events_tx.send(Event::Shutdown).await;
             Ok(())
         } else {
@@ -341,8 +355,8 @@ impl State {
     // checks if the application within the npk has an id (name) that is the same
     // as one of the already installed applications
     // returns the application id if it was installed, otherwise None
-    async fn npk_id_and_version(&self, npk: &Path) -> Result<(Name, Version)> {
-        id_and_version(npk.into(), &self.signing_keys)
+    async fn npk_id_and_version(&self, npk: &Path) -> Result<(Name, Version), Error> {
+        id_and_version(npk.into(), &self.signing_keys).map_err(Error::InstallationError)
     }
 
     /// Install a npk from give path
@@ -498,29 +512,39 @@ impl State {
 
             // remove npk from registry
             for d in &self.config.directories.container_dirs {
-                let mut dir = fs::read_dir(&d)
-                    .await
-                    .map_err(|_| Error::UninstallationError(anyhow!("Could not read directory")))?;
+                let mut dir = fs::read_dir(&d).await.map_err(|e| {
+                    Error::UninstallationError(InstallFailure::FileIoProblem {
+                        context: "Could not read directory".to_string(),
+                        error: e,
+                    })
+                })?;
                 while let Some(res) = dir.next().await {
-                    let entry = res.map_err(|_| {
-                        Error::UninstallationError(anyhow!("Could not read directory"))
+                    let entry = res.map_err(|e| {
+                        Error::UninstallationError(InstallFailure::FileIoProblem {
+                            context: "Could not read directory".to_string(),
+                            error: e,
+                        })
                     })?;
                     let manifest =
                         extract_manifest(entry.path().as_path().into(), &self.signing_keys)
-                            .map_err(|_| {
-                                Error::UninstallationError(anyhow!("Trouble with npk path"))
-                            })?;
+                            .map_err(Error::UninstallationError)?;
 
                     if manifest.name == name && manifest.version == *version {
-                        fs::remove_file(&entry.path()).await.map_err(|_| {
-                            Error::UninstallationError(anyhow!(
-                                "Could not remove npk {}",
-                                entry.path().to_string_lossy()
-                            ))
+                        fs::remove_file(&entry.path()).await.map_err(|e| {
+                            Error::UninstallationError(InstallFailure::FileIoProblem {
+                                context: format!(
+                                    "Could not remove npk {}",
+                                    entry.path().to_string_lossy()
+                                ),
+                                error: e,
+                            })
                         })?;
                     }
                 }
             }
+            self.notification_tx
+                .send(Notification::Uninstalled(name.to_owned()))
+                .await;
         }
 
         Ok(())
@@ -528,7 +552,7 @@ impl State {
 
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally
-    pub async fn on_exit(&mut self, name: &str, exit_status: &ExitStatus) -> Result<()> {
+    pub async fn on_exit(&mut self, name: &str, exit_status: &ExitStatus) -> Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(context) = app.process.take() {
                 info!(
@@ -543,9 +567,12 @@ impl State {
                     let mut context = context;
                     if let Some(cgroups) = context.cgroups.take() {
                         log::debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await?;
+                        cgroups.destroy().await.map_err(Error::CGroupProblem)?;
                     }
                 }
+                self.notification_tx
+                    .send(Notification::ApplicationExited(name.to_owned()))
+                    .await;
             }
         }
         Ok(())

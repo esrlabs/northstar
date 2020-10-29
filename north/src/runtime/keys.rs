@@ -12,35 +12,53 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{Context, Result};
+use crate::runtime::error::KeyError;
 use async_std::{fs, path::Path};
 use ed25519_dalek::PublicKey;
 use futures::{AsyncReadExt, StreamExt};
 use log::info;
 use std::collections::HashMap;
 
-pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>> {
+pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, KeyError> {
     let mut signing_keys = HashMap::new();
     let mut key_dir = fs::read_dir(&key_dir)
         .await
-        .with_context(|| format!("Failed to open {}", key_dir.display()))?;
+        .map_err(|e| KeyError::ProblemWithFile {
+            context: format!("Failed to open {}", key_dir.display()),
+            error: e,
+        })?;
     while let Some(entry) = key_dir.next().await {
-        let entry = entry.context("Invalid key dir entry")?;
+        let entry = entry.map_err(|e| KeyError::ProblemWithFile {
+            context: "Invalid key dir entry".to_string(),
+            error: e,
+        })?;
+        // .context("Invalid key dir entry")?;
         let path = entry.path();
         if let Some(extension) = path.extension() {
             if extension == "pub" && path.is_file().await {
                 if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {
                     info!("Loading signing key {}", key_id);
-                    let mut sign_key_file = fs::File::open(&path)
-                        .await
-                        .with_context(|| format!("Failed to open {}", path.display()))?;
+                    let mut sign_key_file =
+                        fs::File::open(&path)
+                            .await
+                            .map_err(|e| KeyError::ProblemWithFile {
+                                context: format!("Failed to open {}", path.display()),
+                                error: e,
+                            })?;
                     let mut key_bytes = Vec::new();
                     sign_key_file
                         .read_to_end(&mut key_bytes)
                         .await
-                        .with_context(|| format!("Failed to read {}", path.display()))?;
-                    let key = PublicKey::from_bytes(&key_bytes)
-                        .with_context(|| format!("Failed to load key from {}", path.display()))?;
+                        .map_err(|e| KeyError::ProblemWithFile {
+                            context: format!("Failed to read {}", path.display()),
+                            error: e,
+                        })?;
+                    let key = PublicKey::from_bytes(&key_bytes).map_err(|_| {
+                        KeyError::SignatureCorrupt(format!(
+                            "Signature error for key from {}",
+                            path.display()
+                        ))
+                    })?;
                     signing_keys.insert(key_id, key);
                 }
             }

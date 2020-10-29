@@ -17,7 +17,6 @@ use crate::{
     manifest::{Mount, Name, Version},
     runtime::{error::InstallFailure, npk::ArchiveReader, state::State},
 };
-use anyhow::{Context, Result};
 use async_std::{
     fs,
     os::unix,
@@ -27,7 +26,7 @@ use futures::stream::StreamExt;
 use log::{debug, info};
 use std::{io, process::Command};
 
-pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
+pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallFailure> {
     info!("Installing containers from {}", dir.display());
 
     lazy_static::lazy_static! {
@@ -43,7 +42,10 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<()> {
 
     let containers = fs::read_dir(&dir)
         .await
-        .with_context(|| format!("Failed to read {}", dir.display()))?
+        .map_err(|e| InstallFailure::FileIoProblem {
+            context: format!("Failed to read {}", dir.display()),
+            error: e,
+        })?
         .filter_map(move |d| async move { d.ok() })
         .map(|d| d.path())
         .filter_map(move |d| async move {
@@ -100,7 +102,7 @@ pub async fn install(
             debug!("Removing {}", root.display());
             fs::remove_dir_all(&root)
                 .await
-                .map_err(|e| InstallFailure::InternalError {
+                .map_err(|e| InstallFailure::FileIoProblem {
                     context: format!("Failed to remove {}", root.display()),
                     error: e,
                 })?;
@@ -114,12 +116,12 @@ pub async fn install(
         cmd.arg("-d");
         cmd.arg(root.display().to_string());
         cmd.arg(npk.display().to_string());
-        let output = cmd.output().map_err(|e| InstallFailure::InternalError {
+        let output = cmd.output().map_err(|e| InstallFailure::FileIoProblem {
             context: format!("Output error: {}", e),
             error: e,
         })?;
         if !output.status.success() {
-            return Err(InstallFailure::InternalError {
+            return Err(InstallFailure::FileIoProblem {
                 context: format!(
                     "Failed to unsquash: {}",
                     String::from_utf8_lossy(&output.stderr)
@@ -133,7 +135,7 @@ pub async fn install(
                 Mount::Bind { target, host, .. } => {
                     let source = &host;
                     let target = root.join(target.strip_prefix("/").map_err(|_| {
-                        InstallFailure::InternalError {
+                        InstallFailure::FileIoProblem {
                             context: "join error".to_string(),
                             error: io::Error::new(io::ErrorKind::Other, "join error"),
                         }
@@ -141,14 +143,14 @@ pub async fn install(
                     // The mount points are part of the squashfs - remove them and symlink
                     if target.exists().await {
                         fs::remove_dir(&target).await.map_err(|e| {
-                            InstallFailure::InternalError {
+                            InstallFailure::FileIoProblem {
                                 context: format!("Failed to rmdir {}", target.display()),
                                 error: e,
                             }
                         })?;
                     }
                     unix::fs::symlink(source, &target).await.map_err(|e| {
-                        InstallFailure::InternalError {
+                        InstallFailure::FileIoProblem {
                             context: format!(
                                 "Failed to link {} to {}",
                                 source.display(),
@@ -161,14 +163,14 @@ pub async fn install(
 
                 Mount::Persist { target, .. } => {
                     let dir = root.join(target.strip_prefix("/").map_err(|_| {
-                        InstallFailure::InternalError {
+                        InstallFailure::FileIoProblem {
                             context: "Failed to join".to_string(),
                             error: io::Error::new(io::ErrorKind::Other, "join error"),
                         }
                     })?);
                     fs::create_dir_all(&dir)
                         .await
-                        .map_err(|e| InstallFailure::InternalError {
+                        .map_err(|e| InstallFailure::FileIoProblem {
                             context: format!("Failed to create {}", dir.display()),
                             error: e,
                         })?;
@@ -188,9 +190,12 @@ pub async fn install(
     Ok((manifest.name, manifest.version))
 }
 
-pub async fn uninstall(container: &Container) -> Result<()> {
+pub async fn uninstall(container: &Container) -> Result<(), InstallFailure> {
     debug!("Removing {}", container.root.display());
     fs::remove_dir_all(&container.root)
         .await
-        .with_context(|| format!("Failed to remove {}", container.root.display()))
+        .map_err(|e| InstallFailure::FileIoProblem {
+            context: format!("Failed to remove {}", container.root.display()),
+            error: e,
+        })
 }

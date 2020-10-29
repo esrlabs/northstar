@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::runtime::error::DeviceMapperError;
-use anyhow::{anyhow, Context, Result};
 use async_std::task;
 use nix::libc::{c_ulong, ioctl as nix_ioctl};
 use std::{borrow::Cow, cmp, fmt, mem::size_of, os::unix::io::AsRawFd, path::Path, slice};
