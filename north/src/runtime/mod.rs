@@ -33,6 +33,7 @@ use config::Config;
 use log::*;
 use process::ExitStatus;
 use state::State;
+use std::collections::HashMap;
 
 pub type EventTx = sync::Sender<Event>;
 pub type NotificationTx = sync::Sender<Notification>;
@@ -64,6 +65,13 @@ pub enum Event {
     Shutdown,
     /// Stdout and stderr of child processes
     ChildOutput { name: Name, fd: i32, line: String },
+    /// Add or remove a subscriber to notifications
+    NotificationSubscription {
+        id: String,
+        subscriber: Option<NotificationTx>,
+    },
+    /// Notification events
+    Notification(Notification),
 }
 
 #[derive(Clone, Debug)]
@@ -83,12 +91,9 @@ pub async fn run(config: &Config) -> Result<(), Error> {
 
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
-    let (event_tx, event_rx) = sync::channel::<Event>(1000);
+    let (event_tx, event_rx) = sync::channel::<Event>(100);
 
-    // The notification channel is used to propagate notifications from the runtime
-    let (notification_tx, notification_rx) = sync::channel::<Notification>(1000);
-
-    let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
+    let mut state = State::new(config, event_tx.clone()).await?;
 
     // Ensure the configured run_dir exists
     // TODO: permission check of SETTINGS.directories.run_dir
@@ -137,10 +142,11 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     }
 
     // Initialize console
-    let console = console::Console::new(&config.console_address, &event_tx, notification_rx);
+    let console = console::Console::new(&config.console_address, &event_tx);
     // and start servicing clients
     console.start_listening().await?;
 
+    let mut subscriber_map = HashMap::new();
     // Enter main loop
     while let Ok(event) = event_rx.recv().await {
         match event {
@@ -182,6 +188,22 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             }
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => break,
+            Event::NotificationSubscription { id, subscriber } => match subscriber {
+                Some(tx) => {
+                    debug!("New notification subscriber: {}", id);
+                    subscriber_map.insert(id, tx);
+                }
+                None => {
+                    debug!("Unsubscribed notification subscriber: {}", id);
+                    subscriber_map.remove(&id);
+                }
+            },
+            Event::Notification(notification) => {
+                for (id, subscriber) in subscriber_map.iter() {
+                    debug!("Give notification to subscriber {}", id);
+                    subscriber.send(notification.clone()).await;
+                }
+            }
         }
     }
 

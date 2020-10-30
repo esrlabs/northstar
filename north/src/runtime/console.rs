@@ -16,7 +16,7 @@ use super::state::State;
 use crate::{
     api,
     api::{InstallationResult, MessageId, Notification},
-    runtime::{error::Error, Event, EventTx, NotificationRx},
+    runtime::{error::Error, Event, EventTx},
 };
 use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
@@ -38,15 +38,13 @@ use log::{debug, error, info, warn};
 use tempfile::tempdir;
 
 pub struct Console {
-    notification_rx: NotificationRx,
     event_tx: EventTx,
     address: String,
 }
 
 impl Console {
-    pub fn new(address: &str, tx: &EventTx, notification_rx: NotificationRx) -> Self {
+    pub fn new(address: &str, tx: &EventTx) -> Self {
         Self {
-            notification_rx,
             event_tx: tx.clone(),
             address: address.to_owned(),
         }
@@ -130,8 +128,6 @@ impl Console {
     pub async fn start_listening(&self) -> Result<(), Error> {
         debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
-        let notification_rx = self.notification_rx.clone();
-
         let listener =
             TcpListener::bind(&self.address)
                 .await
@@ -145,13 +141,11 @@ impl Console {
 
             // Spawn a task for each incoming connection.
             while let Some(stream) = incoming.next().await {
-                let tx_clone = event_tx.clone();
-                let notification_rx_clone = notification_rx.clone();
+                let event_tx_clone = event_tx.clone();
+                // let notification_rx_clone = notification_rx.clone();
                 if let Ok(stream) = stream {
                     task::spawn(async move {
-                        if let Err(e) =
-                            connection_loop(stream, tx_clone, notification_rx_clone).await
-                        {
+                        if let Err(e) = connection_loop(stream, event_tx_clone).await {
                             warn!("Error servicing connection: {}", e);
                         }
                     });
@@ -236,7 +230,7 @@ struct MessageWithData {
 
 async fn receive_message_from_socket<R: Read + Unpin>(
     reader: &mut R,
-    message_tx: &sync::Sender<MessageWithData>,
+    message_tx: &sync::Sender<Option<MessageWithData>>,
     tmp_installation_dir: &std::path::Path,
 ) -> Result<(), Error> {
     // Read frame length
@@ -303,7 +297,7 @@ async fn receive_message_from_socket<R: Read + Unpin>(
             path: None,
         },
     };
-    message_tx.send(msg_with_data).await;
+    message_tx.send(Some(msg_with_data)).await;
     Ok(())
 }
 
@@ -327,14 +321,13 @@ fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Messa
         loop {
             match client_rx.recv().await {
                 Ok(msg_to_send) => {
-                    debug!("Need to send something to client");
                     if let Err(e) = send_reply(&msg_to_send, &mut writer).await {
                         warn!("Error sending back to client: {}", e);
                         break;
                     }
                 }
-                Err(e) => {
-                    warn!("Error receiving send job: {}", e);
+                Err(_) => {
+                    debug!("Stop sending task");
                     break;
                 }
             }
@@ -345,47 +338,52 @@ fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Messa
 fn start_receiving_from_socket(
     reader: &TcpStream,
     tmp_installation_dir: std::path::PathBuf,
-    message_tx: sync::Sender<MessageWithData>,
+    message_tx: sync::Sender<Option<MessageWithData>>,
 ) {
     let reader = reader.clone();
     let _ = task::spawn(async move {
         let mut buf_reader: io::BufReader<&TcpStream> = io::BufReader::new(&reader);
-        // TODO listen for shutdown
         loop {
             if let Err(e) =
                 receive_message_from_socket(&mut buf_reader, &message_tx, &tmp_installation_dir)
                     .await
             {
                 warn!("Error receiving from socket: {}", e);
+                message_tx.send(None).await;
                 break;
             }
         }
     });
 }
 
-async fn connection_loop(
-    stream: TcpStream,
-    mut event_tx: EventTx,
-    notification_rx: NotificationRx,
-) -> Result<(), Error> {
+async fn connection_loop(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Error> {
     let peer = stream.peer_addr().map_err(|e| Error::GeneralIoProblem {
         context: "Failed to get peer from command connection".to_string(),
         error: e,
     })?;
     debug!("Client {:?} connected", peer);
 
+    let (notify_sender, notify_receiver) = sync::channel::<Notification>(10);
+    let subscription_id = uuid::Uuid::new_v4().to_string();
+    let subscription_event = Event::NotificationSubscription {
+        id: subscription_id.clone(),
+        subscriber: Some(notify_sender),
+    };
+    event_tx.send(subscription_event).await;
+
     enum ConsoleEvent {
         SystemEvent(Notification),
         ApiMessage(MessageWithData),
+        ClientDisconnect,
     }
 
     let (reader, writer) = &mut (&stream, &stream);
     let (mut message_tx, mut message_rx) = sync::channel::<Message>(1);
 
     // channel for sending messages back to client
-    let (client_tx, client_rx) = sync::channel::<Message>(100);
+    let (client_tx, client_rx) = sync::channel::<Message>(10);
 
-    let (socket_tx, socket_rx) = sync::channel::<MessageWithData>(1);
+    let (socket_tx, socket_rx) = sync::channel::<Option<MessageWithData>>(1);
     let tmp_installation_dir = tempdir().map_err(|e| Error::GeneralIoProblem {
         context: "Error creating temp installation dir".to_string(),
         error: e,
@@ -399,16 +397,20 @@ async fn connection_loop(
 
     start_sending_over_socket(writer, client_rx);
 
-    let message_event_stream: futures::stream::Map<async_std::sync::Receiver<MessageWithData>, _> =
-        socket_rx.map(ConsoleEvent::ApiMessage);
+    let message_event_stream: futures::stream::Map<
+        async_std::sync::Receiver<Option<MessageWithData>>,
+        _,
+    > = socket_rx.map(|m| match m {
+        Some(msg) => ConsoleEvent::ApiMessage(msg),
+        None => ConsoleEvent::ClientDisconnect,
+    });
     let runtime_event_stream: futures::stream::Map<async_std::sync::Receiver<Notification>, _> =
-        notification_rx.map(ConsoleEvent::SystemEvent);
+        notify_receiver.map(ConsoleEvent::SystemEvent);
     let mut event_stream = futures::stream::select(message_event_stream, runtime_event_stream);
 
     while let Some(event) = event_stream.next().await {
         match event {
             ConsoleEvent::SystemEvent(n) => {
-                debug!("Handle system notification");
                 let reply = Message {
                     id: "Notification".to_owned(),
                     payload: Payload::Notification(n),
@@ -416,7 +418,6 @@ async fn connection_loop(
                 client_tx.send(reply).await;
             }
             ConsoleEvent::ApiMessage(m) => {
-                debug!("Handle incoming ApiMessage");
                 if let Err(e) = handle_api_request(
                     m,
                     client_tx.clone(),
@@ -433,8 +434,19 @@ async fn connection_loop(
                     break;
                 }
             }
+            ConsoleEvent::ClientDisconnect => {
+                debug!("Client disconnect, exit connection_loop");
+                break;
+            }
         }
     }
+    debug!("Connection loop for peer {} finished", peer);
+    event_tx
+        .send(Event::NotificationSubscription {
+            subscriber: None,
+            id: subscription_id,
+        })
+        .await;
 
     async fn handle_api_request(
         m: MessageWithData,
