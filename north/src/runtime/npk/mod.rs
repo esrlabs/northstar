@@ -12,11 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{
-    api::Name,
-    manifest::{Manifest, Version},
-    runtime::error::InstallFailure,
-};
+use crate::{manifest::Manifest, runtime::error::InstallFailure};
 use async_std::path::PathBuf;
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
@@ -201,14 +197,6 @@ pub fn extract_manifest(
 ) -> Result<Manifest, InstallFailure> {
     let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
     archive_reader.extract_manifest_from_archive()
-}
-
-pub fn id_and_version(
-    npk: &std::path::Path,
-    signing_keys: &HashMap<String, PublicKey>,
-) -> Result<(Name, Version), InstallFailure> {
-    let manifest = extract_manifest(&npk, &signing_keys)?;
-    Ok((manifest.name.clone(), manifest.version))
 }
 
 impl<'a> ArchiveReader<'a> {

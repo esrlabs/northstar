@@ -54,11 +54,38 @@ pub fn start_receiving_from_socket(
         loop {
             match receive_reply(&mut reader).await {
                 Ok(message) => match message.payload {
-                    Payload::Notification(n) => println!("Notification: {:?}", n),
+                    Payload::Notification(n) => match n {
+                        api::Notification::OutOfMemory(name) => {
+                            println!("{} was killed (out of memory)", name)
+                        }
+                        api::Notification::ApplicationExited {
+                            id,
+                            version,
+                            exit_info,
+                        } => {
+                            println!("{}-{} exited ({})", id, version, exit_info);
+                        }
+                        api::Notification::InstallationFinished(name, version) => {
+                            println!("{}-{} was installed", name, version)
+                        }
+                        api::Notification::Uninstalled(name, version) => {
+                            println!("{}-{} was uninstalled", name, version)
+                        }
+                        api::Notification::ApplicationStarted(name, version) => {
+                            println!("{}-{} was started", name, version)
+                        }
+                        api::Notification::ApplicationStopped(name, version) => {
+                            println!("{}-{} was stopped", name, version)
+                        }
+                        api::Notification::ShutdownOccurred => {
+                            println!("North daemon was shut down");
+                            break;
+                        }
+                    },
                     Payload::Response(r) => {
                         let _ = response_sender.send(r);
                     }
-                    _ => log::warn!("received unexpected payload"),
+                    _ => log::warn!("Received unexpected payload"),
                 },
                 Err(e) => {
                     log::warn!("Error receiving from socket: {}", e);
@@ -70,10 +97,7 @@ pub fn start_receiving_from_socket(
     Ok(sender)
 }
 
-pub(crate) async fn run<S: AsyncWriteExt + Unpin>(
-    stream: &mut S,
-    req: Request,
-) -> Result<(), NstarError> {
+async fn run<S: AsyncWriteExt + Unpin>(stream: &mut S, req: Request) -> Result<(), NstarError> {
     // Send request
     let request_msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
@@ -231,21 +255,22 @@ pub(crate) async fn start<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a s
             {
                 run(stream, Request::Start(container.manifest.name.clone())).await?;
                 match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
-                    Ok(resp) => println!(
-                        "Started {}:{}: {:?}",
-                        container.manifest.name, container.manifest.version, resp
-                    ),
+                    Ok(Response::Start { result }) => match result {
+                        api::StartResult::Success => println!("start succeeded"),
+                        api::StartResult::Error(s) => println!("start failed: {}", s),
+                    },
+                    Ok(x) => println!("Received wrong response for start command ({:?})", x),
                     Err(e) => println!("Error starting container(s): {}", e),
                 }
             }
             Ok(())
         }
         Ok(r) => Err(NstarError::ProtocolError(format!(
-            "Did receive wrong response for start request: {:?}",
+            "Did receive wrong response for container request: {:?}",
             r
         ))),
         Err(e) => Err(NstarError::OperationError(format!(
-            "Error receiving response for start request: {}",
+            "Error receiving response for container request: {}",
             e
         ))),
     }
@@ -269,10 +294,11 @@ pub(crate) async fn stop<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &'a st
             {
                 run(stream, Request::Stop(container.manifest.name.clone())).await?;
                 match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
-                    Ok(response) => println!(
-                        "Stopped {}:{}: {:?}",
-                        container.manifest.name, container.manifest.version, response
-                    ),
+                    Ok(Response::Stop { result }) => match result {
+                        api::StopResult::Success => println!("stop succeeded"),
+                        api::StopResult::Error(s) => println!("stop failed: {}", s),
+                    },
+                    Ok(x) => println!("Received wrong response for stop command ({:?})", x),
                     Err(e) => println!("Error stopping container(s): {}", e),
                 }
             }
@@ -334,8 +360,12 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
 
     log::debug!("Sent out update ({} bytes)...waiting for reply", sent_bytes);
 
-    match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await {
-        Ok(r) => println!("Installation of {} {:?}", path_s, r),
+    match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
+        Ok(Response::Install { result }) => match result {
+            api::InstallationResult::Success => println!("install succeeded"),
+            failed => println!("install failed: {:?}", failed),
+        },
+        Ok(x) => println!("Received wrong response for install command ({:?})", x),
         Err(_) => println!(
             "Timeout while waiting for installation response: {}ms",
             RESPONSE_TIMEOUT.as_millis()
