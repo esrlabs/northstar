@@ -24,7 +24,7 @@ use crate::{
     runtime::{
         error::{Error, InstallFailure},
         npk,
-        npk::{extract_manifest, id_and_version},
+        npk::extract_manifest,
         Event, EventTx,
     },
 };
@@ -346,13 +346,6 @@ impl State {
         }
     }
 
-    // checks if the application within the npk has an id (name) that is the same
-    // as one of the already installed applications
-    // returns the application id if it was installed, otherwise None
-    async fn npk_id_and_version(&self, npk: &Path) -> Result<(Name, Version), Error> {
-        id_and_version(npk.into(), &self.signing_keys).map_err(Error::InstallationError)
-    }
-
     /// Install a npk from give path
     pub async fn install(
         &mut self,
@@ -424,7 +417,7 @@ impl State {
                     }
                 }
                 match npk::install(self, npk).await {
-                    Ok(_) => {
+                    Ok((name, version)) => {
                         info!("Installation succeeded!");
                         let _ = self
                             .events_tx
@@ -439,10 +432,7 @@ impl State {
                         // generate notification for installation event
                         self.events_tx
                             .send(Event::Notification(Notification::InstallationFinished(
-                                self.npk_id_and_version(&npk)
-                                    .await
-                                    .map(|(name, _version)| name)
-                                    .unwrap_or(format!("{}", npk.to_string_lossy())),
+                                name, version,
                             )))
                             .await;
                     }
@@ -539,6 +529,7 @@ impl State {
             self.events_tx
                 .send(Event::Notification(Notification::Uninstalled(
                     name.to_owned(),
+                    version.clone(),
                 )))
                 .await;
         }
@@ -566,10 +557,16 @@ impl State {
                         cgroups.destroy().await.map_err(Error::CGroupProblem)?;
                     }
                 }
+                let exit_info = match exit_status {
+                    ExitStatus::Exit(c) => format!("Exited with code {}", c),
+                    ExitStatus::Signaled(s) => format!("Terminated by signal {}", s.as_str()),
+                };
                 self.events_tx
-                    .send(Event::Notification(Notification::ApplicationExited(
-                        name.to_owned(),
-                    )))
+                    .send(Event::Notification(Notification::ApplicationExited {
+                        id: name.to_owned(),
+                        version: app.container.manifest.version.clone(),
+                        exit_info,
+                    }))
                     .await;
             }
         }

@@ -22,9 +22,13 @@ pub enum Payload {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
     OutOfMemory(Name),
-    ApplicationExited(Name),
-    InstallationFinished(Name),
-    Uninstalled(Name),
+    ApplicationExited {
+        id: Name,
+        version: Version,
+        exit_info: String,
+    },
+    InstallationFinished(Name, Version),
+    Uninstalled(Name, Version),
     ApplicationStarted(Name, Version),
     ApplicationStopped(Name, Version),
     ShutdownOccurred,
