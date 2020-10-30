@@ -80,7 +80,7 @@ for example_dir in "${EXAMPLES[@]}"; do
     fi
 
     echo "Creating NPK (${name})"
-    ./sextant/target/release/sextant \
+    ./target/release/sextant \
       pack \
       --dir "${TMP_DIR}" \
       --out "${REGISTRY_DIR}" \

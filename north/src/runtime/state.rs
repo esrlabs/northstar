@@ -25,7 +25,7 @@ use crate::{
         error::{Error, InstallFailure},
         npk,
         npk::{extract_manifest, id_and_version},
-        Event, EventTx, NotificationTx,
+        Event, EventTx,
     },
 };
 use async_std::{
@@ -45,7 +45,6 @@ use time::Duration;
 #[derive(Debug)]
 pub struct State {
     events_tx: EventTx,
-    notification_tx: NotificationTx,
     pub signing_keys: HashMap<String, PublicKey>,
     pub applications: HashMap<Name, Application>,
     pub resources: HashMap<(Name, Version), Application>,
@@ -122,18 +121,13 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub async fn new(
-        config: &Config,
-        tx: EventTx,
-        notification_tx: NotificationTx,
-    ) -> Result<State, Error> {
+    pub async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         // Load keys for manifest verification
         let key_dir: PathBuf = config.directories.key_dir.clone().into();
         let signing_keys = keys::load(&key_dir).await.map_err(Error::KeyError)?;
 
         Ok(State {
             events_tx: tx,
-            notification_tx,
             signing_keys,
             applications: HashMap::new(),
             resources: HashMap::new(),
@@ -275,11 +269,11 @@ impl State {
             #[cfg(any(target_os = "android", target_os = "linux"))]
             cgroups,
         });
-        self.notification_tx
-            .send(Notification::ApplicationStarted(
+        self.events_tx
+            .send(Event::Notification(Notification::ApplicationStarted(
                 name.to_owned(),
                 app.container.manifest.version.clone(),
-            ))
+            )))
             .await;
         info!("Started {}", app);
 
@@ -306,11 +300,11 @@ impl State {
                     }
                 }
 
-                self.notification_tx
-                    .send(Notification::ApplicationStopped(
+                self.events_tx
+                    .send(Event::Notification(Notification::ApplicationStopped(
                         name.to_owned(),
                         app.container.manifest.version.clone(),
-                    ))
+                    )))
                     .await;
                 info!("Stopped {} {:?}", app, status);
                 Ok(())
@@ -337,8 +331,8 @@ impl State {
                     .map_err(Error::UninstallationError)?;
             }
 
-            self.notification_tx
-                .send(Notification::ShutdownOccurred)
+            self.events_tx
+                .send(Event::Notification(Notification::ShutdownOccurred))
                 .await;
             self.events_tx.send(Event::Shutdown).await;
             Ok(())
@@ -443,13 +437,13 @@ impl State {
                             ))
                             .await;
                         // generate notification for installation event
-                        self.notification_tx
-                            .send(Notification::InstallationFinished(
+                        self.events_tx
+                            .send(Event::Notification(Notification::InstallationFinished(
                                 self.npk_id_and_version(&npk)
                                     .await
                                     .map(|(name, _version)| name)
                                     .unwrap_or(format!("{}", npk.to_string_lossy())),
-                            ))
+                            )))
                             .await;
                     }
                     Err(e) => {
@@ -542,8 +536,10 @@ impl State {
                     }
                 }
             }
-            self.notification_tx
-                .send(Notification::Uninstalled(name.to_owned()))
+            self.events_tx
+                .send(Event::Notification(Notification::Uninstalled(
+                    name.to_owned(),
+                )))
                 .await;
         }
 
@@ -570,8 +566,10 @@ impl State {
                         cgroups.destroy().await.map_err(Error::CGroupProblem)?;
                     }
                 }
-                self.notification_tx
-                    .send(Notification::ApplicationExited(name.to_owned()))
+                self.events_tx
+                    .send(Event::Notification(Notification::ApplicationExited(
+                        name.to_owned(),
+                    )))
                     .await;
             }
         }
@@ -592,8 +590,10 @@ impl State {
                     .stop(Duration::from_secs(1))
                     .await
                     .map_err(Error::ProcessError)?;
-                self.notification_tx
-                    .send(Notification::OutOfMemory(name.to_owned()))
+                self.events_tx
+                    .send(Event::Notification(Notification::OutOfMemory(
+                        name.to_owned(),
+                    )))
                     .await;
             }
         }
