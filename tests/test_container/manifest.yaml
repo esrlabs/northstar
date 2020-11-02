@@ -12,3 +12,5 @@ mounts:
       host: /lib64
     /system:
       host: /system
+    /tmpfs:
+      size: 20480000
