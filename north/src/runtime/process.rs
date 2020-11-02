@@ -524,6 +524,9 @@ pub mod minijail {
 
                     mount_bind(jail, &shared_resource_path, target.as_path().into(), false)?;
                 }
+                Mount::Tmpfs { target, size } => {
+                    mount_tmpfs(jail, target.as_path().into(), size)?;
+                }
             }
         }
         Ok(())
@@ -544,6 +547,18 @@ pub mod minijail {
             if rw { " (rw)" } else { "" }
         );
         jail.mount_bind(&source, &target, rw)
+            .map_err(ProcessError::MinijailProblem)
+    }
+
+    fn mount_tmpfs(
+        jail: &mut ::minijail::Minijail,
+        target: &Path,
+        size: &str,
+    ) -> Result<(), ProcessError> {
+        let target: &std::path::Path = target.into();
+        debug!("Mounting tmpfs to {}", target.display());
+        let data = format!("size={},mode=1777", size);
+        jail.mount_with_data(Path::new("none").into(), &target, "tmpfs", 0, &data)
             .map_err(ProcessError::MinijailProblem)
     }
 

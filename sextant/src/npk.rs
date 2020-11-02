@@ -278,6 +278,15 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<Vec<(&str, u32)>> {
                     mode,
                 ));
             }
+            Mount::Tmpfs { target, .. } => {
+                let mode = 777;
+                pseudo_files.push((
+                    target
+                        .to_str()
+                        .with_context(|| "Cannot convert manifest mount point to string")?,
+                    mode,
+                ));
+            }
         }
     }
     Ok(pseudo_files)

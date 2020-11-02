@@ -136,7 +136,7 @@ pub enum MountFlag {
     // NoSuid,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
     Resource {
         target: std::path::PathBuf,
@@ -152,6 +152,10 @@ pub enum Mount {
     Persist {
         target: std::path::PathBuf,
         flags: HashSet<MountFlag>,
+    },
+    Tmpfs {
+        target: std::path::PathBuf,
+        size: String,
     },
 }
 
@@ -200,6 +204,10 @@ enum MountSource {
     Resource {
         resource: String,
     },
+    Tmpfs {
+        #[serde(deserialize_with = "deserialize_to_size_string")]
+        size: String,
+    },
     Bind {
         host: std::path::PathBuf,
         #[serde(default)]
@@ -209,6 +217,30 @@ enum MountSource {
         #[serde(default)]
         flags: HashSet<MountFlag>,
     },
+}
+
+fn deserialize_to_size_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct SizeVisitor;
+
+    impl<'de> Visitor<'de> for SizeVisitor {
+        type Value = String;
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(format!("{}", v))
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(v.to_owned())
+        }
+    }
+
+    deserializer.deserialize_any(SizeVisitor)
 }
 
 impl MountsSerialization {
@@ -247,6 +279,9 @@ impl MountsSerialization {
                         resource: format!("{}:{}{}", name, version, dir.display()),
                     },
                 )?,
+                Mount::Tmpfs { target, size } => {
+                    map.serialize_entry(&target, &MountSource::Tmpfs { size: size.clone() })?
+                }
             }
         }
         map.end()
@@ -272,6 +307,7 @@ impl MountsSerialization {
                             host,
                             flags,
                         },
+                        MountSource::Tmpfs { size } => Mount::Tmpfs { target, size },
                         MountSource::Persist { flags } => Mount::Persist { target, flags },
                         MountSource::Resource { resource } => {
                             lazy_static! {
@@ -393,6 +429,10 @@ mounts:
           - rw
     /here/we/go:
         resource: bla:1.0.0/bin/foo
+    /tmpfs:
+        size: 42
+    /big_tmpfs:
+        size: 42G
 autostart: true
 cgroups:
   mem:
@@ -447,6 +487,14 @@ log:
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo").into(),
             },
+            Mount::Tmpfs {
+                target: std::path::PathBuf::from("/tmpfs"),
+                size: "42".to_string(),
+            },
+            Mount::Tmpfs {
+                target: std::path::PathBuf::from("/big_tmpfs"),
+                size: "42G".to_string(),
+            },
         ];
         assert_eq!(manifest.mounts, mounts);
         assert_eq!(
@@ -487,6 +535,10 @@ mounts:
           - rw
     /here/we/go:
         resource: bla:1.0.0/bin/foo
+    /tmpfs:
+        size: 42
+    /big_tmpfs:
+        size: 42G
 autostart: true
 cgroups:
   mem:
