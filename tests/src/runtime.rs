@@ -101,7 +101,8 @@ impl Runtime {
     pub async fn expect_output(&mut self, regex: &str) -> Result<Vec<String>> {
         self.output
             .captures(regex)
-            .await?
+            .or_timeout(TIMEOUT)
+            .await??
             .ok_or_else(|| anyhow!("Pattern not found"))
     }
 

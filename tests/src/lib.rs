@@ -21,7 +21,7 @@ pub mod util;
 #[cfg(test)]
 mod test {
     use crate::{runtime::Runtime, util::Timeout};
-    use anyhow::{Context, Result};
+    use anyhow::Result;
     use async_std::{fs, path::Path};
 
     fn init_logger() {
@@ -93,16 +93,20 @@ mod test {
         let input_file = data_dir.join("input.txt");
 
         // Write the input to the test_container
-        fs::write(&input_file, b"echo hello there!").await?;
+        fs::write(
+            &input_file,
+            b"echo foo
+            touch /tmpfs/foo
+            write bar /tmpfs/foo
+            cat /tmpfs/foo",
+        )
+        .await?;
 
         // Start the test_container process
         runtime.start("test_container-000").await.map(drop)?;
 
-        runtime
-            .expect_output("hello there!")
-            .or_timeout_in_secs(5)
-            .await?
-            .context("Failed to find expected test_container output")?;
+        runtime.expect_output("test_container-000: 1: foo").await?;
+        runtime.expect_output("test_container-000: 1: bar").await?;
 
         runtime.try_stop("test_container-000").await?;
 
