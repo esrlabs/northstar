@@ -1219,14 +1219,13 @@ checksum = "0f2d26ec3309788e423cfbf68ad1800f061638098d76a83681af979dc4eda19d"
 dependencies = [
  "adler",
  "autocfg",
-<<<<<<< HEAD
 ]
 
 [[package]]
 name = "mio"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8f1c83949125de4a582aa2da15ae6324d91cf6a58a70ea407643941ff98f558"
+checksum = "8962c171f57fcfffa53f4df1bb15ec4c8cf26a7569459c9ceb62d94aab0d9584"
 dependencies = [
  "libc",
  "log",
@@ -1243,8 +1242,6 @@ checksum = "07b88fb9795d4d36d62a012dfbf49a8f5cf12751f36d31a9dbe66d528e58979e"
 dependencies = [
  "socket2",
  "winapi",
-=======
->>>>>>> Cleanup of rakefile
 ]
 
 [[package]]

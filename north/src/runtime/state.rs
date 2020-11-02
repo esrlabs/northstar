@@ -369,11 +369,7 @@ impl State {
                     .await;
             }
             Ok(manifest) => {
-                let pkg_file_name = format!(
-                    "{}-{}.npk",
-                    manifest.name,
-                    manifest.version,
-                );
+                let pkg_file_name = format!("{}-{}.npk", manifest.name, manifest.version,);
                 log::debug!(
                     "Try to install {}, checking the installed apps",
                     manifest.name
