@@ -128,13 +128,12 @@ impl Console {
     pub async fn start_listening(&self) -> Result<(), Error> {
         debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
-        let listener =
-            TcpListener::bind(&self.address)
-                .await
-                .map_err(|e| Error::GeneralIoProblem {
-                    context: format!("Failed to open listener on {}", self.address),
-                    error: e,
-                })?;
+        let listener = TcpListener::bind(&self.address)
+            .await
+            .map_err(|e| Error::Io {
+                context: format!("Failed to open listener on {}", self.address),
+                error: e,
+            })?;
 
         task::spawn(async move {
             let mut incoming = listener.incoming();
@@ -235,13 +234,10 @@ async fn receive_message_from_socket<R: Read + Unpin>(
 ) -> Result<(), Error> {
     // Read frame length
     let mut buf = [0u8; 4];
-    reader
-        .read_exact(&mut buf)
-        .await
-        .map_err(|e| Error::GeneralIoProblem {
-            context: "Could not read length of network package".to_string(),
-            error: e,
-        })?;
+    reader.read_exact(&mut buf).await.map_err(|e| Error::Io {
+        context: "Could not read length of network package".to_string(),
+        error: e,
+    })?;
     let frame_len = BigEndian::read_u32(&buf) as usize;
 
     // Read payload
@@ -249,13 +245,13 @@ async fn receive_message_from_socket<R: Read + Unpin>(
     reader
         .read_exact(&mut buffer)
         .await
-        .map_err(|e| Error::GeneralIoProblem {
+        .map_err(|e| Error::Io {
             context: "Could not read network package".to_string(),
             error: e,
         })?;
 
     let message: Message = serde_json::from_slice(&buffer)
-        .map_err(|_| Error::ProtocolError("Could not parse protocol message".to_string()))?;
+        .map_err(|_| Error::Protocol("Could not parse protocol message".to_string()))?;
     let msg_with_data = match &message.payload {
         Payload::Installation(size) => {
             debug!("Incoming installation ({} bytes)", size);
@@ -271,7 +267,7 @@ async fn receive_message_from_socket<R: Read + Unpin>(
                 .append(true)
                 .open(&tmp_installation_file_path)
                 .await
-                .map_err(|e| Error::GeneralIoProblem {
+                .map_err(|e| Error::Io {
                     context: format!(
                         "Failed to create file {}",
                         tmp_installation_file_path.display()
@@ -281,7 +277,7 @@ async fn receive_message_from_socket<R: Read + Unpin>(
             let buf_writer = BufWriter::new(tmpfile);
             let received_bytes = io::copy(reader.take(*size as u64), buf_writer)
                 .await
-                .map_err(|e| Error::GeneralIoProblem {
+                .map_err(|e| Error::Io {
                     context: format!("Could not receive {} bytes", size),
                     error: e,
                 })?;
@@ -357,7 +353,7 @@ fn start_receiving_from_socket(
 }
 
 async fn connection_loop(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Error> {
-    let peer = stream.peer_addr().map_err(|e| Error::GeneralIoProblem {
+    let peer = stream.peer_addr().map_err(|e| Error::Io {
         context: "Failed to get peer from command connection".to_string(),
         error: e,
     })?;
@@ -384,7 +380,7 @@ async fn connection_loop(stream: TcpStream, mut event_tx: EventTx) -> Result<(),
     let (client_tx, client_rx) = sync::channel::<Message>(10);
 
     let (socket_tx, socket_rx) = sync::channel::<Option<MessageWithData>>(1);
-    let tmp_installation_dir = tempdir().map_err(|e| Error::GeneralIoProblem {
+    let tmp_installation_dir = tempdir().map_err(|e| Error::Io {
         context: "Error creating temp installation dir".to_string(),
         error: e,
     })?;

@@ -12,25 +12,29 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::error::InstallFailure;
+use crate::runtime::error::InstallationError;
 use async_std::{future, task};
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use std::{fs::metadata, path::Path, time::Duration};
 
-pub async fn wait_for_file_deleted(path: &Path, timeout: Duration) -> Result<(), InstallFailure> {
+pub async fn wait_for_file_deleted(
+    path: &Path,
+    timeout: Duration,
+) -> Result<(), InstallationError> {
     let my_path = path.to_owned();
 
     future::timeout(
         timeout,
         task::spawn_blocking(move || {
-            let inotify =
-                Inotify::init(InitFlags::IN_CLOEXEC).map_err(|e| InstallFailure::INotifyError {
+            let inotify = Inotify::init(InitFlags::IN_CLOEXEC).map_err(|e| {
+                InstallationError::INotifyError {
                     context: "Init inotify failed".to_string(),
                     error: e,
-                })?;
+                }
+            })?;
             inotify
                 .add_watch(&my_path, AddWatchFlags::IN_DELETE_SELF)
-                .map_err(|e| InstallFailure::INotifyError {
+                .map_err(|e| InstallationError::INotifyError {
                     context: "Add inotify watch failed".to_string(),
                     error: e,
                 })?;
@@ -43,7 +47,7 @@ pub async fn wait_for_file_deleted(path: &Path, timeout: Duration) -> Result<(),
 
                 inotify
                     .read_events()
-                    .map_err(|e| InstallFailure::INotifyError {
+                    .map_err(|e| InstallationError::INotifyError {
                         context: "Read inotify events failed".to_string(),
                         error: e,
                     })?;
@@ -51,7 +55,5 @@ pub async fn wait_for_file_deleted(path: &Path, timeout: Duration) -> Result<(),
         }),
     )
     .await
-    .map_err(|_| {
-        InstallFailure::TimeoutError(format!("Deletion of {} timed out", path.display()))
-    })?
+    .map_err(|_| InstallationError::Timeout(format!("Deletion of {} timed out", path.display())))?
 }

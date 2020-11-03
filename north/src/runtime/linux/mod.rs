@@ -41,10 +41,10 @@ pub async fn init(config: &Config) -> Result<(), Error> {
         None,
     )
     .await
-    .map_err(Error::InstallationError)?;
+    .map_err(Error::Installation)?;
 
     debug!("Entering mount namespace");
-    sched::unshare(sched::CloneFlags::CLONE_NEWNS).map_err(|e| Error::OsProblem {
+    sched::unshare(sched::CloneFlags::CLONE_NEWNS).map_err(|e| Error::Os {
         context: "Failed to enter mount namespace".to_string(),
         error: e,
     })?;
@@ -78,7 +78,7 @@ async fn init_minijail_log() -> Result<(), Error> {
             Level::Trace => SyslogLevel::MAX,
         };
 
-        let (readfd, writefd) = pipe().map_err(|e| Error::OsProblem {
+        let (readfd, writefd) = pipe().map_err(|e| Error::Os {
             context: "Failed to create pipe for minijail logs".to_string(),
             error: e,
         })?;

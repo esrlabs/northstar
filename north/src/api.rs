@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     manifest::{Manifest, Version},
-    runtime::error::InstallFailure,
+    runtime::error::InstallationError,
 };
 
 pub type Name = String;
@@ -145,49 +145,49 @@ pub enum ShutdownResult {
     Error(String), // TODO
 }
 
-impl From<InstallFailure> for InstallationResult {
-    fn from(failure: InstallFailure) -> InstallationResult {
+impl From<InstallationError> for InstallationResult {
+    fn from(failure: InstallationError) -> InstallationResult {
         match failure {
-            InstallFailure::FileCorrupted(_) => InstallationResult::FileCorrupted,
-            InstallFailure::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
-            InstallFailure::MalformedSignature => InstallationResult::MalformedSignature,
-            InstallFailure::MalformedHashes(_) => InstallationResult::MalformedHashes,
-            InstallFailure::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
-            InstallFailure::VerityProblem(s) => InstallationResult::VerityProblem(s),
-            InstallFailure::ArchiveError(s) => InstallationResult::ArchiveError(s),
+            InstallationError::Zip(_) => InstallationResult::FileCorrupted,
+            InstallationError::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
+            InstallationError::MalformedSignature => InstallationResult::MalformedSignature,
+            InstallationError::MalformedHashes(_) => InstallationResult::MalformedHashes,
+            InstallationError::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
+            InstallationError::VerityError(s) => InstallationResult::VerityProblem(s),
+            InstallationError::ArchiveError(s) => InstallationResult::ArchiveError(s),
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallFailure::DeviceMapper(e) => {
+            InstallationError::DeviceMapper(e) => {
                 InstallationResult::DeviceMapperProblem(format!("{:?}", e))
             }
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallFailure::LoopDeviceError(e) => {
+            InstallationError::LoopDeviceError(e) => {
                 InstallationResult::LoopDeviceError(format!("{}", e))
             }
-            InstallFailure::HashInvalid(s) => InstallationResult::HashInvalid(s),
-            InstallFailure::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
-            InstallFailure::ApplicationAlreadyInstalled(_) => {
+            InstallationError::HashInvalid(s) => InstallationResult::HashInvalid(s),
+            InstallationError::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
+            InstallationError::ApplicationAlreadyInstalled(_) => {
                 InstallationResult::ApplicationAlreadyInstalled
             }
-            InstallFailure::FileIoProblem { context, error: _ } => {
+            InstallationError::Io { context, error: _ } => {
                 InstallationResult::FileIoProblem(context)
             }
-            InstallFailure::MountError { context, error: _ } => {
+            InstallationError::MountError { context, error: _ } => {
                 InstallationResult::MountError(context)
             }
-            InstallFailure::INotifyError { context, error: _ } => {
+            InstallationError::INotifyError { context, error: _ } => {
                 InstallationResult::INotifyError(context)
             }
-            InstallFailure::TimeoutError(s) => InstallationResult::TimeoutError(s),
-            InstallFailure::NoVerityHeader => {
+            InstallationError::Timeout(s) => InstallationResult::TimeoutError(s),
+            InstallationError::NoVerityHeader => {
                 InstallationResult::VerityProblem("Verity header missing".to_string())
             }
-            InstallFailure::UnexpectedVerityAlgorithm(s) => {
+            InstallationError::UnexpectedVerityAlgorithm(s) => {
                 InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
             }
-            InstallFailure::UnexpectedVerityVersion(n) => {
+            InstallationError::UnexpectedVerityVersion(n) => {
                 InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
             }
-            InstallFailure::SignatureVerificationFailed(s) => {
+            InstallationError::SignatureVerificationError(s) => {
                 InstallationResult::SignatureVerificationFailed(s)
             }
         }

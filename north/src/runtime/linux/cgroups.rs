@@ -13,10 +13,11 @@
 //   limitations under the License.
 
 use super::super::super::runtime::{config, Event, EventTx};
-use crate::{manifest, runtime::error::CGroupError};
+use crate::manifest;
 use async_std::{
     fs,
     fs::OpenOptions,
+    io,
     path::{Path, PathBuf},
     prelude::*,
     sync, task,
@@ -25,6 +26,7 @@ use futures::{future::FutureExt, select};
 use log::{debug, warn};
 use proc_mounts::MountIter;
 use std::time::Duration;
+use thiserror::Error;
 
 const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
 const OOM_CONTROL: &str = "memory.oom_control";
@@ -32,13 +34,37 @@ const UNDER_OOM: &str = "under_oom 1";
 const CPU_SHARES: &str = "cpu.shares";
 const TASKS: &str = "tasks";
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Internal error: {0}")]
+    InternalError(String),
+    #[error("Problem destroying cgroug: {context}")]
+    DestroyError {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+    #[error("Problem mounting cgroup: {context}")]
+    MountProblem {
+        context: String,
+        #[source]
+        error: Option<io::Error>,
+    },
+    #[error("File problem cgroup: {context}")]
+    FileProblem {
+        context: String,
+        #[source]
+        error: io::Error,
+    },
+}
+
 #[async_trait::async_trait]
 trait CGroup: Sized {
     /// Assign a PID to this cgroup
-    async fn assign(&self, pid: u32) -> Result<(), CGroupError> {
+    async fn assign(&self, pid: u32) -> Result<(), Error> {
         if !self.path().exists().await {
-            Err(CGroupError::CGroupNotFound(format!(
-                "CGroup {} not found",
+            Err(Error::InternalError(format!(
+                "Invalid cgroup {}",
                 self.path().display()
             )))
         } else {
@@ -49,10 +75,10 @@ trait CGroup: Sized {
     }
 
     /// Destroy the cgroup by removing the dir
-    async fn destroy(self) -> Result<(), CGroupError> {
+    async fn destroy(self) -> Result<(), Error> {
         let path = self.path().to_owned();
         if !path.exists().await {
-            Err(CGroupError::CGroupNotFound(format!(
+            Err(Error::InternalError(format!(
                 "CGroup {} not found",
                 path.display()
             )))
@@ -60,7 +86,7 @@ trait CGroup: Sized {
             debug!("Destroying cgroup {}", path.display());
             fs::remove_dir(&path)
                 .await
-                .map_err(|e| CGroupError::DestroyError {
+                .map_err(|e| Error::DestroyError {
                     context: format!("Failed to remove {}", path.display()),
                     error: e,
                 })
@@ -89,7 +115,7 @@ impl CGroupMem {
         name: &str,
         cgroup: &manifest::CGroupMem,
         tx: EventTx,
-    ) -> Result<CGroupMem, CGroupError> {
+    ) -> Result<CGroupMem, Error> {
         let mount_point = get_mount_point("memory")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
@@ -160,7 +186,7 @@ impl CGroupCpu {
         parent: &Path,
         name: &str,
         cgroup: &manifest::CGroupCpu,
-    ) -> Result<CGroupCpu, CGroupError> {
+    ) -> Result<CGroupCpu, Error> {
         let mount_point = get_mount_point("cpu")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
@@ -190,7 +216,7 @@ impl CGroups {
         name: &str,
         cgroups: &manifest::CGroups,
         tx: EventTx,
-    ) -> Result<CGroups, CGroupError> {
+    ) -> Result<CGroups, Error> {
         let mem = if let Some(ref mem) = cgroups.mem {
             let parent: PathBuf = config.memory.clone().into();
             let group = CGroupMem::new(&parent, &name, &mem, tx).await?;
@@ -210,7 +236,7 @@ impl CGroups {
         Ok(CGroups { mem, cpu })
     }
 
-    pub async fn assign(&self, pid: u32) -> Result<(), CGroupError> {
+    pub async fn assign(&self, pid: u32) -> Result<(), Error> {
         if let Some(ref mem) = self.mem {
             mem.assign(pid).await?;
         }
@@ -220,7 +246,7 @@ impl CGroups {
         Ok(())
     }
 
-    pub async fn destroy(self) -> Result<(), CGroupError> {
+    pub async fn destroy(self) -> Result<(), Error> {
         if let Some(mem) = self.mem {
             mem.destroy().await?;
         }
@@ -231,12 +257,12 @@ impl CGroups {
     }
 }
 
-async fn create(path: &Path) -> Result<(), CGroupError> {
+async fn create(path: &Path) -> Result<(), Error> {
     debug!("Creating {}", path.display());
     if !path.exists().await {
         fs::create_dir_all(&path)
             .await
-            .map_err(|e| CGroupError::FileProblem {
+            .map_err(|e| Error::FileProblem {
                 context: format!("Failed to create {}", path.display()),
                 error: e,
             })?;
@@ -244,41 +270,39 @@ async fn create(path: &Path) -> Result<(), CGroupError> {
     Ok(())
 }
 
-async fn write(path: &Path, value: &str) -> Result<(), CGroupError> {
+async fn write(path: &Path, value: &str) -> Result<(), Error> {
     let mut file = OpenOptions::new()
         .write(true)
         .open(path)
         .await
-        .map_err(|e| CGroupError::FileProblem {
+        .map_err(|e| Error::FileProblem {
             context: format!("Failed open {}", path.display()),
             error: e,
         })?;
     file.write_all(format!("{}\n", value).as_bytes())
         .await
-        .map_err(|e| CGroupError::FileProblem {
+        .map_err(|e| Error::FileProblem {
             context: format!("Failed write to {}", path.display()),
             error: e,
         })?;
-    file.sync_all()
-        .await
-        .map_err(|e| CGroupError::FileProblem {
-            context: format!("Failed synd {}", path.display()),
-            error: e,
-        })?;
+    file.sync_all().await.map_err(|e| Error::FileProblem {
+        context: format!("Failed synd {}", path.display()),
+        error: e,
+    })?;
     Ok(())
 }
 
-fn get_mount_point(cgroup: &str) -> Result<PathBuf, CGroupError> {
+fn get_mount_point(cgroup: &str) -> Result<PathBuf, Error> {
     let cgroup = String::from(cgroup);
     MountIter::new()
-        .map_err(|e| CGroupError::MountProblem {
+        .map_err(|e| Error::MountProblem {
             context: "Cannot access mount points".to_string(),
             error: Some(e),
         })?
         .filter_map(|m| m.ok())
         .find(|m| m.fstype == "cgroup" && m.options.contains(&cgroup))
         .map(|m| m.dest.into())
-        .ok_or_else(|| CGroupError::MountProblem {
+        .ok_or_else(|| Error::MountProblem {
             context: format!("No mount point for cgroup {}", &cgroup),
             error: None,
         })
