@@ -27,7 +27,7 @@ pub enum Error {
     #[error("Missing resouce {0}")]
     MissingResource(String),
     #[error("Problem with handling process: {0}")]
-    ProcessError(ProcessError),
+    Process(super::process::Error),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
     #[error("Failed to install")]
@@ -56,31 +56,6 @@ pub enum Error {
     ProtocolError(String),
     #[error("Configuration of runtime incorrect: {0}")]
     ConfigurationError(String),
-}
-
-#[derive(Error, Debug)]
-pub enum ProcessError {
-    #[error("Problem starting the process: {0}")]
-    StartupError(String),
-    #[error("Problem with stopping the process")]
-    StopProblem,
-    #[error("Wrong container type: {0}")]
-    WrongContainerType(String),
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    #[error("Problem creating a minijail: {0}")]
-    MinijailProblem(#[from] minijail::Error),
-    #[error("IO problem: {context}")]
-    IoProblem {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
-    #[error("Linux problem: {context}")]
-    LinuxProblem {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
 }
 
 #[derive(Error, Debug)]

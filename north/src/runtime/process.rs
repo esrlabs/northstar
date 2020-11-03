@@ -13,16 +13,16 @@
 //   limitations under the License.
 
 use super::{npk::Container, Event, EventTx};
-use crate::runtime::error::ProcessError;
 use async_std::{sync, task};
 use async_trait::async_trait;
-use futures::{select, FutureExt, StreamExt};
+use futures::StreamExt;
 use log::debug;
 use nix::{
     sys::{signal, wait},
     unistd,
 };
 use std::{fmt::Debug, time};
+use thiserror::Error;
 use wait::WaitStatus;
 
 const ENV_NAME: &str = "NAME";
@@ -74,14 +74,41 @@ impl ExitHandle {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Problem starting the process: {0}")]
+    Start(String),
+    #[error("Problem with stopping the process")]
+    StopProblem,
+    #[error("Wrong container type: {0}")]
+    WrongContainerType(String),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Problem creating a minijail: {0}")]
+    Minijail(#[from] ::minijail::Error),
+    #[error("IO problem: {context}")]
+    Io {
+        context: String,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Linux problem: {context}")]
+    LinuxProblem {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+}
+
 #[async_trait]
 pub trait Process: Debug + Sync + Send {
     fn pid(&self) -> Pid;
-    async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, ProcessError>;
+    async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error>;
 }
 
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
 pub mod os {
+    use futures::{select, FutureExt};
+
     use super::*;
     use std::process;
 
@@ -92,17 +119,14 @@ pub mod os {
     }
 
     impl OsProcess {
-        pub async fn start(
-            container: &Container,
-            event_tx: EventTx,
-        ) -> Result<OsProcess, ProcessError> {
+        pub async fn start(container: &Container, event_tx: EventTx) -> Result<OsProcess, Error> {
             let manifest = &container.manifest;
 
             // Init
             let init = if let Some(ref init) = manifest.init {
                 init.display().to_string()
             } else {
-                return Err(ProcessError::WrongContainerType(format!(
+                return Err(Error::WrongContainerType(format!(
                     "Cannot start a resource container {}:{}",
                     manifest.name, manifest.version,
                 )));
@@ -122,7 +146,7 @@ pub mod os {
             cmd.envs(env.drain());
 
             // Spawn
-            let child = cmd.spawn().map_err(|e| ProcessError::IoProblem {
+            let child = cmd.spawn().map_err(|e| Error::Io {
                 context: format!("Failed to execute {}", init.display()),
                 error: e,
             })?;
@@ -144,12 +168,12 @@ pub mod os {
             self.child.id()
         }
 
-        async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, ProcessError> {
+        async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
             // Send a SIGTERM to the application. If the application does not terminate with a timeout
             // it is SIGKILLed.
             let sigterm = signal::Signal::SIGTERM;
             signal::kill(unistd::Pid::from_raw(self.child.id() as i32), Some(sigterm)).map_err(
-                |e| ProcessError::LinuxProblem {
+                |e| Error::LinuxProblem {
                     context: format!("Failed to SIGTERM {}", self.child.id()),
                     error: e,
                 },
@@ -164,12 +188,12 @@ pub mod os {
                     if let Some(exit_status) = s {
                         exit_status
                     } else {
-                        return Err(ProcessError::StopProblem);
+                        return Err(Error::StopProblem);
                     }
                 }, // This is the happy path...
                 _ = timeout => {
                     signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))
-                    .map_err(|e| ProcessError::LinuxProblem { context: "Could not kill process".to_string(), error: e})?;
+                    .map_err(|e| Error::LinuxProblem { context: "Could not kill process".to_string(), error: e})?;
                     ExitStatus::Signaled(signal::Signal::SIGKILL)
                 }
             })
@@ -179,17 +203,22 @@ pub mod os {
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod minijail {
-    use super::*;
+    use super::{
+        waitpid, Container, Error, ExitHandle, ExitStatus, Pid, Process, ENV_NAME, ENV_VERSION,
+    };
     use crate::{
         manifest::{Mount, MountFlag},
         runtime::{Event, EventTx},
     };
     use async_std::{fs, io, path::Path, task};
-    use futures::StreamExt;
+    use futures::{select, FutureExt, StreamExt};
     use io::prelude::{BufReadExt, WriteExt};
-    use log::warn;
-    use nix::unistd::{self, chown};
-    use std::{fmt, os::unix::io::AsRawFd};
+    use log::{debug, warn};
+    use nix::{
+        sys::signal,
+        unistd::{self, chown},
+    };
+    use std::{fmt, os::unix::io::AsRawFd, time};
     use stop_token::StopSource;
 
     // We need a Send + Sync version of Minijail
@@ -216,14 +245,14 @@ pub mod minijail {
             fd: i32,
             tag: &str,
             event_tx: EventTx,
-        ) -> Result<CaptureOutput, ProcessError> {
+        ) -> Result<CaptureOutput, Error> {
             let fifo = tmpdir.join(fd.to_string());
             use nix::sys::stat::Mode;
             nix::unistd::mkfifo(
                 &fifo,
                 Mode::S_IRUSR | Mode::S_IWUSR, //| Mode::S_IROTH | Mode::S_IWOTH,
             )
-            .map_err(|e| ProcessError::LinuxProblem {
+            .map_err(|e| Error::LinuxProblem {
                 context: "Failed to mkfifo".to_string(),
                 error: e,
             })?;
@@ -234,7 +263,7 @@ pub mod minijail {
                 .read(true)
                 .write(true)
                 .open(&fifo)
-                .map_err(|e| ProcessError::IoProblem {
+                .map_err(|e| Error::Io {
                     context: format!("Failed to open fifo {}", fifo.display()),
                     error: e,
                 })?;
@@ -244,7 +273,7 @@ pub mod minijail {
                 .write(false)
                 .open(&fifo)
                 .await
-                .map_err(|e| ProcessError::IoProblem {
+                .map_err(|e| Error::Io {
                     context: format!("Failed to open fifo {}", fifo.display()),
                     error: e,
                 })?;
@@ -315,17 +344,17 @@ pub mod minijail {
             data_dir: &Path,
             uid: u32,
             gid: u32,
-        ) -> Result<MinijailProcess, ProcessError> {
+        ) -> Result<MinijailProcess, Error> {
             let root: std::path::PathBuf = container.root.clone().into();
             let manifest = &container.manifest;
-            let mut jail = ::minijail::Minijail::new().map_err(ProcessError::MinijailProblem)?;
+            let mut jail = ::minijail::Minijail::new().map_err(Error::Minijail)?;
 
             let init = manifest
                 .init
                 .as_ref()
-                .ok_or_else(|| ProcessError::StartupError("Cannot start a resource".to_string()))?;
+                .ok_or_else(|| Error::Start("Cannot start a resource".to_string()))?;
 
-            let tmpdir = tempfile::TempDir::new().map_err(|e| ProcessError::IoProblem {
+            let tmpdir = tempfile::TempDir::new().map_err(|e| Error::Io {
                 context: format!("Failed to create tmpdir for {}", manifest.name),
                 error: e,
             })?;
@@ -341,19 +370,17 @@ pub mod minijail {
             // TODO: configure seccomp via API instead of a file
             if let Some(ref seccomp) = container.manifest.seccomp {
                 let seccomp_config = tmpdir_path.join("seccomp");
-                let mut f = fs::File::create(&seccomp_config).await.map_err(|e| {
-                    ProcessError::IoProblem {
+                let mut f = fs::File::create(&seccomp_config)
+                    .await
+                    .map_err(|e| Error::Io {
                         context: "Failed to create seccomp configuraiton".to_string(),
                         error: e,
-                    }
-                })?;
-                let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
-                f.write_all(s.as_bytes())
-                    .await
-                    .map_err(|e| ProcessError::IoProblem {
-                        context: "Failed to write seccomp configuraiton".to_string(),
-                        error: e,
                     })?;
+                let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
+                f.write_all(s.as_bytes()).await.map_err(|e| Error::Io {
+                    context: "Failed to write seccomp configuraiton".to_string(),
+                    error: e,
+                })?;
 
                 // Temporary disabled
                 // Must be called before parse_seccomp_filters
@@ -441,7 +468,7 @@ pub mod minijail {
         uid: u32,
         gid: u32,
         run_dir: &Path,
-    ) -> Result<(), ProcessError> {
+    ) -> Result<(), Error> {
         // Create a minimal dev folder in a tmpfs and mount on /dev
         jail.mount_dev();
         // Mount a tmpfs on /tmp
@@ -475,12 +502,10 @@ pub mod minijail {
                 Mount::Persist { target, flags } => {
                     let dir = data_dir.join(&container.manifest.name);
                     debug!("Creating {}", dir.display());
-                    fs::create_dir_all(&dir)
-                        .await
-                        .map_err(|e| ProcessError::IoProblem {
-                            context: format!("Failed to create {}", dir.display()),
-                            error: e,
-                        })?;
+                    fs::create_dir_all(&dir).await.map_err(|e| Error::Io {
+                        context: format!("Failed to create {}", dir.display()),
+                        error: e,
+                    })?;
 
                     debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
                     chown(
@@ -488,7 +513,7 @@ pub mod minijail {
                         Some(unistd::Uid::from_raw(uid)),
                         Some(unistd::Gid::from_raw(gid)),
                     )
-                    .map_err(|e| ProcessError::LinuxProblem {
+                    .map_err(|e| Error::LinuxProblem {
                         context: format!("Failed to chown {} to {}:{}", dir.display(), uid, gid,),
                         error: e,
                     })?;
@@ -513,7 +538,7 @@ pub mod minijail {
                             .unwrap_or(first_part_of_path);
 
                         if !src_dir.exists().await {
-                            return Err(ProcessError::StartupError(format!(
+                            return Err(Error::Start(format!(
                                 "Resource folder {} is missing",
                                 src_dir.display()
                             )));
@@ -537,7 +562,7 @@ pub mod minijail {
         source: &Path,
         target: &Path,
         rw: bool,
-    ) -> Result<(), ProcessError> {
+    ) -> Result<(), Error> {
         let source: &std::path::Path = source.into();
         let target: &std::path::Path = target.into();
         debug!(
@@ -547,33 +572,21 @@ pub mod minijail {
             if rw { " (rw)" } else { "" }
         );
         jail.mount_bind(&source, &target, rw)
-            .map_err(ProcessError::MinijailProblem)
+            .map_err(Error::Minijail)
     }
 
-    fn mount_tmpfs(
-        jail: &mut ::minijail::Minijail,
-        target: &Path,
-        size: &str,
-    ) -> Result<(), ProcessError> {
-        let target: &std::path::Path = target.into();
-        debug!("Mounting tmpfs to {}", target.display());
-        let data = format!("size={},mode=1777", size);
-        jail.mount_with_data(Path::new("none").into(), &target, "tmpfs", 0, &data)
-            .map_err(ProcessError::MinijailProblem)
-    }
-
-    #[async_trait]
+    #[async_trait::async_trait]
     impl Process for MinijailProcess {
         fn pid(&self) -> Pid {
             self.pid
         }
 
-        async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, ProcessError> {
+        async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
             // Send a SIGTERM to the application. If the application does not terminate with a timeout
             // it is SIGKILLed.
             let sigterm = signal::Signal::SIGTERM;
             signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm)).map_err(|e| {
-                ProcessError::LinuxProblem {
+                Error::LinuxProblem {
                     context: format!("Failed to SIGTERM {}", self.pid),
                     error: e,
                 }
@@ -588,12 +601,12 @@ pub mod minijail {
                     if let Some(exit_status) = s {
                         exit_status
                     } else {
-                        return Err(ProcessError::StopProblem);
+                        return Err(Error::StopProblem);
                     }
                 }, // This is the happy path...
                 _ = timeout => {
                     signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))
-                    .map_err(|e| ProcessError::LinuxProblem { context: "Could not kill process".to_string(), error: e})?;
+                    .map_err(|e| Error::LinuxProblem { context: "Could not kill process".to_string(), error: e})?;
                     ExitStatus::Signaled(signal::Signal::SIGKILL)
                 }
             })
