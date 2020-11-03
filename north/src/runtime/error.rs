@@ -12,7 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::{InstallationResult, Name};
+#[cfg(any(target_os = "android", target_os = "linux"))]
+use super::linux::device_mapper;
+use super::{InstallationResult, Name};
 use std::io;
 use thiserror::Error;
 
@@ -139,8 +141,9 @@ pub enum InstallFailure {
     UnexpectedVerityAlgorithm(String),
     #[error("Problem with archive ({0})")]
     ArchiveError(String),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Problem with device mapper")]
-    DeviceMapperProblem(DeviceMapperError),
+    DeviceMapper(device_mapper::Error),
     #[error("Problem with loop device")]
     LoopDeviceError(LoopDeviceError),
     #[error("Hash is invalid ({0})")]
@@ -181,7 +184,8 @@ impl From<InstallFailure> for InstallationResult {
             InstallFailure::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
             InstallFailure::VerityProblem(s) => InstallationResult::VerityProblem(s),
             InstallFailure::ArchiveError(s) => InstallationResult::ArchiveError(s),
-            InstallFailure::DeviceMapperProblem(e) => {
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            InstallFailure::DeviceMapper(e) => {
                 InstallationResult::DeviceMapperProblem(format!("{:?}", e))
             }
             InstallFailure::LoopDeviceError(e) => {
@@ -216,18 +220,6 @@ impl From<InstallFailure> for InstallationResult {
             }
         }
     }
-}
-
-#[derive(Error, Debug)]
-pub enum DeviceMapperError {
-    #[error("Failure opening file for device mapper")]
-    OpenDmFailed(#[from] io::Error),
-    #[error("Failure issuing an IO-CTL call")]
-    IoCtrlFailed(#[from] nix::Error),
-    #[error("Response DM buffer requires too much space")]
-    BufferFull,
-    #[error("Failure to suspend device")]
-    SuspendDeviceFailed,
 }
 
 #[derive(Error, Debug)]

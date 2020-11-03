@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::error::DeviceMapperError;
 use async_std::task;
 use nix::libc::{c_ulong, ioctl as nix_ioctl};
 use std::{borrow::Cow, cmp, fmt, mem::size_of, os::unix::io::AsRawFd, path::Path, slice};
@@ -133,22 +132,34 @@ impl Default for Struct_dm_ioctl {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Failure opening file for device mapper")]
+    Open(#[from] async_std::io::Error),
+    #[error("Failure issuing an IO-CTL call")]
+    IoCtrl(#[from] nix::Error),
+    #[error("Response DM buffer requires too much space")]
+    BufferFull,
+    #[error("Failure to suspend device")]
+    Suspend,
+}
+
 pub struct Dm {
     file: std::fs::File,
 }
 
 impl Dm {
-    pub fn new(dm: &Path) -> Result<Dm, DeviceMapperError> {
+    pub fn new(dm: &Path) -> Result<Dm, Error> {
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(&dm)
-            .map_err(DeviceMapperError::OpenDmFailed)?;
+            .map_err(Error::Open)?;
         Ok(Dm { file })
     }
 
     /// Devicemapper version information: Major, Minor, and patchlevel versions.
-    pub async fn version(&self) -> Result<(u32, u32, u32), DeviceMapperError> {
+    pub async fn version(&self) -> Result<(u32, u32, u32), Error> {
         let mut hdr = DmOptions::new().to_ioctl_hdr(None, DmFlags::empty());
 
         self.do_ioctl(DM_VERSION_CMD as u8, &mut hdr, None).await?;
@@ -163,7 +174,7 @@ impl Dm {
     /// in-use devices, and they will be removed when released.
     ///
     /// Valid flags: DM_DEFERRED_REMOVE
-    pub async fn remove_all(&self, options: &DmOptions) -> Result<(), DeviceMapperError> {
+    pub async fn remove_all(&self, options: &DmOptions) -> Result<(), Error> {
         let mut hdr = options.to_ioctl_hdr(None, DmFlags::DM_DEFERRED_REMOVE);
 
         self.do_ioctl(DM_REMOVE_ALL_CMD as u8, &mut hdr, None)
@@ -179,7 +190,7 @@ impl Dm {
         &self,
         name: &str,
         options: &DmOptions,
-    ) -> Result<DeviceInfo, DeviceMapperError> {
+    ) -> Result<DeviceInfo, Error> {
         let mut hdr = options.to_ioctl_hdr(None, DmFlags::DM_READONLY | DmFlags::DM_PERSISTENT_DEV);
 
         Self::hdr_set_name(&mut hdr, name);
@@ -197,11 +208,7 @@ impl Dm {
     /// used.
     ///
     /// Valid flags: DM_DEFERRED_REMOVE
-    pub async fn device_remove(
-        &self,
-        id: &str,
-        options: &DmOptions,
-    ) -> Result<DeviceInfo, DeviceMapperError> {
+    pub async fn device_remove(&self, id: &str, options: &DmOptions) -> Result<DeviceInfo, Error> {
         let mut hdr = options.to_ioctl_hdr(Some(id), DmFlags::DM_DEFERRED_REMOVE);
 
         self.do_ioctl(DM_DEV_REMOVE_CMD as u8, &mut hdr, None)
@@ -223,7 +230,7 @@ impl Dm {
         id: &str,
         targets: &[(u64, u64, String, String)],
         options: &DmOptions,
-    ) -> Result<DeviceInfo, DeviceMapperError> {
+    ) -> Result<DeviceInfo, Error> {
         let mut targs = Vec::new();
 
         // Construct targets first, since we need to know how many & size
@@ -288,11 +295,7 @@ impl Dm {
     /// held until it is resumed.
     ///
     /// Valid flags: DM_SUSPEND, DM_NOFLUSH, DM_SKIP_LOCKFS
-    pub async fn device_suspend(
-        &self,
-        id: &str,
-        options: &DmOptions,
-    ) -> Result<DeviceInfo, DeviceMapperError> {
+    pub async fn device_suspend(&self, id: &str, options: &DmOptions) -> Result<DeviceInfo, Error> {
         let mut hdr = options.to_ioctl_hdr(
             Some(id),
             DmFlags::DM_SUSPEND | DmFlags::DM_NOFLUSH | DmFlags::DM_SKIP_LOCKFS,
@@ -300,7 +303,7 @@ impl Dm {
 
         self.do_ioctl(DM_DEV_SUSPEND_CMD as u8, &mut hdr, None)
             .await
-            .map_err(|_| DeviceMapperError::SuspendDeviceFailed);
+            .map_err(|_| Error::Suspend);
 
         Ok(DeviceInfo::new(hdr))
     }
@@ -317,7 +320,7 @@ impl Dm {
         ioctl: u8,
         hdr: &mut Struct_dm_ioctl,
         in_data: Option<&[u8]>,
-    ) -> Result<Vec<u8>, DeviceMapperError> {
+    ) -> Result<Vec<u8>, Error> {
         // Create in-buf by copying hdr and any in-data into a linear
         // Vec v.  'hdr_slc' also aliases hdr as a &[u8], used first
         // to copy the hdr into v, and later to update the
@@ -362,7 +365,7 @@ impl Dm {
                     let op = op as i32;
                     nix::convert_ioctl_res!(nix_ioctl(fd, op, v.as_mut_ptr()))
                 } {
-                    return Err(DeviceMapperError::IoCtrlFailed(e));
+                    return Err(Error::IoCtrl(e));
                 }
                 // If DM was able to write the requested data into the provided buffer, break the loop
                 if (hdr.flags & DmFlags::DM_BUFFER_FULL.bits()) == 0 {
@@ -376,7 +379,7 @@ impl Dm {
                 // the size to exceed u32::MAX.
                 let len = v.len();
                 if len == std::u32::MAX as usize {
-                    return Err(DeviceMapperError::BufferFull);
+                    return Err(Error::BufferFull);
                 }
                 v.resize((len as u32).saturating_mul(2) as usize, 0);
 

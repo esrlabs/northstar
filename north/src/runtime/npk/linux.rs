@@ -69,7 +69,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallFai
         .map(|d| d.path());
 
     let dm = state.config.devices.device_mapper.clone();
-    let dm = dm::Dm::new(&dm).map_err(InstallFailure::DeviceMapperProblem)?;
+    let dm = dm::Dm::new(&dm).map_err(InstallFailure::DeviceMapper)?;
     let lc: PathBuf = state.config.devices.loop_control.clone().into();
     let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
         .await
@@ -90,7 +90,7 @@ pub async fn install(
     debug!("Installing {}", npk.display());
 
     let dm = &state.config.devices.device_mapper.clone();
-    let dm = dm::Dm::new(&dm).map_err(InstallFailure::DeviceMapperProblem)?;
+    let dm = dm::Dm::new(&dm).map_err(InstallFailure::DeviceMapper)?;
 
     let lc: PathBuf = state.config.devices.loop_control.clone().into();
     let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
@@ -313,7 +313,7 @@ async fn setup_and_mount(
         &dm::DmOptions::new().set_flags(dm::DmFlags::DM_DEFERRED_REMOVE),
     )
     .await
-    .map_err(InstallFailure::DeviceMapperProblem)?;
+    .map_err(InstallFailure::DeviceMapper)?;
 
     Ok(dm_dev)
 }
@@ -427,7 +427,7 @@ async fn veritysetup(
             &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
         )
         .await
-        .map_err(InstallFailure::DeviceMapperProblem)?;
+        .map_err(InstallFailure::DeviceMapper)?;
 
     let verity_table = format!(
         "{} {} {} {} {} {} {} {} {} {}",
@@ -453,12 +453,12 @@ async fn veritysetup(
         dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
     )
     .await
-    .map_err(InstallFailure::DeviceMapperProblem)?;
+    .map_err(InstallFailure::DeviceMapper)?;
 
     debug!("Resuming device");
     dm.device_suspend(&name, &dm::DmOptions::new())
         .await
-        .map_err(InstallFailure::DeviceMapperProblem)?;
+        .map_err(InstallFailure::DeviceMapper)?;
 
     debug!("Waiting for device {}", dm_dev.display());
     while !dm_dev.exists().await {
