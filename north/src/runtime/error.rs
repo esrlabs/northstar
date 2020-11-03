@@ -16,7 +16,7 @@
 use super::linux::device_mapper;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use super::linux::loopdev;
-use super::{InstallationResult, Name};
+use super::Name;
 use std::io;
 use thiserror::Error;
 
@@ -138,53 +138,4 @@ pub enum InstallFailure {
     },
     #[error("Timeout error: {0}")]
     TimeoutError(String),
-}
-
-impl From<InstallFailure> for InstallationResult {
-    fn from(failure: InstallFailure) -> InstallationResult {
-        match failure {
-            InstallFailure::FileCorrupted(_) => InstallationResult::FileCorrupted,
-            InstallFailure::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
-            InstallFailure::MalformedSignature => InstallationResult::MalformedSignature,
-            InstallFailure::MalformedHashes(_) => InstallationResult::MalformedHashes,
-            InstallFailure::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
-            InstallFailure::VerityProblem(s) => InstallationResult::VerityProblem(s),
-            InstallFailure::ArchiveError(s) => InstallationResult::ArchiveError(s),
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallFailure::DeviceMapper(e) => {
-                InstallationResult::DeviceMapperProblem(format!("{:?}", e))
-            }
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallFailure::LoopDeviceError(e) => {
-                InstallationResult::LoopDeviceError(format!("{}", e))
-            }
-            InstallFailure::HashInvalid(s) => InstallationResult::HashInvalid(s),
-            InstallFailure::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
-            InstallFailure::ApplicationAlreadyInstalled(_) => {
-                InstallationResult::ApplicationAlreadyInstalled
-            }
-            InstallFailure::FileIoProblem { context, error: _ } => {
-                InstallationResult::FileIoProblem(context)
-            }
-            InstallFailure::MountError { context, error: _ } => {
-                InstallationResult::MountError(context)
-            }
-            InstallFailure::INotifyError { context, error: _ } => {
-                InstallationResult::INotifyError(context)
-            }
-            InstallFailure::TimeoutError(s) => InstallationResult::TimeoutError(s),
-            InstallFailure::NoVerityHeader => {
-                InstallationResult::VerityProblem("Verity header missing".to_string())
-            }
-            InstallFailure::UnexpectedVerityAlgorithm(s) => {
-                InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
-            }
-            InstallFailure::UnexpectedVerityVersion(n) => {
-                InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
-            }
-            InstallFailure::SignatureVerificationFailed(s) => {
-                InstallationResult::SignatureVerificationFailed(s)
-            }
-        }
-    }
 }
