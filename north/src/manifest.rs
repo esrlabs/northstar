@@ -205,7 +205,7 @@ enum MountSource {
         resource: String,
     },
     Tmpfs {
-        #[serde(deserialize_with = "deserialize_to_size_string")]
+        #[serde(deserialize_with = "deserialize_tmpfs_size")]
         size: String,
     },
     Bind {
@@ -219,7 +219,7 @@ enum MountSource {
     },
 }
 
-fn deserialize_to_size_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_tmpfs_size<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -235,8 +235,20 @@ where
             Ok(format!("{}", v))
         }
 
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
-            Ok(v.to_owned())
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            // check if the string is correctly formatted as size in tmpfs(5)
+            lazy_static! {
+                static ref TMPFS_SIZE: regex::Regex =
+                    regex::Regex::new(r"^\d+(?i:k|m|g)?$").expect("Wrong regex");
+            }
+            if TMPFS_SIZE.is_match(v) {
+                Ok(v.to_owned())
+            } else {
+                Err(E::custom("Wrong format for tmpfs size parameter"))
+            }
         }
     }
 
