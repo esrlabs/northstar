@@ -32,10 +32,16 @@ use async_std::{
     task,
 };
 use byteorder::{BigEndian, ByteOrder};
-use futures::stream::StreamExt;
+use futures::stream::{self, StreamExt};
 use io::ErrorKind;
 use log::{debug, error, info, warn};
 use tempfile::tempdir;
+
+enum ConsoleEvent {
+    SystemEvent(Notification),
+    ApiMessage(MessageWithData),
+    Disconnected,
+}
 
 pub struct Console {
     event_tx: EventTx,
@@ -144,7 +150,7 @@ impl Console {
                 // let notification_rx_clone = notification_rx.clone();
                 if let Ok(stream) = stream {
                     task::spawn(async move {
-                        if let Err(e) = connection_loop(stream, event_tx_clone).await {
+                        if let Err(e) = connection(stream, event_tx_clone).await {
                             warn!("Error servicing connection: {}", e);
                         }
                     });
@@ -227,7 +233,7 @@ struct MessageWithData {
     path: Option<std::path::PathBuf>,
 }
 
-async fn receive_message_from_socket<R: Read + Unpin>(
+async fn read<R: Read + Unpin>(
     reader: &mut R,
     message_tx: &sync::Sender<Option<MessageWithData>>,
     tmp_installation_dir: &std::path::Path,
@@ -297,62 +303,38 @@ async fn receive_message_from_socket<R: Read + Unpin>(
     Ok(())
 }
 
-async fn send_reply<W: Unpin + Write>(reply: &Message, writer: &mut W) -> io::Result<()> {
-    // Serialize reply
-    let reply =
-        serde_json::to_string_pretty(&reply).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+async fn on_request(
+    m: MessageWithData,
+    event_tx: &mut EventTx,
+    client_tx: Sender<Message>,
+    rx_reply: &mut Receiver<Message>,
+    tx_reply: &mut Sender<Message>,
+) -> io::Result<()> {
+    let event = match m {
+        MessageWithData {
+            message:
+                Message {
+                    id,
+                    payload: Payload::Installation(_),
+                },
+            path: Some(p),
+        } => Event::Install(id, PathBuf::from(&p), tx_reply.clone()),
+        _ => Event::Console(m.message, tx_reply.clone()),
+    };
+    event_tx.send(event).await;
 
-    // Send reply
-    let mut buffer = [0u8; 4];
-    BigEndian::write_u32(&mut buffer, reply.len() as u32);
-    writer.write_all(&buffer).await?;
-    writer.write_all(reply.as_bytes()).await?;
+    // Wait for reply of main loop
+    // TODO: timeout
+    let reply = rx_reply
+        .recv()
+        .await
+        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+    client_tx.send(reply).await;
     Ok(())
 }
 
-fn start_sending_over_socket(writer: &TcpStream, client_rx: sync::Receiver<Message>) {
-    // setup send functionality
-    let mut writer = writer.clone();
-    let _ = task::spawn(async move {
-        loop {
-            match client_rx.recv().await {
-                Ok(msg_to_send) => {
-                    if let Err(e) = send_reply(&msg_to_send, &mut writer).await {
-                        warn!("Error sending back to client: {}", e);
-                        break;
-                    }
-                }
-                Err(_) => {
-                    debug!("Stop sending task");
-                    break;
-                }
-            }
-        }
-    });
-}
-
-fn start_receiving_from_socket(
-    reader: &TcpStream,
-    tmp_installation_dir: std::path::PathBuf,
-    message_tx: sync::Sender<Option<MessageWithData>>,
-) {
-    let reader = reader.clone();
-    let _ = task::spawn(async move {
-        let mut buf_reader: io::BufReader<&TcpStream> = io::BufReader::new(&reader);
-        loop {
-            if let Err(e) =
-                receive_message_from_socket(&mut buf_reader, &message_tx, &tmp_installation_dir)
-                    .await
-            {
-                warn!("Error receiving from socket: {}", e);
-                message_tx.send(None).await;
-                break;
-            }
-        }
-    });
-}
-
-async fn connection_loop(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Error> {
+async fn connection(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Error> {
     let peer = stream.peer_addr().map_err(|e| Error::Io {
         context: "Failed to get peer from command connection".to_string(),
         error: e,
@@ -367,113 +349,115 @@ async fn connection_loop(stream: TcpStream, mut event_tx: EventTx) -> Result<(),
     };
     event_tx.send(subscription_event).await;
 
-    enum ConsoleEvent {
-        SystemEvent(Notification),
-        ApiMessage(MessageWithData),
-        ClientDisconnect,
-    }
-
-    let (reader, writer) = &mut (&stream, &stream);
     let (mut message_tx, mut message_rx) = sync::channel::<Message>(1);
-
-    // channel for sending messages back to client
     let (client_tx, client_rx) = sync::channel::<Message>(10);
-
     let (socket_tx, socket_rx) = sync::channel::<Option<MessageWithData>>(1);
     let tmp_installation_dir = tempdir().map_err(|e| Error::Io {
         context: "Error creating temp installation dir".to_string(),
         error: e,
     })?;
 
-    start_receiving_from_socket(
-        reader,
-        std::path::PathBuf::from(tmp_installation_dir.path()),
-        socket_tx,
-    );
+    let tmp_installation_dir = std::path::PathBuf::from(tmp_installation_dir.path());
 
-    start_sending_over_socket(writer, client_rx);
-
-    let message_event_stream: futures::stream::Map<
-        async_std::sync::Receiver<Option<MessageWithData>>,
-        _,
-    > = socket_rx.map(|m| match m {
-        Some(msg) => ConsoleEvent::ApiMessage(msg),
-        None => ConsoleEvent::ClientDisconnect,
+    // RX
+    let reader = stream.clone();
+    let tx = socket_tx.clone();
+    task::spawn(async move {
+        let mut buf_reader: io::BufReader<&TcpStream> = io::BufReader::new(&reader);
+        loop {
+            if let Err(e) = read(&mut buf_reader, &tx, &tmp_installation_dir).await {
+                warn!("IO error on client connection: {}", e);
+                tx.send(None).await;
+                break;
+            }
+        }
     });
-    let runtime_event_stream: futures::stream::Map<async_std::sync::Receiver<Notification>, _> =
-        notify_receiver.map(ConsoleEvent::SystemEvent);
-    let mut event_stream = futures::stream::select(message_event_stream, runtime_event_stream);
 
-    while let Some(event) = event_stream.next().await {
+    // TX
+    let mut writer = stream;
+    task::spawn(async move {
+        loop {
+            match client_rx.recv().await {
+                Ok(msg_to_send) => {
+                    async fn send<W: Unpin + Write>(
+                        reply: &Message,
+                        writer: &mut W,
+                    ) -> io::Result<()> {
+                        // Serialize reply
+                        let reply = serde_json::to_string_pretty(&reply)
+                            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+
+                        // Send reply
+                        let mut buffer = [0u8; 4];
+                        BigEndian::write_u32(&mut buffer, reply.len() as u32);
+                        writer.write_all(&buffer).await?;
+                        writer.write_all(reply.as_bytes()).await.map(drop)
+                    }
+
+                    // Break this loop upon connection errors
+                    if let Err(e) = send(&msg_to_send, &mut writer).await {
+                        warn!("IO error on client connection: {}", e);
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let client_events = socket_rx.map(|m| match m {
+        Some(msg) => ConsoleEvent::ApiMessage(msg),
+        None => ConsoleEvent::Disconnected,
+    });
+    let runtime_events = notify_receiver.map(ConsoleEvent::SystemEvent);
+    let mut events = stream::select(client_events, runtime_events);
+
+    while let Some(event) = events.next().await {
         match event {
-            ConsoleEvent::SystemEvent(n) => {
+            ConsoleEvent::SystemEvent(notification) => {
                 let reply = Message {
-                    id: "Notification".to_owned(),
-                    payload: Payload::Notification(n),
+                    id: uuid::Uuid::new_v4().to_string(),
+                    payload: Payload::Notification(notification),
                 };
                 client_tx.send(reply).await;
             }
-            ConsoleEvent::ApiMessage(m) => {
-                if let Err(e) = handle_api_request(
-                    m,
-                    client_tx.clone(),
+            ConsoleEvent::ApiMessage(message) => {
+                let r = on_request(
+                    message,
                     &mut event_tx,
+                    client_tx.clone(),
                     &mut message_rx,
                     &mut message_tx,
                 )
-                .await
-                {
-                    match e.kind() {
-                        ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
-                        _ => warn!("Error on handle_request to {:?}: {:?}", peer, e),
+                .await;
+
+                match r {
+                    Ok(_) => (),
+                    Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+                        info!("Client {:?} disconnected", peer);
+                        break;
                     }
-                    break;
+                    Err(e) => {
+                        warn!("Failed to handle request from {:?}: {:?}", peer, e);
+                        break;
+                    }
                 }
             }
-            ConsoleEvent::ClientDisconnect => {
-                debug!("Client disconnect, exit connection_loop");
+            ConsoleEvent::Disconnected => {
+                debug!("Client disconnected");
                 break;
             }
         }
     }
-    debug!("Connection loop for peer {} finished", peer);
+
+    debug!("Connection to {} closed", peer);
+
     event_tx
         .send(Event::NotificationSubscription {
             subscriber: None,
             id: subscription_id,
         })
         .await;
-
-    async fn handle_api_request(
-        m: MessageWithData,
-        sender_to_client: Sender<Message>,
-        event_tx: &mut EventTx,
-        rx_reply: &mut Receiver<Message>,
-        tx_reply: &mut Sender<Message>,
-    ) -> io::Result<()> {
-        let event = match m {
-            MessageWithData {
-                message:
-                    Message {
-                        id,
-                        payload: Payload::Installation(_),
-                    },
-                path: Some(p),
-            } => Event::Install(id, PathBuf::from(&p), tx_reply.clone()),
-            _ => Event::Console(m.message, tx_reply.clone()),
-        };
-        event_tx.send(event).await;
-
-        // Wait for reply of main loop
-        // TODO: timeout
-        let reply = rx_reply
-            .recv()
-            .await
-            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
-
-        sender_to_client.send(reply).await;
-        Ok(())
-    }
 
     Ok(())
 }
