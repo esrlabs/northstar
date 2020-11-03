@@ -94,24 +94,30 @@ A file system image of a Nortstar package is attached to a loopback device. The 
 
 ## Creating Northstar Packages
 
-In order to use an application in a northstar container, it needs to be packaged in a northstar package (NPK). For that we currently provide a ruby script (`tooling.rb`) that can create such containers.
+In order to use an application in a northstar container, it needs to be packaged in a northstar package (NPK). The `sextant` tool can be used to create and package npk files
 
-An example of how to use it can be found in the top level `rakefile.rb`. This is the function that needs to be called:
+```shell
+Northstar CLI
 
-```ruby
-# Create an NPK package
-# Params:
-# +arch+:: achitecture for which this package will be built
-#          e.g. aarch64-linux-android, aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu
-# +arch_dir+:: directory where the architecture specific content is to be found
-# +src_dir+:: directory where non-architecture specific content is found
-# +out_dir+:: where the npk should be packaged to (usually the registry directory)
-def create_arch_package(arch, arch_dir, src_dir, out_dir, pack_config)
+USAGE:
+    sextant <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    gen-key
+    help       Prints this message or the help of the given subcommand(s)
+    inspect    Print information about a Northstar container
+    pack       Pack Northstar containers
+    unpack     Unpack Northstar containers
 ```
 
-Once the packages are created, they are stored in a registry directory. This registry needs to be configured later when starting the northstar runtime.
+In order to create your own northstar packages, you will also need to generate a keypair that
+subsequently will be used to generate and verify the signatures of your images.
 
-We are currently working on a [more comfortable and user friendly tool.](https://github.com/esrlabs/northstar/issues/7)
+Once the packages are created, they are stored in a registry directory. This registry needs to be configured later when starting the northstar runtime.
 
 ## Configuring and Running Northstar
 
@@ -130,8 +136,24 @@ The script in `doc/tools/check_conf.sh` can be used to check your running kernel
 
 ### Starting Northstar
 
-The Northstar runtime is an executable and usually run as a daemon started by your system manager of
-choice. The configuration of the runtime is done with a `*.toml` configuration file.
+The Northstar runtime is an executable and usually run as a daemon started by your system manager of choice. It can be started with a config file.
+
+```shell
+North
+
+USAGE:
+    north [FLAGS] [OPTIONS]
+
+FLAGS:
+    -d, --debug      Print debug logs
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -c, --config <config>    File that contains the north configuration [default: north.toml]
+```
+
+The configuration of the runtime is done with a `*.toml` configuration file.
 Here is an example:
 
 ```toml

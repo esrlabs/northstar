@@ -1277,7 +1277,7 @@ checksum = "cf51a729ecf40266a2368ad335a5fdde43471f545a967109cd62146ecf8b66ff"
 
 [[package]]
 name = "north"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-std",

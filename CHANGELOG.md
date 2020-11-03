@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+* Support for cross compilation for `musl`
+
+## [0.5.0] - 2020-11-2
+### Added
+* Notifications for system events are now sent to connected clients (e.g. to `nstar`)
+
+### Changed
+* Installation of packages:
+  When a package is installed, it is now streamed to the north daemon
+* Dedicated error types instead of generic anyhow errors
+* Resource-Containers: now multiple versions are possible
+* nstar is now implemented with tokio
+
+### Removed
+* ruby tooling for generating npks. `sextant` is now used for npk generation
 
 ## [0.4.0] - 2020-10-22
 ### Added

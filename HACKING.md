@@ -21,7 +21,7 @@ A recent version of `docker` is needed for some of the cross-compilations we are
 A recent ruby version is needed for using the tooling and running the rake-scripts within this
 project.
 
-When `ruby` is installed on the system, run `rake setup_environment` to add additional tools and libraries.
+When `ruby` is installed on the system, run `rake setup` to add additional tools and libraries.
 
 ## Checks & Tests
 

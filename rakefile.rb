@@ -1,5 +1,3 @@
-require 'tmpdir'
-
 REGISTRY = `pwd`.strip + '/target/north/registry'
 KEY = `pwd`.strip + '/examples/keys/north.key'
 
@@ -51,8 +49,8 @@ task :setup do
   raise 'Docker is required' unless which('docker')
 
   unless which('mksquashfs')
-      system 'sudo apt install squashfs-tools' if OS.linux?
-      system 'brew install squashfs' if OS.mac?
+    system 'sudo apt install squashfs-tools' if OS.linux?
+    system 'brew install squashfs' if OS.mac?
   end
   'cargo install --version 0.2.1 cross' unless which('cross')
 end
@@ -60,13 +58,14 @@ end
 namespace :test do
   desc 'Prepare integration test run'
   task :prepare do
+    require 'tmpdir'
     mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
     `./examples/build_examples.sh`
     `cargo build -p north`
     `cargo build -p nstar`
     `cargo build --release -p test_container`
 
-    Dir.mktmpdir do |dir| 
+    Dir.mktmpdir do |dir|
       cp './tests/test_container/manifest.yaml', dir
       root = "#{dir}/root"
       mkdir_p root
@@ -83,6 +82,7 @@ namespace :test do
   desc 'Test coverage'
   task :coverage do
     raise 'Test coverage runs on Linux only!' unless OS.linux?
+
     sh 'cargo clean'
     rust_flags = ['-Zprofile',
                   '-Ccodegen-units=1',
