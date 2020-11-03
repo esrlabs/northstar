@@ -47,15 +47,12 @@ async fn main() {
 
 async fn run() -> Result<(), Error> {
     let opt = Opt::from_args();
-    let config_string =
-        &read_to_string(&opt.config)
-            .await
-            .map_err(|e| Error::GeneralIoProblem {
-                context: format!("Failed to read configuration file {}", opt.config.display()),
-                error: e,
-            })?;
+    let config_string = &read_to_string(&opt.config).await.map_err(|e| Error::Io {
+        context: format!("Failed to read configuration file {}", opt.config.display()),
+        error: e,
+    })?;
     let config: Config = toml::from_str(config_string).map_err(|_| {
-        Error::ConfigurationError(format!(
+        Error::Configuration(format!(
             "Failed to read configuration file {}",
             opt.config.display()
         ))

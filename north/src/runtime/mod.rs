@@ -99,7 +99,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     // TODO: permission check of SETTINGS.directories.run_dir
     fs::create_dir_all(&config.directories.run_dir)
         .await
-        .map_err(|e| Error::GeneralIoProblem {
+        .map_err(|e| Error::Io {
             context: format!("Failed to create {}", config.directories.run_dir.display()),
             error: e,
         })?;
@@ -107,7 +107,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     // Ensure the configured data_dir exists
     fs::create_dir_all(&config.directories.data_dir)
         .await
-        .map_err(|e| Error::GeneralIoProblem {
+        .map_err(|e| Error::Io {
             context: format!("Failed to create {}", config.directories.data_dir.display()),
             error: e,
         })?;
@@ -118,7 +118,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
         let d: PathBuf = d.into();
         npk::install_all(&mut state, &d.as_path())
             .await
-            .map_err(Error::InstallationError)?;
+            .map_err(Error::Installation)?;
     }
 
     info!(

@@ -22,7 +22,7 @@ use crate::{
     api::{InstallationResult, Message, MessageId, Notification},
     manifest::{Manifest, Mount, Name, Version},
     runtime::{
-        error::{Error, InstallFailure},
+        error::{Error, InstallationError},
         npk,
         npk::extract_manifest,
         Event, EventTx,
@@ -35,7 +35,7 @@ use async_std::{
     sync,
 };
 use ed25519_dalek::PublicKey;
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter, result, time,
@@ -156,7 +156,7 @@ impl State {
     }
 
     /// Add a container instance the list of known containers
-    pub fn add(&mut self, container: Container) -> Result<(), InstallFailure> {
+    pub fn add(&mut self, container: Container) -> Result<(), InstallationError> {
         let name = container.manifest.name.clone();
         let version = container.manifest.version.clone();
         if container.is_resource_container() {
@@ -165,13 +165,13 @@ impl State {
                 .get(&(name.clone(), version.clone()))
                 .is_some()
             {
-                return Err(InstallFailure::ApplicationAlreadyInstalled(name));
+                return Err(InstallationError::ApplicationAlreadyInstalled(name));
             }
             let app = Application::new(container);
             self.resources.insert((name, version), app);
         } else {
             if self.applications.get(&name).is_some() {
-                return Err(InstallFailure::ApplicationAlreadyInstalled(name));
+                return Err(InstallationError::ApplicationAlreadyInstalled(name));
             }
             let app = Application::new(container);
             self.applications.insert(name, app);
@@ -242,7 +242,7 @@ impl State {
         // CGroups
         #[cfg(any(target_os = "android", target_os = "linux"))]
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
-            log::debug!("Creating cgroup configuration for {}", app);
+            debug!("Creating cgroup configuration for {}", app);
             let cgroups = crate::runtime::linux::cgroups::CGroups::new(
                 &self.config.cgroups,
                 app.name(),
@@ -250,13 +250,10 @@ impl State {
                 self.events_tx.clone(),
             )
             .await
-            .map_err(Error::CGroupProblem)?;
+            .map_err(Error::CGroup)?;
 
-            log::debug!("Assigning {} to cgroup {}", process.pid(), app);
-            cgroups
-                .assign(process.pid())
-                .await
-                .map_err(Error::CGroupProblem)?;
+            debug!("Assigning {} to cgroup {}", process.pid(), app);
+            cgroups.assign(process.pid()).await.map_err(Error::CGroup)?;
             Some(cgroups)
         } else {
             None
@@ -295,8 +292,8 @@ impl State {
                 #[cfg(any(target_os = "android", target_os = "linux"))]
                 {
                     if let Some(cgroups) = context.cgroups {
-                        log::debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::CGroupProblem)?;
+                        debug!("Destroying cgroup configuration of {}", app);
+                        cgroups.destroy().await.map_err(Error::CGroup)?;
                     }
                 }
 
@@ -370,12 +367,12 @@ impl State {
             }
             Ok(manifest) => {
                 let pkg_file_name = format!("{}-{}.npk", manifest.name, manifest.version,);
-                log::debug!(
+                debug!(
                     "Try to install {}, checking the installed apps",
                     manifest.name
                 );
                 let registry_path = container_dir.map(|p| p.join(&pkg_file_name));
-                log::debug!("Try to install..., registry_path: {:?}", registry_path);
+                debug!("Try to install..., registry_path: {:?}", registry_path);
                 if manifest.is_resource_image() {
                     if self
                         .resources
@@ -492,14 +489,14 @@ impl State {
             // remove npk from registry
             for d in &self.config.directories.container_dirs {
                 let mut dir = fs::read_dir(&d).await.map_err(|e| {
-                    Error::UninstallationError(InstallFailure::FileIoProblem {
+                    Error::UninstallationError(InstallationError::Io {
                         context: "Could not read directory".to_string(),
                         error: e,
                     })
                 })?;
                 while let Some(res) = dir.next().await {
                     let entry = res.map_err(|e| {
-                        Error::UninstallationError(InstallFailure::FileIoProblem {
+                        Error::UninstallationError(InstallationError::Io {
                             context: "Could not read directory".to_string(),
                             error: e,
                         })
@@ -510,7 +507,7 @@ impl State {
 
                     if manifest.name == name && manifest.version == *version {
                         fs::remove_file(&entry.path()).await.map_err(|e| {
-                            Error::UninstallationError(InstallFailure::FileIoProblem {
+                            Error::UninstallationError(InstallationError::Io {
                                 context: format!(
                                     "Could not remove npk {}",
                                     entry.path().to_string_lossy()
@@ -548,8 +545,8 @@ impl State {
                 {
                     let mut context = context;
                     if let Some(cgroups) = context.cgroups.take() {
-                        log::debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::CGroupProblem)?;
+                        debug!("Destroying cgroup configuration of {}", app);
+                        cgroups.destroy().await.map_err(Error::CGroup)?;
                     }
                 }
                 let exit_info = match exit_status {
