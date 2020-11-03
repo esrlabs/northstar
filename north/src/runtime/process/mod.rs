@@ -27,6 +27,7 @@ use wait::WaitStatus;
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub mod minijail;
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
 pub mod raw;
 
 const ENV_NAME: &str = "NAME";
