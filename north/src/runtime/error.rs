@@ -39,7 +39,7 @@ pub enum Error {
     #[error("Problem with cgroups")]
     CGroupProblem(CGroupError),
     #[error("Problem with keys: {0}")]
-    KeyError(KeyError),
+    KeyError(super::keys::Error),
     #[error("OS level problem: {context}")]
     OsProblem {
         context: String,
@@ -105,18 +105,6 @@ pub enum CGroupError {
         #[source]
         error: io::Error,
     },
-}
-
-#[derive(Error, Debug)]
-pub enum KeyError {
-    #[error("File problem {context}")]
-    ProblemWithFile {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
-    #[error("Key signature problen: {0}")]
-    SignatureCorrupt(String),
 }
 
 #[derive(Error, Debug)]
