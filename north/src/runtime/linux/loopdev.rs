@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::error::LoopDeviceError;
 use async_std::{
     fs,
     path::{Path, PathBuf},
@@ -20,6 +19,7 @@ use async_std::{
 use libc::{c_int, ioctl};
 use nix::{errno::Errno, Error::Sys};
 use std::os::unix::prelude::*;
+use thiserror::Error;
 
 const LOOP_SET_FD: u16 = 0x4C00;
 const LOOP_CLR_FD: u16 = 0x4C01;
@@ -29,6 +29,26 @@ const LOOP_FLAG_READ_ONLY: u32 = 0x01;
 const LOOP_FLAG_AUTOCLEAR: u32 = 0x04;
 const LOOP_CTL_GET_FREE: u16 = 0x4C82;
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Failed to open loop control")]
+    Open(#[from] async_std::io::Error),
+    #[error("Failed to find or allocate free loop device")]
+    NoFreeDeviceFound,
+    #[error("Failed to add new loop device")]
+    DeviceAlreadyAllocated,
+    #[error("Failed to associate loop device with open file")]
+    AssociateWithOpenFile,
+    #[error("Set Loop status exceeded number of retries ({0})")]
+    StatusWriteBusy(usize),
+    #[error("Failed to set loop status")]
+    SetStatusFailed(#[from] nix::Error),
+    #[error("Failed to set direct I/O mode")]
+    DirectIo,
+    #[error("Failed to dis-associate loop device from file descriptor")]
+    Clear,
+}
+
 #[derive(Debug)]
 pub struct LoopControl {
     dev_file: fs::File,
@@ -36,25 +56,25 @@ pub struct LoopControl {
 }
 
 impl LoopControl {
-    pub async fn open(control: &Path, dev: &str) -> Result<LoopControl, LoopDeviceError> {
+    pub async fn open(control: &Path, dev: &str) -> Result<LoopControl, Error> {
         Ok(LoopControl {
             dev_file: fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(&control)
                 .await
-                .map_err(LoopDeviceError::ControlFileNotCreated)?,
+                .map_err(Error::Open)?,
             dev: dev.into(),
         })
     }
 
-    pub async fn next_free(&self) -> Result<LoopDevice, LoopDeviceError> {
+    pub async fn next_free(&self) -> Result<LoopDevice, Error> {
         let result;
         unsafe {
             result = ioctl(self.dev_file.as_raw_fd() as c_int, LOOP_CTL_GET_FREE.into());
         }
         if result < 0 {
-            Err(LoopDeviceError::NoFreeDeviceFound)
+            Err(Error::NoFreeDeviceFound)
         } else {
             Ok(LoopDevice::open(&format!("{}{}", self.dev, result)).await?)
         }
@@ -76,13 +96,13 @@ impl AsRawFd for LoopDevice {
 
 impl LoopDevice {
     /// Opens a loop device.
-    pub async fn open<P: AsRef<Path>>(dev: P) -> Result<LoopDevice, LoopDeviceError> {
+    pub async fn open<P: AsRef<Path>>(dev: P) -> Result<LoopDevice, Error> {
         let f = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(dev.as_ref())
             .await
-            .map_err(LoopDeviceError::ControlFileNotCreated)?;
+            .map_err(Error::Open)?;
         Ok(LoopDevice {
             device: f,
             path: PathBuf::from(dev.as_ref()),
@@ -97,7 +117,7 @@ impl LoopDevice {
         sizelimit: u64,
         read_only: bool,
         auto_clear: bool,
-    ) -> Result<(), LoopDeviceError> {
+    ) -> Result<(), Error> {
         log::debug!(
             "Attaching {} to loopback device at {}",
             bf_path
@@ -114,7 +134,7 @@ impl LoopDevice {
         let code = unsafe { ioctl(device_fd, LOOP_SET_FD.into(), file_fd) };
 
         if code < 0 {
-            return Err(LoopDeviceError::AssociateWithOpenFile);
+            return Err(Error::AssociateWithOpenFile);
         }
 
         // Set offset and limit for backing_file
@@ -144,26 +164,26 @@ impl LoopDevice {
                 }
                 nix::Result::Err(e) => {
                     self.detach()?;
-                    return Err(LoopDeviceError::SetStatusFailed(e));
+                    return Err(Error::SetStatusFailed(e));
                 }
             }
         }
 
         self.detach()?;
-        Err(LoopDeviceError::StatusWriteBusy(MAX_RETRIES))
+        Err(Error::StatusWriteBusy(MAX_RETRIES))
     }
 
-    pub fn detach(&self) -> Result<(), LoopDeviceError> {
+    pub fn detach(&self) -> Result<(), Error> {
         let fd = self.device.as_raw_fd() as c_int;
         let code = unsafe { ioctl(fd, LOOP_CLR_FD.into(), 0) };
         if code < 0 {
-            Err(LoopDeviceError::ClearFailed)
+            Err(Error::Clear)
         } else {
             Ok(())
         }
     }
 
-    pub fn set_direct_io(&self, enable: bool) -> Result<(), LoopDeviceError> {
+    pub fn set_direct_io(&self, enable: bool) -> Result<(), Error> {
         unsafe {
             if ioctl(
                 self.device.as_raw_fd() as c_int,
@@ -171,7 +191,7 @@ impl LoopDevice {
                 if enable { 1 } else { 0 },
             ) < 0
             {
-                Err(LoopDeviceError::DirectIoModeFailed)
+                Err(Error::DirectIo)
             } else {
                 Ok(())
             }
@@ -186,7 +206,7 @@ impl LoopDevice {
     }
 
     /// Get major and minor number of device
-    pub async fn dev_id(&self) -> Result<(u64, u64), LoopDeviceError> {
+    pub async fn dev_id(&self) -> Result<(u64, u64), Error> {
         let attr = self.device.metadata().await?;
         let rdev = attr.rdev();
         let major = ((rdev >> 32) & 0xFFFF_F000) | ((rdev >> 8) & 0xFFF);
