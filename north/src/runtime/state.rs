@@ -220,7 +220,7 @@ impl State {
 
         // Android and Linux
         #[cfg(any(target_os = "android", target_os = "linux"))]
-        let process = super::process::minijail::MinijailProcess::start(
+        let process = super::process::minijail::Process::start(
             &app.container,
             self.events_tx.clone(),
             self.config.directories.run_dir.as_path().into(),
@@ -233,7 +233,7 @@ impl State {
 
         // Not Android or Linux
         #[cfg(not(any(target_os = "android", target_os = "linux")))]
-        let process = super::process::os::OsProcess::start(&app.container, self.events_tx.clone())
+        let process = super::process::raw::Process::start(&app.container, self.events_tx.clone())
             .await
             .map_err(Error::Process)?;
 
