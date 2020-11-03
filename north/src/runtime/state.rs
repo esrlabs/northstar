@@ -229,13 +229,13 @@ impl State {
             self.config.container_gid,
         )
         .await
-        .map_err(Error::ProcessError)?;
+        .map_err(Error::Process)?;
 
         // Not Android or Linux
         #[cfg(not(any(target_os = "android", target_os = "linux")))]
         let process = super::process::os::OsProcess::start(&app.container, self.events_tx.clone())
             .await
-            .map_err(Error::ProcessError)?;
+            .map_err(Error::Process)?;
 
         let process = Box::new(process) as Box<dyn Process>;
 
@@ -290,7 +290,7 @@ impl State {
                     .process
                     .stop(timeout)
                     .await
-                    .map_err(Error::ProcessError)?;
+                    .map_err(Error::Process)?;
 
                 #[cfg(any(target_os = "android", target_os = "linux"))]
                 {
@@ -581,7 +581,7 @@ impl State {
                     .process_mut()
                     .stop(Duration::from_secs(1))
                     .await
-                    .map_err(Error::ProcessError)?;
+                    .map_err(Error::Process)?;
                 self.events_tx
                     .send(Event::Notification(Notification::OutOfMemory(
                         name.to_owned(),
