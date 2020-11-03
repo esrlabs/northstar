@@ -14,6 +14,8 @@
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use super::linux::device_mapper;
+#[cfg(any(target_os = "android", target_os = "linux"))]
+use super::linux::loopdev;
 use super::{InstallationResult, Name};
 use std::io;
 use thiserror::Error;
@@ -144,8 +146,9 @@ pub enum InstallFailure {
     #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Problem with device mapper")]
     DeviceMapper(device_mapper::Error),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Problem with loop device")]
-    LoopDeviceError(LoopDeviceError),
+    LoopDeviceError(loopdev::Error),
     #[error("Hash is invalid ({0})")]
     HashInvalid(String),
     #[error("No signature key found ({0})")]
@@ -188,6 +191,7 @@ impl From<InstallFailure> for InstallationResult {
             InstallFailure::DeviceMapper(e) => {
                 InstallationResult::DeviceMapperProblem(format!("{:?}", e))
             }
+            #[cfg(any(target_os = "android", target_os = "linux"))]
             InstallFailure::LoopDeviceError(e) => {
                 InstallationResult::LoopDeviceError(format!("{}", e))
             }
@@ -220,24 +224,4 @@ impl From<InstallFailure> for InstallationResult {
             }
         }
     }
-}
-
-#[derive(Error, Debug)]
-pub enum LoopDeviceError {
-    #[error("Control file for loop device could not be created")]
-    ControlFileNotCreated(#[from] io::Error),
-    #[error("Failure to find or allocate free loop device")]
-    NoFreeDeviceFound,
-    #[error("Failure adding new loop device")]
-    DeviceAlreadyAllocated,
-    #[error("Failure to associate loop device with open file")]
-    AssociateWithOpenFile,
-    #[error("Set Loop status exceeded number of retries ({0})")]
-    StatusWriteBusy(usize),
-    #[error("Set Loop status failed")]
-    SetStatusFailed(#[from] nix::Error),
-    #[error("Failure to set DIRECT I/O mode")]
-    DirectIoModeFailed,
-    #[error("Failure to dis-associate loop device from file descriptor")]
-    ClearFailed,
 }
