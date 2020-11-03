@@ -237,7 +237,7 @@ fn gen_signature_yaml(
     let fsimg_size = fs::metadata(&fsimg_path)
         .with_context(|| format!("Fail to read read size of '{}'", &fsimg_path.display()))?
         .len();
-    let verity_hash = create_verity_header(&fsimg_path, fsimg_size)?;
+    let verity_hash = write_verity_header(&fsimg_path, fsimg_size)?;
     let key_pair = read_keypair(&key_file_path)?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest_path, &fsimg_path, fsimg_size, &verity_hash)?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
@@ -286,72 +286,86 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<Vec<(&str, u32)>> {
 fn gen_hash_tree(
     image: &File,
     image_size: u64,
-    block_size: u64,
     salt: &[u8; SHA256_SIZE],
-    hash_level_offsets: &[usize],
+    level_offsets: &[usize],
     tree_size: usize,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
-    let mut hash_tree = vec![0_u8; tree_size];
-    let hash_src_offset = 0;
-    let mut hash_src_size = image_size;
-    let mut level_num = 0;
-    let mut reader = BufReader::new(image);
-    let mut level_output: Vec<u8> = vec![];
+    // For a description of the overall hash tree generation logic see
+    // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
-    while hash_src_size > block_size {
-        let mut level_output_list: Vec<[u8; SHA256_SIZE]> = vec![];
-        let mut remaining = hash_src_size;
-        while remaining > 0 {
+    let mut hash_tree = vec![0_u8; tree_size];
+    let mut level_num = 0;
+    let mut level_size = image_size;
+    let mut level_hashes: Vec<[u8; SHA256_SIZE]> = vec![];
+
+    if image_size % BLOCK_SIZE as u64 != 0 {
+        return Err(anyhow!(
+            "Failed to generate verity has tree. The image size {} is not a multiple of the block size {}",
+            image_size,
+            BLOCK_SIZE
+        ));
+    }
+
+    loop {
+        level_hashes.clear();
+        let mut rem_size = level_size;
+
+        while rem_size > 0 {
+            // 1. Choose a random salt (hexadecimal encoding).
             let mut sha256 = Sha256::new();
             sha256.update(salt);
 
-            let data_len;
+            // "2. Unsparse your system image into 4k blocks."
+            // "3. For each block, get its (salted) SHA256 hash."
             if level_num == 0 {
-                let offset = hash_src_offset + hash_src_size - remaining;
-                data_len = std::cmp::min(remaining, block_size);
-                let mut data = vec![0_u8; data_len as usize];
-                reader.seek(Start(offset))?;
-                reader.read_exact(&mut data)?;
+                // hash block of original file
+                let offset = level_size - rem_size;
+                let mut data = vec![0_u8; BLOCK_SIZE];
+                let mut image_reader = BufReader::new(image);
+                image_reader.seek(Start(offset))?;
+                image_reader.read_exact(&mut data)?;
                 sha256.update(&data);
             } else {
-                let offset =
-                    hash_level_offsets[level_num - 1] + hash_src_size as usize - remaining as usize;
-                data_len = block_size;
-                sha256.update(&hash_tree[offset..offset + data_len as usize]);
+                // hash block of previous level
+                let offset = level_offsets[level_num - 1] + level_size as usize - rem_size as usize;
+                sha256.update(&hash_tree[offset..offset + BLOCK_SIZE]);
             }
 
-            remaining -= data_len;
-            if data_len < block_size {
-                let zeros = vec![0_u8; (block_size - data_len) as usize];
-                sha256.update(zeros);
-            }
-            level_output_list.push(sha256.finalize().into());
+            rem_size -= BLOCK_SIZE as u64;
+            level_hashes.push(sha256.finalize().into());
         }
 
-        level_output = level_output_list
+        // "7. Repeat steps 2-6 using the previous level as the source for the next until you have only a single hash."
+        if level_hashes.len() == 1 {
+            break;
+        }
+
+        // "4. Concatenate these hashes to form a level"
+        let mut level_bytes = level_hashes
             .iter()
             .flat_map(|s| s.iter().copied())
             .collect();
-        let padding_needed =
-            round_up_to_multiple(level_output.len(), block_size as usize) - level_output.len();
-        level_output.append(&mut vec![0_u8; padding_needed]);
 
-        let offset = hash_level_offsets[level_num];
-        hash_tree[offset..offset + level_output.len()].copy_from_slice(level_output.as_slice());
+        // "5. Pad the level with 0s to a 4k block boundary."
+        pad_to_block_size(&mut level_bytes);
 
-        hash_src_size = level_output.len() as u64;
+        // "6. Concatenate the level to your hash tree."
+        let offset = level_offsets[level_num];
+        hash_tree[offset..offset + level_bytes.len()].copy_from_slice(level_bytes.as_slice());
+
+        level_size = level_bytes.len() as u64;
         level_num += 1;
     }
 
-    let digest = Sha256::digest(
-        &salt
-            .iter()
-            .copied()
-            .chain(level_output.iter().copied())
-            .collect::<Vec<u8>>(),
-    );
+    // "The result of this is a single hash, which is your root hash.
+    // This and your salt are used during the construction of your dm-verity mapping table."
+    let root_hash = level_hashes[0];
+    Ok((root_hash.to_vec(), hash_tree))
+}
 
-    Ok((digest.to_vec(), hash_tree))
+fn pad_to_block_size(data: &mut Vec<u8>) {
+    let pad_size = round_up_to_multiple(data.len(), BLOCK_SIZE) - data.len();
+    data.append(&mut vec![0_u8; pad_size]);
 }
 
 fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
@@ -365,7 +379,7 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     signature_yaml
 }
 
-fn calc_hash_level_offsets(
+fn calc_hash_tree_level_offsets(
     image_size: usize,
     block_size: usize,
     digest_size: usize,
@@ -373,20 +387,18 @@ fn calc_hash_level_offsets(
     let mut level_offsets: Vec<usize> = vec![];
     let mut level_sizes: Vec<usize> = vec![];
     let mut tree_size = 0;
-
     let mut num_levels = 0;
-    let mut size = image_size;
-    while size > block_size {
-        let num_blocks = (size + block_size - 1) / block_size;
+    let mut rem_size = image_size;
+
+    while rem_size > block_size {
+        let num_blocks = (rem_size + block_size - 1) / block_size;
         let level_size = round_up_to_multiple(num_blocks * digest_size, block_size);
 
         level_sizes.push(level_size);
         tree_size += level_size;
         num_levels += 1;
-
-        size = level_size;
+        rem_size = level_size;
     }
-
     for n in 0..num_levels {
         let mut offset = 0;
         #[allow(clippy::needless_range_loop)]
@@ -428,20 +440,19 @@ fn create_fs_img(tmp_root_path: &Path, manifest: &Manifest, fsimg_path: &Path) -
     Ok(())
 }
 
-fn create_verity_header(fsimg_path: &Path, fsimg_size: u64) -> Result<Vec<u8>> {
+fn write_verity_header(fsimg_path: &Path, fsimg_size: u64) -> Result<Vec<u8>> {
     let salt = gen_salt();
-    let (hash_level_offsets, tree_size) =
-        calc_hash_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
+    let (level_offsets, tree_size) =
+        calc_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
     let (verity_hash, hash_tree) = gen_hash_tree(
         &File::open(&fsimg_path).with_context(|| format!("Cannot open '{}'", &FS_IMG_NAME))?,
         fsimg_size,
-        BLOCK_SIZE as u64,
         &salt,
-        &hash_level_offsets,
+        &level_offsets,
         tree_size,
     )
     .with_context(|| "Error while generating hash tree")?;
-    write_verity_header(&fsimg_path, fsimg_size, &salt, &hash_tree)
+    write_verity_superblock_and_hashtree(&fsimg_path, fsimg_size, &salt, &hash_tree)
         .with_context(|| "Error while writing verity header")?;
     Ok(verity_hash)
 }
@@ -502,7 +513,7 @@ fn create_squashfs(
     }
 }
 
-fn write_verity_header(
+fn write_verity_superblock_and_hashtree(
     fsimg_path: &Path,
     fsimg_size: u64,
     salt: &[u8; 32],
@@ -512,30 +523,30 @@ fn write_verity_header(
     assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
     let data_blocks = fsimg_size / BLOCK_SIZE as u64;
 
-    /* ['verity', 1, 1, uuid.gsub('-', ''), 'sha256', 4096, 4096, data_blocks, 32, salt, '']
-     * .pack('a8 L L H32 a32 L L Q S x6 a256 a3752')
-     * (https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format)
-     * (https://ruby-doc.org/core-2.7.1/Array.html#method-i-pack) */
     let mut fsimg = OpenOptions::new()
         .write(true)
         .append(true)
         .open(&fsimg_path)
         .with_context(|| format!("Cannot open '{}'", &fsimg_path.display()))?;
-    fsimg.write_all(b"verity")?;
-    fsimg.write_all(&[0_u8, 0_u8])?;
-    fsimg.write_all(&1_u32.to_ne_bytes())?;
-    fsimg.write_all(&1_u32.to_ne_bytes())?;
+
+    // https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format
+    const VERITY_SIGNATURE: &[u8; 8] = b"verity\x00\x00";
+    const HASH_ALG_NAME: &[u8; 6] = b"sha256";
+    fsimg.write_all(VERITY_SIGNATURE)?;
+    fsimg.write_all(&1_u32.to_ne_bytes())?; // superblock version
+    fsimg.write_all(&1_u32.to_ne_bytes())?; // hash type 'normal'
     fsimg.write_all(&hex::decode(uuid.to_string().replace("-", ""))?)?;
-    fsimg.write_all(b"sha256")?;
+    fsimg.write_all(HASH_ALG_NAME)?;
     fsimg.write_all(&[0_u8; 26])?;
-    fsimg.write_all(&4096_u32.to_ne_bytes())?;
-    fsimg.write_all(&4096_u32.to_ne_bytes())?;
-    fsimg.write_all(&data_blocks.to_ne_bytes())?;
-    fsimg.write_all(&32_u16.to_ne_bytes())?;
-    fsimg.write_all(&[0_u8; 6])?;
+    fsimg.write_all(&4096_u32.to_ne_bytes())?; // data block in bytes
+    fsimg.write_all(&4096_u32.to_ne_bytes())?; // hash block in bytes
+    fsimg.write_all(&data_blocks.to_ne_bytes())?; // number of data blocks
+    fsimg.write_all(&32_u16.to_ne_bytes())?; // salt size (SHA256 output length)
+    fsimg.write_all(&[0_u8; 6])?; // padding
     fsimg.write_all(&salt.to_vec())?;
-    fsimg.write_all(&vec![0_u8; 256 - salt.len()])?;
-    fsimg.write_all(&[0_u8; 3752])?;
+    fsimg.write_all(&vec![0_u8; 256 - salt.len()])?; // padding
+    const BYTES_WRITTEN: usize = 8 + 4 + 4 + 16 + 6 + 26 + 4 + 4 + 8 + 2 + 6 + 256;
+    fsimg.write_all(&[0_u8; BLOCK_SIZE - BYTES_WRITTEN])?; // pad to BLOCK_SIZE
     fsimg.write_all(&hash_tree)?;
 
     Ok(())
@@ -646,7 +657,6 @@ fn assume_non_existing(path: &Path) -> Result<()> {
     }
 }
 
-fn round_up_to_multiple(number: usize, factor: usize) -> usize {
-    let round_down_to_multiple = number + factor - 1;
-    round_down_to_multiple - (round_down_to_multiple % factor)
+fn round_up_to_multiple(number: usize, multiple: usize) -> usize {
+    number + ((multiple - (number % multiple)) % multiple)
 }
