@@ -1,6 +1,7 @@
 #!/bin/bash
 # Build example containers. Expected to be called from the northstar root directory e.g ./examples/build_examples.sh <platform>
 
+set -eu
 set -o errexit
 set -o pipefail
 set -o nounset
