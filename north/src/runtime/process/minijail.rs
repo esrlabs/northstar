@@ -354,6 +354,12 @@ async fn setup_mounts(
 
                 mount_bind(jail, &shared_resource_path, target.as_path().into(), false)?;
             }
+            Mount::Tmpfs { target, size } => {
+                debug!("Mounting tmpfs to {}", target.display());
+                let data = format!("size={},mode=1777", size);
+                jail.mount_with_data(Path::new("none").into(), &target, "tmpfs", 0, &data)
+                    .map_err(Error::Minijail)?;
+            }
         }
     }
     Ok(())
