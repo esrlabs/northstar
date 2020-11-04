@@ -376,31 +376,23 @@ async fn connection(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Erro
     // TX
     let mut writer = stream;
     task::spawn(async move {
-        loop {
-            match client_rx.recv().await {
-                Ok(msg_to_send) => {
-                    async fn send<W: Unpin + Write>(
-                        reply: &Message,
-                        writer: &mut W,
-                    ) -> io::Result<()> {
-                        // Serialize reply
-                        let reply = serde_json::to_string_pretty(&reply)
-                            .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        while let Ok(msg_to_send) = client_rx.recv().await {
+            async fn send<W: Unpin + Write>(reply: &Message, writer: &mut W) -> io::Result<()> {
+                // Serialize reply
+                let reply = serde_json::to_string_pretty(&reply)
+                    .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
 
-                        // Send reply
-                        let mut buffer = [0u8; 4];
-                        BigEndian::write_u32(&mut buffer, reply.len() as u32);
-                        writer.write_all(&buffer).await?;
-                        writer.write_all(reply.as_bytes()).await.map(drop)
-                    }
+                // Send reply
+                let mut buffer = [0u8; 4];
+                BigEndian::write_u32(&mut buffer, reply.len() as u32);
+                writer.write_all(&buffer).await?;
+                writer.write_all(reply.as_bytes()).await.map(drop)
+            }
 
-                    // Break this loop upon connection errors
-                    if let Err(e) = send(&msg_to_send, &mut writer).await {
-                        warn!("IO error on client connection: {}", e);
-                        break;
-                    }
-                }
-                Err(_) => break,
+            // Break this loop upon connection errors
+            if let Err(e) = send(&msg_to_send, &mut writer).await {
+                warn!("IO error on client connection: {}", e);
+                break;
             }
         }
     });
