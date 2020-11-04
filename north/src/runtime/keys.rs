@@ -16,59 +16,39 @@ use ed25519_dalek::*;
 use log::info;
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
-use tokio::{
-    fs,
-    io::{self, AsyncReadExt},
-    stream::StreamExt,
-};
+use tokio::{fs, io, stream::StreamExt};
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Io error: {context}")]
-    Io {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
+    #[error("Io error: {0} ({1})")]
+    Io(String, #[source] io::Error),
     #[error("Invalid key signature: {0}")]
-    Signature(String),
+    Signature(#[from] SignatureError),
 }
 
 pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, Error> {
     let mut signing_keys = HashMap::new();
-    let mut key_dir = fs::read_dir(&key_dir).await.map_err(|e| Error::Io {
-        context: format!("Failed to open {}", key_dir.display()),
-        error: e,
+    let mut key_dir = fs::read_dir(&key_dir).await.map_err(|e| {
+        Error::Io(
+            format!("Failed to load keys from: {}", key_dir.display()),
+            e,
+        )
     })?;
     while let Some(entry) = key_dir.next().await {
-        let entry = entry.map_err(|e| Error::Io {
-            context: "Invalid key dir entry".to_string(),
-            error: e,
-        })?;
-        // .context("Invalid key dir entry")?;
-        let path = entry.path();
-        if let Some(extension) = path.extension() {
-            if extension == "pub" && path.is_file() {
-                if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {
-                    info!("Loading signing key {}", key_id);
-                    let mut sign_key_file = fs::File::open(&path).await.map_err(|e| Error::Io {
-                        context: format!("Failed to open {}", path.display()),
-                        error: e,
-                    })?;
-                    let mut key_bytes = Vec::new();
-                    sign_key_file
-                        .read_to_end(&mut key_bytes)
-                        .await
-                        .map_err(|e| Error::Io {
-                            context: format!("Failed to read {}", path.display()),
-                            error: e,
-                        })?;
-                    let key = PublicKey::from_bytes(&key_bytes).map_err(|_| {
-                        Error::Signature(format!("Signature error for key from {}", path.display()))
-                    })?;
-                    signing_keys.insert(key_id, key);
-                }
-            }
+        let path = entry
+            .map_err(|e| Error::Io("Failed to read dir entry".to_string(), e))?
+            .path();
+        if path.extension().filter(|ext| *ext == "pub").is_none() || !path.is_file() {
+            continue;
+        }
+
+        if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {
+            info!("Loading signing key {}", key_id);
+            let key_bytes = fs::read(&path)
+                .await
+                .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
+            let key = PublicKey::from_bytes(&key_bytes)?;
+            signing_keys.insert(key_id, key);
         }
     }
     Ok(signing_keys)
