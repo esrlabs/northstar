@@ -6,6 +6,7 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+this_script=$(basename $0)
 bold=$(tput bold)
 normal=$(tput sgr0)
 
@@ -20,6 +21,15 @@ exe() { echo " + $@" ; "$@" ; }
 
 log_err() {
   echo >&2 "$@"
+}
+
+ensure_top_level_dir_invocation() {
+  local top_level_dir=$(git rev-parse --show-toplevel)
+
+  if [[ ${top_level_dir} != $(pwd) ]]; then
+    log_err "${this_script} must be invoked from the top-level directory"
+    exit 64
+  fi
 }
 
 create_temp_dir() {
@@ -84,6 +94,8 @@ build_example() {
 }
 
 main() {
+  ensure_top_level_dir_invocation
+
   local EXAMPLES=(
     "./examples/container/cpueater"
     "./examples/container/crashing"
