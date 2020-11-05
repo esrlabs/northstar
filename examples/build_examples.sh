@@ -23,7 +23,7 @@ log_err() {
   echo >&2 "$@"
 }
 
-ensure_top_level_dir_invocation() {
+assert_is_toplevel_dir() {
   local top_level_dir=$(git rev-parse --show-toplevel)
 
   if [[ ${top_level_dir} != $(pwd) ]]; then
@@ -94,7 +94,7 @@ build_example() {
 }
 
 main() {
-  ensure_top_level_dir_invocation
+  assert_is_toplevel_dir
 
   local EXAMPLES=(
     "./examples/container/cpueater"
