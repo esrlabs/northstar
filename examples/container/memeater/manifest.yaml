@@ -9,5 +9,5 @@ mounts:
     /system:
       host: /system
 cgroups:
-  mem:
-    limit: 10000000
+  memory:
+    limit_in_bytes: 10000000

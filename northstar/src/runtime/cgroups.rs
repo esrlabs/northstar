@@ -31,10 +31,8 @@ use tokio::{
 
 use super::{config, Event, EventTx};
 
-const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
 const OOM_CONTROL: &str = "memory.oom_control";
 const UNDER_OOM: &str = "under_oom 1";
-const CPU_SHARES: &str = "cpu.shares";
 const TASKS: &str = "tasks";
 
 #[derive(Error, Debug)]
@@ -93,21 +91,18 @@ impl CGroupMem {
     async fn new(
         parent: &Path,
         name: &str,
-        cgroup: &manifest::CGroupMem,
+        cgroup: &manifest::CGroup,
         tx: EventTx,
     ) -> Result<CGroupMem, Error> {
         let mount_point = get_mount_point("memory")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
 
-        // Configure memory limit
-        let limit_in_bytes = path.join(LIMIT_IN_BYTES);
-        debug!(
-            "Setting {} to {} bytes",
-            limit_in_bytes.display(),
-            cgroup.limit
-        );
-        write(&limit_in_bytes, &cgroup.limit.to_string()).await?;
+        for (file, value) in cgroup {
+            let path = path.join(format!("memory.{}", file));
+            debug!("Setting {} to {} bytes", path.display(), value);
+            write(&path, &value).await?;
+        }
 
         // Configure oom
         let oom_control = path.join(OOM_CONTROL);
@@ -163,23 +158,16 @@ impl CGroup for CGroupCpu {
 }
 
 impl CGroupCpu {
-    async fn new(
-        parent: &Path,
-        name: &str,
-        cgroup: &manifest::CGroupCpu,
-    ) -> Result<CGroupCpu, Error> {
+    async fn new(parent: &Path, name: &str, cgroup: &manifest::CGroup) -> Result<CGroupCpu, Error> {
         let mount_point = get_mount_point("cpu")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
 
-        // Configure cpu shares
-        let cpu_shares = path.join(CPU_SHARES);
-        debug!(
-            "Setting {} to {} shares",
-            cpu_shares.display(),
-            cgroup.shares
-        );
-        write(&cpu_shares, &cgroup.shares.to_string()).await?;
+        for (file, value) in cgroup {
+            let path = path.join(format!("cpu.{}", file));
+            debug!("Setting {} to {} bytes", path.display(), value);
+            write(&path, &value).await?;
+        }
 
         Ok(CGroupCpu { path })
     }
@@ -198,17 +186,17 @@ impl CGroups {
         cgroups: &manifest::CGroups,
         tx: EventTx,
     ) -> Result<CGroups, Error> {
-        let mem = if let Some(ref mem) = cgroups.mem {
+        let mem = if let Some(values) = cgroups.get("memory") {
             let parent = &config.memory;
-            let group = CGroupMem::new(parent, &name, &mem, tx).await?;
+            let group = CGroupMem::new(&parent, &name, values, tx).await?;
             Some(group)
         } else {
             None
         };
 
-        let cpu = if let Some(ref cpu) = cgroups.cpu {
+        let cpu = if let Some(values) = cgroups.get("cpu") {
             let parent = &config.cpu;
-            let group = CGroupCpu::new(&parent, &name, &cpu).await?;
+            let group = CGroupCpu::new(&parent, &name, values).await?;
             Some(group)
         } else {
             None

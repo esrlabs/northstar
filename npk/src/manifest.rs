@@ -102,26 +102,6 @@ pub enum OnExit {
     Restart(u32),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CGroupMem {
-    /// Limit im bytes
-    pub limit: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CGroupCpu {
-    /// CPU shares assigned to this container. CGroups divide the resource CPU into 1024 shares.
-    pub shares: u32,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CGroups {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mem: Option<CGroupMem>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cpu: Option<CGroupCpu>,
-}
-
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub enum MountFlag {
     /// Bind mount
@@ -164,6 +144,9 @@ pub enum Mount {
     /// Mount a tmpfs with size
     Tmpfs { size: u64 },
 }
+
+pub type CGroup = HashMap<String, String>;
+pub type CGroups = HashMap<String, CGroup>;
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
@@ -506,8 +489,8 @@ mounts:
     resource: bla-blah.foo:1.0.0/bin/foo
 autostart: true
 cgroups:
-  mem:
-    limit: 30
+  memory:
+    limit_in_bytes: 30
   cpu:
     shares: 100
 seccomp:
@@ -550,13 +533,16 @@ seccomp:
         mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs { size: 42 });
         mounts.insert(PathBuf::from("/dev"), Mount::Dev { r#type: Dev::Full });
         assert_eq!(manifest.mounts, mounts);
-        assert_eq!(
-            manifest.cgroups,
-            Some(CGroups {
-                mem: Some(CGroupMem { limit: 30 }),
-                cpu: Some(CGroupCpu { shares: 100 }),
-            })
-        );
+
+        let mut cgroups = HashMap::new();
+        let mut mem = HashMap::new();
+        let mut cpu = HashMap::new();
+        mem.insert("limit_in_bytes".to_string(), "30".to_string());
+        cpu.insert("shares".to_string(), "100".to_string());
+        cgroups.insert("memory".to_string(), mem);
+        cgroups.insert("cpu".to_string(), cpu);
+
+        assert_eq!(manifest.cgroups, Some(cgroups));
 
         let mut seccomp = HashMap::new();
         seccomp.insert("fork".to_string(), "1".to_string());
@@ -695,8 +681,8 @@ mounts:
   /dev: full
 autostart: true
 cgroups:
-  mem:
-    limit: 30
+  memory:
+    limit_in_bytes: 30
   cpu:
     shares: 100
 seccomp:
