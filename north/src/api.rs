@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    manifest::{Manifest, Version},
-    runtime::error::InstallationError,
-};
+use crate::manifest::{Manifest, Version};
 
 pub type Name = String;
 pub type MessageId = String; // UUID
@@ -143,53 +140,4 @@ pub enum InstallationResult {
 pub enum ShutdownResult {
     Success,
     Error(String), // TODO
-}
-
-impl From<InstallationError> for InstallationResult {
-    fn from(failure: InstallationError) -> InstallationResult {
-        match failure {
-            InstallationError::Zip(_) => InstallationResult::FileCorrupted,
-            InstallationError::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
-            InstallationError::MalformedSignature => InstallationResult::MalformedSignature,
-            InstallationError::MalformedHashes(_) => InstallationResult::MalformedHashes,
-            InstallationError::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
-            InstallationError::VerityError(s) => InstallationResult::VerityProblem(s),
-            InstallationError::ArchiveError(s) => InstallationResult::ArchiveError(s),
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallationError::DeviceMapper(e) => {
-                InstallationResult::DeviceMapperProblem(format!("{:?}", e))
-            }
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallationError::LoopDeviceError(e) => {
-                InstallationResult::LoopDeviceError(format!("{}", e))
-            }
-            InstallationError::HashInvalid(s) => InstallationResult::HashInvalid(s),
-            InstallationError::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
-            InstallationError::ApplicationAlreadyInstalled(_) => {
-                InstallationResult::ApplicationAlreadyInstalled
-            }
-            InstallationError::Io { context, error: _ } => {
-                InstallationResult::FileIoProblem(context)
-            }
-            InstallationError::MountError { context, error: _ } => {
-                InstallationResult::MountError(context)
-            }
-            InstallationError::INotifyError { context, error: _ } => {
-                InstallationResult::INotifyError(context)
-            }
-            InstallationError::Timeout(s) => InstallationResult::TimeoutError(s),
-            InstallationError::NoVerityHeader => {
-                InstallationResult::VerityProblem("Verity header missing".to_string())
-            }
-            InstallationError::UnexpectedVerityAlgorithm(s) => {
-                InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
-            }
-            InstallationError::UnexpectedVerityVersion(n) => {
-                InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
-            }
-            InstallationError::SignatureVerificationError(s) => {
-                InstallationResult::SignatureVerificationFailed(s)
-            }
-        }
-    }
 }
