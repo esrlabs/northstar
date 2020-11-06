@@ -30,7 +30,10 @@ use process::ExitStatus;
 use state::State;
 use std::path::PathBuf;
 use sync::mpsc;
-use tokio::{fs, sync};
+use tokio::{
+    fs,
+    sync::{self, oneshot},
+};
 
 pub type EventTx = mpsc::Sender<Event>;
 
@@ -38,7 +41,7 @@ pub type EventTx = mpsc::Sender<Event>;
 #[derive(Debug)]
 pub enum Event {
     /// Incomming command
-    Console(Request, mpsc::Sender<api::Message>),
+    Console(Request, oneshot::Sender<api::Message>),
     /// A instance exited with return code
     Exit(Name, ExitStatus),
     /// Out of memory event occured

@@ -34,7 +34,7 @@ use tokio::{
     prelude::*,
     select,
     stream::StreamExt,
-    sync::{self, broadcast},
+    sync::{self, broadcast, oneshot},
     task,
 };
 
@@ -78,7 +78,7 @@ impl Console {
         &self,
         state: &mut State,
         request: &Request,
-        response_tx: mpsc::Sender<Message>,
+        response_tx: oneshot::Sender<Message>,
     ) {
         match request {
             Request::Message(message) => {
@@ -143,7 +143,7 @@ impl Console {
 
                     // A error on the response_tx means that the connection
                     // was closed in the meantime. Ignore it.
-                    response_tx.send(response_message).await.ok();
+                    response_tx.send(response_message).ok();
                 } else {
                     warn!("Received message is not a request");
                 }
@@ -162,7 +162,7 @@ impl Console {
                 };
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                response_tx.send(message).await.ok();
+                response_tx.send(message).ok();
             }
         }
     }
@@ -309,7 +309,7 @@ impl Console {
                 ConnectionEvent::Request(request) => Request::Message(request),
                 ConnectionEvent::Install(message, npk) => Request::Install(message, npk),
             };
-            let (reply_tx, mut reply_rx) = mpsc::channel::<Message>(1);
+            let (reply_tx, reply_rx) = oneshot::channel();
             let event = Event::Console(request, reply_tx);
             event_tx
                 .send(event)
@@ -317,7 +317,6 @@ impl Console {
                 .expect("Internal channel error on main");
 
             let reply = reply_rx
-                .recv()
                 .await
                 .expect("Internal channel error on client reply");
 
