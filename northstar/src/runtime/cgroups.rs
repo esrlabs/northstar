@@ -20,13 +20,12 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use sync::mpsc;
 use thiserror::Error;
 use tokio::{
     fs,
     fs::OpenOptions,
     io::{self, AsyncWriteExt},
-    select, sync, task, time,
+    select, task, time,
 };
 
 use super::{config, Event, EventTx};
@@ -45,24 +44,42 @@ pub enum Error {
     Io(String, io::Error),
 }
 
-#[async_trait::async_trait]
-trait CGroup: Sized {
+#[derive(Debug)]
+struct CGroup {
+    cgroup: String,
+    path: PathBuf,
+}
+
+impl CGroup {
+    async fn new(cgroup: String, path: &Path, config: &manifest::CGroup) -> Result<CGroup, Error> {
+        let path = get_mount_point(&cgroup)?.join(&path);
+        create(&path).await?;
+
+        for (param, value) in config {
+            let filename = path.join(format!("{}.{}", &cgroup, param));
+            debug!("Setting {} to {} bytes", filename.display(), value);
+            write(&filename, &value).await?;
+        }
+
+        Ok(CGroup { cgroup, path })
+    }
+
     /// Assign a PID to this cgroup
     async fn assign(&self, pid: u32) -> Result<(), Error> {
-        if !self.path().exists() {
-            panic!("Failed to find cgroup {}", self.path().display());
+        if !self.path.exists() {
+            panic!("Failed to find cgroup {}", self.path.display());
         } else {
-            debug!("Assigning {} to {}", pid, self.path().display());
-            let tasks = self.path().join(TASKS);
+            debug!("Assigning {} to {}", pid, self.path.display());
+            let tasks = self.path.join(TASKS);
             write(&tasks, &pid.to_string()).await
         }
     }
 
     /// Destroy the cgroup by removing the dir
     async fn destroy(self) -> Result<(), Error> {
-        let path = self.path().to_owned();
+        let path = self.path.to_owned();
         if !path.exists() {
-            panic!("Failed to find cgroup {}", self.path().display());
+            panic!("Failed to find cgroup {}", self.path.display());
         } else {
             debug!("Destroying cgroup {}", path.display());
             fs::remove_dir(&path)
@@ -70,55 +87,69 @@ trait CGroup: Sized {
                 .map_err(|e| Error::Destroy(format!("Failed to remove {}", path.display()), e))
         }
     }
-
-    /// Path to this cgroup instance
-    fn path(&self) -> &Path;
 }
 
 #[derive(Debug)]
-pub struct CGroupMem {
-    pub path: PathBuf,
-    monitor: mpsc::Sender<()>,
-}
+pub struct CGroups(Vec<CGroup>);
 
-impl CGroup for CGroupMem {
-    fn path(&self) -> &Path {
-        self.path.as_path()
+impl CGroups {
+    pub(crate) async fn new(
+        config: &config::CGroups,
+        name: &str,
+        cgroups: &manifest::CGroups,
+        tx: EventTx,
+    ) -> Result<CGroups, Error> {
+        let mut cgroup_list = Vec::new();
+        for (cgroup_name, values) in cgroups {
+            let path = get_cgroup_path(cgroup_name, &config).join(name);
+            let cgroup = CGroup::new(cgroup_name.to_owned(), path.as_path(), values).await?;
+            cgroup_list.push(cgroup);
+        }
+
+        // TODO integrate this into they CGroup type
+        if let Some(cgroup) = cgroup_list.iter().find(|cg| cg.cgroup == "memory") {
+            setup_oom_monitor(name, cgroup.path.as_path(), tx).await?;
+        }
+
+        Ok(CGroups(cgroup_list))
+    }
+
+    pub async fn assign(&self, pid: u32) -> Result<(), Error> {
+        for cgroup in &self.0 {
+            cgroup.assign(pid).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn destroy(self) -> Result<(), Error> {
+        for cgroup in self.0 {
+            cgroup.destroy().await?;
+        }
+        Ok(())
     }
 }
 
-impl CGroupMem {
-    async fn new(
-        parent: &Path,
-        name: &str,
-        cgroup: &manifest::CGroup,
-        tx: EventTx,
-    ) -> Result<CGroupMem, Error> {
-        let mount_point = get_mount_point("memory")?;
-        let path = mount_point.join(parent).join(name);
-        create(&path).await?;
+fn get_cgroup_path(name: &str, config: &config::CGroups) -> PathBuf {
+    match name {
+        "memory" => config.memory.clone(),
+        "cpu" => config.cpu.clone(),
+        _ => PathBuf::from("north"),
+    }
+}
 
-        for (file, value) in cgroup {
-            let path = path.join(format!("memory.{}", file));
-            debug!("Setting {} to {} bytes", path.display(), value);
-            write(&path, &value).await?;
-        }
+async fn setup_oom_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), Error> {
+    let name = name.to_string();
 
-        // Configure oom
-        let oom_control = path.join(OOM_CONTROL);
-        write(&oom_control, "1").await?;
+    // Configure oom
+    let oom_control = path.join(OOM_CONTROL);
+    write(&oom_control, "1").await?;
 
-        // Dropping monitor will stop the task below
-        let (monitor, mut rx) = mpsc::channel::<()>(1);
-        let name = name.to_string();
-
-        task::spawn(async move {
-            let mut done = Box::pin(rx.recv());
-
-            loop {
-                let read = Box::pin(fs::read_to_string(&oom_control));
-                select! {
-                    res = read => match res {
+    // This task stops when the main loop receiver closes
+    task::spawn(async move {
+        loop {
+            select! {
+                result = fs::read_to_string(&oom_control) => {
+                    match result {
                         Ok(s) => {
                             if s.lines().any(|l| l == UNDER_OOM) {
                                 warn!("Container {} is under OOM!", name);
@@ -131,99 +162,15 @@ impl CGroupMem {
                             debug!("Stopping oom {}: {}", oom_control.display(), e);
                             break;
                         }
-                    },
-                    _ = &mut done => {
-                        debug!("Stopping oom monitor {}", oom_control.display());
-                        return;
-                    }
-                };
-                time::sleep(Duration::from_millis(500)).await;
-            }
-        });
-
-        debug!("Created {}", path.display());
-        Ok(CGroupMem { path, monitor })
-    }
-}
-
-#[derive(Debug)]
-pub struct CGroupCpu {
-    pub path: PathBuf,
-}
-
-impl CGroup for CGroupCpu {
-    fn path(&self) -> &Path {
-        self.path.as_path()
-    }
-}
-
-impl CGroupCpu {
-    async fn new(parent: &Path, name: &str, cgroup: &manifest::CGroup) -> Result<CGroupCpu, Error> {
-        let mount_point = get_mount_point("cpu")?;
-        let path = mount_point.join(parent).join(name);
-        create(&path).await?;
-
-        for (file, value) in cgroup {
-            let path = path.join(format!("cpu.{}", file));
-            debug!("Setting {} to {} bytes", path.display(), value);
-            write(&path, &value).await?;
+                    };
+                },
+                _ = tx.closed() => { break; }
+            };
+            time::sleep(Duration::from_millis(500)).await;
         }
+    });
 
-        Ok(CGroupCpu { path })
-    }
-}
-
-#[derive(Debug)]
-pub struct CGroups {
-    pub mem: Option<CGroupMem>,
-    pub cpu: Option<CGroupCpu>,
-}
-
-impl CGroups {
-    pub(super) async fn new(
-        config: &config::CGroups,
-        name: &str,
-        cgroups: &manifest::CGroups,
-        tx: EventTx,
-    ) -> Result<CGroups, Error> {
-        let mem = if let Some(values) = cgroups.get("memory") {
-            let parent = &config.memory;
-            let group = CGroupMem::new(&parent, &name, values, tx).await?;
-            Some(group)
-        } else {
-            None
-        };
-
-        let cpu = if let Some(values) = cgroups.get("cpu") {
-            let parent = &config.cpu;
-            let group = CGroupCpu::new(&parent, &name, values).await?;
-            Some(group)
-        } else {
-            None
-        };
-
-        Ok(CGroups { mem, cpu })
-    }
-
-    pub async fn assign(&self, pid: u32) -> Result<(), Error> {
-        if let Some(ref mem) = self.mem {
-            mem.assign(pid).await?;
-        }
-        if let Some(ref cpu) = self.cpu {
-            cpu.assign(pid).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn destroy(self) -> Result<(), Error> {
-        if let Some(mem) = self.mem {
-            mem.destroy().await?;
-        }
-        if let Some(cpu) = self.cpu {
-            cpu.destroy().await?;
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn create(path: &Path) -> Result<(), Error> {

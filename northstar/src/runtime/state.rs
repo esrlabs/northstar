@@ -320,7 +320,7 @@ impl State {
 
                 if let Some(cgroups) = context.cgroups {
                     debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await.map_err(Error::Cgroups)?;
+                    cgroups.destroy().await.ok();
                 }
 
                 // Send notification to main loop
@@ -581,7 +581,7 @@ impl State {
     /// to be removed and handled externally
     pub async fn on_exit(&mut self, name: &str, exit_status: &ExitStatus) -> Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
-            if let Some(context) = app.process.take() {
+            if let Some(mut context) = app.process.take() {
                 info!(
                     "Process {} exited after {:?} and status {:?}",
                     app,
@@ -589,10 +589,9 @@ impl State {
                     exit_status,
                 );
 
-                let mut context = context;
                 if let Some(cgroups) = context.cgroups.take() {
                     debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await.map_err(Error::Cgroups)?;
+                    cgroups.destroy().await?;
                 }
 
                 let exit_info = match exit_status {
