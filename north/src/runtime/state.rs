@@ -133,11 +133,6 @@ impl State {
         })
     }
 
-    /// Return an owned copy of the main loop tx handle
-    pub fn _event_tx(&self) -> EventTx {
-        self.events_tx.clone()
-    }
-
     /// Return an iterator over all known applications
     pub fn applications(&self) -> impl iter::Iterator<Item = &Application> {
         self.applications.values()
@@ -265,13 +260,14 @@ impl State {
             cgroups,
         });
 
-        self.events_tx
-            .send(Event::Notification(Notification::ApplicationStarted(
+        Self::notification(
+            &self.events_tx,
+            Notification::ApplicationStarted(
                 name.to_owned(),
                 app.container.manifest.version.clone(),
-            )))
-            .await
-            .expect("Internal channel error on main");
+            ),
+        )
+        .await;
 
         info!("Started {}", app);
 
@@ -299,13 +295,14 @@ impl State {
                 }
 
                 // Send notification to main loop
-                self.events_tx
-                    .send(Event::Notification(Notification::ApplicationStopped(
+                Self::notification(
+                    &self.events_tx,
+                    Notification::ApplicationStopped(
                         name.to_owned(),
                         app.container.manifest.version.clone(),
-                    )))
-                    .await
-                    .expect("Internal channel error on main");
+                    ),
+                )
+                .await;
 
                 info!("Stopped {} {:?}", app, status);
                 Ok(())
@@ -332,10 +329,7 @@ impl State {
                     .map_err(Error::UninstallationError)?;
             }
 
-            self.events_tx
-                .send(Event::Notification(Notification::Shutdown))
-                .await
-                .ok();
+            Self::notification(&self.events_tx, Notification::Shutdown).await;
 
             self.events_tx
                 .send(Event::Shutdown)
@@ -408,13 +402,11 @@ impl State {
             })?;
 
         // Send notification about newly install npk
-        self.events_tx
-            .send(Event::Notification(Notification::Install(
-                manifest.name.clone(),
-                manifest.version.clone(),
-            )))
-            .await
-            .expect("Internal channel error on main");
+        Self::notification(
+            &self.events_tx,
+            Notification::Install(manifest.name.clone(), manifest.version.clone()),
+        )
+        .await;
 
         Ok(())
     }
@@ -489,13 +481,11 @@ impl State {
                 }
             }
 
-            self.events_tx
-                .send(Event::Notification(Notification::Uninstalled(
-                    name.to_owned(),
-                    version.clone(),
-                )))
-                .await
-                .expect("Internal channel error on main");
+            Self::notification(
+                &self.events_tx,
+                Notification::Uninstalled(name.to_owned(), version.clone()),
+            )
+            .await;
         }
 
         Ok(())
@@ -526,14 +516,15 @@ impl State {
                     ExitStatus::Signaled(s) => format!("Terminated by signal {}", s.as_str()),
                 };
 
-                self.events_tx
-                    .send(Event::Notification(Notification::ApplicationExited {
+                Self::notification(
+                    &self.events_tx,
+                    Notification::ApplicationExited {
                         id: name.to_owned(),
                         version: app.container.manifest.version.clone(),
                         exit_info,
-                    }))
-                    .await
-                    .expect("Internal channel error on main");
+                    },
+                )
+                .await;
             }
         }
         Ok(())
@@ -563,5 +554,11 @@ impl State {
             }
         }
         Ok(())
+    }
+
+    async fn notification(tx: &EventTx, n: Notification) {
+        tx.send(Event::Notification(n))
+            .await
+            .expect("Internal channel error on main");
     }
 }

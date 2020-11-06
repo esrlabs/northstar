@@ -28,14 +28,11 @@ use console::Request;
 use log::*;
 use process::ExitStatus;
 use state::State;
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 use sync::mpsc;
 use tokio::{fs, sync};
 
 pub type EventTx = mpsc::Sender<Event>;
-pub type NotificationTx = mpsc::Sender<Notification>;
-
-pub type NotificationRx = mpsc::Receiver<Notification>;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -52,11 +49,6 @@ pub enum Event {
     Shutdown,
     /// Stdout and stderr of child processes
     ChildOutput { name: Name, fd: i32, line: String },
-    /// Add or remove a subscriber to notifications
-    NotificationSubscription {
-        id: String,
-        subscriber: Option<NotificationTx>,
-    },
     /// Notification events
     Notification(Notification),
 }
@@ -133,9 +125,6 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     // Start to listen for incoming connections
     console.listen().await?;
 
-    // TODO: move this to `state`
-    let mut subscriber_map = HashMap::new();
-
     // Enter main loop
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -153,29 +142,14 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             Event::Oom(id) => state.on_oom(&id).await?,
             // A container process existed. Check `process::wait_exit` for details.
             Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await?,
+            // The runtime os commanded to shut down and exit.
+            Event::Shutdown => break,
+            // Forward notifications to console
+            Event::Notification(notification) => console.notification(notification).await?,
             // Handle unrecoverable errors by logging it and do a gracefull shutdown.
             Event::Error(ref error) => {
                 error!("Fatal error: {}", error);
                 break;
-            }
-            // The runtime os commanded to shut down and exit.
-            Event::Shutdown => break,
-            Event::NotificationSubscription { id, subscriber } => match subscriber {
-                Some(tx) => {
-                    debug!("Subscribed {}", id);
-                    subscriber_map.insert(id, tx);
-                }
-                None => {
-                    debug!("Unsubscribed {}", id);
-                    subscriber_map.remove(&id);
-                }
-            },
-            Event::Notification(notification) => {
-                for (id, subscriber) in subscriber_map.iter_mut() {
-                    debug!("Sending notification to subscriber {}", id);
-                    // TODO: Remove subscriber if send fails
-                    subscriber.send(notification.clone()).await.ok();
-                }
             }
         }
     }
