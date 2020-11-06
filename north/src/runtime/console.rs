@@ -12,13 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::state::State;
 use crate::{
     api,
-    api::{InstallationResult, Notification},
-    runtime::{error::Error, Event, EventTx},
+    runtime::{error::Error, state::State, Event, EventTx},
 };
-use api::{Container, Message, Payload, Process, ShutdownResult, StartResult, StopResult};
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, error, warn};
 use std::{
@@ -29,9 +26,8 @@ use sync::mpsc;
 use tempfile::tempdir;
 use tokio::{
     fs::OpenOptions,
-    io::{self, AsyncRead, AsyncWrite, BufReader, BufWriter},
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
-    prelude::*,
     select,
     stream::StreamExt,
     sync::{self, broadcast, oneshot},
@@ -40,17 +36,17 @@ use tokio::{
 
 // Events from message received by clients in deserialized form
 enum ConnectionEvent {
-    Request(Message),
-    Install(Message, PathBuf),
+    Request(api::Message),
+    Install(api::Message, PathBuf),
 }
 
-type NotificationRx = broadcast::Receiver<Notification>;
+type NotificationRx = broadcast::Receiver<api::Notification>;
 
 // Request from the main loop to the console
 #[derive(Debug)]
 pub enum Request {
-    Message(Message),
-    Install(Message, PathBuf),
+    Message(api::Message),
+    Install(api::Message, PathBuf),
 }
 
 /// A console is responsible for monitoring and serving incoming client connections
@@ -59,7 +55,7 @@ pub enum Request {
 pub struct Console {
     event_tx: EventTx,
     address: String,
-    notification_tx: broadcast::Sender<Notification>,
+    notification_tx: broadcast::Sender<api::Notification>,
 }
 
 impl Console {
@@ -78,12 +74,12 @@ impl Console {
         &self,
         state: &mut State,
         request: &Request,
-        response_tx: oneshot::Sender<Message>,
+        response_tx: oneshot::Sender<api::Message>,
     ) {
         match request {
             Request::Message(message) => {
                 let payload = &message.payload;
-                if let Payload::Request(ref request) = payload {
+                if let api::Payload::Request(ref request) = payload {
                     let response = match request {
                         api::Request::Containers => {
                             debug!("Request::Containers received");
@@ -91,24 +87,24 @@ impl Console {
                         }
                         api::Request::Start(name) => match state.start(&name).await {
                             Ok(_) => api::Response::Start {
-                                result: StartResult::Success,
+                                result: api::StartResult::Success,
                             },
                             Err(e) => {
                                 error!("Failed to start {}: {}", name, e);
                                 api::Response::Start {
-                                    result: StartResult::Error(e.to_string()),
+                                    result: api::StartResult::Error(e.to_string()),
                                 }
                             }
                         },
                         api::Request::Stop(name) => {
                             match state.stop(&name, std::time::Duration::from_secs(1)).await {
                                 Ok(_) => api::Response::Stop {
-                                    result: StopResult::Success,
+                                    result: api::StopResult::Success,
                                 },
                                 Err(e) => {
                                     error!("Failed to stop {}: {}", name, e);
                                     api::Response::Stop {
-                                        result: StopResult::Error(e.to_string()),
+                                        result: api::StopResult::Error(e.to_string()),
                                     }
                                 }
                             }
@@ -128,17 +124,17 @@ impl Console {
                         }
                         api::Request::Shutdown => match state.shutdown().await {
                             Ok(_) => api::Response::Shutdown {
-                                result: ShutdownResult::Success,
+                                result: api::ShutdownResult::Success,
                             },
                             Err(e) => api::Response::Shutdown {
-                                result: ShutdownResult::Error(e.to_string()),
+                                result: api::ShutdownResult::Error(e.to_string()),
                             },
                         },
                     };
 
-                    let response_message = Message {
+                    let response_message = api::Message {
                         id: message.id.clone(),
-                        payload: Payload::Response(response),
+                        payload: api::Payload::Response(response),
                     };
 
                     // A error on the response_tx means that the connection
@@ -151,14 +147,14 @@ impl Console {
             Request::Install(message, path) => {
                 let payload = match state.install(&path).await {
                     Ok(_) => api::Response::Install {
-                        result: InstallationResult::Success,
+                        result: api::InstallationResult::Success,
                     },
                     Err(e) => api::Response::Install { result: e.into() },
                 };
 
-                let message = Message {
+                let message = api::Message {
                     id: message.id.clone(),
-                    payload: Payload::Response(payload),
+                    payload: api::Payload::Response(payload),
                 };
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
@@ -198,7 +194,7 @@ impl Console {
     }
 
     /// Send a notification to the notification broadcast
-    pub async fn notification(&self, notification: Notification) -> Result<(), Error> {
+    pub async fn notification(&self, notification: api::Notification) -> Result<(), Error> {
         self.notification_tx
             .send(notification)
             .map_err(|_| Error::Internal("Notification channel tx"))
@@ -249,10 +245,10 @@ impl Console {
 
         // TX
         let client_out = {
-            let (tx, mut rx_messages) = mpsc::channel::<Message>(1);
+            let (tx, mut rx_messages) = mpsc::channel::<api::Message>(1);
             task::spawn(async move {
                 async fn send<W: Unpin + AsyncWrite>(
-                    reply: &Message,
+                    reply: &api::Message,
                     writer: &mut W,
                 ) -> io::Result<()> {
                     // Serialize reply
@@ -290,9 +286,9 @@ impl Console {
                                 }
                             };
 
-                            let message = Message {
+                            let message = api::Message {
                                 id: uuid::Uuid::new_v4().to_string(),
-                                payload: Payload::Notification(payload),
+                                payload: api::Payload::Notification(payload),
                             };
                             if send(&message, &mut writer).await.is_err() {
                                 break;
@@ -331,12 +327,12 @@ impl Console {
     }
 }
 
-fn list_containers(state: &State) -> Vec<Container> {
-    let mut app_containers: Vec<Container> = state
+fn list_containers(state: &State) -> Vec<api::Container> {
+    let mut app_containers: Vec<api::Container> = state
         .applications()
-        .map(|app| Container {
+        .map(|app| api::Container {
             manifest: app.manifest().clone(),
-            process: app.process_context().map(|f| Process {
+            process: app.process_context().map(|f| api::Process {
                 pid: f.process().pid(),
                 uptime: f.uptime().as_nanos() as u64,
                 memory: {
@@ -361,9 +357,9 @@ fn list_containers(state: &State) -> Vec<Container> {
             }),
         })
         .collect();
-    let mut resource_containers: Vec<Container> = state
+    let mut resource_containers: Vec<api::Container> = state
         .resources()
-        .map(|app| Container {
+        .map(|app| api::Container {
             manifest: app.manifest().clone(),
             process: None,
         })
@@ -395,11 +391,11 @@ async fn read<R: AsyncRead + Unpin>(
         })?;
 
     // Deserialize message
-    let message: Message = serde_json::from_slice(&buffer)
+    let message: api::Message = serde_json::from_slice(&buffer)
         .map_err(|_| Error::Protocol("Failed to deserialize message".to_string()))?;
 
     match &message.payload {
-        Payload::Installation(size) => {
+        api::Payload::Installation(size) => {
             debug!("Incoming installation ({} bytes)", size);
 
             // Open a tmpfile
