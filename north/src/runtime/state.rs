@@ -19,7 +19,7 @@ use super::{
     process::{ExitStatus, Process},
 };
 use crate::{
-    api::{InstallationResult, Message, MessageId, Notification},
+    api::Notification,
     manifest::{Manifest, Mount, Name, Version},
     runtime::{
         error::{Error, InstallationError},
@@ -33,11 +33,11 @@ use log::{debug, info, warn};
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter,
-    path::{Path, PathBuf},
+    path::Path,
     result, time,
 };
 use time::Duration;
-use tokio::{fs, stream::StreamExt, sync::mpsc};
+use tokio::{fs, stream::StreamExt};
 
 #[derive(Debug)]
 pub struct State {
@@ -354,109 +354,69 @@ impl State {
     }
 
     /// Install a npk
-    pub async fn install(
-        &mut self,
-        npk: &Path,
-        msg_id: MessageId,
-        registry: Option<PathBuf>, // TODO: why is this a option?
-        tx: mpsc::Sender<Message>,
-    ) {
-        match read_manifest(npk, &self.signing_keys) {
-            Err(e) => {
-                warn!("Failed to get package name from manifest");
-                let _ = self
-                    .events_tx
-                    .send(Event::InstallationFinished(
-                        e.into(),
-                        npk.to_owned(),
-                        msg_id,
-                        tx,
-                        None,
-                    ))
-                    .await;
-            }
-            Ok(manifest) => {
-                let pkg_file_name = format!("{}-{}.npk", manifest.name, manifest.version,);
-                debug!(
-                    "Trying to install {}. Checking the installed applications",
-                    manifest.name
-                );
-                let registry = registry.unwrap().join(&pkg_file_name);
-                debug!("Trying to install to registry {}", registry.display());
-                if manifest.is_resource() {
-                    if self
-                        .resources
-                        .contains_key(&(manifest.name, manifest.version))
-                    {
-                        warn!("Resource container with same version already installed");
-                        self.events_tx
-                            .send(Event::InstallationFinished(
-                                InstallationResult::DuplicateResource,
-                                npk.into(),
-                                msg_id,
-                                tx,
-                                Some(registry),
-                            ))
-                            .await
-                            .expect("Internal channel error to main");
-                        return;
-                    }
-                } else {
-                    // Regular application
-                    if self.applications.contains_key(&manifest.name) {
-                        warn!("Cannot install already installed application");
-                        let _ = self
-                            .events_tx
-                            .send(Event::InstallationFinished(
-                                InstallationResult::ApplicationAlreadyInstalled,
-                                npk.to_owned(),
-                                msg_id,
-                                tx,
-                                Some(registry),
-                            ))
-                            .await;
-                        return;
-                    }
-                }
-                match npk::install(self, npk).await {
-                    Ok((name, version)) => {
-                        info!("Installation succeeful");
-                        let _ = self
-                            .events_tx
-                            .send(Event::InstallationFinished(
-                                InstallationResult::Success,
-                                std::path::PathBuf::from(npk),
-                                msg_id,
-                                tx,
-                                Some(registry),
-                            ))
-                            .await;
+    pub async fn install(&mut self, npk: &Path) -> Result<(), InstallationError> {
+        let manifest = read_manifest(npk, &self.signing_keys)?;
 
-                        // generate notification for installation event
-                        // TODO
-                        self.events_tx
-                            .send(Event::Notification(Notification::InstallationFinished(
-                                name, version,
-                            )))
-                            .await
-                            .expect("Internal channel error on main");
-                    }
-                    Err(e) => {
-                        warn!("Installation failed: {}", e);
-                        self.events_tx
-                            .send(Event::InstallationFinished(
-                                e.into(),
-                                npk.to_owned(),
-                                msg_id,
-                                tx,
-                                None,
-                            ))
-                            .await
-                            .expect("Internal channel error on main");
-                    }
-                }
+        let package = format!("{}-{}.npk", manifest.name, manifest.version);
+        debug!(
+            "Trying to install {}. Checking the installed applications",
+            manifest.name
+        );
+
+        let registry = self
+            .config
+            .directories
+            .container_dirs
+            .first()
+            .unwrap()
+            .join(&package);
+
+        debug!("Trying to install to registry {}", registry.display());
+
+        if manifest.is_resource() {
+            if self
+                .resources
+                .contains_key(&(manifest.name.clone(), manifest.version.clone()))
+            {
+                warn!("Resource container with same version already installed");
+                return Err(InstallationError::DuplicateResource);
             }
+        } else if self.applications.contains_key(&manifest.name) {
+            return Err(InstallationError::ApplicationAlreadyInstalled(
+                manifest.name.clone(),
+            ));
         }
+
+        // Copy tmpfile into registry
+        fs::copy(&npk, &registry)
+            .await
+            .map_err(|error| InstallationError::Io {
+                context: "Failed to copy npk to registry".to_string(),
+                error,
+            })?;
+
+        // Install and mount npk
+        npk::install(self, &registry).await?;
+
+        // Remove tmpfile
+        // TODO: move this to console?
+        fs::remove_file(npk)
+            .await
+            .map_err(|error| InstallationError::Io {
+                context: format!("Failed to remove {}", npk.display()),
+                error,
+            })?;
+
+        // Send notification about newly install npk
+        self.events_tx
+            .send(Event::Notification(Notification::Install(
+                manifest.name.clone(),
+                manifest.version.clone(),
+            )))
+            .await
+            .expect("Internal channel error on main");
+
+        Ok(())
     }
 
     fn is_installed(&self, name: &str, version: &Version) -> bool {

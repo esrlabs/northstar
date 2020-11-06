@@ -65,7 +65,7 @@ pub fn start_receiving_from_socket(
                         } => {
                             println!("{}-{} exited ({})", id, version, exit_info);
                         }
-                        api::Notification::InstallationFinished(name, version) => {
+                        api::Notification::Install(name, version) => {
                             println!("{}-{} was installed", name, version)
                         }
                         api::Notification::Uninstalled(name, version) => {
