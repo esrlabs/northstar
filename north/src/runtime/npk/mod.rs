@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::{manifest::Manifest, runtime::error::InstallationError};
-use async_std::path::PathBuf;
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
 use log::trace;
@@ -24,6 +23,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt::{self},
     io::Read,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
@@ -47,7 +47,7 @@ pub struct Container {
 
 impl Container {
     pub fn is_resource_container(&self) -> bool {
-        self.manifest.is_resource_image()
+        self.manifest.is_resource()
     }
 }
 
@@ -197,8 +197,8 @@ struct ArchiveReader<'a> {
     signing_keys: &'a HashMap<String, PublicKey>,
 }
 
-pub fn extract_manifest(
-    npk: &std::path::Path,
+pub fn read_manifest(
+    npk: &Path,
     signing_keys: &HashMap<String, PublicKey>,
 ) -> Result<Manifest, InstallationError> {
     let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
@@ -207,7 +207,7 @@ pub fn extract_manifest(
 
 impl<'a> ArchiveReader<'a> {
     fn new(
-        npk: &std::path::Path,
+        npk: &Path,
         signing_keys: &'a HashMap<String, PublicKey>,
     ) -> std::result::Result<Self, InstallationError> {
         let file = std::fs::File::open(&npk).map_err(|e| InstallationError::Io {
@@ -278,7 +278,7 @@ impl<'a> ArchiveReader<'a> {
     }
 }
 
-#[async_std::test]
+#[tokio::test]
 async fn test_signature_parsing() -> std::io::Result<()> {
     let signature = "manifest.yaml:
   hash: 0cbc141c2ef274989683d9ec03edcf41c57688ef5c422c647239328de2c3f306

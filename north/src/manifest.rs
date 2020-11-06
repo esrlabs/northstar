@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use async_std::{fs, path::Path};
 use lazy_static::lazy_static;
 use serde::{
     de::{Deserializer, Visitor},
@@ -22,9 +21,11 @@ use serde::{
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 use thiserror::Error;
+use tokio::fs;
 
 /// A container version. Versions follow the semver format
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
@@ -139,22 +140,22 @@ pub enum MountFlag {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
     Resource {
-        target: std::path::PathBuf,
+        target: PathBuf,
         name: String,
         version: Version,
-        dir: std::path::PathBuf,
+        dir: PathBuf,
     },
     Bind {
-        target: std::path::PathBuf,
-        host: std::path::PathBuf,
+        target: PathBuf,
+        host: PathBuf,
         flags: HashSet<MountFlag>,
     },
     Persist {
-        target: std::path::PathBuf,
+        target: PathBuf,
         flags: HashSet<MountFlag>,
     },
     Tmpfs {
-        target: std::path::PathBuf,
+        target: PathBuf,
         size: String,
     },
 }
@@ -167,7 +168,7 @@ pub struct Manifest {
     pub version: Version,
     /// Path to init
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub init: Option<std::path::PathBuf>,
+    pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
@@ -209,7 +210,7 @@ enum MountSource {
         size: String,
     },
     Bind {
-        host: std::path::PathBuf,
+        host: PathBuf,
         #[serde(default)]
         flags: HashSet<MountFlag>,
     },
@@ -324,9 +325,7 @@ impl MountsSerialization {
                             let name = caps.name("name").unwrap().as_str().to_string();
                             let version = Version::parse(caps.name("version").unwrap().as_str())
                                 .map_err(serde::de::Error::custom)?;
-                            let dir = std::path::PathBuf::from(
-                                caps.name("dir").map_or("/", |m| m.as_str()),
-                            );
+                            let dir = PathBuf::from(caps.name("dir").map_or("/", |m| m.as_str()));
 
                             Mount::Resource {
                                 target,
@@ -379,7 +378,7 @@ impl Manifest {
     }
 
     /// used to find out if this manifest describes a resource container
-    pub fn is_resource_image(&self) -> bool {
+    pub fn is_resource(&self) -> bool {
         self.init.is_none()
     }
 }
@@ -401,10 +400,9 @@ mod tests {
     use crate::manifest::*;
     use anyhow::{anyhow, Result};
 
-    #[async_std::test]
+    #[tokio::test]
     async fn parse() -> Result<()> {
-        use async_std::path::PathBuf;
-        use std::{fs::File, io::Write};
+        use std::{fs::File, io::Write, path::PathBuf};
 
         let file = tempfile::NamedTempFile::new()?;
         let path = file.path();
@@ -454,7 +452,7 @@ log:
 
         let manifest = Manifest::from_path(&PathBuf::from(path)).await?;
 
-        assert_eq!(manifest.init, Some(std::path::PathBuf::from("/binary")));
+        assert_eq!(manifest.init, Some(PathBuf::from("/binary")));
         assert_eq!(manifest.name, "hello");
         let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
         assert_eq!(args.len(), 2);
@@ -469,30 +467,30 @@ log:
         );
         let mounts = vec![
             Mount::Bind {
-                target: std::path::PathBuf::from("/lib"),
-                host: std::path::PathBuf::from("/lib"),
+                target: PathBuf::from("/lib"),
+                host: PathBuf::from("/lib"),
                 flags: [MountFlag::Rw].iter().cloned().collect(),
             },
             Mount::Persist {
-                target: std::path::PathBuf::from("/data"),
+                target: PathBuf::from("/data"),
                 flags: HashSet::new(),
             },
             Mount::Persist {
-                target: std::path::PathBuf::from("/data_rw"),
+                target: PathBuf::from("/data_rw"),
                 flags: [MountFlag::Rw].iter().cloned().collect(),
             },
             Mount::Resource {
-                target: std::path::PathBuf::from("/here/we/go"),
+                target: PathBuf::from("/here/we/go"),
                 name: "bla".to_string(),
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo").into(),
             },
             Mount::Tmpfs {
-                target: std::path::PathBuf::from("/tmpfs"),
+                target: PathBuf::from("/tmpfs"),
                 size: "42".to_string(),
             },
             Mount::Tmpfs {
-                target: std::path::PathBuf::from("/big_tmpfs"),
+                target: PathBuf::from("/big_tmpfs"),
                 size: "42G".to_string(),
             },
         ];

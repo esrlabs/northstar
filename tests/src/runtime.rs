@@ -16,37 +16,33 @@
 
 use crate::{
     process_assert::ProcessAssert,
-    util::{CaptureReader, Timeout},
+    util::{cargo_bin, CaptureReader, Timeout},
 };
-use anyhow::{anyhow, Context, Result};
-use assert_cmd::cargo::CommandCargoExt;
+use anyhow::{anyhow, Context, Error, Result};
 use log::{error, info};
-use std::{
-    process::{Child, Command, Stdio},
-    time,
+use std::process::Stdio;
+use tokio::{
+    process::{Child, Command},
+    select, time,
 };
 
 const TIMEOUT: time::Duration = time::Duration::from_secs(3);
 
 async fn nstar(command: &str) -> Result<()> {
-    let command = command.to_owned();
-    async_std::task::spawn_blocking(move || {
-        let output = Command::cargo_bin("nstar")
-            .context("Could not find nstar")?
-            .arg(&command)
-            .output()?;
+    let output = Command::new(cargo_bin("nstar"))
+        .arg(&command)
+        .output()
+        .await?;
 
-        // TODO sometimes the shutdown command won't get a reply
-        if command != "shutdown" && !output.status.success() {
-            let error_msg = String::from_utf8(output.stderr)?;
-            error!("Failed to run nstar {}: {}", command, error_msg);
-            Err(anyhow!("Failed to run nstar {}: {}", command, error_msg))
-        } else {
-            info!("nstar {}: {}", command, String::from_utf8(output.stdout)?);
-            Ok(())
-        }
-    })
-    .await
+    // TODO sometimes the shutdown command won't get a reply
+    if command != "shutdown" && !output.status.success() {
+        let error_msg = String::from_utf8(output.stderr)?;
+        error!("Failed to run nstar {}: {}", command, error_msg);
+        Err(anyhow!("Failed to run nstar {}: {}", command, error_msg))
+    } else {
+        info!("nstar {}: {}", command, String::from_utf8(output.stdout)?);
+        Ok(())
+    }
 }
 
 /// A running instance of north.
@@ -61,11 +57,10 @@ impl Runtime {
     /// # Examples
     ///
     /// ```no_run
-    /// use async_std::prelude::*;
     /// use anyhow::Result;
     /// use tests::runtime::Runtime;
     ///
-    /// #[async_std::main]
+    /// #[tokio::main]
     /// async fn main() -> Result<()> {
     ///     let north = Runtime::launch().await?;
     ///     Ok(())
@@ -73,8 +68,7 @@ impl Runtime {
     /// ```
     pub async fn launch() -> Result<Runtime> {
         async move {
-            let mut child = Command::cargo_bin("north")
-                .context("Could not locate the north binary")?
+            let mut child = Command::new(cargo_bin("north"))
                 .current_dir("..")
                 .stdout(Stdio::piped())
                 .spawn()
@@ -101,8 +95,7 @@ impl Runtime {
     pub async fn expect_output(&mut self, regex: &str) -> Result<Vec<String>> {
         self.output
             .captures(regex)
-            .or_timeout(TIMEOUT)
-            .await??
+            .await?
             .ok_or_else(|| anyhow!("Pattern not found"))
     }
 
@@ -149,14 +142,27 @@ impl Runtime {
     }
 
     pub async fn try_stop(&mut self, container_name: &str) -> Result<()> {
-        nstar(&format!("stop {}", container_name))
-            .or_timeout(TIMEOUT)
-            .await
-            .context(format!("Failed to stop container {}", container_name))?
+        async move {
+            nstar(&format!("stop {}", container_name)).await?;
+
+            // Check that the container stopped
+            self.output
+                .captures(&format!(
+                    "(Stopped {}|is not running|Failed to stop)",
+                    container_name
+                ))
+                .await
+                .context(format!("Failed to wait for {} to stop", container_name))?;
+
+            Ok(())
+        }
+        .or_timeout(TIMEOUT)
+        .await
+        .context(format!("Failed to stop container {}", container_name))?
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
-        async move {
+        let shutdown = async {
             nstar("shutdown").await?;
 
             // Check that the shutdown request was received
@@ -165,22 +171,16 @@ impl Runtime {
                 .await
                 .context("Shutdown request was not received")?;
 
-            while let Ok(None) = self.child.try_wait() {
-                async_std::task::sleep(std::time::Duration::from_millis(50)).await;
-            }
+            self.child.wait().await?;
+            Ok::<(), Error>(())
+        };
 
-            Ok(())
-        }
-        .or_timeout(TIMEOUT)
-        .await
-        .context("Failed to shutdown")?
-    }
-}
+        let timeout = time::sleep(TIMEOUT);
 
-impl Drop for Runtime {
-    fn drop(&mut self) {
-        if let Ok(None) = self.child.try_wait() {
-            self.child.kill().expect("Could not kill north");
+        select! {
+            _ = shutdown => (),
+            _ = timeout => self.child.kill().await.context("Failed to kill runtime")?,
         }
+        Ok(())
     }
 }

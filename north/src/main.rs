@@ -15,12 +15,12 @@
 #![deny(clippy::all)]
 
 use crate::runtime::error::Error;
-use async_std::{fs::read_to_string, path::PathBuf};
 use log::{error, info};
 use north::runtime;
 use runtime::config::Config;
-use std::process;
+use std::{path::PathBuf, process};
 use structopt::StructOpt;
+use tokio::fs::read_to_string;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "north", about = "North")]
@@ -34,7 +34,7 @@ struct Opt {
     pub debug: bool,
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() {
     process::exit(match run().await {
         Ok(()) => 0,

@@ -15,8 +15,9 @@
 //! Set of assertions wrapped to OS processes
 
 use anyhow::{anyhow, Context, Result};
-use async_std::{fs, path::PathBuf};
 use regex::Regex;
+use std::path::PathBuf;
+use tokio::fs;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProcessState {

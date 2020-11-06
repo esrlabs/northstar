@@ -31,7 +31,7 @@ pub enum Notification {
     Uninstalled(Name, Version),
     ApplicationStarted(Name, Version),
     ApplicationStopped(Name, Version),
-    ShutdownOccurred,
+    Shutdown,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
