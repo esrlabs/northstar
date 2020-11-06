@@ -22,13 +22,9 @@ pub(self) mod npk;
 pub(self) mod process;
 pub(super) mod state;
 
-use crate::{
-    api,
-    api::{InstallationResult, MessageId, Notification},
-    manifest::Name,
-    runtime::error::Error,
-};
+use crate::{api, api::Notification, manifest::Name, runtime::error::Error};
 use config::Config;
+use console::Request;
 use log::*;
 use process::ExitStatus;
 use state::State;
@@ -45,17 +41,7 @@ pub type NotificationRx = mpsc::Receiver<Notification>;
 #[derive(Debug)]
 pub enum Event {
     /// Incomming command
-    Console(api::Message, mpsc::Sender<api::Message>),
-    /// Installation Event
-    Install(api::MessageId, PathBuf, mpsc::Sender<api::Message>),
-    /// Installation finished event
-    InstallationFinished(
-        InstallationResult,
-        PathBuf,   // Path to the npk file that was received
-        MessageId, // UID of the message that triggered the installation
-        mpsc::Sender<api::Message>,
-        Option<PathBuf>, // path to registry
-    ),
+    Console(Request, mpsc::Sender<api::Message>),
     /// A instance exited with return code
     Exit(Name, ExitStatus),
     /// Out of memory event occured
@@ -144,10 +130,12 @@ pub async fn run(config: &Config) -> Result<(), Error> {
 
     // Initialize console
     let console = console::Console::new(&config.console_address, &event_tx);
-    // and start servicing clients
-    console.start_listening().await?;
+    // Start to listen for incoming connections
+    console.listen().await?;
 
+    // TODO: move this to `state`
     let mut subscriber_map = HashMap::new();
+
     // Enter main loop
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -159,23 +147,6 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
             Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await,
-            // Installation event that triggers the installation of a received file
-            Event::Install(msg_id, path, txr) => {
-                state
-                    .install(
-                        &path,
-                        msg_id,
-                        config.directories.container_dirs.first().cloned(),
-                        txr,
-                    )
-                    .await
-            }
-            // Once the installation has finished, the file can be added to the registry
-            Event::InstallationFinished(success, npk, msg_id, txr, container_dir) => {
-                console
-                    .installation_finished(success, msg_id, txr, container_dir, &npk)
-                    .await;
-            }
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.

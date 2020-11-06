@@ -27,7 +27,7 @@ pub enum Notification {
         version: Version,
         exit_info: String,
     },
-    InstallationFinished(Name, Version),
+    Install(Name, Version),
     Uninstalled(Name, Version),
     ApplicationStarted(Name, Version),
     ApplicationStopped(Name, Version),

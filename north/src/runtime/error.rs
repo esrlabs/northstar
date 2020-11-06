@@ -118,11 +118,13 @@ pub enum InstallationError {
     },
     #[error("Timeout: {0}")]
     Timeout(String),
+    #[error("Duplicate resource")]
+    DuplicateResource,
 }
 
 impl From<InstallationError> for InstallationResult {
-    fn from(failure: InstallationError) -> InstallationResult {
-        match failure {
+    fn from(error: InstallationError) -> InstallationResult {
+        match error {
             InstallationError::Zip(_) => InstallationResult::FileCorrupted,
             InstallationError::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
             InstallationError::MalformedSignature => InstallationResult::MalformedSignature,
@@ -165,6 +167,7 @@ impl From<InstallationError> for InstallationResult {
             InstallationError::SignatureVerificationError(s) => {
                 InstallationResult::SignatureVerificationFailed(s)
             }
+            InstallationError::DuplicateResource => InstallationResult::DuplicateResource,
         }
     }
 }
