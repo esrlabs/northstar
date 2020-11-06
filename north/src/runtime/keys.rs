@@ -12,12 +12,15 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use async_std::{fs, io, path::Path};
-use ed25519_dalek::PublicKey;
-use futures::{AsyncReadExt, StreamExt};
+use ed25519_dalek::*;
 use log::info;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 use thiserror::Error;
+use tokio::{
+    fs,
+    io::{self, AsyncReadExt},
+    stream::StreamExt,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -45,7 +48,7 @@ pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, Error> {
         // .context("Invalid key dir entry")?;
         let path = entry.path();
         if let Some(extension) = path.extension() {
-            if extension == "pub" && path.is_file().await {
+            if extension == "pub" && path.is_file() {
                 if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {
                     info!("Loading signing key {}", key_id);
                     let mut sign_key_file = fs::File::open(&path).await.map_err(|e| Error::Io {

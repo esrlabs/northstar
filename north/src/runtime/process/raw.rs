@@ -12,20 +12,16 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::{process::Child, time};
-
-use async_std::task;
-use futures::{select, FutureExt};
+use super::{exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
+use crate::runtime::{npk::Container, EventTx};
 use log::debug;
 use nix::{sys::signal, unistd};
-
-use crate::runtime::{npk::Container, EventTx};
-
-use super::{waitpid, Error, ExitHandle, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
+use std::{process::Child, time};
+use tokio::{select, stream::StreamExt, time::sleep};
 
 #[derive(Debug)]
 pub struct Process {
-    exit_handle: ExitHandle,
+    exit_handle_wait: ExitHandleWait,
     child: Child,
 }
 
@@ -65,11 +61,14 @@ impl Process {
         let pid = child.id();
         debug!("Started {}", container.manifest.name);
 
-        let exit_handle = ExitHandle::new();
+        let (exit_handle_signal, exit_handle_wait) = exit_handle();
         // Spawn a task thats waits for the child to exit
-        waitpid(&manifest.name, pid, exit_handle.signal(), event_tx).await;
+        waitpid(&manifest.name, pid, exit_handle_signal, event_tx).await;
 
-        Ok(Process { exit_handle, child })
+        Ok(Process {
+            exit_handle_wait,
+            child,
+        })
     }
 }
 
@@ -84,27 +83,23 @@ impl super::Process for Process {
         // it is SIGKILLed.
         let sigterm = signal::Signal::SIGTERM;
         signal::kill(unistd::Pid::from_raw(self.child.id() as i32), Some(sigterm)).map_err(
-            |e| Error::LinuxProblem {
+            |e| Error::Os {
                 context: format!("Failed to SIGTERM {}", self.child.id()),
                 error: e,
             },
         )?;
 
-        let mut timeout = Box::pin(task::sleep(timeout).fuse());
-        let mut exited = Box::pin(self.exit_handle.wait()).fuse();
-
+        let timeout = Box::pin(sleep(timeout));
+        let exited = Box::pin(self.exit_handle_wait.next());
         let pid = self.child.id();
+
         Ok(select! {
             s = exited => {
-                if let Some(exit_status) = s {
-                    exit_status
-                } else {
-                    return Err(Error::StopProblem);
-                }
-            }, // This is the happy path...
+                s.expect("Internal channel error during process termination")  // This is the happy path...
+            },
             _ = timeout => {
                 signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))
-                .map_err(|e| Error::LinuxProblem { context: "Could not kill process".to_string(), error: e})?;
+                .map_err(|e| Error::Os { context: "Could not kill process".to_string(), error: e})?;
                 ExitStatus::Signaled(signal::Signal::SIGKILL)
             }
         })

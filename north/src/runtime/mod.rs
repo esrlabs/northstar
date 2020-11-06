@@ -28,32 +28,33 @@ use crate::{
     manifest::Name,
     runtime::error::Error,
 };
-use async_std::{fs, path::PathBuf, sync};
 use config::Config;
 use log::*;
 use process::ExitStatus;
 use state::State;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
+use sync::mpsc;
+use tokio::{fs, sync};
 
-pub type EventTx = sync::Sender<Event>;
-pub type NotificationTx = sync::Sender<Notification>;
+pub type EventTx = mpsc::Sender<Event>;
+pub type NotificationTx = mpsc::Sender<Notification>;
 
-pub type NotificationRx = sync::Receiver<Notification>;
+pub type NotificationRx = mpsc::Receiver<Notification>;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum Event {
     /// Incomming command
-    Console(api::Message, sync::Sender<api::Message>),
+    Console(api::Message, mpsc::Sender<api::Message>),
     /// Installation Event
-    Install(api::MessageId, PathBuf, sync::Sender<api::Message>),
+    Install(api::MessageId, PathBuf, mpsc::Sender<api::Message>),
     /// Installation finished event
     InstallationFinished(
         InstallationResult,
-        std::path::PathBuf, // path to the temp npk file that was received
-        MessageId,          // UID of the message that triggered the installation
-        sync::Sender<api::Message>,
-        Option<std::path::PathBuf>, // path to registry
+        PathBuf,   // Path to the npk file that was received
+        MessageId, // UID of the message that triggered the installation
+        mpsc::Sender<api::Message>,
+        Option<PathBuf>, // path to registry
     ),
     /// A instance exited with return code
     Exit(Name, ExitStatus),
@@ -91,7 +92,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
 
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.
-    let (event_tx, event_rx) = sync::channel::<Event>(100);
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
 
     let mut state = State::new(config, event_tx.clone()).await?;
 
@@ -148,7 +149,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
 
     let mut subscriber_map = HashMap::new();
     // Enter main loop
-    while let Ok(event) = event_rx.recv().await {
+    while let Some(event) = event_rx.recv().await {
         match event {
             Event::ChildOutput { name, fd, line } => {
                 on_child_output(&mut state, &name, fd, &line).await
@@ -190,18 +191,19 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             Event::Shutdown => break,
             Event::NotificationSubscription { id, subscriber } => match subscriber {
                 Some(tx) => {
-                    debug!("New notification subscriber: {}", id);
+                    debug!("Subscribed {}", id);
                     subscriber_map.insert(id, tx);
                 }
                 None => {
-                    debug!("Unsubscribed notification subscriber: {}", id);
+                    debug!("Unsubscribed {}", id);
                     subscriber_map.remove(&id);
                 }
             },
             Event::Notification(notification) => {
-                for (id, subscriber) in subscriber_map.iter() {
-                    debug!("Give notification to subscriber {}", id);
-                    subscriber.send(notification.clone()).await;
+                for (id, subscriber) in subscriber_map.iter_mut() {
+                    debug!("Sending notification to subscriber {}", id);
+                    // TODO: Remove subscriber if send fails
+                    subscriber.send(notification.clone()).await.ok();
                 }
             }
         }

@@ -77,7 +77,7 @@ pub fn start_receiving_from_socket(
                         api::Notification::ApplicationStopped(name, version) => {
                             println!("{}-{} was stopped", name, version)
                         }
-                        api::Notification::ShutdownOccurred => {
+                        api::Notification::Shutdown => {
                             println!("North daemon was shut down");
                             break;
                         }

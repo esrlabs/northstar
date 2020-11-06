@@ -13,47 +13,51 @@
 //   limitations under the License.
 
 use crate::runtime::error::InstallationError;
-use async_std::{future, task};
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
-use std::{fs::metadata, path::Path, time::Duration};
+use std::{fs::metadata, path::Path};
+use tokio::{select, task, time};
 
 pub async fn wait_for_file_deleted(
     path: &Path,
-    timeout: Duration,
+    timeout: time::Duration,
 ) -> Result<(), InstallationError> {
-    let my_path = path.to_owned();
+    let path = path.to_owned();
 
-    future::timeout(
-        timeout,
-        task::spawn_blocking(move || {
-            let inotify = Inotify::init(InitFlags::IN_CLOEXEC).map_err(|e| {
-                InstallationError::INotifyError {
-                    context: "Init inotify failed".to_string(),
-                    error: e,
-                }
+    let timeout = time::sleep(timeout);
+    let notify_path = path.to_owned();
+    let wait = task::spawn_blocking(move || {
+        let inotify =
+            Inotify::init(InitFlags::IN_CLOEXEC).map_err(|e| InstallationError::INotifyError {
+                context: "Init inotify failed".to_string(),
+                error: e,
             })?;
+        inotify
+            .add_watch(&notify_path, AddWatchFlags::IN_DELETE_SELF)
+            .map_err(|e| InstallationError::INotifyError {
+                context: "Add inotify watch failed".to_string(),
+                error: e,
+            })?;
+
+        loop {
+            // check if the file still exists
+            if metadata(&notify_path).is_err() {
+                break Ok(());
+            }
+
             inotify
-                .add_watch(&my_path, AddWatchFlags::IN_DELETE_SELF)
+                .read_events()
                 .map_err(|e| InstallationError::INotifyError {
-                    context: "Add inotify watch failed".to_string(),
+                    context: "Read inotify events failed".to_string(),
                     error: e,
                 })?;
+        }
+    });
 
-            loop {
-                // check if the file still exists
-                if metadata(&my_path).is_err() {
-                    return Ok(());
-                }
-
-                inotify
-                    .read_events()
-                    .map_err(|e| InstallationError::INotifyError {
-                        context: "Read inotify events failed".to_string(),
-                        error: e,
-                    })?;
-            }
-        }),
-    )
-    .await
-    .map_err(|_| InstallationError::Timeout(format!("Deletion of {} timed out", path.display())))?
+    select! {
+        _ = timeout => Err(InstallationError::Timeout(format!("Deletion of {} timed out", &path.display()))),
+        w = wait => match w {
+            Ok(e) => e,
+            Err(_) => Err(InstallationError::Timeout(format!("Inotify error on {}", &path.display()))),
+        }
+    }
 }

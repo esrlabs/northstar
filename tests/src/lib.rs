@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#![cfg(any(target_os = "linux", target_os = "android"))]
+//#![cfg(any(target_os = "linux", target_os = "android"))]
 
 pub mod process_assert;
 pub mod runtime;
@@ -21,15 +21,16 @@ pub mod util;
 #[cfg(test)]
 mod test {
     use crate::{runtime::Runtime, util::Timeout};
-    use anyhow::Result;
-    use async_std::{fs, path::Path};
+    use anyhow::{Context, Result};
+    use std::path::Path;
+    use tokio::fs;
 
     fn init_logger() {
         env_logger::builder().is_test(true).try_init().ok();
     }
 
     #[ignore]
-    #[async_std::test]
+    #[tokio::test]
     async fn check_hello() -> Result<()> {
         init_logger();
         let mut runtime = Runtime::launch().await?;
@@ -44,7 +45,7 @@ mod test {
     }
 
     #[ignore]
-    #[async_std::test]
+    #[tokio::test]
     async fn check_cpueater() -> Result<()> {
         init_logger();
         let mut runtime = Runtime::launch().await?;
@@ -61,7 +62,7 @@ mod test {
     }
 
     #[ignore]
-    #[async_std::test]
+    #[tokio::test]
     async fn check_memeater() -> Result<()> {
         init_logger();
 
@@ -81,32 +82,26 @@ mod test {
     }
 
     #[ignore]
-    #[async_std::test]
+    #[tokio::test]
     async fn check_datarw_mount() -> Result<()> {
         init_logger();
 
         let mut runtime = Runtime::launch().await?;
 
-        let data_dir = Path::new("../target/north/data/test_container-000/")
-            .canonicalize()
-            .await?;
+        let data_dir = Path::new("../target/north/data/test_container-000/").canonicalize()?;
         let input_file = data_dir.join("input.txt");
 
         // Write the input to the test_container
-        fs::write(
-            &input_file,
-            b"echo foo
-            touch /tmpfs/foo
-            write bar /tmpfs/foo
-            cat /tmpfs/foo",
-        )
-        .await?;
+        fs::write(&input_file, b"echo hello there!").await?;
 
         // Start the test_container process
         runtime.start("test_container-000").await.map(drop)?;
 
-        runtime.expect_output("test_container-000: 1: foo").await?;
-        runtime.expect_output("test_container-000: 1: bar").await?;
+        runtime
+            .expect_output("hello there!")
+            .or_timeout_in_secs(5)
+            .await?
+            .context("Failed to find expected test_container output")?;
 
         runtime.try_stop("test_container-000").await?;
 
@@ -117,11 +112,11 @@ mod test {
     }
 
     #[ignore]
-    #[async_std::test]
+    #[tokio::test]
     async fn check_crashing_container() -> Result<()> {
         init_logger();
 
-        let data_dir = Path::new("../target/north/data/").canonicalize().await?;
+        let data_dir = Path::new("../target/north/data/").canonicalize()?;
 
         let mut runtime = Runtime::launch().await?;
 

@@ -27,22 +27,15 @@ use crate::{
     manifest::{Mount, Name, Version},
     runtime::npk::{ArchiveReader, InstallationError},
 };
-use async_std::{
-    fs,
-    fs::metadata,
-    io,
-    path::{Path, PathBuf},
-    prelude::*,
-    task,
-};
 use floating_duration::TimeAsFloat;
 use fmt::Debug;
-use futures::stream::StreamExt;
 use log::*;
 use std::{
     fmt::{self},
-    process, time,
+    path::{Path, PathBuf},
+    process,
 };
+use tokio::{fs, fs::metadata, io, prelude::*, stream::StreamExt, time};
 
 const SUPPORTED_VERITY_VERSION: u32 = 1;
 
@@ -65,13 +58,13 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), Installati
             context: format!("Failed to read {}", dir.display()),
             error: e,
         })?
-        .filter_map(move |d| async move { d.ok() })
+        .filter_map(move |d| d.ok())
         .map(|d| d.path());
 
     let dm = state.config.devices.device_mapper.clone();
     let dm = dm::Dm::new(&dm).map_err(InstallationError::DeviceMapper)?;
-    let lc: PathBuf = state.config.devices.loop_control.clone().into();
-    let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
+    let lc = &state.config.devices.loop_control;
+    let lc = LoopControl::open(lc, &state.config.devices.loop_dev)
         .await
         .map_err(InstallationError::LoopDeviceError)?;
 
@@ -92,8 +85,8 @@ pub async fn install(
     let dm = &state.config.devices.device_mapper.clone();
     let dm = dm::Dm::new(&dm).map_err(InstallationError::DeviceMapper)?;
 
-    let lc: PathBuf = state.config.devices.loop_control.clone().into();
-    let lc = LoopControl::open(&lc, &state.config.devices.loop_dev)
+    let lc = &state.config.devices.loop_control;
+    let lc = LoopControl::open(lc, &state.config.devices.loop_dev)
         .await
         .map_err(InstallationError::LoopDeviceError)?;
 
@@ -115,7 +108,7 @@ pub async fn uninstall(container: &Container) -> Result<(), InstallationError> {
         })?;
 
     crate::runtime::linux::inotify::wait_for_file_deleted(
-        container.dm_dev.as_path().into(),
+        &container.dm_dev,
         std::time::Duration::from_secs(3),
     )
     .await?;
@@ -139,8 +132,7 @@ async fn install_internal(
     if let Ok(md) = metadata(&npk).await {
         debug!("Installing an NPK with size: {}", md.len());
     }
-    let p: &std::path::Path = npk.into();
-    let mut archive_reader = ArchiveReader::new(&p, &state.signing_keys)?;
+    let mut archive_reader = ArchiveReader::new(&npk, &state.signing_keys)?;
 
     let hashes = archive_reader.extract_hashes()?;
 
@@ -165,7 +157,7 @@ async fn install_internal(
 
     let (fs_offset, fs_size) = archive_reader.extract_fs_start_and_size()?;
 
-    let mut fs = async_std::fs::File::open(&npk)
+    let mut fs = fs::File::open(&npk)
         .await
         .map_err(|e| InstallationError::Io {
             context: format!("Failed to open {:?} ({})", npk, e),
@@ -191,9 +183,8 @@ async fn install_internal(
             .run_dir
             .join(&manifest.name)
             .join(&format!("{}", manifest.version));
-        let root: PathBuf = root.into();
 
-        if !root.exists().await {
+        if !root.exists() {
             info!("Creating mountpoint {}", root.display());
             fs::create_dir_all(&root)
                 .await
@@ -459,8 +450,8 @@ async fn veritysetup(
         .map_err(InstallationError::DeviceMapper)?;
 
     debug!("Waiting for device {}", dm_dev.display());
-    while !dm_dev.exists().await {
-        task::sleep(std::time::Duration::from_millis(1)).await;
+    while !dm_dev.exists() {
+        time::sleep(time::Duration::from_millis(1)).await;
     }
 
     let veritysetup_duration = start.elapsed();
@@ -475,7 +466,7 @@ async fn veritysetup(
 async fn mount(dm_dev: &Path, root: &Path, r#type: &str) -> Result<(), InstallationError> {
     let start = time::Instant::now();
     debug!(
-        "Mount read-only {} filesystem on device {} to this location:{}",
+        "Mount {} fs on {} to {}",
         r#type,
         dm_dev.display(),
         root.display(),

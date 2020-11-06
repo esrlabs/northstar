@@ -14,19 +14,15 @@
 
 use super::super::super::runtime::{config, Event, EventTx};
 use crate::manifest;
-use async_std::{
-    fs,
-    fs::OpenOptions,
-    io,
-    path::{Path, PathBuf},
-    prelude::*,
-    sync, task,
-};
-use futures::{future::FutureExt, select};
 use log::{debug, warn};
 use proc_mounts::MountIter;
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
+use sync::mpsc;
 use thiserror::Error;
+use tokio::{fs, fs::OpenOptions, io, prelude::*, select, sync, task, time};
 
 const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
 const OOM_CONTROL: &str = "memory.oom_control";
@@ -62,7 +58,7 @@ pub enum Error {
 trait CGroup: Sized {
     /// Assign a PID to this cgroup
     async fn assign(&self, pid: u32) -> Result<(), Error> {
-        if !self.path().exists().await {
+        if !self.path().exists() {
             Err(Error::InternalError(format!(
                 "Invalid cgroup {}",
                 self.path().display()
@@ -77,7 +73,7 @@ trait CGroup: Sized {
     /// Destroy the cgroup by removing the dir
     async fn destroy(self) -> Result<(), Error> {
         let path = self.path().to_owned();
-        if !path.exists().await {
+        if !path.exists() {
             Err(Error::InternalError(format!(
                 "CGroup {} not found",
                 path.display()
@@ -100,7 +96,7 @@ trait CGroup: Sized {
 #[derive(Debug)]
 pub struct CGroupMem {
     pub path: PathBuf,
-    monitor: sync::Sender<()>,
+    monitor: mpsc::Sender<()>,
 }
 
 impl CGroup for CGroupMem {
@@ -134,20 +130,21 @@ impl CGroupMem {
         write(&oom_control, "1").await?;
 
         // Dropping monitor will stop the task below
-        let (monitor, rx) = sync::channel::<()>(1);
+        let (monitor, mut rx) = mpsc::channel::<()>(1);
         let name = name.to_string();
 
         task::spawn(async move {
-            let mut done = Box::pin(rx.recv()).fuse();
+            let mut done = Box::pin(rx.recv());
 
             loop {
-                let mut read = Box::pin(fs::read_to_string(&oom_control)).fuse();
+                let read = Box::pin(fs::read_to_string(&oom_control));
                 select! {
                     res = read => match res {
                         Ok(s) => {
                             if s.lines().any(|l| l == UNDER_OOM) {
                                 warn!("Container {} is under OOM!", name);
-                                tx.send(Event::Oom(name)).await;
+                                // TODO
+                                tx.send(Event::Oom(name)).await.ok();
                                 break;
                             }
                         }
@@ -156,12 +153,12 @@ impl CGroupMem {
                             break;
                         }
                     },
-                    _ = done => {
+                    _ = &mut done => {
                         debug!("Stopping oom monitor {}", oom_control.display());
                         return;
                     }
                 };
-                task::sleep(Duration::from_millis(500)).await;
+                time::sleep(Duration::from_millis(500)).await;
             }
         });
 
@@ -218,15 +215,15 @@ impl CGroups {
         tx: EventTx,
     ) -> Result<CGroups, Error> {
         let mem = if let Some(ref mem) = cgroups.mem {
-            let parent: PathBuf = config.memory.clone().into();
-            let group = CGroupMem::new(&parent, &name, &mem, tx).await?;
+            let parent = &config.memory;
+            let group = CGroupMem::new(parent, &name, &mem, tx).await?;
             Some(group)
         } else {
             None
         };
 
         let cpu = if let Some(ref cpu) = cgroups.cpu {
-            let parent: PathBuf = config.cpu.clone().into();
+            let parent = &config.cpu;
             let group = CGroupCpu::new(&parent, &name, &cpu).await?;
             Some(group)
         } else {
@@ -259,7 +256,7 @@ impl CGroups {
 
 async fn create(path: &Path) -> Result<(), Error> {
     debug!("Creating {}", path.display());
-    if !path.exists().await {
+    if !path.exists() {
         fs::create_dir_all(&path)
             .await
             .map_err(|e| Error::FileProblem {
@@ -301,7 +298,7 @@ fn get_mount_point(cgroup: &str) -> Result<PathBuf, Error> {
         })?
         .filter_map(|m| m.ok())
         .find(|m| m.fstype == "cgroup" && m.options.contains(&cgroup))
-        .map(|m| m.dest.into())
+        .map(|m| m.dest)
         .ok_or_else(|| Error::MountProblem {
             context: format!("No mount point for cgroup {}", &cgroup),
             error: None,

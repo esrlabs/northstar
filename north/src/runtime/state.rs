@@ -24,23 +24,20 @@ use crate::{
     runtime::{
         error::{Error, InstallationError},
         npk,
-        npk::extract_manifest,
+        npk::read_manifest,
         Event, EventTx,
     },
 };
-use async_std::{
-    fs,
-    path::{Path, PathBuf},
-    stream::StreamExt,
-    sync,
-};
-use ed25519_dalek::PublicKey;
+use ed25519_dalek::*;
 use log::{debug, info, warn};
 use std::{
     collections::{HashMap, HashSet},
-    fmt, iter, result, time,
+    fmt, iter,
+    path::{Path, PathBuf},
+    result, time,
 };
 use time::Duration;
+use tokio::{fs, stream::StreamExt, sync::mpsc};
 
 #[derive(Debug)]
 pub struct State {
@@ -123,8 +120,9 @@ impl State {
     /// Create a new empty State instance
     pub async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         // Load keys for manifest verification
-        let key_dir: PathBuf = config.directories.key_dir.clone().into();
-        let signing_keys = keys::load(&key_dir).await.map_err(Error::KeyError)?;
+        let signing_keys = keys::load(&config.directories.key_dir)
+            .await
+            .map_err(Error::KeyError)?;
 
         Ok(State {
             events_tx: tx,
@@ -223,8 +221,8 @@ impl State {
         let process = super::process::minijail::Process::start(
             &app.container,
             self.events_tx.clone(),
-            self.config.directories.run_dir.as_path().into(),
-            self.config.directories.data_dir.as_path().into(),
+            self.config.directories.run_dir.as_path(),
+            self.config.directories.data_dir.as_path(),
             self.config.container_uid,
             self.config.container_gid,
         )
@@ -266,12 +264,15 @@ impl State {
             #[cfg(any(target_os = "android", target_os = "linux"))]
             cgroups,
         });
+
         self.events_tx
             .send(Event::Notification(Notification::ApplicationStarted(
                 name.to_owned(),
                 app.container.manifest.version.clone(),
             )))
-            .await;
+            .await
+            .expect("Internal channel error on main");
+
         info!("Started {}", app);
 
         Ok(())
@@ -297,12 +298,15 @@ impl State {
                     }
                 }
 
+                // Send notification to main loop
                 self.events_tx
                     .send(Event::Notification(Notification::ApplicationStopped(
                         name.to_owned(),
                         app.container.manifest.version.clone(),
                     )))
-                    .await;
+                    .await
+                    .expect("Internal channel error on main");
+
                 info!("Stopped {} {:?}", app, status);
                 Ok(())
             } else {
@@ -320,7 +324,7 @@ impl State {
             .values()
             .all(|app| app.process_context().is_none())
         {
-            // remove mounts before shutdown
+            // Remove mounts before shutdown
             for (name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
                 info!("Removing {}", name);
                 crate::runtime::npk::uninstall(container)
@@ -329,9 +333,15 @@ impl State {
             }
 
             self.events_tx
-                .send(Event::Notification(Notification::ShutdownOccurred))
-                .await;
-            self.events_tx.send(Event::Shutdown).await;
+                .send(Event::Notification(Notification::Shutdown))
+                .await
+                .ok();
+
+            self.events_tx
+                .send(Event::Shutdown)
+                .await
+                .expect("Internal channel error on main");
+
             Ok(())
         } else {
             let apps = self
@@ -343,22 +353,22 @@ impl State {
         }
     }
 
-    /// Install a npk from give path
+    /// Install a npk
     pub async fn install(
         &mut self,
         npk: &Path,
         msg_id: MessageId,
-        container_dir: Option<std::path::PathBuf>,
-        tx: sync::Sender<Message>,
+        registry: Option<PathBuf>, // TODO: why is this a option?
+        tx: mpsc::Sender<Message>,
     ) {
-        match extract_manifest(npk.into(), &self.signing_keys) {
+        match read_manifest(npk, &self.signing_keys) {
             Err(e) => {
-                warn!("Could not get package name from manifest");
+                warn!("Failed to get package name from manifest");
                 let _ = self
                     .events_tx
                     .send(Event::InstallationFinished(
                         e.into(),
-                        std::path::PathBuf::from(npk),
+                        npk.to_owned(),
                         msg_id,
                         tx,
                         None,
@@ -368,41 +378,41 @@ impl State {
             Ok(manifest) => {
                 let pkg_file_name = format!("{}-{}.npk", manifest.name, manifest.version,);
                 debug!(
-                    "Try to install {}, checking the installed apps",
+                    "Trying to install {}. Checking the installed applications",
                     manifest.name
                 );
-                let registry_path = container_dir.map(|p| p.join(&pkg_file_name));
-                debug!("Try to install..., registry_path: {:?}", registry_path);
-                if manifest.is_resource_image() {
+                let registry = registry.unwrap().join(&pkg_file_name);
+                debug!("Trying to install to registry {}", registry.display());
+                if manifest.is_resource() {
                     if self
                         .resources
                         .contains_key(&(manifest.name, manifest.version))
                     {
                         warn!("Resource container with same version already installed");
-                        let _ = self
-                            .events_tx
+                        self.events_tx
                             .send(Event::InstallationFinished(
                                 InstallationResult::DuplicateResource,
-                                std::path::PathBuf::from(npk),
+                                npk.into(),
                                 msg_id,
                                 tx,
-                                registry_path,
+                                Some(registry),
                             ))
-                            .await;
+                            .await
+                            .expect("Internal channel error to main");
                         return;
                     }
                 } else {
-                    // regular application
+                    // Regular application
                     if self.applications.contains_key(&manifest.name) {
                         warn!("Cannot install already installed application");
                         let _ = self
                             .events_tx
                             .send(Event::InstallationFinished(
                                 InstallationResult::ApplicationAlreadyInstalled,
-                                std::path::PathBuf::from(npk),
+                                npk.to_owned(),
                                 msg_id,
                                 tx,
-                                registry_path,
+                                Some(registry),
                             ))
                             .await;
                         return;
@@ -410,7 +420,7 @@ impl State {
                 }
                 match npk::install(self, npk).await {
                     Ok((name, version)) => {
-                        info!("Installation succeeded!");
+                        info!("Installation succeeful");
                         let _ = self
                             .events_tx
                             .send(Event::InstallationFinished(
@@ -418,35 +428,38 @@ impl State {
                                 std::path::PathBuf::from(npk),
                                 msg_id,
                                 tx,
-                                registry_path,
+                                Some(registry),
                             ))
                             .await;
+
                         // generate notification for installation event
+                        // TODO
                         self.events_tx
                             .send(Event::Notification(Notification::InstallationFinished(
                                 name, version,
                             )))
-                            .await;
+                            .await
+                            .expect("Internal channel error on main");
                     }
                     Err(e) => {
                         warn!("Installation failed: {}", e);
-                        let _ = self
-                            .events_tx
+                        self.events_tx
                             .send(Event::InstallationFinished(
                                 e.into(),
-                                std::path::PathBuf::from(npk),
+                                npk.to_owned(),
                                 msg_id,
                                 tx,
                                 None,
                             ))
-                            .await;
+                            .await
+                            .expect("Internal channel error on main");
                     }
                 }
             }
         }
     }
 
-    fn is_app_installed(&self, name: &str, version: &Version) -> bool {
+    fn is_installed(&self, name: &str, version: &Version) -> bool {
         match self.applications.get(name) {
             None => self
                 .resources
@@ -460,14 +473,15 @@ impl State {
     /// app has to be stopped before it can be uninstalled
     // TODO uninstall resource
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> result::Result<(), Error> {
-        if !self.is_app_installed(name, version) {
+        if !self.is_installed(name, version) {
             return Err(Error::ApplicationNotFound);
         }
+
         let installed_app = self.applications.get(name);
         let to_uninstall = match installed_app {
             Some(app) => {
                 if app.is_running() {
-                    warn!("Cannot uninstall running container {}", app);
+                    warn!("Cannot uninstall started container {}", app);
                     return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
                 }
                 Some(app)
@@ -476,54 +490,52 @@ impl State {
         };
         if let Some(app) = to_uninstall {
             if app.is_running() {
-                warn!("Cannot uninstall running container {}", app);
+                warn!("Cannot uninstall started container {}", app);
                 return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
             }
-            info!("Removing {}", app);
+            info!("Uninstalling {}", app);
             npk::uninstall(app.container())
                 .await
                 .map_err(Error::UninstallationError)?;
             self.applications.remove(name);
             self.resources.remove(&(name.to_string(), version.clone()));
 
-            // remove npk from registry
+            // Remove npk from registry
             for d in &self.config.directories.container_dirs {
                 let mut dir = fs::read_dir(&d).await.map_err(|e| {
                     Error::UninstallationError(InstallationError::Io {
-                        context: "Could not read directory".to_string(),
+                        context: format!("Failed to read {}", d.display()),
                         error: e,
                     })
                 })?;
                 while let Some(res) = dir.next().await {
                     let entry = res.map_err(|e| {
                         Error::UninstallationError(InstallationError::Io {
-                            context: "Could not read directory".to_string(),
+                            context: "Could not read directory".to_string(), // TODO: Which directory?
                             error: e,
                         })
                     })?;
-                    let manifest =
-                        extract_manifest(entry.path().as_path().into(), &self.signing_keys)
-                            .map_err(Error::UninstallationError)?;
+                    let manifest = read_manifest(entry.path().as_path(), &self.signing_keys)
+                        .map_err(Error::UninstallationError)?;
 
                     if manifest.name == name && manifest.version == *version {
                         fs::remove_file(&entry.path()).await.map_err(|e| {
                             Error::UninstallationError(InstallationError::Io {
-                                context: format!(
-                                    "Could not remove npk {}",
-                                    entry.path().to_string_lossy()
-                                ),
+                                context: format!("Failed to remove {}", entry.path().display()),
                                 error: e,
                             })
                         })?;
                     }
                 }
             }
+
             self.events_tx
                 .send(Event::Notification(Notification::Uninstalled(
                     name.to_owned(),
                     version.clone(),
                 )))
-                .await;
+                .await
+                .expect("Internal channel error on main");
         }
 
         Ok(())
@@ -553,13 +565,15 @@ impl State {
                     ExitStatus::Exit(c) => format!("Exited with code {}", c),
                     ExitStatus::Signaled(s) => format!("Terminated by signal {}", s.as_str()),
                 };
+
                 self.events_tx
                     .send(Event::Notification(Notification::ApplicationExited {
                         id: name.to_owned(),
                         version: app.container.manifest.version.clone(),
                         exit_info,
                     }))
-                    .await;
+                    .await
+                    .expect("Internal channel error on main");
             }
         }
         Ok(())
@@ -579,11 +593,13 @@ impl State {
                     .stop(Duration::from_secs(1))
                     .await
                     .map_err(Error::Process)?;
+
                 self.events_tx
                     .send(Event::Notification(Notification::OutOfMemory(
                         name.to_owned(),
                     )))
-                    .await;
+                    .await
+                    .expect("Internal channel error on main");
             }
         }
         Ok(())

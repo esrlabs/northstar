@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use crate::runtime::error::InstallationError;
-use async_std::path::Path;
+use std::path::Path;
 
 pub use nix::mount::MsFlags as MountFlags;
 

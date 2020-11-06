@@ -58,6 +58,8 @@ pub enum Error {
     CGroup(super::linux::cgroups::Error),
     #[error("Key error: {0}")]
     KeyError(super::keys::Error),
+    #[error("Internal error: {0}")]
+    Internal(&'static str),
 }
 
 #[derive(Error, Debug)]

@@ -12,14 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use async_std::{
-    fs,
-    path::{Path, PathBuf},
-};
 use libc::{c_int, ioctl};
 use nix::{errno::Errno, Error::Sys};
-use std::os::unix::prelude::*;
+use std::{
+    os::unix::prelude::*,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
+use tokio::{fs, io};
 
 const LOOP_SET_FD: u16 = 0x4C00;
 const LOOP_CLR_FD: u16 = 0x4C01;
@@ -32,7 +32,7 @@ const LOOP_CTL_GET_FREE: u16 = 0x4C82;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to open loop control")]
-    Open(#[from] async_std::io::Error),
+    Open(#[from] io::Error),
     #[error("Failed to find or allocate free loop device")]
     NoFreeDeviceFound,
     #[error("Failed to add new loop device")]
@@ -139,9 +139,11 @@ impl LoopDevice {
 
         // Set offset and limit for backing_file
         log::debug!("Setting offset {} and limit {}", offset, sizelimit);
-        let mut info: loop_info64 = Default::default();
-        info.lo_offset = offset;
-        info.lo_sizelimit = sizelimit;
+        let mut info = loop_info64 {
+            lo_offset: offset,
+            lo_sizelimit: sizelimit,
+            ..Default::default()
+        };
         if read_only {
             info.lo_flags |= LOOP_FLAG_READ_ONLY;
         }

@@ -17,14 +17,12 @@ use crate::{
     manifest::{Mount, Name, Version},
     runtime::{error::InstallationError, npk::ArchiveReader, state::State},
 };
-use async_std::{
-    fs,
-    os::unix,
-    path::{Path, PathBuf},
-};
-use futures::stream::StreamExt;
 use log::{debug, info};
-use std::{io, process::Command};
+use std::{io, path::Path, process::Command};
+use tokio::{
+    fs::{self, os::unix::symlink},
+    stream::StreamExt,
+};
 
 pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallationError> {
     info!("Installing containers from {}", dir.display());
@@ -35,7 +33,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), Installati
             context: format!("Failed to read {}", dir.display()),
             error: e,
         })?
-        .filter_map(move |d| async move { d.ok() })
+        .filter_map(move |d| d.ok())
         .map(|d| d.path());
 
     let mut npks = Box::pin(npks);
@@ -45,17 +43,13 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), Installati
     Ok(())
 }
 
-pub async fn install(
-    state: &mut State,
-    npk: &Path,
-) -> std::result::Result<(Name, Version), InstallationError> {
+pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
     if let Some(npk_name) = npk.file_name() {
         info!("Loading {}", npk_name.to_string_lossy());
     }
 
     let (manifest, (fs_offset, _fs_size)) = {
-        let mut archive_reader = ArchiveReader::new(npk.into(), &state.signing_keys)?;
-
+        let mut archive_reader = ArchiveReader::new(npk, &state.signing_keys)?;
         (
             archive_reader.extract_manifest_from_archive()?,
             archive_reader.extract_fs_start_and_size()?,
@@ -77,10 +71,10 @@ pub async fn install(
             manifest.name.push_str(&format!("-{:03}", instance));
         }
 
-        let run_dir: PathBuf = state.config.directories.run_dir.as_path().into();
+        let run_dir = state.config.directories.run_dir.as_path();
         let root = run_dir.join(&manifest.name);
 
-        if root.exists().await {
+        if root.exists() {
             debug!("Removing {}", root.display());
             fs::remove_dir_all(&root)
                 .await
@@ -126,7 +120,7 @@ pub async fn install(
                                 })?,
                         );
                     // The mount points are part of the squashfs - remove them and symlink
-                    if target.exists().await {
+                    if target.exists() {
                         fs::remove_dir(&target)
                             .await
                             .map_err(|e| InstallationError::Io {
@@ -134,16 +128,16 @@ pub async fn install(
                                 error: e,
                             })?;
                     }
-                    unix::fs::symlink(source, &target).await.map_err(|e| {
-                        InstallationError::Io {
+                    symlink(source, &target)
+                        .await
+                        .map_err(|e| InstallationError::Io {
                             context: format!(
                                 "Failed to link {} to {}",
                                 source.display(),
                                 target.display()
                             ),
                             error: e,
-                        }
-                    })?;
+                        })?;
                 }
 
                 Mount::Persist { target, .. } => {

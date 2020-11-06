@@ -22,20 +22,24 @@ use api::{
     Container, Message, Payload, Process, Request, Response, ShutdownResult, StartResult,
     StopResult,
 };
-use async_std::{
-    fs::OpenOptions,
-    io::{self, BufWriter, Read, Write},
+use byteorder::{BigEndian, ByteOrder};
+use log::{debug, error, info, warn};
+use std::{
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
+use sync::mpsc;
+use tempfile::tempdir;
+use tokio::{
+    fs::{self, OpenOptions},
+    io::{self, AsyncRead, AsyncWrite, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
-    path::PathBuf,
     prelude::*,
-    sync::{self, Sender},
+    select,
+    stream::StreamExt,
+    sync::{self, mpsc::Sender},
     task,
 };
-use byteorder::{BigEndian, ByteOrder};
-use futures::stream::{self, StreamExt};
-use io::ErrorKind;
-use log::{debug, error, info, warn};
-use tempfile::tempdir;
 
 /// A console is responsible for monitoring and serving incoming client connections
 /// It feeds relevant events back to the runtime and forwards responses and notifications
@@ -46,14 +50,13 @@ pub struct Console {
 }
 
 enum ConsoleEvent {
-    SystemEvent(Notification),
     ApiMessage(MessageWithData),
     Disconnected,
 }
 
 struct MessageWithData {
     message: Message,
-    path: Option<std::path::PathBuf>,
+    path: Option<PathBuf>,
 }
 
 impl Console {
@@ -71,7 +74,7 @@ impl Console {
         &self,
         state: &mut State,
         message: &Message,
-        response_tx: sync::Sender<Message>,
+        response_tx: mpsc::Sender<Message>,
     ) {
         let payload = &message.payload;
         if let Payload::Request(ref request) = payload {
@@ -131,7 +134,10 @@ impl Console {
                 id: message.id.clone(),
                 payload: Payload::Response(response),
             };
-            response_tx.send(response_message).await;
+
+            // A error on the response_tx means that the connection
+            // was closed in the meantime. Ignore it.
+            response_tx.send(response_message).await.ok();
         } else {
             warn!("Received message is not a request");
         }
@@ -142,7 +148,7 @@ impl Console {
     pub async fn start_listening(&self) -> Result<(), Error> {
         debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
-        let listener = TcpListener::bind(&self.address)
+        let mut listener = TcpListener::bind(&self.address)
             .await
             .map_err(|e| Error::Io {
                 context: format!("Failed to open listener on {}", self.address),
@@ -150,10 +156,8 @@ impl Console {
             })?;
 
         task::spawn(async move {
-            let mut incoming = listener.incoming();
-
             // Spawn a task for each incoming connection.
-            while let Some(stream) = incoming.next().await {
+            while let Some(stream) = listener.next().await {
                 let event_tx_clone = event_tx.clone();
                 if let Ok(stream) = stream {
                     task::spawn(async move {
@@ -171,15 +175,15 @@ impl Console {
         &self,
         install_result: InstallationResult,
         msg_id: MessageId,
-        response_message_tx: sync::Sender<Message>,
-        registry_path: Option<std::path::PathBuf>,
-        npk: &std::path::Path,
+        response_message_tx: mpsc::Sender<Message>,
+        registry_path: Option<PathBuf>,
+        npk: &Path,
     ) {
         debug!("Installation finished, registry_path: {:?}", registry_path,);
         let mut install_result = install_result;
         if let (InstallationResult::Success, Some(new_path)) = (&install_result, registry_path) {
             // move npk into container dir
-            if let Err(e) = async_std::fs::rename(npk, new_path).await {
+            if let Err(e) = fs::rename(npk, new_path).await {
                 install_result =
                     InstallationResult::FileIoProblem(format!("Could not replace npk: {}", e));
             }
@@ -190,7 +194,10 @@ impl Console {
                 result: install_result,
             }),
         };
-        response_message_tx.send(response_message).await
+        response_message_tx
+            .send(response_message)
+            .await
+            .expect("TODO");
     }
 }
 
@@ -235,10 +242,10 @@ fn list_containers(state: &State) -> Vec<Container> {
     app_containers
 }
 
-async fn read<R: Read + Unpin>(
+async fn read<R: AsyncRead + Unpin>(
     reader: &mut R,
-    message_tx: &sync::Sender<Option<MessageWithData>>,
-    tmp_installation_dir: &std::path::Path,
+    message_tx: &mpsc::Sender<Option<MessageWithData>>,
+    tmp_installation_dir: &Path,
 ) -> Result<(), Error> {
     // Read frame length
     let mut buf = [0u8; 4];
@@ -282,8 +289,8 @@ async fn read<R: Read + Unpin>(
                     ),
                     error: e,
                 })?;
-            let buf_writer = BufWriter::new(tmpfile);
-            let received_bytes = io::copy(reader.take(*size as u64), buf_writer)
+            let mut writer = BufWriter::new(tmpfile);
+            let received_bytes = io::copy(&mut reader.take(*size as u64), &mut writer)
                 .await
                 .map_err(|e| Error::Io {
                     context: format!("Could not receive {} bytes", size),
@@ -300,7 +307,9 @@ async fn read<R: Read + Unpin>(
             path: None,
         },
     };
-    message_tx.send(Some(msg_with_data)).await;
+    // If sending on the message_tx part fails indicates a closed
+    // connection. Ingore the error and discard the result.
+    message_tx.send(Some(msg_with_data)).await.ok();
     Ok(())
 }
 
@@ -310,7 +319,7 @@ async fn on_request(
     sender_to_client: Sender<Message>,
     event_tx: &mut EventTx,
 ) -> io::Result<()> {
-    let (tx_reply, rx_reply) = sync::channel::<Message>(1);
+    let (tx_reply, mut rx_reply) = mpsc::channel::<Message>(1);
     let event = match m {
         MessageWithData {
             message:
@@ -322,24 +331,77 @@ async fn on_request(
         } => Event::Install(id, PathBuf::from(&p), tx_reply.clone()),
         _ => Event::Console(m.message, tx_reply.clone()),
     };
-    event_tx.send(event).await;
+    event_tx
+        .send(event)
+        .await
+        .expect("Internal channel error on main");
 
-    // Wait for reply of main loop
-    // TODO: timeout
+    // Wait for reply of the main loop
+    // TODO: Add a timeout to not make the connection wait forever
     let reply = rx_reply
         .recv()
         .await
-        .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
+        .ok_or_else(|| io::Error::new(ErrorKind::Other, "Channel error"))?;
 
-    sender_to_client.send(reply).await;
+    // TODO: what to do with this error? Is the connection closed? Is this ok?
+    sender_to_client.send(reply).await.ok();
     Ok(())
 }
 
-fn start_sending_to_client(writer: &TcpStream, client_rx: sync::Receiver<Message>) {
-    // setup send functionality
-    let mut writer = writer.clone();
+async fn connection(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Error> {
+    let subscription_id = uuid::Uuid::new_v4().to_string();
+    let peer = stream.peer_addr().map_err(|e| Error::Io {
+        context: "Failed to get peer from command connection".to_string(),
+        error: e,
+    })?;
+    debug!("Client {:?} connected", peer);
+
+    let tmpdir = tempdir().map_err(|e| Error::Io {
+        context: "Error creating temp installation dir".to_string(),
+        error: e,
+    })?;
+
+    // For each new client connection we create a new channel
+    // the rx end is used to report notifications to the client
+    // while the tx end is stored in the runtime to broadcast notifications
+    let (notification_sender, mut notification_receiver) = mpsc::channel::<Notification>(10);
+    event_tx
+        .send(Event::NotificationSubscription {
+            id: subscription_id.clone(),
+            subscriber: Some(notification_sender),
+        })
+        .await
+        .map_err(|_| Error::Internal("Channel"))?;
+
+    // Channel for sending response messages back to client
+    let (response_tx, mut response_rx) = mpsc::channel::<Message>(1);
+
+    let (reader, mut writer) = stream.into_split();
+
+    // RX
+    let dir = tmpdir.path().to_owned();
+    let (tx, rx) = mpsc::channel::<Option<MessageWithData>>(1);
     task::spawn(async move {
-        async fn send_reply<W: Unpin + Write>(reply: &Message, writer: &mut W) -> io::Result<()> {
+        let mut reader = BufReader::new(reader);
+        loop {
+            if let Err(e) = read(&mut reader, &tx, &dir).await {
+                warn!("Error receiving from socket: {}", e);
+                tx.send(None).await.ok(); // TODO
+                break;
+            }
+        }
+    });
+    let mut client_events = rx.map(|m| match m {
+        Some(msg) => ConsoleEvent::ApiMessage(msg),
+        None => ConsoleEvent::Disconnected,
+    });
+
+    // TX
+    task::spawn(async move {
+        async fn send_reply<W: Unpin + AsyncWrite>(
+            reply: &Message,
+            writer: &mut W,
+        ) -> io::Result<()> {
             // Serialize reply
             let reply = serde_json::to_string_pretty(&reply)
                 .map_err(|e| io::Error::new(ErrorKind::Other, e))?;
@@ -352,100 +414,52 @@ fn start_sending_to_client(writer: &TcpStream, client_rx: sync::Receiver<Message
             Ok(())
         }
         loop {
-            while let Ok(msg_to_send) = client_rx.recv().await {
+            while let Some(msg_to_send) = response_rx.recv().await {
                 if let Err(e) = send_reply(&msg_to_send, &mut writer).await {
+                    // TODO: Is the connection closed if this happens?
                     warn!("Error sending back to client: {}", e);
                     break;
                 }
             }
         }
     });
-}
 
-fn start_receiving_from_client(
-    reader: &TcpStream,
-    tmp_installation_dir: std::path::PathBuf,
-) -> impl Stream<Item = ConsoleEvent> {
-    let (tx, rx) = sync::channel::<Option<MessageWithData>>(1);
-    let reader = reader.clone();
-    let _ = task::spawn(async move {
-        let mut buf_reader: io::BufReader<&TcpStream> = io::BufReader::new(&reader);
-        loop {
-            if let Err(e) = read(&mut buf_reader, &tx, &tmp_installation_dir).await {
-                warn!("Error receiving from socket: {}", e);
-                tx.send(None).await;
-                break;
-            }
-        }
-    });
-    rx.map(|m| match m {
-        Some(msg) => ConsoleEvent::ApiMessage(msg),
-        None => ConsoleEvent::Disconnected,
-    })
-}
-
-async fn connection(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Error> {
-    let peer = stream.peer_addr().map_err(|e| Error::Io {
-        context: "Failed to get peer from command connection".to_string(),
-        error: e,
-    })?;
-    debug!("Client {:?} connected", peer);
-
-    // for each new client connection we create a new channel
-    // the rx end is used to report notifications to the client
-    // while the tx end is stored in the runtime to broadcast notifications
-    let (notify_sender, notify_receiver) = sync::channel::<Notification>(10);
-    let subscription_id = uuid::Uuid::new_v4().to_string();
-    event_tx
-        .send(Event::NotificationSubscription {
-            id: subscription_id.clone(),
-            subscriber: Some(notify_sender),
-        })
-        .await;
-
-    let (reader, writer) = &mut (&stream, &stream);
-
-    // channel for sending response messages back to client
-    let response_channel = sync::channel::<Message>(10);
-
-    let tmp_installation_dir = tempdir().map_err(|e| Error::Io {
-        context: "Error creating temp installation dir".to_string(),
-        error: e,
-    })?;
-
-    let client_events = start_receiving_from_client(
-        reader,
-        std::path::PathBuf::from(tmp_installation_dir.path()),
-    );
-
-    // make sure everything sent through the response_channel is forwarded to the client
-    start_sending_to_client(writer, response_channel.1);
-
-    let runtime_events = notify_receiver.map(ConsoleEvent::SystemEvent);
-
-    let mut events = stream::select(client_events, runtime_events);
-
-    while let Some(event) = events.next().await {
-        match event {
-            ConsoleEvent::SystemEvent(notification) => {
-                let reply = Message {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    payload: Payload::Notification(notification),
-                };
-                response_channel.0.send(reply).await;
-            }
-            ConsoleEvent::ApiMessage(m) => {
-                if let Err(e) = on_request(m, response_channel.0.clone(), &mut event_tx).await {
-                    match e.kind() {
-                        ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
-                        _ => warn!("Error on handle_request to {:?}: {:?}", peer, e),
+    loop {
+        select! {
+            notification = notification_receiver.next() => {
+                if let Some(notification) = notification {
+                    let reply = Message {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        payload: Payload::Notification(notification),
+                    };
+                    // If there's a error on the response tx indicates
+                    // that the connection is closed. Break.
+                    if response_tx.send(reply).await.is_err() {
+                        break;
                     }
+                } else {
                     break;
                 }
             }
-            ConsoleEvent::Disconnected => {
-                debug!("Client disconnected");
-                break;
+            console_event = client_events.next() => {
+                match console_event {
+                    Some(ConsoleEvent::ApiMessage(m)) => {
+                        if let Err(e) = on_request(m, response_tx.clone(), &mut event_tx).await {
+                            match e.kind() {
+                                ErrorKind::UnexpectedEof => info!("Client {:?} disconnected", peer),
+                                _ => {
+                                    warn!("Error on handle_request to {:?}: {:?}", peer, e);
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    Some(ConsoleEvent::Disconnected) | None => {
+                        debug!("Client disconnected");
+                        break;
+                    }
+                }
             }
         }
     }
@@ -457,7 +471,8 @@ async fn connection(stream: TcpStream, mut event_tx: EventTx) -> Result<(), Erro
             subscriber: None,
             id: subscription_id,
         })
-        .await;
+        .await
+        .expect("Internal channel error on main");
 
     Ok(())
 }

@@ -12,21 +12,24 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{waitpid, Error, ExitHandle, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
+use super::{exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
 use crate::{
     manifest::{Mount, MountFlag},
     runtime::{npk::Container, Event, EventTx},
 };
-use async_std::{fs, io, path::Path, task};
-use futures::{select, FutureExt, StreamExt};
-use io::prelude::{BufReadExt, WriteExt};
 use log::{debug, warn};
 use nix::{
-    sys::signal,
+    sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
-use std::{fmt, os::unix::io::AsRawFd, time};
-use stop_token::StopSource;
+use std::{fmt, os::unix::io::AsRawFd, path::Path};
+use tokio::{
+    fs,
+    io::{self, AsyncBufReadExt, AsyncWriteExt},
+    select,
+    stream::StreamExt,
+    task, time,
+};
 
 // We need a Send + Sync version of Minijail
 struct Minijail(::minijail::Minijail);
@@ -37,8 +40,6 @@ unsafe impl Sync for Minijail {}
 // the main loop. When this struct is dropped the internal spawned tasks are stopped.
 #[derive(Debug)]
 struct CaptureOutput {
-    // Stop token to interrupt the stream
-    stop_source: StopSource,
     // Fd
     fd: i32,
     // File instance to the write part. The raw fd of File is passed to minijail
@@ -48,22 +49,16 @@ struct CaptureOutput {
 
 impl CaptureOutput {
     pub async fn new(
-        tmpdir: &std::path::Path,
+        tmpdir: &Path,
         fd: i32,
         tag: &str,
         event_tx: EventTx,
     ) -> Result<CaptureOutput, Error> {
         let fifo = tmpdir.join(fd.to_string());
-        use nix::sys::stat::Mode;
-        nix::unistd::mkfifo(
-            &fifo,
-            Mode::S_IRUSR | Mode::S_IWUSR, //| Mode::S_IROTH | Mode::S_IWOTH,
-        )
-        .map_err(|e| Error::LinuxProblem {
+        unistd::mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).map_err(|e| Error::Os {
             context: "Failed to mkfifo".to_string(),
             error: e,
         })?;
-        // .context("Failed to mkfifo")?;
 
         // Open the writing part in blocking mode
         let write = std::fs::OpenOptions::new()
@@ -85,10 +80,7 @@ impl CaptureOutput {
                 error: e,
             })?;
 
-        let stop_source = stop_token::StopSource::new();
-        let lines = io::BufReader::new(read).lines();
-        // Wrap lines in stop_source
-        let mut lines = stop_source.stop_token().stop_stream(lines);
+        let mut lines = io::BufReader::new(read).lines();
 
         let tag = tag.to_string();
         task::spawn(async move {
@@ -100,15 +92,13 @@ impl CaptureOutput {
                         fd,
                         line,
                     })
-                    .await;
+                    .await
+                    .ok();
             }
+            debug!("Stopping process capture of {} on fd {}", tag, fd);
         });
 
-        Ok(CaptureOutput {
-            stop_source,
-            fd,
-            write,
-        })
+        Ok(CaptureOutput { fd, write })
     }
 
     pub fn read_fd(&self) -> i32 {
@@ -133,8 +123,8 @@ pub struct Process {
     _stdout: CaptureOutput,
     /// Captured stderr output
     _stderr: CaptureOutput,
-    /// Sender and receiver for signaling this process exit
-    exit_handle: ExitHandle,
+    /// Rx part of the exit handle of this process
+    exit_handle_wait: ExitHandleWait,
 }
 
 impl fmt::Debug for Process {
@@ -152,7 +142,7 @@ impl Process {
         uid: u32,
         gid: u32,
     ) -> Result<Process, Error> {
-        let root: std::path::PathBuf = container.root.clone().into();
+        let root = &container.root;
         let manifest = &container.manifest;
         let mut jail = ::minijail::Minijail::new().map_err(Error::Minijail)?;
 
@@ -241,7 +231,7 @@ impl Process {
         let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
 
         let pid = jail.run_remap_env_preload(
-            &std::path::PathBuf::from(init.as_path()),
+            &init.as_path(),
             &[
                 (stderr.write_fd(), stderr.read_fd()),
                 (stdout.write_fd(), stdout.read_fd()),
@@ -251,9 +241,9 @@ impl Process {
             false,
         )? as u32;
 
-        let exit_handle = ExitHandle::new();
+        let (exit_handle_signal, exit_handle_wait) = exit_handle();
         // Spawn a task thats waits for the child to exit
-        waitpid(&manifest.name, pid, exit_handle.signal(), event_tx).await;
+        waitpid(&manifest.name, pid, exit_handle_signal, event_tx).await;
 
         Ok(Process {
             pid,
@@ -261,7 +251,7 @@ impl Process {
             _tmpdir: tmpdir,
             _stdout: stdout,
             _stderr: stderr,
-            exit_handle,
+            exit_handle_wait,
         })
     }
 }
@@ -302,7 +292,7 @@ async fn setup_mounts(
                     continue;
                 }
                 let rw = flags.contains(&MountFlag::Rw);
-                mount_bind(jail, source.into(), target.as_path().into(), rw)?;
+                mount_bind(jail, &source, &target, rw)?;
             }
             Mount::Persist { target, flags } => {
                 let dir = data_dir.join(&container.manifest.name);
@@ -318,12 +308,13 @@ async fn setup_mounts(
                     Some(unistd::Uid::from_raw(uid)),
                     Some(unistd::Gid::from_raw(gid)),
                 )
-                .map_err(|e| Error::LinuxProblem {
+                .map_err(|e| Error::Os {
                     context: format!("Failed to chown {} to {}:{}", dir.display(), uid, gid,),
                     error: e,
                 })?;
+
                 let rw = flags.contains(&MountFlag::Rw);
-                mount_bind(jail, &dir, target.as_path().into(), rw)?;
+                mount_bind(jail, &dir, &target, rw)?;
             }
             Mount::Resource {
                 target,
@@ -342,7 +333,7 @@ async fn setup_mounts(
                         })
                         .unwrap_or(first_part_of_path);
 
-                    if !src_dir.exists().await {
+                    if !src_dir.exists() {
                         return Err(Error::Start(format!(
                             "Resource folder {} is missing",
                             src_dir.display()
@@ -352,12 +343,12 @@ async fn setup_mounts(
                     src_dir
                 };
 
-                mount_bind(jail, &shared_resource_path, target.as_path().into(), false)?;
+                mount_bind(jail, &shared_resource_path, &target.as_path(), false)?;
             }
             Mount::Tmpfs { target, size } => {
                 debug!("Mounting tmpfs to {}", target.display());
                 let data = format!("size={},mode=1777", size);
-                jail.mount_with_data(Path::new("none").into(), &target, "tmpfs", 0, &data)
+                jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
                     .map_err(Error::Minijail)?;
             }
         }
@@ -371,8 +362,6 @@ fn mount_bind(
     target: &Path,
     rw: bool,
 ) -> Result<(), Error> {
-    let source: &std::path::Path = source.into();
-    let target: &std::path::Path = target.into();
     debug!(
         "Bind mounting {} to {}{}",
         source.display(),
@@ -394,27 +383,23 @@ impl super::Process for Process {
         // it is SIGKILLed.
         let sigterm = signal::Signal::SIGTERM;
         signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm)).map_err(|e| {
-            Error::LinuxProblem {
+            Error::Os {
                 context: format!("Failed to SIGTERM {}", self.pid),
                 error: e,
             }
         })?;
 
-        let mut timeout = Box::pin(task::sleep(timeout).fuse());
-        let mut exited = Box::pin(self.exit_handle.wait()).fuse();
+        let timeout = Box::pin(time::sleep(timeout));
+        let exited = Box::pin(self.exit_handle_wait.next());
 
         let pid = self.pid;
         Ok(select! {
             s = exited => {
-                if let Some(exit_status) = s {
-                    exit_status
-                } else {
-                    return Err(Error::StopProblem);
-                }
-            }, // This is the happy path...
+                s.expect("Internal channel error during process termination")  // This is the happy path...
+            },
             _ = timeout => {
                 signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))
-                .map_err(|e| Error::LinuxProblem { context: "Could not kill process".to_string(), error: e})?;
+                    .map_err(|e| Error::Os { context: "Failed to kill process".to_string(), error: e})?;
                 ExitStatus::Signaled(signal::Signal::SIGKILL)
             }
         })

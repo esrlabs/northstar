@@ -12,10 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use async_std::task;
 use nix::libc::{c_ulong, ioctl as nix_ioctl};
 use std::{borrow::Cow, cmp, fmt, mem::size_of, os::unix::io::AsRawFd, path::Path, slice};
 use thiserror::Error;
+use tokio::{io, task};
 
 const MIN_BUF_SIZE: usize = 16 * 1024;
 
@@ -135,7 +135,7 @@ impl Default for Struct_dm_ioctl {
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failure opening file for device mapper")]
-    Open(#[from] async_std::io::Error),
+    Open(#[from] io::Error),
     #[error("Failure issuing an IO-CTL call")]
     IoCtrl(#[from] nix::Error),
     #[error("Response DM buffer requires too much space")]
@@ -236,10 +236,12 @@ impl Dm {
         // Construct targets first, since we need to know how many & size
         // before initializing the header.
         for t in targets {
-            let mut targ: Struct_dm_target_spec = Default::default();
-            targ.sector_start = t.0;
-            targ.length = t.1;
-            targ.status = 0;
+            let mut targ = Struct_dm_target_spec {
+                sector_start: t.0,
+                length: t.1,
+                status: 0,
+                ..Default::default()
+            };
 
             let dst: &mut [u8] = unsafe { &mut *(&mut targ.target_type[..] as *mut [u8]) };
             let bytes = t.2.as_bytes();
@@ -358,7 +360,7 @@ impl Dm {
             nix::request_code_readwrite!(DM_IOCTL, ioctl, size_of::<Struct_dm_ioctl>()) as c_ulong;
 
         let fd = self.file.as_raw_fd();
-        task::spawn_blocking(move || {
+        task::block_in_place(move || {
             loop {
                 if let Err(e) = unsafe {
                     #[cfg(any(target_os = "android", target_env = "musl"))]
@@ -400,7 +402,6 @@ impl Dm {
             let new_data_off = cmp::max(hdr.data_start, hdr.data_size);
             Ok(v[hdr.data_start as usize..new_data_off as usize].to_vec())
         })
-        .await
     }
 }
 

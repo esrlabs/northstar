@@ -6,10 +6,9 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0.31"
-assert_cmd = "1.0.1"
-async-std = { version = "1.6.5", features = ["attributes", "unstable"] }
 async-trait = "0.1.36"
 env_logger = "0.7.1"
 log = "0.4.8"
 north = { path = "../north" }
 regex = "1.3.9"
+tokio = { version = "0.3", features = ["full"] }

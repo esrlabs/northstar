@@ -15,30 +15,33 @@
 //! Extends Future with timeout methods
 
 use anyhow::{Context, Result};
-use async_std::{
-    future::{timeout, Future},
-    sync::{channel, Receiver},
-    task,
-};
 use async_trait::async_trait;
 use log::debug;
 use regex::Regex;
 use std::{
-    io::{self, BufRead, BufReader},
-    time::Duration,
+    env,
+    future::Future,
+    path::{self, PathBuf},
+};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, BufReader},
+    stream::StreamExt,
+    sync::mpsc::{channel, Receiver},
+    task, time,
+    time::timeout,
 };
 
 /// Extends Future with timeout methods
 #[async_trait]
 pub trait Timeout: Sized + Future {
     /// Times out if the tasks takes longer than `duration`
-    async fn or_timeout(self, duration: Duration) -> Result<Self::Output> {
+    async fn or_timeout(self, duration: time::Duration) -> Result<Self::Output> {
         timeout(duration, self).await.map_err(anyhow::Error::new)
     }
 
     /// Times out if the tasks takes longer than the `secs`
     async fn or_timeout_in_secs(self, secs: u64) -> Result<Self::Output> {
-        self.or_timeout(Duration::from_secs(secs)).await
+        self.or_timeout(time::Duration::from_secs(secs)).await
     }
 }
 
@@ -51,15 +54,15 @@ pub struct CaptureReader {
 
 impl CaptureReader {
     /// Takes the stdout from the input process and wraps it in a CaptureReader
-    pub async fn new<R: io::Read + Send + Sync + 'static>(read: R) -> CaptureReader {
+    pub async fn new<R: AsyncRead + Send + Sync + Unpin + 'static>(read: R) -> CaptureReader {
         let (sender, receiver) = channel::<String>(100);
 
-        task::spawn_blocking(move || {
+        task::spawn(async move {
             let stdout = BufReader::new(read);
             let mut lines = stdout.lines();
-            while let Some(Ok(line)) = lines.next() {
+            while let Some(Ok(line)) = lines.next().await {
                 debug!("{}", line);
-                task::block_on(sender.send(line));
+                sender.send(line).await.ok();
             }
         });
 
@@ -68,8 +71,8 @@ impl CaptureReader {
 
     /// Consumes the stdout till a match to the input regex is found.
     pub async fn captures(&mut self, regex: &str) -> Result<Option<Vec<String>>> {
-        let re = Regex::new(regex).context("invalid regular expression")?;
-        while let Ok(line) = self.receiver.recv().await {
+        let re = Regex::new(regex).context("Invalid regular expression")?;
+        while let Some(line) = self.receiver.recv().await {
             if let Some(cap) = re.captures(&line) {
                 return Ok(Some(
                     cap.iter()
@@ -80,4 +83,25 @@ impl CaptureReader {
         }
         Ok(None)
     }
+}
+
+pub fn cargo_bin<S: AsRef<str>>(name: S) -> path::PathBuf {
+    cargo_bin_str(name.as_ref())
+}
+
+fn target_dir() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .map(|mut path| {
+            path.pop();
+            if path.ends_with("deps") {
+                path.pop();
+            }
+            path
+        })
+        .unwrap()
+}
+
+fn cargo_bin_str(name: &str) -> path::PathBuf {
+    target_dir().join(format!("{}{}", name, env::consts::EXE_SUFFIX))
 }

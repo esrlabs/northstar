@@ -35,9 +35,4 @@ cp "${TEST_CONTAINER_DIR}/manifest.yaml" "${TMP_DIR}"
 cross build --release --bin "${name}" --target "${PLATFORM}"
 cp "./target/$PLATFORM/release/$name" "${ROOT_DIR}"
 
-cargo run --bin sextant -- \
-  pack \
-  --dir "${TMP_DIR}" \
-  --out "${REGISTRY_DIR}" \
-  --key "${EXAMPLE_PRV_KEY}" \
-  --platform "${PLATFORM}"
+cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${REGISTRY_DIR}" --key "${EXAMPLE_PRV_KEY}"
