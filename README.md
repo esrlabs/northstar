@@ -128,9 +128,9 @@ Required Kernel features are:
 
 The script in `doc/tools/check_conf.sh` can be used to check your running kernel for the correct configuration. The version provided is for Android, but can be adapted to any platform providing the shell on the platform supports arrays.
 
-Required development tools:
-* Rust
-* Ruby
+
+
+
 
 ### Build Northstar
 Open a terminal, clone the repository and build the solution and start the runtime:
