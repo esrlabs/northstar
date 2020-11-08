@@ -134,6 +134,49 @@ Required Kernel features are:
 
 The script in `doc/tools/check_conf.sh` can be used to check your running kernel for the correct configuration. The version provided is for Android, but can be adapted to any platform providing the shell on the platform supports arrays.
 
+Required development tools:
+* Rust
+* Ruby
+
+### Build Northstar
+Open a terminal, clone the repository and build the solution and start the runtime:
+
+    $ git clone https://github.com/esrlabs/northstar.git
+    $ cargo build --release --bin north 
+    $ cargo build --release --bin nstar 
+    $ ./examples/build_examples.sh 
+    $ sudo ./target/release/north
+
+### Run sample code
+Open a second terminal navigate to the directory where the northstar source is located. Start `nstar` to interact with the runtime.
+Execute the following commands:
+
+1. `containers` to list all registered containers
+2. `start crashing` to start an example container which will crash within the next 10 seconds 
+
+[//]: # 
+ 
+
+    $ ./target/release/nstar
+    $ >> containers
+    Name              | Version | Type     | PID | Uptime 
+    -------------------+---------+----------+-----+--------
+    cpueater          | 0.0.1   | App      |     |  
+    crashing          | 0.0.1   | App      |     |  
+    datarw            | 0.0.1   | App      |     |  
+    ferris_says_hello | 0.0.3   | App      |     |  
+    hello             | 0.0.2   | App      |     |  
+    memeater          | 0.0.1   | App      |     |  
+    ferris            | 0.0.2   | Resource |     |  
+    hello_message     | 0.1.2   | Resource |     |  
+    >> start crashing
+    crashing-0.0.1 was started
+    start succeeded
+    >> crashing-0.0.1 exited (Exited with code 101)
+
+
+
+
 ### Starting Northstar
 
 The Northstar runtime is an executable and usually run as a daemon started by your system manager of choice. It can be started with a config file.
