@@ -12,10 +12,26 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::error::InstallationError;
 use std::path::Path;
+use thiserror::Error;
 
 pub use nix::mount::MsFlags as MountFlags;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Mount error: {context}")]
+    Mount {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+    #[error("Umount error: {context}")]
+    Umount {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+}
 
 pub async fn mount(
     source: &Path,
@@ -23,7 +39,7 @@ pub async fn mount(
     fstype: &str,
     flags: MountFlags,
     data: Option<&str>,
-) -> Result<(), InstallationError> {
+) -> Result<(), Error> {
     nix::mount::mount(
         Some(source.as_os_str()),
         target.as_os_str(),
@@ -31,18 +47,19 @@ pub async fn mount(
         flags,
         data,
     )
-    .map_err(|e| InstallationError::MountError {
+    .map_err(|error| Error::Mount {
         context: format!(
-            "Failed to mount {} on {}",
+            "Failed to mount {} on {} with flags {:?}",
             source.display(),
-            target.display()
+            target.display(),
+            flags,
         ),
-        error: e,
+        error,
     })
 }
 
-pub async fn unmount(target: &Path) -> Result<(), InstallationError> {
-    nix::mount::umount(target.as_os_str()).map_err(|e| InstallationError::MountError {
+pub async fn unmount(target: &Path) -> Result<(), Error> {
+    nix::mount::umount(target.as_os_str()).map_err(|e| Error::Umount {
         context: format!("Failed to unmount {}", target.display()),
         error: e,
     })

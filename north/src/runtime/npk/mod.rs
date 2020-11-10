@@ -209,7 +209,7 @@ impl<'a> ArchiveReader<'a> {
     fn new(
         npk: &Path,
         signing_keys: &'a HashMap<String, PublicKey>,
-    ) -> std::result::Result<Self, InstallationError> {
+    ) -> Result<Self, InstallationError> {
         let file = std::fs::File::open(&npk).map_err(|e| InstallationError::Io {
             context: format!("Failed to open {:?} ({})", npk, e),
             error: e,
@@ -224,9 +224,7 @@ impl<'a> ArchiveReader<'a> {
         })
     }
 
-    pub fn extract_fs_start_and_size(
-        &mut self,
-    ) -> std::result::Result<(u64, u64), InstallationError> {
+    pub fn extract_fs_start_and_size(&mut self) -> Result<(u64, u64), InstallationError> {
         let f = self.archive.by_name(FS_IMAGE).map_err(|e| {
             InstallationError::ArchiveError(format!("Failed to find file-system {}", e))
         })?;
@@ -234,7 +232,7 @@ impl<'a> ArchiveReader<'a> {
         Ok((f.data_start(), f.size()))
     }
 
-    pub fn extract_hashes(&mut self) -> std::result::Result<Hashes, InstallationError> {
+    pub fn extract_hashes(&mut self) -> Result<Hashes, InstallationError> {
         let mut signature_file = self
             .archive
             .by_name(SIGNATURE)
@@ -249,9 +247,7 @@ impl<'a> ArchiveReader<'a> {
         Hashes::from_str(&signature, &self.signing_keys)
     }
 
-    pub fn extract_manifest_from_archive(
-        &mut self,
-    ) -> std::result::Result<Manifest, InstallationError> {
+    pub fn extract_manifest_from_archive(&mut self) -> Result<Manifest, InstallationError> {
         let hashes = self.extract_hashes()?;
         let mut manifest_file = self.archive.by_name(MANIFEST).map_err(|e| {
             InstallationError::ArchiveError(format!("Failed to read manifest ({})", e))

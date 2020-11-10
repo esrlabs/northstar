@@ -13,9 +13,9 @@
 //   limitations under the License.
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
-use super::linux::device_mapper;
+use super::linux::{self, device_mapper, mount};
 #[cfg(any(target_os = "android", target_os = "linux"))]
-use super::linux::loopdev;
+use super::linux::{inotify, loopdev};
 use super::Name;
 use crate::api::InstallationResult;
 use std::io;
@@ -49,6 +49,9 @@ pub enum Error {
         #[source]
         error: io::Error,
     },
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Linux error")]
+    Linux(#[from] linux::Error),
     #[error("Protocol error: {0}")]
     Protocol(String),
     #[error("Configuration error: {0}")]
@@ -84,8 +87,14 @@ pub enum InstallationError {
     UnexpectedVerityVersion(u32),
     #[error("Unsupported verity algorithm: {0}")]
     UnexpectedVerityAlgorithm(String),
+    #[error("Application {0} already installed")]
+    ApplicationAlreadyInstalled(String),
     #[error("Archive error: {0}")]
     ArchiveError(String),
+    #[error("Timeout: {0}")]
+    Timeout(String),
+    #[error("Duplicate resource")]
+    DuplicateResource,
     #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Device mapper error: {0}")]
     DeviceMapper(device_mapper::Error),
@@ -96,30 +105,18 @@ pub enum InstallationError {
     HashInvalid(String),
     #[error("Key missing: {0}")]
     KeyNotFound(String),
-    #[error("Application {0} already installed")]
-    ApplicationAlreadyInstalled(String),
-    #[error("Failure to mount: {context}")]
-    MountError {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
-    #[error("Failure to mount: {context}")]
-    INotifyError {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Failed to mount")]
+    Mount(#[from] mount::Error),
+    #[error("Inotify")]
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    INotify(#[from] inotify::Error),
     #[error("IO error: {context}")]
     Io {
         context: String,
         #[source]
         error: io::Error,
     },
-    #[error("Timeout: {0}")]
-    Timeout(String),
-    #[error("Duplicate resource")]
-    DuplicateResource,
 }
 
 impl From<InstallationError> for InstallationResult {
@@ -148,12 +145,10 @@ impl From<InstallationError> for InstallationResult {
             InstallationError::Io { context, error: _ } => {
                 InstallationResult::FileIoProblem(context)
             }
-            InstallationError::MountError { context, error: _ } => {
-                InstallationResult::MountError(context)
-            }
-            InstallationError::INotifyError { context, error: _ } => {
-                InstallationResult::INotifyError(context)
-            }
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            InstallationError::Mount(e) => InstallationResult::MountError(format!("{}", e)),
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            InstallationError::INotify(e) => InstallationResult::INotifyError(format!("{}", e)),
             InstallationError::Timeout(s) => InstallationResult::TimeoutError(s),
             InstallationError::NoVerityHeader => {
                 InstallationResult::VerityProblem("Verity header missing".to_string())

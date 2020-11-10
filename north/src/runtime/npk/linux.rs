@@ -76,10 +76,7 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), Installati
 }
 
 #[allow(dead_code)]
-pub async fn install(
-    state: &mut State,
-    npk: &Path,
-) -> std::result::Result<(Name, Version), InstallationError> {
+pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
     debug!("Installing {}", npk.display());
 
     let dm = &state.config.devices.device_mapper.clone();
@@ -98,7 +95,9 @@ pub async fn install(
 #[allow(dead_code)]
 pub async fn uninstall(container: &Container) -> Result<(), InstallationError> {
     debug!("Unmounting {}", container.root.display());
-    linux_mount::unmount(&container.root).await?;
+    linux_mount::unmount(&container.root)
+        .await
+        .map_err(InstallationError::Mount)?;
     debug!("Removing {}", container.root.display());
     fs::remove_dir_all(&container.root)
         .await
@@ -107,11 +106,12 @@ pub async fn uninstall(container: &Container) -> Result<(), InstallationError> {
             error: e,
         })?;
 
-    crate::runtime::linux::inotify::wait_for_file_deleted(
+    super::super::linux::inotify::wait_for_file_deleted(
         &container.dm_dev,
         std::time::Duration::from_secs(3),
     )
-    .await?;
+    .await
+    .map_err(InstallationError::INotify)?;
     Ok(())
 }
 
@@ -120,7 +120,7 @@ async fn install_internal(
     dm: &dm::Dm,
     lc: &LoopControl,
     npk: &Path,
-) -> std::result::Result<(Name, Version), InstallationError> {
+) -> Result<(Name, Version), InstallationError> {
     let start = time::Instant::now();
     if let Some(npk_name) = npk.file_name() {
         info!(
@@ -267,7 +267,7 @@ async fn setup_and_mount(
     fs_offset: u64,
     lo_size: u64,
     root: &Path,
-) -> std::result::Result<PathBuf, InstallationError> {
+) -> Result<PathBuf, InstallationError> {
     let fs_type = get_fs_type(&mut fs, fs_offset)
         .await
         .map_err(|e| InstallationError::Io {

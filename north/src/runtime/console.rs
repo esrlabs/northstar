@@ -375,7 +375,7 @@ async fn read<R: AsyncRead + Unpin>(
     // Read frame length
     let mut buf = [0u8; 4];
     reader.read_exact(&mut buf).await.map_err(|e| Error::Io {
-        context: "Could not read length of network package".to_string(),
+        context: "Failed to read frame length of network package".to_string(),
         error: e,
     })?;
     let frame_len = BigEndian::read_u32(&buf) as usize;
