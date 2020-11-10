@@ -1,3 +1,18 @@
+// Copyright (c) 2020 ESRLabs
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
+use derive_new::new;
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::{Manifest, Version};
@@ -11,14 +26,35 @@ pub struct Message {
     pub payload: Payload,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+impl Message {
+    pub fn new(payload: Payload) -> Message {
+        Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            payload,
+        }
+    }
+
+    pub fn new_request(request: Request) -> Message {
+        Message::new(Payload::Request(request))
+    }
+
+    pub fn new_response(respone: Response) -> Message {
+        Message::new(Payload::Response(respone))
+    }
+
+    pub fn new_notification(notification: Notification) -> Message {
+        Message::new(Payload::Notification(notification))
+    }
+}
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Payload {
     Request(Request),
     Response(Response),
     Notification(Notification),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
     OutOfMemory(Name),
     ApplicationExited {
@@ -38,12 +74,12 @@ pub enum Request {
     Containers,
     Start(Name),
     Stop(Name),
-    Install(usize),
+    Install(u64),
     Uninstall { name: Name, version: Version },
     Shutdown,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Container {
     pub manifest: Manifest,
     pub process: Option<Process>,
@@ -56,7 +92,7 @@ pub struct Process {
     pub memory: Option<Memory>,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Memory {
     pub size: u64,
     pub resident: u64,
@@ -65,7 +101,7 @@ pub struct Memory {
     pub data: u64,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Response {
     Containers(Vec<Container>),
     Start { result: StartResult },
@@ -75,26 +111,26 @@ pub enum Response {
     Shutdown { result: ShutdownResult },
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum StartResult {
     Success,
     Error(String),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum StopResult {
     Success,
     Error(String), // TODO
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum UninstallResult {
     Success,
     Error(String), // TODO
 }
 
 /// A lot can go wrong when trying to install an NPK
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum InstallationResult {
     /// Everything went smooth
     Success,
@@ -136,7 +172,7 @@ pub enum InstallationResult {
     INotifyError(String),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ShutdownResult {
     Success,
     Error(String), // TODO
