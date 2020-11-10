@@ -69,7 +69,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     // umounting of npks. Next the mount propagation of the the parent
     // mount of the run dir is set to private. See linux::init for details.
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    linux::init(&config).await?;
+    linux::init(&config).await.map_err(Error::Linux)?;
 
     // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
     // loop.

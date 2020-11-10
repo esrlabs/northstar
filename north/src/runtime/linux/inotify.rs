@@ -12,52 +12,46 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::error::InstallationError;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use std::{fs::metadata, path::Path};
+use thiserror::Error;
 use tokio::{select, task, time};
 
-pub async fn wait_for_file_deleted(
-    path: &Path,
-    timeout: time::Duration,
-) -> Result<(), InstallationError> {
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Nix error")]
+    Nix(#[from] nix::Error),
+    #[error("Inotify timeout error {0}")]
+    Timeout(String),
+}
+
+pub async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
     let path = path.to_owned();
 
     let timeout = time::sleep(timeout);
     let notify_path = path.to_owned();
     let wait = task::spawn_blocking(move || {
-        let inotify =
-            Inotify::init(InitFlags::IN_CLOEXEC).map_err(|e| InstallationError::INotifyError {
-                context: "Init inotify failed".to_string(),
-                error: e,
-            })?;
+        let inotify = Inotify::init(InitFlags::IN_CLOEXEC).map_err(Error::Nix)?;
         inotify
             .add_watch(&notify_path, AddWatchFlags::IN_DELETE_SELF)
-            .map_err(|e| InstallationError::INotifyError {
-                context: "Add inotify watch failed".to_string(),
-                error: e,
-            })?;
+            .map_err(Error::Nix)?;
 
         loop {
             // check if the file still exists
             if metadata(&notify_path).is_err() {
-                break Ok(());
+                break;
             }
 
-            inotify
-                .read_events()
-                .map_err(|e| InstallationError::INotifyError {
-                    context: "Read inotify events failed".to_string(),
-                    error: e,
-                })?;
+            inotify.read_events().map_err(Error::Nix)?;
         }
+        Result::<(), Error>::Ok(())
     });
 
     select! {
-        _ = timeout => Err(InstallationError::Timeout(format!("Deletion of {} timed out", &path.display()))),
+        _ = timeout => Err(Error::Timeout(format!("Inotify error on {}", &path.display()))),
         w = wait => match w {
-            Ok(e) => e,
-            Err(_) => Err(InstallationError::Timeout(format!("Inotify error on {}", &path.display()))),
+            Ok(_) => Ok(()),
+            Err(_) => Err(Error::Timeout(format!("Inotify error on {}", &path.display()))),
         }
     }
 }
