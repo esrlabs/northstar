@@ -18,11 +18,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use log::debug;
 use regex::Regex;
-use std::{
-    env,
-    future::Future,
-    path::{self, PathBuf},
-};
+use std::{env, future::Future, path::PathBuf};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     stream::StreamExt,
@@ -85,7 +81,7 @@ impl CaptureReader {
     }
 }
 
-pub fn cargo_bin<S: AsRef<str>>(name: S) -> path::PathBuf {
+pub fn cargo_bin<S: AsRef<str>>(name: S) -> PathBuf {
     cargo_bin_str(name.as_ref())
 }
 
@@ -102,6 +98,6 @@ fn target_dir() -> PathBuf {
         .unwrap()
 }
 
-fn cargo_bin_str(name: &str) -> path::PathBuf {
+fn cargo_bin_str(name: &str) -> PathBuf {
     target_dir().join(format!("{}{}", name, env::consts::EXE_SUFFIX))
 }
