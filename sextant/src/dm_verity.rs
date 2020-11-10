@@ -208,10 +208,8 @@ fn append_superblock_and_hashtree(
     raw_sb.extend(&vec![0_u8; 256 - salt.len()]); // padding
     fsimg.write_all(&raw_sb)?;
 
-    // pad to BLOCK_SIZE
-    fsimg.write_all(vec![0u8; BLOCK_SIZE - raw_sb.len()].as_slice())?;
+    fsimg.write_all(vec![0u8; BLOCK_SIZE - raw_sb.len()].as_slice())?; // pad to BLOCK_SIZE
     fsimg.write_all(&hash_tree)?;
-
     Ok(())
 }
 
