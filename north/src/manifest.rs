@@ -397,8 +397,8 @@ impl Manifest {
 
 impl FromStr for Manifest {
     type Err = ManifestError;
-    fn from_str(s: &str) -> std::result::Result<Manifest, ManifestError> {
-        let parse_res: std::result::Result<Manifest, ManifestError> = serde_yaml::from_str(s)
+    fn from_str(s: &str) -> Result<Manifest, ManifestError> {
+        let parse_res: Result<Manifest, ManifestError> = serde_yaml::from_str(s)
             .map_err(|_| ManifestError::CouldNotParse("Failed to parse manifest".to_string()));
         if let Ok(manifest) = &parse_res {
             manifest.verify()?;
