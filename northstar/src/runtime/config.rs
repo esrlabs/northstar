@@ -24,18 +24,10 @@ pub struct Repository {
     pub key: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct CGroups {
-    /// CGroups Memory dir. This is the subdir added to the root memory cgroup.
-    /// The directory is created if it does not exist.
-    /// This groups acts as the toplevel northstar memory cgroup.
-    pub memory: PathBuf,
-
-    /// CGroups CPU dir. This is the subdir added to the root cpu cgroup.
-    /// The directory is created if it does not exist.
-    /// This groups acts as the toplevel northstar cpu cgroup.
-    pub cpu: PathBuf,
-}
+/// This map specifies the root cgroup under which the application cgroups are inserted.
+/// The directory is created if it does not exist.
+/// If not set for a specific cgroup, it defaults to "north".
+pub type CGroups = HashMap<String, PathBuf>;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Devices {

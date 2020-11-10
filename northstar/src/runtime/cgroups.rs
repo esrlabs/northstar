@@ -101,12 +101,15 @@ impl CGroups {
     ) -> Result<CGroups, Error> {
         let mut cgroup_list = Vec::new();
         for (cgroup_name, values) in cgroups {
-            let path = get_cgroup_path(cgroup_name, &config).join(name);
+            let path = config
+                .get(cgroup_name)
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("north"))
+                .join(name);
             let cgroup = CGroup::new(cgroup_name.to_owned(), path.as_path(), values).await?;
             cgroup_list.push(cgroup);
         }
 
-        // TODO integrate this into they CGroup type
         if let Some(cgroup) = cgroup_list.iter().find(|cg| cg.cgroup == "memory") {
             setup_oom_monitor(name, cgroup.path.as_path(), tx).await?;
         }
@@ -126,14 +129,6 @@ impl CGroups {
             cgroup.destroy().await?;
         }
         Ok(())
-    }
-}
-
-fn get_cgroup_path(name: &str, config: &config::CGroups) -> PathBuf {
-    match name {
-        "memory" => config.memory.clone(),
-        "cpu" => config.cpu.clone(),
-        _ => PathBuf::from("north"),
     }
 }
 
