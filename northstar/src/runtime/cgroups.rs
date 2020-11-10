@@ -50,6 +50,35 @@ struct CGroup {
     path: PathBuf,
 }
 
+pub async fn init_root_cgroups(config: &config::CGroups) -> Result<(), Error> {
+    let cpuset_root = config
+        .get("cpuset")
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("north"));
+    let mount_point = get_mount_point("cpuset")?;
+    let cpuset_root = mount_point.join(cpuset_root);
+    create(cpuset_root.as_path()).await?;
+
+    let cpus_write = copy_config(
+        mount_point.join("cpuset.cpus"),
+        cpuset_root.join("cpuset.cpus"),
+    );
+    let mems_write = copy_config(
+        mount_point.join("cpuset.mems"),
+        cpuset_root.join("cpuset.mems"),
+    );
+
+    match tokio::try_join!(cpus_write, mems_write) {
+        Err(error) => Err(Error::Io("Failed to configure cpuset".to_string(), error)),
+        Ok(_) => Ok(()),
+    }
+}
+
+async fn copy_config(from: PathBuf, to: PathBuf) -> Result<(), io::Error> {
+    let value = fs::read_to_string(from);
+    fs::write(to, value.await?).await
+}
+
 impl CGroup {
     async fn new(cgroup: String, path: &Path, config: &manifest::CGroup) -> Result<CGroup, Error> {
         let path = get_mount_point(&cgroup)?.join(&path);

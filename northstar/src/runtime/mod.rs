@@ -97,6 +97,9 @@ impl Runtime {
         // Initialize minijails static functionality
         let minijail_log_handle = minijail_init().await?;
 
+        // Initialize cgroup hierarchies
+        cgroups::init_root_cgroups(&config.cgroups).await?;
+
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.data_dir).await?;
         mkdir_p_rw(&config.run_dir).await?;
