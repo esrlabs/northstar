@@ -15,7 +15,6 @@ pub struct Message {
 pub enum Payload {
     Request(Request),
     Response(Response),
-    Installation(usize), // size of npk that will be sent
     Notification(Notification),
 }
 
@@ -39,6 +38,7 @@ pub enum Request {
     Containers,
     Start(Name),
     Stop(Name),
+    Install(usize),
     Uninstall { name: Name, version: Version },
     Shutdown,
 }
