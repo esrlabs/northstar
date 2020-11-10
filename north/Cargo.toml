@@ -48,7 +48,7 @@ anyhow = "1.0.33"
 
 [features]
 default = ["api", "runtime", "manifest"]
-api = ["manifest", "serde"]
+api = ["manifest", "serde", "tokio"]
 manifest = ["lazy_static", "regex", "semver", "serde_yaml", "thiserror"]
 runtime = [
     "api",
