@@ -31,6 +31,13 @@ enum TestCommands {
     Echo {
         message: Vec<String>,
     },
+    Write {
+        message: String,
+        path: PathBuf,
+    },
+    Touch {
+        path: PathBuf,
+    },
 }
 
 #[allow(clippy::all)]
@@ -47,6 +54,8 @@ fn main() -> Result<()> {
             TestCommands::Cat { path } => cat(&path)?,
             TestCommands::Crash => crash(),
             TestCommands::Echo { message } => echo(&message),
+            TestCommands::Write { message, path } => write(&message, path.as_path())?,
+            TestCommands::Touch { path } => touch(&path)?,
         };
     }
 
@@ -69,4 +78,17 @@ fn echo(message: &[String]) {
 
 fn crash() {
     panic!("witness me!");
+}
+
+fn write(input: &str, path: &Path) -> Result<()> {
+    fs::write(path, input).context(format!(
+        "Failed to write \"{}\" to {}",
+        input,
+        path.display()
+    ))
+}
+
+fn touch(path: &Path) -> Result<()> {
+    fs::File::create(path)?;
+    Ok(())
 }
