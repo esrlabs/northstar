@@ -1,6 +1,21 @@
+// Copyright (c) 2019 - 2020 ESRLabs
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
 use anyhow::{anyhow, Context, Result};
 use byteorder::{BigEndian, ByteOrder};
 use itertools::Itertools;
+use log::debug;
 use north::{
     api::{self, Container, Message, Payload, Request, Response},
     manifest::Version,
@@ -10,9 +25,10 @@ use std::{path::Path, time::Duration};
 use thiserror::Error;
 use tokio::{
     fs::{self, File},
+    io,
     io::{AsyncReadExt, AsyncWriteExt},
     net::tcp::OwnedReadHalf,
-    sync, time,
+    sync, task, time,
 };
 
 const RESPONSE_TIMEOUT: Duration = Duration::from_millis(1000);
@@ -49,7 +65,7 @@ pub fn start_receiving_from_socket(
 ) -> Result<sync::broadcast::Sender<Response>> {
     let (response_sender, _) = sync::broadcast::channel(100);
     let sender = response_sender.clone();
-    let _ = tokio::spawn(async move {
+    task::spawn(async move {
         // TODO listen for shutdown
         loop {
             match receive_reply(&mut reader).await {
@@ -105,25 +121,24 @@ async fn run<S: AsyncWriteExt + Unpin>(stream: &mut S, req: Request) -> Result<(
     };
     let request = serde_json::to_string(&request_msg)
         .map_err(|_e| NstarError::FormatError("Failed to serialize".to_string()))?;
+    let mut request = request.as_bytes();
+
     let mut buf = [0u8; 4];
-    BigEndian::write_u32(&mut buf, request.as_bytes().len() as u32);
+    BigEndian::write_u32(&mut buf, request.len() as u32);
     stream.write_all(&buf).await.map_err(|e| {
         NstarError::ConnectionError(format!("Failed to write size to stream ({})", e))
     })?;
-    stream
-        .write_all(request.as_bytes())
+
+    io::copy(&mut request, stream)
         .await
-        .context(format!(
-            "Failed to write {} bytes request to stream",
-            request.as_bytes().len(),
-        ))
         .map_err(|e| {
             NstarError::ConnectionError(format!(
                 "Failed to write {} bytes request to stream ({})",
-                request.as_bytes().len(),
+                request.len(),
                 e,
             ))
         })
+        .map(drop)
 }
 
 async fn receive_reply<S: AsyncReadExt + Unpin>(mut stream: S) -> Result<Message> {
@@ -320,15 +335,13 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
     mut stream: S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
 ) -> Result<(), NstarError> {
-    let path_s = path_str.ok_or_else(|| anyhow!("Argument <path to npk> missing"))?;
-    let path = Path::new(path_s);
-    let file_size = fs::metadata(&path).await?.len();
-
-    let request_msg = Message {
+    let file = Path::new(path_str.ok_or_else(|| anyhow!("Argument <path to npk> missing"))?);
+    let size = fs::metadata(&file).await?.len() as usize;
+    let message = Message {
         id: uuid::Uuid::new_v4().to_string(),
-        payload: Payload::Installation(file_size as usize),
+        payload: Payload::Request(Request::Install(size)),
     };
-    let request = serde_json::to_string(&request_msg).context("Failed to serialize")?;
+    let request = serde_json::to_string(&message).context("Failed to serialize")?;
     let mut buf = [0u8; 4];
     BigEndian::write_u32(&mut buf, request.as_bytes().len() as u32);
     stream
@@ -339,26 +352,10 @@ pub async fn stream_update<S: AsyncWriteExt + Unpin>(
         NstarError::ConnectionError("Failed to write file to install to stream".to_string())
     })?;
 
-    let mut file = File::open(&path).await?;
+    let mut file = File::open(&file).await?;
+    let n = io::copy(&mut file, &mut stream).await?;
 
-    let mut buf = [0; 4096];
-    let mut sent_bytes = 0usize;
-    loop {
-        let n = file.read(&mut buf).await?;
-
-        if n == 0 {
-            // reached end of file
-            break;
-        }
-
-        stream
-            .write_all(&buf[..n])
-            .await
-            .context("Failed to write to stream")?;
-        sent_bytes += n;
-    }
-
-    log::debug!("Sent out update ({} bytes)...waiting for reply", sent_bytes);
+    debug!("Sent out update ({} bytes)...waiting for reply", n);
 
     match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
         Ok(Response::Install { result }) => match result {
@@ -379,13 +376,12 @@ pub(crate) async fn uninstall<'a, S: AsyncWriteExt + Unpin, I: Iterator<Item = &
     stream: &mut S,
     mut response_receiver: sync::broadcast::Receiver<Response>,
 ) -> Result<(), NstarError> {
-    log::debug!("uninstall");
-
     let id = cmd.next().context("Container id missing")?.to_owned();
     let version_str = cmd.next().context("Version missing")?;
     let version = Version::parse(version_str).context("Version has wrong format")?;
 
     run(stream, Request::Uninstall { name: id, version }).await?;
+
     match time::timeout(RESPONSE_TIMEOUT, response_receiver.recv()).await? {
         Ok(Response::Uninstall { result }) => {
             match result {

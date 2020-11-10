@@ -130,6 +130,7 @@ impl Console {
                                 result: api::ShutdownResult::Error(e.to_string()),
                             },
                         },
+                        api::Request::Install(_) => unreachable!(),
                     };
 
                     let response_message = api::Message {
@@ -395,7 +396,7 @@ async fn read<R: AsyncRead + Unpin>(
         .map_err(|_| Error::Protocol("Failed to deserialize message".to_string()))?;
 
     match &message.payload {
-        api::Payload::Installation(size) => {
+        api::Payload::Request(api::Request::Install(size)) => {
             debug!("Incoming installation ({} bytes)", size);
 
             // Open a tmpfile
