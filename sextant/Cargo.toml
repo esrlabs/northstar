@@ -26,7 +26,8 @@ rand = "0.7.3"
 serde_yaml = "0.8.13"
 sha2 = "0.9.1"
 structopt = "0.3.14"
-tempdir = "0.3.7"
+tempfile = "3.1.0"
 uuid = "0.8.1"
 which = "4.0.2"
-zip = { git = "https://github.com/inorick/zip-rs.git", branch = "add-extra-field-support" }
+# Replace the git dependency when https://github.com/zip-rs/zip/pull/200 is merged and released
+zip = { git = "https://github.com/esrlabs/zip.git", branch = "support-extra-field", features = ["unreserved"] }
