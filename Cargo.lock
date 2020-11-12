@@ -193,9 +193,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.61"
+version = "1.0.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed67cbde08356238e75fc4656be4749481eeffb09e19f320a25237d5221c985d"
+checksum = "f1770ced377336a88a67c473594ccc14eca6f4559217c34f64aac8f83d641b40"
 
 [[package]]
 name = "cfg-if"
@@ -388,7 +388,7 @@ checksum = "c8492de420e9e60bc9a1d66e2dbb91825390b738a388606600663fc529b4b307"
 dependencies = [
  "byteorder",
  "digest",
- "rand_core 0.5.1",
+ "rand_core",
  "subtle",
  "zeroize",
 ]
@@ -481,7 +481,7 @@ checksum = "c762bae6dcaf24c4c84667b8579785430908723d5c889f469d76a41d59cc7a9d"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
- "rand 0.7.3",
+ "rand",
  "serde",
  "sha2",
  "zeroize",
@@ -587,22 +587,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2c60b71d9dbcd810a3be879dc9aafac6cec5c50dc2346e245f61f54a61fdf22"
 
 [[package]]
+name = "form_urlencoded"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ece68d15c92e84fa4f19d3780f1294e5ca82a78a6d515f1efaabcc144688be00"
+dependencies = [
+ "matches",
+ "percent-encoding",
+]
+
+[[package]]
 name = "fs_extra"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2022715d62ab30faffd124d40b76f4134a550a87792276512b18d63272333394"
 
 [[package]]
-name = "fuchsia-cprng"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
-
-[[package]]
 name = "futures-core"
-version = "0.3.7"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18eaa56102984bed2c88ea39026cff3ce3b4c7f508ca970cedf2450ea10d4e46"
+checksum = "847ce131b72ffb13b6109a221da9ad97a64cbe48feb1028356b836b47b8f1748"
 
 [[package]]
 name = "generic-array"
@@ -924,7 +928,7 @@ dependencies = [
  "url",
  "uuid",
  "vergen",
- "zip 0.5.8",
+ "zip 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1178,19 +1182,6 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "552840b97013b1a26992c11eac34bdd778e464601a4c2054b5f0bff7c6761293"
-dependencies = [
- "fuchsia-cprng",
- "libc",
- "rand_core 0.3.1",
- "rdrand",
- "winapi",
-]
-
-[[package]]
-name = "rand"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a6b1679d49b24bbfe0c803429aa1874472f50d9b363131f0e89fc356b544d03"
@@ -1198,7 +1189,7 @@ dependencies = [
  "getrandom",
  "libc",
  "rand_chacha",
- "rand_core 0.5.1",
+ "rand_core",
  "rand_hc",
 ]
 
@@ -1209,23 +1200,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4c8ed856279c9737206bf725bf36935d8666ead7aa69b52be55af369d193402"
 dependencies = [
  "ppv-lite86",
- "rand_core 0.5.1",
+ "rand_core",
 ]
-
-[[package]]
-name = "rand_core"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a6fdeb83b075e8266dcc8762c22776f6877a63111121f5f8c7411e5be7eed4b"
-dependencies = [
- "rand_core 0.4.2",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c33a3c44ca05fa6f1807d8e6743f3824e8509beca625669633be0acbdf509dc"
 
 [[package]]
 name = "rand_core"
@@ -1242,16 +1218,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca3129af7b92a17112d59ad498c6f81eaf463253766b90396d39ea7a39d6613c"
 dependencies = [
- "rand_core 0.5.1",
-]
-
-[[package]]
-name = "rdrand"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
-dependencies = [
- "rand_core 0.3.1",
+ "rand_core",
 ]
 
 [[package]]
@@ -1472,14 +1439,14 @@ dependencies = [
  "itertools",
  "log",
  "north",
- "rand 0.7.3",
+ "rand",
  "serde_yaml",
  "sha2",
  "structopt",
- "tempdir",
+ "tempfile",
  "uuid",
  "which",
- "zip 0.5.6",
+ "zip 0.5.8 (git+https://github.com/esrlabs/zip.git?branch=support-extra-field)",
 ]
 
 [[package]]
@@ -1530,9 +1497,9 @@ checksum = "fbee7696b84bbf3d89a1c2eccff0850e3047ed46bfcd2e92c29a2d074d57e252"
 
 [[package]]
 name = "socket2"
-version = "0.3.15"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1fa70dc5c8104ec096f4fe7ede7a221d35ae13dcd19ba1ad9a81d2cab9a1c44"
+checksum = "7fd8b795c389288baa5f355489c65e71fd48a02104600d15c4cfbc561e9e429d"
 dependencies = [
  "cfg-if 0.1.10",
  "libc",
@@ -1627,16 +1594,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tempdir"
-version = "0.3.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15f2b5fb00ccdf689e0149d1b1b3c03fead81c2b37735d812fa8bddbbf41b6d8"
-dependencies = [
- "rand 0.4.6",
- "remove_dir_all",
-]
-
-[[package]]
 name = "tempfile"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1644,7 +1601,7 @@ checksum = "7a6e24d9338a0a5be79593e2fa15a648add6138caa803e2d5bc782c371732ca9"
 dependencies = [
  "cfg-if 0.1.10",
  "libc",
- "rand 0.7.3",
+ "rand",
  "redox_syscall",
  "remove_dir_all",
  "winapi",
@@ -1742,9 +1699,18 @@ dependencies = [
 
 [[package]]
 name = "tinyvec"
-version = "0.3.4"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "238ce071d267c5710f9d31451efec16c5ee22de34df17cc05e56cbc92e967117"
+checksum = "b78a366903f506d2ad52ca8dc552102ffdd3e937ba8a227f024dc1d1eae28575"
+dependencies = [
+ "tinyvec_macros",
+]
+
+[[package]]
+name = "tinyvec_macros"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
@@ -1811,9 +1777,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-normalization"
-version = "0.1.13"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fb19cf769fa8c6a80a162df694621ebeb4dafb606470b2b2fce0be40a98a977"
+checksum = "b7f98e67a4d84f730d343392f9bfff7d21e3fca562b9cb7a43b768350beeddc6"
 dependencies = [
  "tinyvec",
 ]
@@ -1838,10 +1804,11 @@ checksum = "f7fe0bb3479651439c9112f72b6c505038574c9fbb575ed1bf3b797fa39dd564"
 
 [[package]]
 name = "url"
-version = "2.1.1"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "829d4a8476c35c9bf0bbce5a3b23f4106f79728039b726d292bb93bc106787cb"
+checksum = "5909f2b0817350449ed73e8bcd81c8c3c8d9a7a5d8acba4b27db277f1868976e"
 dependencies = [
+ "form_urlencoded",
  "idna",
  "matches",
  "percent-encoding",
@@ -1859,7 +1826,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fde2f6a4bea1d6e007c4ad38c6839fa71cbb63b6dbf5b595aa38dc9b1093c11"
 dependencies = [
- "rand 0.7.3",
+ "rand",
 ]
 
 [[package]]
@@ -1975,8 +1942,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "0.5.6"
-source = "git+https://github.com/inorick/zip-rs.git?branch=add-extra-field-support#99707a58927ea4784f0478d2a96e3e3c82f14bf5"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "543adf038106b64cfca4711c82c917d785e3540e04f7996554488f988ec43124"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -1989,8 +1957,7 @@ dependencies = [
 [[package]]
 name = "zip"
 version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "543adf038106b64cfca4711c82c917d785e3540e04f7996554488f988ec43124"
+source = "git+https://github.com/esrlabs/zip.git?branch=support-extra-field#422494c861b8229aff5cec9f3186c9e037b2965b"
 dependencies = [
  "byteorder",
  "bzip2",
