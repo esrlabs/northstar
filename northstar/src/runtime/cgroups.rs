@@ -16,17 +16,11 @@ use log::{debug, warn};
 use npk::manifest;
 use proc_mounts::MountIter;
 use std::{
-    io::ErrorKind,
     path::{Path, PathBuf},
     time::Duration,
 };
 use thiserror::Error;
-use tokio::{
-    fs,
-    fs::OpenOptions,
-    io::{self, AsyncWriteExt},
-    select, task, time,
-};
+use tokio::{fs, io, select, task, time};
 
 use super::{config, Event, EventTx};
 
@@ -42,6 +36,10 @@ pub enum Error {
     Mount(String, io::Error),
     #[error("Io error: {0}: {1:?}")]
     Io(String, io::Error),
+    #[error("Cannot access mount points: {0}")]
+    MountPointsNotAccessible(#[source] io::Error),
+    #[error("No mount point for cgroup controller {0}")]
+    ControllerNotFound(String),
 }
 
 #[derive(Debug)]
@@ -51,42 +49,39 @@ struct CGroup {
 }
 
 pub async fn init_root_cgroups(config: &config::CGroups) -> Result<(), Error> {
-    let cpuset_root = config
-        .get("cpuset")
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("north"));
     let mount_point = get_mount_point("cpuset")?;
-    let cpuset_root = mount_point.join(cpuset_root);
-    create(cpuset_root.as_path()).await?;
+    let cpuset_root = mount_point.join(get_cgroup_root("cpuset", config));
 
-    let cpus_write = copy_config(
-        mount_point.join("cpuset.cpus"),
-        cpuset_root.join("cpuset.cpus"),
-    );
-    let mems_write = copy_config(
-        mount_point.join("cpuset.mems"),
-        cpuset_root.join("cpuset.mems"),
-    );
+    debug!("Creating cpuset hierarchy under {}", cpuset_root.display());
+    create_if_not_exists(cpuset_root.as_path()).await?;
 
-    match tokio::try_join!(cpus_write, mems_write) {
-        Err(error) => Err(Error::Io("Failed to configure cpuset".to_string(), error)),
-        Ok(_) => Ok(()),
-    }
+    tokio::try_join!(
+        copy_file("cpuset.cpus", &mount_point, &cpuset_root),
+        copy_file("cpuset.mems", &mount_point, &cpuset_root),
+    )?;
+    Ok(())
 }
 
-async fn copy_config(from: PathBuf, to: PathBuf) -> Result<(), io::Error> {
-    let value = fs::read_to_string(from);
-    fs::write(to, value.await?).await
+async fn copy_file(name: &str, src_dir: &Path, dst_dir: &Path) -> Result<(), Error> {
+    let file_path = src_dir.join(name);
+    // NOTE For some reason using fs::copy here does not work
+    let value = fs::read_to_string(&file_path).await.map_err(|e| {
+        Error::Io(
+            format!("Could not read content of {}", file_path.display(),),
+            e,
+        )
+    })?;
+    write(&dst_dir.join(name), &value).await
 }
 
 impl CGroup {
     async fn new(cgroup: String, path: &Path, config: &manifest::CGroup) -> Result<CGroup, Error> {
         let path = get_mount_point(&cgroup)?.join(&path);
-        create(&path).await?;
+        create_if_not_exists(&path).await?;
 
         for (param, value) in config {
             let filename = path.join(format!("{}.{}", &cgroup, param));
-            debug!("Setting {} to {} bytes", filename.display(), value);
+            debug!("Setting {} to {}", filename.display(), value);
             write(&filename, &value).await?;
         }
 
@@ -95,26 +90,17 @@ impl CGroup {
 
     /// Assign a PID to this cgroup
     async fn assign(&self, pid: u32) -> Result<(), Error> {
-        if !self.path.exists() {
-            panic!("Failed to find cgroup {}", self.path.display());
-        } else {
-            debug!("Assigning {} to {}", pid, self.path.display());
-            let tasks = self.path.join(TASKS);
-            write(&tasks, &pid.to_string()).await
-        }
+        debug!("Assigning {} to {}", pid, self.path.display());
+        let tasks = self.path.join(TASKS);
+        write(&tasks, &pid.to_string()).await
     }
 
     /// Destroy the cgroup by removing the dir
     async fn destroy(self) -> Result<(), Error> {
-        let path = self.path.to_owned();
-        if !path.exists() {
-            panic!("Failed to find cgroup {}", self.path.display());
-        } else {
-            debug!("Destroying cgroup {}", path.display());
-            fs::remove_dir(&path)
-                .await
-                .map_err(|e| Error::Destroy(format!("Failed to remove {}", path.display()), e))
-        }
+        debug!("Destroying cgroup {}", self.path.display());
+        fs::remove_dir(&self.path)
+            .await
+            .map_err(|e| Error::Destroy(self.path.to_string_lossy().to_string(), e))
     }
 }
 
@@ -129,14 +115,9 @@ impl CGroups {
         tx: EventTx,
     ) -> Result<CGroups, Error> {
         let mut cgroup_list = Vec::new();
-        for (cgroup_name, values) in cgroups {
-            let path = config
-                .get(cgroup_name)
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from("north"))
-                .join(name);
-            let cgroup = CGroup::new(cgroup_name.to_owned(), path.as_path(), values).await?;
-            cgroup_list.push(cgroup);
+        for (controller, params) in cgroups {
+            let path = get_cgroup_root(controller, config).join(name);
+            cgroup_list.push(CGroup::new(controller.to_owned(), path.as_path(), params).await?);
         }
 
         if let Some(cgroup) = cgroup_list.iter().find(|cg| cg.cgroup == "memory") {
@@ -197,42 +178,37 @@ async fn setup_oom_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), E
     Ok(())
 }
 
-async fn create(path: &Path) -> Result<(), Error> {
-    debug!("Creating {}", path.display());
+async fn create_if_not_exists(path: &Path) -> Result<(), Error> {
     if !path.exists() {
+        debug!("Creating {}", path.display());
         fs::create_dir_all(&path)
             .await
-            .map_err(|e| Error::Io(format!("Failed to create {}", path.display()), e))?;
+            .map_err(|e| Error::Io(format!("Failed to create directory {}", path.display()), e))
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 async fn write(path: &Path, value: &str) -> Result<(), Error> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .open(path)
+    fs::write(path, value)
         .await
-        .map_err(|e| Error::Io(format!("Failed open {}", path.display()), e))?;
-    file.write_all(format!("{}\n", value).as_bytes())
-        .await
-        .map_err(|e| Error::Io(format!("Failed write to {}", path.display()), e))?;
-    file.sync_all()
-        .await
-        .map_err(|e| Error::Io(format!("Failed synd {}", path.display()), e))?;
-    Ok(())
+        .map_err(|e| Error::Io(format!("Failed to write to {}", path.display()), e))
 }
 
-fn get_mount_point(cgroup: &str) -> Result<PathBuf, Error> {
-    let cgroup = String::from(cgroup);
+fn get_cgroup_root(controller: &str, config: &config::CGroups) -> PathBuf {
+    config
+        .get(controller)
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("north"))
+}
+
+/// Get the cgroup v1 controller hierarchy mount point
+fn get_mount_point(controller: &str) -> Result<PathBuf, Error> {
+    let controller = controller.to_owned();
     MountIter::new()
-        .map_err(|e| Error::Mount("Failed to access mount points".to_string(), e))?
-        .filter_map(|m| m.ok())
-        .find(|m| m.fstype == "cgroup" && m.options.contains(&cgroup))
+        .map_err(Error::MountPointsNotAccessible)?
+        .filter_map(Result::ok)
+        .find(|m| m.fstype == "cgroup" && m.options.contains(&controller))
         .map(|m| m.dest)
-        .ok_or_else(|| {
-            Error::Mount(
-                format!("No mount point for cgroup {}", &cgroup),
-                io::Error::new(ErrorKind::Other, ""),
-            )
-        })
+        .ok_or(Error::ControllerNotFound(controller))
 }
