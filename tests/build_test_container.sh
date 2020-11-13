@@ -4,7 +4,6 @@ set -o pipefail
 set -o nounset
 
 TEST_CONTAINER_DIR="./tests/test_container"
-PLATFORM="x86_64-unknown-linux-gnu"
 REGISTRY_DIR="./target/north/registry"
 EXAMPLE_PRV_KEY="./examples/keys/north.key"
 
@@ -24,7 +23,7 @@ trap "exit 1" HUP INT PIPE QUIT TERM
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 name="$(basename "${TEST_CONTAINER_DIR}")"
-echo "Building (${name}, ${PLATFORM})"
+echo "Building ${name}"
 ROOT_DIR="${TMP_DIR}/root"
 mkdir -p "${ROOT_DIR}"
 
@@ -32,8 +31,8 @@ mkdir -p "${ROOT_DIR}"
 cp "${TEST_CONTAINER_DIR}/manifest.yaml" "${TMP_DIR}"
 
 # cross compile and store artifacts
-cross build --release --bin "${name}" --target "${PLATFORM}"
-cp "./target/$PLATFORM/release/$name" "${ROOT_DIR}"
+cargo build --release --bin "${name}"
+cp "./target/release/$name" "${ROOT_DIR}"
 
 cargo run --bin sextant -- \
   pack \
