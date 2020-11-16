@@ -154,7 +154,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => break,
             // Forward notifications to console
-            Event::Notification(notification) => console.notification(notification).await?,
+            Event::Notification(notification) => console.notification(notification).await,
             // Handle unrecoverable errors by logging it and do a gracefull shutdown.
             Event::Error(ref error) => {
                 error!("Fatal error: {}", error);
