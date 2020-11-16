@@ -195,11 +195,11 @@ impl Console {
     }
 
     /// Send a notification to the notification broadcast
-    pub async fn notification(&self, notification: api::Notification) -> Result<(), Error> {
-        self.notification_tx
-            .send(notification)
-            .map_err(|_| Error::Internal("Notification channel tx"))
-            .map(drop)
+    pub async fn notification(&self, notification: api::Notification) {
+        debug!("sending notification: {:?}", notification);
+        if self.notification_tx.send(notification).is_err() {
+            debug!("No subscribers received the notification");
+        }
     }
 
     async fn connection(
