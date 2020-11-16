@@ -3,7 +3,7 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
-TEST_CONTAINER_DIR="./tests/test_container"
+TEST_CONTAINER_DIR="./north_tests/test_container"
 REGISTRY_DIR="./target/north/registry"
 EXAMPLE_PRV_KEY="./examples/keys/north.key"
 

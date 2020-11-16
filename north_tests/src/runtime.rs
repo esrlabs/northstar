@@ -58,7 +58,7 @@ impl Runtime {
     ///
     /// ```no_run
     /// use anyhow::Result;
-    /// use tests::runtime::Runtime;
+    /// use north_tests::runtime::Runtime;
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<()> {
