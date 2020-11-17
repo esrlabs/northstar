@@ -13,6 +13,7 @@
 //   limitations under the License.
 
 use anyhow::{anyhow, Context, Result};
+use bytes::Bytes;
 use futures::{sink::SinkExt, Sink};
 use itertools::Itertools;
 use log::{info, warn};
@@ -32,8 +33,8 @@ use tokio::{
     sync::{self, oneshot},
     task, time,
 };
+use tokio_util::codec::LengthDelimitedCodec;
 
-mod codec;
 mod readline;
 
 const HELP: &str = r"containers:                 List installed containers
@@ -107,8 +108,9 @@ async fn main() -> Result<()> {
         };
         info!("Connected to {}", opt.host);
         let (read, write) = stream.into_split();
-        let mut framed_read = tokio_util::codec::FramedRead::new(read, codec::Codec::default());
-        let mut framed_write = tokio_util::codec::FramedWrite::new(write, codec::Codec::default());
+        let mut framed_read = tokio_util::codec::FramedRead::new(read, LengthDelimitedCodec::new());
+        let mut framed_write =
+            tokio_util::codec::FramedWrite::new(write, LengthDelimitedCodec::new());
 
         // Wait until readline is ready on the first start
         if let Some(barrier) = barrier.take() {
@@ -124,19 +126,29 @@ async fn main() -> Result<()> {
         task::spawn(async move {
             loop {
                 match framed_read.next().await {
-                    Some(Ok(message)) => match message.payload {
-                        Payload::Request(_) => unreachable!(),
-                        Payload::Response(r) => {
-                            if response_tx.send(r).await.is_err() {
+                    Some(Ok(message)) => {
+                        let message: Message = match serde_json::from_slice(&message) {
+                            Err(e) => {
+                                log::error!("Failed to deserialize payload: {:?}", e);
                                 break;
                             }
-                        }
-                        Payload::Notification(n) => {
-                            if notification_tx.send(n).await.is_err() {
-                                break;
+                            Ok(msg) => msg,
+                        };
+
+                        match message.payload {
+                            Payload::Request(_) => unreachable!(),
+                            Payload::Response(r) => {
+                                if response_tx.send(r).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Payload::Notification(n) => {
+                                if notification_tx.send(n).await.is_err() {
+                                    break;
+                                }
                             }
                         }
-                    },
+                    }
                     Some(Err(e)) => {
                         warn!("Connection closed: {}", e);
                         break;
@@ -260,8 +272,8 @@ async fn main() -> Result<()> {
 
                                     // Construct a Message with a installation request
                                     // Place the size of the file on disk in the request
-                                    let message = codec::Message::Message(Message::new_request(Request::Install(size)));
-                                    if let Err(e) = framed_write.send(message).await {
+                                    let message = serde_json::to_vec(&Message::new_request(Request::Install(size)))?;
+                                    if let Err(e) = framed_write.send(Bytes::from(message)).await {
                                         warn!("Stream error: {}", e);
                                         break 'inner;
                                     }
@@ -272,7 +284,7 @@ async fn main() -> Result<()> {
                                     while let Some(r) = npk.next().await {
                                         match r {
                                             // Send the chunk to the stream
-                                            Ok(b) => match framed_write.send(codec::Message::Raw(b)).await {
+                                            Ok(b) => match framed_write.send(b).await {
                                                 Ok(_) => (),
                                                 Err(e) => {
                                                     warn!("Stream error: {}", e);
@@ -362,10 +374,11 @@ async fn main() -> Result<()> {
 
 async fn request_response<S, R>(mut sink: S, mut stream: R, request: Request) -> Result<Response>
 where
-    S: Unpin + Sink<codec::Message>,
+    S: Unpin + Sink<Bytes>,
     R: Unpin + Stream<Item = Response>,
 {
-    sink.send(codec::Message::Message(Message::new_request(request)))
+    let message = serde_json::to_vec(&Message::new_request(request))?;
+    sink.send(Bytes::from(message))
         .await
         .map_err(|_| anyhow!("Sink error"))?;
     stream.next().await.context("Stream error")
