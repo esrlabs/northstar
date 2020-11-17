@@ -65,7 +65,7 @@ fn main() -> Result<(), Error> {
         config.devices.unshare_root.as_os_str(),
         Some(config.devices.unshare_fstype.as_str()),
         nix::mount::MsFlags::MS_PRIVATE,
-        Option::<&'static [u8]>::None
+        Option::<&'static [u8]>::None,
     )?;
 
     // Enter a mount namespace. This needs to be done before spawning
