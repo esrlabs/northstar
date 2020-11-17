@@ -24,8 +24,8 @@ use tokio::{
     stream::StreamExt,
 };
 
-pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallationError> {
-    info!("Installing containers from {}", dir.display());
+pub async fn mount_all(state: &mut State, dir: &Path) -> Result<(), InstallationError> {
+    info!("Mounting containers from {}", dir.display());
 
     let npks = fs::read_dir(&dir)
         .await
@@ -38,12 +38,12 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), Installati
 
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
-        install(state, &npk).await?;
+        mount(state, &npk).await?;
     }
     Ok(())
 }
 
-pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
+pub async fn mount(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
     if let Some(npk_name) = npk.file_name() {
         info!("Loading {}", npk_name.to_string_lossy());
     }
@@ -162,7 +162,7 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version), I
             }
         }
 
-        info!("Installed {}:{}", manifest.name, manifest.version);
+        info!("Mounted {}:{}", manifest.name, manifest.version);
 
         let container = Container { root, manifest };
 

@@ -30,12 +30,12 @@ use std::{
 #[cfg(any(target_os = "android", target_os = "linux"))]
 mod linux;
 #[cfg(any(target_os = "android", target_os = "linux"))]
-pub use linux::{install, install_all, uninstall};
+pub use linux::{mount, mount_all, umount};
 
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
 mod mock;
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
-pub use mock::{install, install_all, uninstall};
+pub use mock::{mount, mount_all, umount};
 
 #[derive(Debug)]
 pub struct Container {
@@ -274,8 +274,8 @@ impl<'a> ArchiveReader<'a> {
     }
 }
 
-#[tokio::test]
-async fn test_signature_parsing() -> std::io::Result<()> {
+#[test]
+fn test_signature_parsing() -> std::io::Result<()> {
     let signature = "manifest.yaml:
   hash: 0cbc141c2ef274989683d9ec03edcf41c57688ef5c422c647239328de2c3f306
 fs.img:

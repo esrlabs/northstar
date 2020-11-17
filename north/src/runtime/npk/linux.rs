@@ -49,7 +49,7 @@ struct VerityHeader {
     pub salt: String,
 }
 
-pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), InstallationError> {
+pub async fn mount_all(state: &mut State, dir: &Path) -> Result<(), InstallationError> {
     info!("Installing containers from {}", dir.display());
 
     let npks = fs::read_dir(&dir)
@@ -70,14 +70,13 @@ pub async fn install_all(state: &mut State, dir: &Path) -> Result<(), Installati
 
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
-        install_internal(state, &dm, &lc, &npk).await?;
+        mount_internal(state, &dm, &lc, &npk).await?;
     }
     Ok(())
 }
 
-#[allow(dead_code)]
-pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
-    debug!("Installing {}", npk.display());
+pub async fn mount(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
+    debug!("Mounting {}", npk.display());
 
     let dm = &state.config.devices.device_mapper.clone();
     let dm = dm::Dm::new(&dm).map_err(InstallationError::DeviceMapper)?;
@@ -87,57 +86,62 @@ pub async fn install(state: &mut State, npk: &Path) -> Result<(Name, Version), I
         .await
         .map_err(InstallationError::LoopDeviceError)?;
 
-    let (name, version) = install_internal(state, &dm, &lc, npk).await?;
+    let (name, version) = mount_internal(state, &dm, &lc, npk).await?;
 
     Ok((name, version))
 }
 
 #[allow(dead_code)]
-pub async fn uninstall(container: &Container) -> Result<(), InstallationError> {
-    debug!("Unmounting {}", container.root.display());
+pub async fn umount(container: &Container) -> Result<(), InstallationError> {
+    debug!("Umounting {}", container.root.display());
     linux_mount::unmount(&container.root)
         .await
         .map_err(InstallationError::Mount)?;
-    debug!("Removing {}", container.root.display());
-    fs::remove_dir_all(&container.root)
+
+    debug!("Waiting for dm device removal");
+    super::super::linux::inotify::wait_for_file_deleted(
+        &container.dm_dev,
+        std::time::Duration::from_secs(5),
+    )
+    .await
+    .map_err(InstallationError::INotify)?;
+
+    debug!("Removing mountpoint {}", container.root.display());
+    // Root which is the container version
+    fs::remove_dir(&container.root)
+        .await
+        .map_err(|e| InstallationError::Io {
+            context: format!("Failed to remove {}", container.root.display()),
+            error: e,
+        })?;
+    // Container name
+    fs::remove_dir(container.root.parent().unwrap())
         .await
         .map_err(|e| InstallationError::Io {
             context: format!("Failed to remove {}", container.root.display()),
             error: e,
         })?;
 
-    super::super::linux::inotify::wait_for_file_deleted(
-        &container.dm_dev,
-        std::time::Duration::from_secs(3),
-    )
-    .await
-    .map_err(InstallationError::INotify)?;
     Ok(())
 }
 
-async fn install_internal(
+async fn mount_internal(
     state: &mut State,
     dm: &dm::Dm,
     lc: &LoopControl,
     npk: &Path,
 ) -> Result<(Name, Version), InstallationError> {
     let start = time::Instant::now();
-    if let Some(npk_name) = npk.file_name() {
-        info!(
-            "Installing {}, loading npk file",
-            npk_name.to_string_lossy()
-        );
-    }
 
-    if let Ok(md) = metadata(&npk).await {
-        debug!("Installing an NPK with size: {}", md.len());
+    if let Ok(meta) = metadata(&npk).await {
+        debug!("Mounting NPK with size {}", meta.len());
     }
     let mut archive_reader = ArchiveReader::new(&npk, &state.signing_keys)?;
 
     let hashes = archive_reader.extract_hashes()?;
 
     let manifest = archive_reader.extract_manifest_from_archive()?;
-    debug!("Manifest loaded for \"{}\"", manifest.name);
+    debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
     let resources: Vec<String> = manifest
         .mounts
@@ -149,19 +153,16 @@ async fn install_internal(
         .collect();
 
     if !resources.is_empty() {
-        debug!("Referencing {} resources:", resources.len());
-        for res in resources {
-            debug!("- {}", res);
-        }
+        debug!("Using {:?}", resources);
     }
 
     let (fs_offset, fs_size) = archive_reader.extract_fs_start_and_size()?;
 
     let mut fs = fs::File::open(&npk)
         .await
-        .map_err(|e| InstallationError::Io {
-            context: format!("Failed to open {:?} ({})", npk, e),
-            error: e,
+        .map_err(|error| InstallationError::Io {
+            context: format!("Failed to open {:?}", npk),
+            error,
         })?;
 
     let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset)
@@ -295,7 +296,7 @@ async fn setup_and_mount(
     .await
     .map_err(|e| InstallationError::VerityError(format!("Failed to find file-system {}", e)))?;
 
-    mount(dm_dev.as_path(), root, fs_type).await?;
+    mount_device(&dm_dev, root, fs_type).await?;
 
     dm.device_remove(
         &name.to_string(),
@@ -463,16 +464,16 @@ async fn veritysetup(
     Ok(dm_dev)
 }
 
-async fn mount(dm_dev: &Path, root: &Path, r#type: &str) -> Result<(), InstallationError> {
+async fn mount_device(device: &Path, root: &Path, r#type: &str) -> Result<(), InstallationError> {
     let start = time::Instant::now();
     debug!(
         "Mount {} fs on {} to {}",
         r#type,
-        dm_dev.display(),
+        device.display(),
         root.display(),
     );
     linux_mount::mount(
-        &dm_dev,
+        &device,
         &root,
         &r#type,
         linux_mount::MountFlags::MS_RDONLY,
