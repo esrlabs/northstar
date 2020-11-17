@@ -16,6 +16,7 @@ use std::path::Path;
 use thiserror::Error;
 
 pub use nix::mount::MsFlags as MountFlags;
+use tokio::task;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -40,27 +41,31 @@ pub async fn mount(
     flags: MountFlags,
     data: Option<&str>,
 ) -> Result<(), Error> {
-    nix::mount::mount(
-        Some(source.as_os_str()),
-        target.as_os_str(),
-        Some(fstype),
-        flags,
-        data,
-    )
-    .map_err(|error| Error::Mount {
-        context: format!(
-            "Failed to mount {} on {} with flags {:?}",
-            source.display(),
-            target.display(),
+    task::block_in_place(|| {
+        nix::mount::mount(
+            Some(source.as_os_str()),
+            target.as_os_str(),
+            Some(fstype),
             flags,
-        ),
-        error,
+            data,
+        )
+        .map_err(|error| Error::Mount {
+            context: format!(
+                "Failed to mount {} on {} with flags {:?}",
+                source.display(),
+                target.display(),
+                flags,
+            ),
+            error,
+        })
     })
 }
 
 pub async fn unmount(target: &Path) -> Result<(), Error> {
-    nix::mount::umount(target.as_os_str()).map_err(|e| Error::Umount {
-        context: format!("Failed to unmount {}", target.display()),
-        error: e,
+    task::block_in_place(|| {
+        nix::mount::umount(target.as_os_str()).map_err(|e| Error::Umount {
+            context: format!("Failed to unmount {}", target.display()),
+            error: e,
+        })
     })
 }
