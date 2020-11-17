@@ -31,7 +31,7 @@ use state::State;
 use std::path::PathBuf;
 use sync::mpsc;
 use tokio::{
-    fs,
+    fs, select,
     sync::{self, oneshot},
 };
 
@@ -49,8 +49,6 @@ pub enum Event {
     Exit(Name, ExitStatus),
     /// Out of memory event occured
     Oom(Name),
-    /// Fatal unhandleable error
-    Error(Error),
     /// North shall shut down
     Shutdown,
     /// Stdout and stderr of child processes
@@ -126,45 +124,62 @@ pub async fn run(config: &Config) -> Result<(), Error> {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    enable_signaled_shutdown(event_tx.clone()).await;
-
     // Initialize console
     let console = console::Console::new(&config.console_address, &event_tx);
     // Start to listen for incoming connections
     console.listen().await?;
 
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to initialize SIGINT stream");
+    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to initialize SIGTERM stream");
+
     // Enter main loop
-    while let Some(event) = event_rx.recv().await {
-        match event {
-            Event::ChildOutput { name, fd, line } => {
-                on_child_output(&mut state, &name, fd, &line).await
+    loop {
+        let result = select! {
+            _ = sigint.recv() => {
+                info!("Received SIGINT");
+                state.shutdown().await
             }
-            // Debug console commands are handled via the main loop in order to get access
-            // to the global state. Therefore the console server receives a tx handle to the
-            // main loop and issues `Event::Console`. Processing of the command takes place
-            // in the console module but with access to `state`.
-            Event::Console(msg, txr) => console.process(&mut state, &msg, txr).await,
-            // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
-            // If a out of memory condition occours this is signaled with `Event::Oom` which
-            // carries the id of the container that is oom.
-            Event::Oom(id) => state.on_oom(&id).await?,
-            // A container process existed. Check `process::wait_exit` for details.
-            Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await?,
-            // The runtime os commanded to shut down and exit.
-            Event::Shutdown => break,
-            // Forward notifications to console
-            Event::Notification(notification) => console.notification(notification).await,
-            // Handle unrecoverable errors by logging it and do a gracefull shutdown.
-            Event::Error(ref error) => {
-                error!("Fatal error: {}", error);
-                break;
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM");
+                state.shutdown().await
             }
+            event = event_rx.recv() => {
+                let event = event.unwrap();
+                match event {
+                    Event::ChildOutput { name, fd, line } => {
+                        on_child_output(&mut state, &name, fd, &line).await;
+                        Ok(())
+                    }
+                    // Debug console commands are handled via the main loop in order to get access
+                    // to the global state. Therefore the console server receives a tx handle to the
+                    // main loop and issues `Event::Console`. Processing of the command takes place
+                    // in the console module but with access to `state`.
+                    Event::Console(msg, txr) => {
+                        console.process(&mut state, &msg, txr).await;
+                        Ok(())
+                    }
+                    // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
+                    // If a out of memory condition occours this is signaled with `Event::Oom` which
+                    // carries the id of the container that is oom.
+                    Event::Oom(id) => state.on_oom(&id).await,
+                    // A container process existed. Check `process::wait_exit` for details.
+                    Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await,
+                    // The runtime os commanded to shut down and exit.
+                    Event::Shutdown => break,
+                    // Forward notifications to console
+                    Event::Notification(notification) => {
+                        console.notification(notification).await;
+                        Ok(())
+                    }
+                }
+            }
+        };
+        if let Err(e) = result {
+            error!("Runtime error: {:?}", e);
         }
     }
 
-    info!("Shutting down...");
-    state.tear_down().await
+    Ok(())
 }
 
 /// This is a starting point for doing something meaningful with the childs outputs.
@@ -174,18 +189,4 @@ async fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
             debug!("[{}] {}: {}: {}", p.process().pid(), name, fd, line);
         }
     }
-}
-
-#[cfg(any(target_os = "linux", target_os = "android"))]
-async fn enable_signaled_shutdown(event_tx: EventTx) {
-    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to initialize SIGINT stream");
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to initialize SIGTERM stream");
-
-    tokio::spawn(async move {
-        tokio::select! {
-            _ = sigint.recv() => (),
-            _ = sigterm.recv() => (),
-        }
-        event_tx.send(Event::Shutdown).await
-    });
 }
