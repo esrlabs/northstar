@@ -315,36 +315,36 @@ impl State {
         }
     }
 
-    pub async fn shutdown(&self) -> result::Result<(), Error> {
-        if self
+    pub async fn shutdown(&mut self) -> result::Result<(), Error> {
+        let running_containers: Vec<String> = self
             .applications
             .values()
-            .all(|app| app.process_context().is_none())
-        {
-            // Remove mounts before shutdown
-            for (name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
-                info!("Removing {}", name);
-                crate::runtime::npk::uninstall(container)
-                    .await
-                    .map_err(Error::UninstallationError)?;
-            }
-
-            Self::notification(&self.events_tx, Notification::Shutdown).await;
-
-            self.events_tx
-                .send(Event::Shutdown)
-                .await
-                .expect("Internal channel error on main");
-
-            Ok(())
-        } else {
-            let apps = self
-                .applications
-                .values()
-                .filter_map(|app| app.process_context().map(|_| app.name().to_string()))
-                .collect();
-            Err(Error::ApplicationRunning(apps))
+            .filter_map(|a| a.process.as_ref().and(Some(a.name().clone())))
+            .collect();
+        for name in running_containers {
+            self.stop(&name, Duration::from_secs(5)).await?;
         }
+
+        for (name, container) in self.applications().map(|a| (a.name(), &a.container)) {
+            info!("Removing {}", name);
+            crate::runtime::npk::uninstall(container)
+                .await
+                .map_err(Error::UninstallationError)?;
+        }
+
+        for (name, container) in self.resources().map(|a| (a.name(), &a.container)) {
+            info!("Removing {}", name);
+            crate::runtime::npk::uninstall(container)
+                .await
+                .map_err(Error::UninstallationError)?;
+        }
+
+        self.events_tx
+            .send(Event::Shutdown)
+            .await
+            .expect("Internal channel error on main");
+
+        Ok(())
     }
 
     /// Install a npk
@@ -488,36 +488,6 @@ impl State {
             .await;
         }
 
-        Ok(())
-    }
-
-    /// Stop and uninstall all the applications
-    pub async fn tear_down(&mut self) -> result::Result<(), Error> {
-        self.stop_all().await?;
-        let containers: Vec<(String, Version)> = self
-            .applications
-            .values()
-            .map(|v| (v.name().clone(), v.version().clone()))
-            .collect();
-        for (name, version) in containers {
-            if let Err(err) = self.uninstall(&name, &version).await {
-                warn!("Error uninstalling {}: {:?}", name, err);
-            }
-        }
-        Ok(())
-    }
-
-    async fn stop_all(&mut self) -> result::Result<(), Error> {
-        let running_containers: Vec<String> = self
-            .applications
-            .values()
-            .filter_map(|a| a.process.as_ref().and(Some(a.name().clone())))
-            .collect();
-        for name in running_containers {
-            if let Err(err) = self.stop(&name, Duration::from_secs(1)).await {
-                warn!("Error stopping {}: {:?}", name, err);
-            }
-        }
         Ok(())
     }
 
