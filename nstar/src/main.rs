@@ -163,7 +163,7 @@ async fn main() -> Result<()> {
                         Some("start") | Some("stop") => {
                             // Request the container list
                             match request_response(&mut framed_write, &mut response_rx, Request::Containers).await {
-                                Ok(Response::Containers(c)) => {
+                                Ok(Some(Response::Containers(c))) => {
                                     match regex::Regex::new(input.split_whitespace().nth(1).unwrap_or(".*")) {
                                         Ok(r) => {
                                             let start = input.starts_with("start");
@@ -216,7 +216,7 @@ async fn main() -> Result<()> {
                         }
                         Some("containers") | Some("ls") | Some("list") => {
                             match request_response(&mut framed_write, &mut response_rx, Request::Containers).await {
-                                Ok(Response::Containers(c)) => {
+                                Ok(Some(Response::Containers(c))) => {
                                     if opt.json {
                                         println!("{}", serde_json::to_string_pretty(&c).unwrap());
 
@@ -336,6 +336,13 @@ async fn main() -> Result<()> {
                                 println!("{:?}", response);
                             }
                         }
+                        Some("shutdown") => {
+                            if let Err(e) = request_response(&mut framed_write, &mut response_rx, Request::Shutdown).await {
+                                warn!("Failed to send shutdown request: {:?}" , e);
+                            }
+                            // No need to break: If the shutdown was a single command the input_rx channel is closed
+                            // and the loop will break
+                        }
                         Some(c) => println!("Unknown command {}", c),
                         None => (),
                     }
@@ -360,15 +367,29 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn request_response<S, R>(mut sink: S, mut stream: R, request: Request) -> Result<Response>
+async fn request_response<S, R>(
+    mut sink: S,
+    mut stream: R,
+    request: Request,
+) -> Result<Option<Response>>
 where
     S: Unpin + Sink<codec::Message>,
     R: Unpin + Stream<Item = Response>,
 {
-    sink.send(codec::Message::Message(Message::new_request(request)))
-        .await
-        .map_err(|_| anyhow!("Sink error"))?;
-    stream.next().await.context("Stream error")
+    sink.send(codec::Message::Message(Message::new_request(
+        request.clone(),
+    )))
+    .await
+    .map_err(|_| anyhow!("Sink error"))?;
+    if request != Request::Shutdown {
+        stream
+            .next()
+            .await
+            .context("Stream error")
+            .map(Option::Some)
+    } else {
+        Ok(None)
+    }
 }
 
 fn format_notification(notification: &Notification, json: bool) {
