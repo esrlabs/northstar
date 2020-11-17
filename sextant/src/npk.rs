@@ -29,6 +29,7 @@ use std::{
     process::Command,
 };
 use tempfile::TempDir;
+use zip::ZipArchive;
 
 const MKSQUASHFS_BIN: &str = "mksquashfs";
 const UNSQUASHFS_BIN: &str = "unsquashfs";
@@ -60,13 +61,12 @@ const ROOT_DIR_NAME: &str = "root";
 /// --dir examples/container/hello \
 /// --out target/north/registry \
 /// --key examples/keys/north.key \
-/// --platform x86_64-unknown-linux-gnu
-pub fn pack(src: &Path, out: &Path, key_file: &Path) -> Result<()> {
-    let manifest = read_manifest(src)?;
+pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<()> {
+    let manifest = read_manifest(dir)?;
 
     // add manifest and root dir to tmp dir
     let tmp = tempfile::TempDir::new().with_context(|| "Failed to create temporary directory")?;
-    let tmp_root = copy_src_root_to_tmp(&src, &tmp)?;
+    let tmp_root = copy_src_root_to_tmp(&dir, &tmp)?;
     let tmp_manifest = write_manifest(&manifest, &tmp)?;
 
     // create filesystem image
@@ -74,17 +74,14 @@ pub fn pack(src: &Path, out: &Path, key_file: &Path) -> Result<()> {
     create_fs_img(&tmp_root, &manifest, &fsimg)?;
 
     // create NPK
-    let signature = sign_npk(&key_file, &fsimg, &tmp_manifest)?;
+    let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
     write_npk(&out, &manifest, &fsimg, &signature)
-        .with_context(|| format!("Failed to create NPK in {}", &out.display()))?;
+        .with_context(|| format!("Failed to create NPK at {}", &out.display()))?;
     Ok(())
 }
 
 pub fn unpack(npk: &Path, out: &Path) -> Result<()> {
-    let mut zip = zip::ZipArchive::new(
-        File::open(&npk).with_context(|| format!("Failed to open NPK at '{}'", &npk.display()))?,
-    )
-    .with_context(|| format!("Failed to parse ZIP format of NPK at '{}'", &npk.display()))?;
+    let mut zip = open_zipped_npk(&npk)?;
     zip.extract(&out)
         .with_context(|| format!("Failed to extract NPK to '{}'", &out.display()))?;
     let fsimg = out.join(&FS_IMG_NAME);
@@ -94,45 +91,53 @@ pub fn unpack(npk: &Path, out: &Path) -> Result<()> {
 }
 
 pub fn inspect(npk: &Path) -> Result<()> {
+    let mut zip = open_zipped_npk(&npk)?;
+    let mut print_buf: String = String::new();
     println!(
         "{}",
         format!("# inspection of '{}'", &npk.display()).green()
     );
-
-    let npk = File::open(&npk).with_context(|| format!("Cannot open NPK '{}'", &npk.display()))?;
-    let mut zip = zip::ZipArchive::new(&npk).context("Failed to open NPK")?;
-
     println!("{}", "## NPK Content".to_string().green());
     zip.file_names().for_each(|f| println!("{}", f));
     println!();
 
-    let mut manifest = zip
+    // print manifest
+    let mut man = zip
         .by_name(MANIFEST_NAME)
-        .context("Failed to find manifest in npk")?;
+        .context("Failed to find manifest in NPK")?;
     println!("{}", format!("## {}", MANIFEST_NAME).green());
-    io::copy(&mut manifest, &mut io::stdout()).context("Failed to read manifest")?;
+    man.read_to_string(&mut print_buf)
+        .with_context(|| "Failed to read manifest")?;
+    println!("{}", &print_buf);
     print!("\n\n");
-    drop(manifest);
+    print_buf.clear();
+    drop(man);
 
-    let mut signature = zip
+    // print signature
+    let mut sig = zip
         .by_name(SIGNATURE_NAME)
-        .context("Failed to find signature in npk")?;
+        .context("Failed to find signature in NPK")?;
     println!("{}", format!("## {}", SIGNATURE_NAME).green());
-    io::copy(&mut signature, &mut io::stdout()).context("Failed to read signautre")?;
+    sig.read_to_string(&mut print_buf)
+        .with_context(|| "Failed to read signature")?;
+    println!("{}", &print_buf);
     print!("\n\n");
-    drop(signature);
+    print_buf.clear();
+    drop(sig);
 
-    let mut fsimage = tempfile::NamedTempFile::new().context("Failed to create tmpfile")?;
-    let mut src = zip
+    // print squashfs listing
+    let mut dest_fsimage = tempfile::NamedTempFile::new().context("Failed to create tmp file")?;
+    let mut src_fsimage = zip
         .by_name(FS_IMG_NAME)
-        .context("Failed to find signature in npk")?;
-    io::copy(&mut src, &mut fsimage)?;
-    let path = fsimage.path();
+        .context("Failed to find filesystem image in NPK")?;
+    io::copy(&mut src_fsimage, &mut dest_fsimage)?;
+    let path = dest_fsimage.path();
     print_squashfs(&path)?;
 
     Ok(())
 }
 
+/// Generate a keypair suitable for signing and verifying NPKs
 pub fn gen_key(name: &str, out: &Path) -> Result<()> {
     let mut csprng = OsRng {};
     let key_pair = Keypair::generate(&mut csprng);
@@ -151,6 +156,14 @@ pub fn gen_key(name: &str, out: &Path) -> Result<()> {
     write(&key_pair.public.to_bytes(), &pub_key)?;
     write(&key_pair.secret.to_bytes(), &prv_key)?;
     Ok(())
+}
+
+fn open_zipped_npk(npk: &&Path) -> Result<ZipArchive<File>> {
+    let zip = zip::ZipArchive::new(
+        File::open(&npk).with_context(|| format!("Failed to open NPK at '{}'", &npk.display()))?,
+    )
+    .with_context(|| format!("Failed to parse ZIP format of NPK at '{}'", &npk.display()))?;
+    Ok(zip)
 }
 
 fn read_manifest(src: &Path) -> Result<Manifest> {
@@ -176,7 +189,7 @@ fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf> {
 fn read_keypair(key_file: &Path) -> Result<Keypair> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     File::open(&key_file)
-        .with_context(|| format!("Fail to open '{}'", &key_file.display()))?
+        .with_context(|| format!("Failed to open '{}'", &key_file.display()))?
         .read_exact(&mut secret_key_bytes)
         .with_context(|| format!("Failed to read key data from '{}'", &key_file.display()))?;
     let secret_key = SecretKey::from_bytes(&secret_key_bytes)
@@ -375,7 +388,11 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<()> {
 
 fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> Result<()> {
     let npk = npk
-        .join(format!("{}-{}.", &manifest.name, &manifest.version))
+        .join(format!(
+            "{}-{}.",
+            &manifest.name,
+            &manifest.version.to_string()
+        ))
         .with_extension(&NPK_EXT);
     let npk = File::create(&npk)
         .with_context(|| format!("Failed to create NPK at '{}'", &npk.display()))?;
