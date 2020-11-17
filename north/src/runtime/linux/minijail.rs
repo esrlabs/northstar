@@ -25,14 +25,11 @@ use tokio::{
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Intitialization error: {context}")]
-    Init {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
+    #[error("Init error: {0}")]
+    Init(#[from] nix::Error),
 }
 
+/// Initialize minijail logging
 pub async fn init() -> Result<(), Error> {
     #[allow(non_camel_case_types)]
     #[allow(dead_code)]
@@ -58,10 +55,7 @@ pub async fn init() -> Result<(), Error> {
             Level::Trace => SyslogLevel::MAX,
         };
 
-        let (readfd, writefd) = pipe().map_err(|error| Error::Init {
-            context: "Failed to create pipe for minijail logs".to_string(),
-            error,
-        })?;
+        let (readfd, writefd) = pipe().map_err(Error::Init)?;
 
         let pipe = unsafe { fs::File::from_raw_fd(readfd) };
         minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);

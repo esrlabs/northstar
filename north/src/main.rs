@@ -14,16 +14,16 @@
 
 #![deny(clippy::all)]
 
-use crate::runtime::error::Error;
-use log::{error, info};
+use anyhow::{Context, Error};
+use log::{info, warn};
 use north::runtime;
 use runtime::config::Config;
-use std::{path::PathBuf, process};
+use std::{env, fs::read_to_string, path::PathBuf, process::exit};
 use structopt::StructOpt;
-use tokio::fs::read_to_string;
+use tokio::{select, signal::unix::SignalKind};
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "north", about = "North")]
+#[structopt(name = "north", about = "Northstar")]
 struct Opt {
     /// File that contains the north configuration
     #[structopt(short, long, default_value = "north.toml")]
@@ -34,39 +34,24 @@ struct Opt {
     pub debug: bool,
 }
 
-#[tokio::main]
-async fn main() {
-    process::exit(match run().await {
-        Ok(()) => 0,
-        Err(err) => {
-            error!("{}", err);
-            1
-        }
-    })
-}
-
-async fn run() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
-    let config_string = &read_to_string(&opt.config).await.map_err(|e| Error::Io {
-        context: format!("Failed to read configuration file {}", opt.config.display()),
-        error: e,
-    })?;
-    let config: Config = toml::from_str(config_string).map_err(|_| {
-        Error::Configuration(format!(
-            "Failed to read configuration file {}",
-            opt.config.display()
-        ))
-    })?;
+    let config = read_to_string(&opt.config)
+        .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
+    let config: Config = toml::from_str(&config)
+        .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
 
     let log_filter = if opt.debug || config.debug {
         "north=debug"
     } else {
         "north=info"
     };
-    logd_logger::builder()
-        .parse_filters(log_filter)
-        .tag("north")
-        .init();
+    {
+        logd_logger::builder()
+            .parse_filters(log_filter)
+            .tag("north")
+            .init();
+    }
 
     info!(
         "North v{} ({})",
@@ -74,5 +59,51 @@ async fn run() -> Result<(), Error> {
         env!("VERGEN_SHA_SHORT")
     );
 
-    runtime::run(&config).await
+    // Set the mount propagation of unshare_root to MS_PRIVATE
+    nix::mount::mount(
+        Option::<&'static [u8]>::None,
+        config.devices.unshare_root.as_os_str(),
+        Some(config.devices.unshare_fstype.as_str()),
+        nix::mount::MsFlags::MS_PRIVATE,
+        Option::<&'static [u8]>::None
+    )?;
+
+    // Enter a mount namespace. This needs to be done before spawning
+    // the tokio threadpool.
+    nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("northstar")
+        .build()?;
+    runtime.block_on(run(config))
+}
+
+async fn run(config: Config) -> Result<(), Error> {
+    let mut runtime = runtime::Runtime::start(config)
+        .await
+        .context("Failed to start runtime")?;
+    let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())
+        .context("Failed to install sigint handler")?;
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
+        .context("Failed to install sigterm handler")?;
+
+    let status = select! {
+        _ = sigint.recv() => {
+            info!("Received SIGINT. Stopping Northstar runtime");
+            runtime.stop_wait().await
+        }
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM. Stopping Northstar runtime");
+            runtime.stop_wait().await
+        }
+        status = &mut runtime => status,
+    };
+    match status {
+        Ok(_) => exit(0),
+        Err(e) => {
+            warn!("Runtime exited with {:?}", e);
+            exit(1);
+        }
+    }
 }

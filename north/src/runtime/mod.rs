@@ -28,15 +28,17 @@ use console::Request;
 use log::*;
 use process::ExitStatus;
 use state::State;
-use std::path::PathBuf;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use sync::mpsc;
 use tokio::{
-    fs, select,
+    fs,
     sync::{self, oneshot},
+    task,
 };
-
-#[cfg(any(target_os = "android", target_os = "linux"))]
-use tokio::signal::unix::{signal, SignalKind};
 
 pub type EventTx = mpsc::Sender<Event>;
 
@@ -65,49 +67,98 @@ pub enum TerminationReason {
     OutOfMemory,
 }
 
-pub async fn run(config: &Config) -> Result<(), Error> {
-    // On Linux systems north enters a mount namespace for automatic
-    // umounting of npks. Next the mount propagation of the the parent
-    // mount of the run dir is set to private. See linux::init for details.
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    linux::init(&config).await.map_err(Error::Linux)?;
+/// Result of a Runtime action
+pub type RuntimeResult = Result<(), Error>;
 
-    // Northstar runs in a event loop. Moduls get a Sender<Event> to the main
-    // loop.
+/// Handle to the Northstar runtime
+pub struct Runtime {
+    /// Channel receive a stop signal for the runtime
+    /// Drop the tx part to gracefully shutdown the mail loop.
+    stop: Option<oneshot::Sender<()>>,
+    // Channel to signal the runtime exit status to the caller of `start`
+    // When the runtime is shut down the result of shutdown is sent to this
+    // channel. If a error happens during normal operation the error is also
+    // sent to this channel.
+    stopped: oneshot::Receiver<RuntimeResult>,
+}
+
+impl Runtime {
+    pub async fn start(config: Config) -> Result<Runtime, Error> {
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let (stopped_tx, stopped_rx) = oneshot::channel();
+
+        linux::minijail::init().await.map_err(Error::Minijail)?;
+
+        // Ensure the configured run_dir exists
+        // TODO: permission check of SETTINGS.directories.run_dir
+        fs::create_dir_all(&config.directories.run_dir)
+            .await
+            .map_err(|e| Error::Io {
+                context: format!("Failed to create {}", config.directories.run_dir.display()),
+                error: e,
+            })?;
+
+        // Ensure the configured data_dir exists
+        fs::create_dir_all(&config.directories.data_dir)
+            .await
+            .map_err(|e| Error::Io {
+                context: format!("Failed to create {}", config.directories.data_dir.display()),
+                error: e,
+            })?;
+
+        // Start a task that drives the main loop and wait for shutdown results
+        task::spawn(async {
+            stopped_tx.send(runtime_task(config, stop_rx).await).ok(); // Ignore error if calle dropped the handle
+        });
+
+        Ok(Runtime {
+            stop: Some(stop_tx),
+            stopped: stopped_rx,
+        })
+    }
+
+    /// Stop the runtime
+    pub fn stop(mut self) {
+        // Drop the sending part of the stop handle
+        self.stop.take();
+    }
+
+    /// Stop the runtime and wait for the termination
+    pub fn stop_wait(mut self) -> impl Future<Output = RuntimeResult> {
+        self.stop.take();
+        self
+    }
+}
+
+impl Future for Runtime {
+    type Output = RuntimeResult;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match Pin::new(&mut self.stopped).poll(cx) {
+            Poll::Ready(r) => match r {
+                Ok(r) => Poll::Ready(r),
+                // Channel error -> tx side dropped
+                Err(_) => Poll::Ready(Ok(())),
+            },
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub async fn runtime_task(config: Config, stop: oneshot::Receiver<()>) -> Result<(), Error> {
+    // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
-
-    let mut state = State::new(config, event_tx.clone()).await?;
-
-    // Ensure the configured run_dir exists
-    // TODO: permission check of SETTINGS.directories.run_dir
-    fs::create_dir_all(&config.directories.run_dir)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to create {}", config.directories.run_dir.display()),
-            error: e,
-        })?;
-
-    // Ensure the configured data_dir exists
-    fs::create_dir_all(&config.directories.data_dir)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to create {}", config.directories.data_dir.display()),
-            error: e,
-        })?;
+    let mut state = State::new(&config, event_tx.clone()).await?;
 
     // Iterate all files in SETTINGS.directories.container_dirs and try
-    // to load/install the npks.
-    for d in &config.directories.container_dirs {
-        let d: PathBuf = d.into();
-        npk::install_all(&mut state, &d.as_path())
+    // to mount the content.
+    for registry in &config.directories.container_dirs {
+        npk::mount_all(&mut state, &registry)
             .await
             .map_err(Error::Installation)?;
     }
 
-    info!(
-        "Installed and loaded {} containers",
-        state.applications.len()
-    );
+    info!("Mounted {} containers", state.applications.len());
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
@@ -119,9 +170,7 @@ pub async fn run(config: &Config) -> Result<(), Error> {
         .collect::<Vec<Name>>();
     for app in &autostart_apps {
         info!("Autostarting {}", app);
-        if let Err(e) = state.start(&app).await {
-            warn!("Failed to start {}: {}", app, e);
-        }
+        state.start(&app).await.ok();
     }
 
     // Initialize console
@@ -129,60 +178,51 @@ pub async fn run(config: &Config) -> Result<(), Error> {
     // Start to listen for incoming connections
     console.listen().await?;
 
-    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to initialize SIGINT stream");
-    let mut sigterm = signal(SignalKind::terminate()).expect("Failed to initialize SIGTERM stream");
+    // Wait for a external shutdown request
+    let shutdown_tx = event_tx.clone();
+    task::spawn(async move {
+        stop.await.ok();
+        shutdown_tx.send(Event::Shutdown).await.ok();
+    });
 
     // Enter main loop
     loop {
-        let result = select! {
-            _ = sigint.recv() => {
-                info!("Received SIGINT");
-                state.shutdown().await
+        let result = match event_rx.recv().await.unwrap() {
+            Event::ChildOutput { name, fd, line } => {
+                on_child_output(&mut state, &name, fd, &line).await;
+                Ok(())
             }
-            _ = sigterm.recv() => {
-                info!("Received SIGTERM");
-                state.shutdown().await
+            // Debug console commands are handled via the main loop in order to get access
+            // to the global state. Therefore the console server receives a tx handle to the
+            // main loop and issues `Event::Console`. Processing of the command takes place
+            // in the console module but with access to `state`.
+            Event::Console(msg, txr) => {
+                console.process(&mut state, &msg, txr).await;
+                Ok(())
             }
-            event = event_rx.recv() => {
-                let event = event.unwrap();
-                match event {
-                    Event::ChildOutput { name, fd, line } => {
-                        on_child_output(&mut state, &name, fd, &line).await;
-                        Ok(())
-                    }
-                    // Debug console commands are handled via the main loop in order to get access
-                    // to the global state. Therefore the console server receives a tx handle to the
-                    // main loop and issues `Event::Console`. Processing of the command takes place
-                    // in the console module but with access to `state`.
-                    Event::Console(msg, txr) => {
-                        console.process(&mut state, &msg, txr).await;
-                        Ok(())
-                    }
-                    // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
-                    // If a out of memory condition occours this is signaled with `Event::Oom` which
-                    // carries the id of the container that is oom.
-                    Event::Oom(id) => state.on_oom(&id).await,
-                    // A container process existed. Check `process::wait_exit` for details.
-                    Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await,
-                    // The runtime os commanded to shut down and exit.
-                    Event::Shutdown => break,
-                    // Forward notifications to console
-                    Event::Notification(notification) => {
-                        console.notification(notification).await;
-                        Ok(())
-                    }
-                }
+            // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
+            // If a out of memory condition occours this is signaled with `Event::Oom` which
+            // carries the id of the container that is oom.
+            Event::Oom(id) => state.on_oom(&id).await,
+            // A container process existed. Check `process::wait_exit` for details.
+            Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await,
+            // The runtime os commanded to shut down and exit.
+            Event::Shutdown => break state.shutdown().await,
+            // Forward notifications to console
+            Event::Notification(notification) => {
+                console.notification(notification).await;
+                Ok(())
             }
         };
-        if let Err(e) = result {
-            error!("Runtime error: {:?}", e);
+
+        // Break if a error happens in the runtime
+        if result.is_err() {
+            break result;
         }
     }
-
-    Ok(())
 }
 
-/// This is a starting point for doing something meaningful with the childs outputs.
+// TODO: Where to send this?
 async fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
     if let Some(p) = state.application(name) {
         if let Some(p) = p.process_context() {

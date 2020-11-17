@@ -22,7 +22,7 @@ use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
-use std::{fmt, os::unix::io::AsRawFd, path::Path};
+use std::{fmt, os::unix::io::AsRawFd, path::Path, ops};
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt, AsyncWriteExt},
@@ -35,6 +35,20 @@ use tokio::{
 struct Minijail(::minijail::Minijail);
 unsafe impl Send for Minijail {}
 unsafe impl Sync for Minijail {}
+
+impl ops::Deref for Minijail {
+    type Target = ::minijail::Minijail;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl ops::DerefMut for Minijail {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 // Capture output of a child process. Create a fifo and spawn a task that forwards each line to
 // the main loop. When this struct is dropped the internal spawned tasks are stopped.
@@ -144,7 +158,7 @@ impl Process {
     ) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
-        let mut jail = ::minijail::Minijail::new().map_err(Error::Minijail)?;
+        let mut jail = Minijail(::minijail::Minijail::new().map_err(Error::Minijail)?);
 
         let init = manifest
             .init
@@ -247,7 +261,7 @@ impl Process {
 
         Ok(Process {
             pid,
-            _jail: Minijail(jail),
+            _jail: jail,
             _tmpdir: tmpdir,
             _stdout: stdout,
             _stderr: stderr,
@@ -257,7 +271,7 @@ impl Process {
 }
 
 async fn setup_mounts(
-    jail: &mut ::minijail::Minijail,
+    jail: &mut Minijail,
     container: &Container,
     data_dir: &Path,
     uid: u32,
