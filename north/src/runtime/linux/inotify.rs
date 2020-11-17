@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
-use std::{fs::metadata, path::Path};
+use std::path::Path;
 use thiserror::Error;
 use tokio::{select, task, time};
 
@@ -26,9 +26,6 @@ pub enum Error {
 }
 
 pub async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
-    let path = path.to_owned();
-
-    let timeout = time::sleep(timeout);
     let notify_path = path.to_owned();
     let wait = task::spawn_blocking(move || {
         let inotify = Inotify::init(InitFlags::IN_CLOEXEC).map_err(Error::Nix)?;
@@ -37,16 +34,15 @@ pub async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Resu
             .map_err(Error::Nix)?;
 
         loop {
-            // check if the file still exists
-            if metadata(&notify_path).is_err() {
+            if !notify_path.exists() {
                 break;
             }
-
             inotify.read_events().map_err(Error::Nix)?;
         }
         Result::<(), Error>::Ok(())
     });
 
+    let timeout = time::sleep(timeout);
     select! {
         _ = timeout => Err(Error::Timeout(format!("Inotify error on {}", &path.display()))),
         w = wait => match w {
