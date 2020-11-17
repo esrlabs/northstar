@@ -15,8 +15,10 @@
 use std::path::Path;
 use thiserror::Error;
 
+use floating_duration::TimeAsFloat;
+use log::*;
 pub use nix::mount::MsFlags as MountFlags;
-use tokio::task;
+use tokio::{task, time};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -68,4 +70,20 @@ pub async fn unmount(target: &Path) -> Result<(), Error> {
             error: e,
         })
     })
+}
+
+pub async fn mount_device(device: &Path, root: &Path, r#type: &str) -> Result<(), super::Error> {
+    let start = time::Instant::now();
+    debug!(
+        "Mount {} fs on {} to {}",
+        r#type,
+        device.display(),
+        root.display(),
+    );
+    mount(&device, &root, &r#type, MountFlags::MS_RDONLY, None).await?;
+
+    let mount_duration = start.elapsed();
+    debug!("Mounting took {:.03}s", mount_duration.as_fractional_secs());
+
+    Ok(())
 }

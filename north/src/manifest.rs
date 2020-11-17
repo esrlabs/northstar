@@ -495,7 +495,7 @@ log:
                 target: PathBuf::from("/here/we/go"),
                 name: "bla".to_string(),
                 version: Version::parse("1.0.0")?,
-                dir: PathBuf::from("/bin/foo").into(),
+                dir: PathBuf::from("/bin/foo"),
             },
             Mount::Tmpfs {
                 target: PathBuf::from("/tmpfs"),

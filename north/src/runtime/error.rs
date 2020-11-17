@@ -13,9 +13,8 @@
 //   limitations under the License.
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
-use super::linux::{device_mapper, mount};
+use super::linux::{self};
 #[cfg(any(target_os = "android", target_os = "linux"))]
-use super::linux::{inotify, loopdev};
 use super::Name;
 use crate::api::InstallationResult;
 use std::io;
@@ -23,20 +22,38 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    // process
+    #[error("Process error: {0}")]
+    Process(super::process::Error),
+    // linux
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Linux error")]
+    Linux(#[from] linux::Error),
+    #[error("Failed to uninstall")]
+    UninstallationError(linux::Error),
+    // linux -- cgroups
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("CGroups error: {0}")]
+    CGroup(super::linux::cgroups::Error),
+    // keys
+    #[error("Key error: {0}")]
+    KeyError(super::keys::Error),
+    // npk
+    #[error("NPK error: {0}")]
+    NpkError(super::npk::Error),
+
+    // installation
+    #[error("Failed to install")]
+    Installation(InstallationError),
+
     #[error("No application found")]
     ApplicationNotFound,
     #[error("Application is not running")]
     ApplicationNotRunning,
     #[error("Missing resource {0}")]
     MissingResource(String),
-    #[error("Process error: {0}")]
-    Process(super::process::Error),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
-    #[error("Failed to install")]
-    Installation(InstallationError),
-    #[error("Failed to uninstall")]
-    UninstallationError(InstallationError),
     #[error("OS error: {context}")]
     Os {
         context: String,
@@ -56,11 +73,6 @@ pub enum Error {
     #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Minijail error: {0}")]
     Minijail(super::linux::minijail::Error),
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    #[error("CGroups error: {0}")]
-    CGroup(super::linux::cgroups::Error),
-    #[error("Key error: {0}")]
-    KeyError(super::keys::Error),
     #[error("Internal error: {0}")]
     Internal(&'static str),
     #[error("Wrong permissions: {0}")]
@@ -69,102 +81,87 @@ pub enum Error {
 
 #[derive(Error, Debug)]
 pub enum InstallationError {
-    #[error("ZIP error")]
-    Zip(#[from] zip::result::ZipError),
-    #[error("Signature file invalid ({0})")]
-    SignatureFileInvalid(String),
-    #[error("Malformed signature")]
-    MalformedSignature,
-    #[error("Hashes malformed ({0})")]
-    MalformedHashes(String),
-    #[error("Failed to verify manifest: {0}")]
-    MalformedManifest(String),
-    #[error("Problem verifiing content with signature ({0})")]
-    SignatureVerificationError(String),
-    #[error("Verity device mapper problem ({0})")]
-    VerityError(String),
-    #[error("Missing verity header")]
-    NoVerityHeader,
-    #[error("Unsupported verity version {0}")]
-    UnexpectedVerityVersion(u32),
-    #[error("Unsupported verity algorithm: {0}")]
-    UnexpectedVerityAlgorithm(String),
+    //     #[error("Verity device mapper problem ({0})")]
+    //     VerityError(String),
+    //     #[error("Missing verity header")]
+    //     NoVerityHeader,
+    //     #[error("Unsupported verity version {0}")]
+    //     UnexpectedVerityVersion(u32),
+    //     #[error("Unsupported verity algorithm: {0}")]
+    //     UnexpectedVerityAlgorithm(String),
     #[error("Application {0} already installed")]
     ApplicationAlreadyInstalled(String),
-    #[error("Archive error: {0}")]
-    ArchiveError(String),
-    #[error("Timeout: {0}")]
-    Timeout(String),
+    //     #[error("Timeout: {0}")]
+    //     Timeout(String),
     #[error("Duplicate resource")]
     DuplicateResource,
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    #[error("Device mapper error: {0}")]
-    DeviceMapper(device_mapper::Error),
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    #[error("Loop device error: {0}")]
-    LoopDeviceError(loopdev::Error),
-    #[error("Hash error: {0}")]
-    HashInvalid(String),
-    #[error("Key missing: {0}")]
-    KeyNotFound(String),
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    #[error("Failed to mount")]
-    Mount(#[from] mount::Error),
-    #[error("Inotify")]
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    INotify(#[from] inotify::Error),
-    #[error("IO error: {context}")]
-    Io {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
+    //     #[cfg(any(target_os = "android", target_os = "linux"))]
+    //     #[error("Device mapper error: {0}")]
+    //     DeviceMapper(device_mapper::Error),
+    //     #[cfg(any(target_os = "android", target_os = "linux"))]
+    //     #[error("Loop device error: {0}")]
+    //     LoopDeviceError(loopdev::Error),
+    //     #[cfg(any(target_os = "android", target_os = "linux"))]
+    //     #[error("Failed to mount")]
+    //     Mount(#[from] mount::Error),
+    //     #[error("Inotify")]
+    //     #[cfg(any(target_os = "android", target_os = "linux"))]
+    //     INotify(#[from] inotify::Error),
+    //     #[error("IO error: {context}")]
+    //     Io {
+    //         context: String,
+    //         #[source]
+    //         error: io::Error,
+    //     },
 }
 
-impl From<InstallationError> for InstallationResult {
-    fn from(error: InstallationError) -> InstallationResult {
-        match error {
-            InstallationError::Zip(_) => InstallationResult::FileCorrupted,
-            InstallationError::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
-            InstallationError::MalformedSignature => InstallationResult::MalformedSignature,
-            InstallationError::MalformedHashes(_) => InstallationResult::MalformedHashes,
-            InstallationError::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
-            InstallationError::VerityError(s) => InstallationResult::VerityProblem(s),
-            InstallationError::ArchiveError(s) => InstallationResult::ArchiveError(s),
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallationError::DeviceMapper(e) => {
-                InstallationResult::DeviceMapperProblem(format!("{:?}", e))
-            }
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallationError::LoopDeviceError(e) => {
-                InstallationResult::LoopDeviceError(format!("{}", e))
-            }
-            InstallationError::HashInvalid(s) => InstallationResult::HashInvalid(s),
-            InstallationError::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
-            InstallationError::ApplicationAlreadyInstalled(_) => {
-                InstallationResult::ApplicationAlreadyInstalled
-            }
-            InstallationError::Io { context, error: _ } => {
-                InstallationResult::FileIoProblem(context)
-            }
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallationError::Mount(e) => InstallationResult::MountError(format!("{}", e)),
-            #[cfg(any(target_os = "android", target_os = "linux"))]
-            InstallationError::INotify(e) => InstallationResult::INotifyError(format!("{}", e)),
-            InstallationError::Timeout(s) => InstallationResult::TimeoutError(s),
-            InstallationError::NoVerityHeader => {
-                InstallationResult::VerityProblem("Verity header missing".to_string())
-            }
-            InstallationError::UnexpectedVerityAlgorithm(s) => {
-                InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
-            }
-            InstallationError::UnexpectedVerityVersion(n) => {
-                InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
-            }
-            InstallationError::SignatureVerificationError(s) => {
-                InstallationResult::SignatureVerificationFailed(s)
-            }
-            InstallationError::DuplicateResource => InstallationResult::DuplicateResource,
-        }
+impl From<Error> for InstallationResult {
+    fn from(error: Error) -> InstallationResult {
+        // TODO error translation to API
+        InstallationResult::ApplicationAlreadyInstalled
+        // match error {
+        //     _ => unreachable!()
+        //     // InstallationError::Zip(_) => InstallationResult::FileCorrupted,
+        //     // InstallationError::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
+        //     // InstallationError::MalformedSignature => InstallationResult::MalformedSignature,
+        //     // InstallationError::MalformedHashes(_) => InstallationResult::MalformedHashes,
+        //     // InstallationError::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
+        //     // InstallationError::VerityError(s) => InstallationResult::VerityProblem(s),
+        //     // InstallationError::ArchiveError(s) => InstallationResult::ArchiveError(s),
+        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
+        //     // InstallationError::DeviceMapper(e) => {
+        //     //     InstallationResult::DeviceMapperProblem(format!("{:?}", e))
+        //     // }
+        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
+        //     // InstallationError::LoopDeviceError(e) => {
+        //     //     InstallationResult::LoopDeviceError(format!("{}", e))
+        //     // }
+        //     // InstallationError::HashInvalid(s) => InstallationResult::HashInvalid(s),
+        //     // InstallationError::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
+        //     // InstallationError::ApplicationAlreadyInstalled(_) => {
+        //     //     InstallationResult::ApplicationAlreadyInstalled
+        //     // }
+        //     // InstallationError::Io { context, error: _ } => {
+        //     //     InstallationResult::FileIoProblem(context)
+        //     // }
+        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
+        //     // InstallationError::Mount(e) => InstallationResult::MountError(format!("{}", e)),
+        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
+        //     // InstallationError::INotify(e) => InstallationResult::INotifyError(format!("{}", e)),
+        //     // InstallationError::Timeout(s) => InstallationResult::TimeoutError(s),
+        //     // InstallationError::NoVerityHeader => {
+        //     //     InstallationResult::VerityProblem("Verity header missing".to_string())
+        //     // }
+        //     // InstallationError::UnexpectedVerityAlgorithm(s) => {
+        //     //     InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
+        //     // }
+        //     // InstallationError::UnexpectedVerityVersion(n) => {
+        //     //     InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
+        //     // }
+        //     // InstallationError::SignatureVerificationError(s) => {
+        //     //     InstallationResult::SignatureVerificationFailed(s)
+        //     // }
+        //     // InstallationError::DuplicateResource => InstallationResult::DuplicateResource,
+        // }
     }
 }

@@ -14,19 +14,17 @@
 
 use super::{
     config::Config,
+    error::{Error, InstallationError},
     keys,
+    npk::read_manifest,
     npk::Container,
     process::{ExitStatus, Process},
+    Event, EventTx,
 };
+use crate::runtime::linux::{umount_and_remove, unpack_and_mount};
 use crate::{
     api::Notification,
     manifest::{Manifest, Mount, Name, Version},
-    runtime::{
-        error::{Error, InstallationError},
-        npk,
-        npk::read_manifest,
-        Event, EventTx,
-    },
 };
 use ed25519_dalek::*;
 use log::{debug, error, info, warn};
@@ -148,7 +146,7 @@ impl State {
     }
 
     /// Add a container instance the list of known containers
-    pub fn add(&mut self, container: Container) -> Result<(), InstallationError> {
+    pub fn add(&mut self, container: Container) -> Result<(), Error> {
         let name = container.manifest.name.clone();
         let version = container.manifest.version.clone();
         if container.is_resource_container() {
@@ -157,13 +155,17 @@ impl State {
                 .get(&(name.clone(), version.clone()))
                 .is_some()
             {
-                return Err(InstallationError::ApplicationAlreadyInstalled(name));
+                return Err(Error::Installation(
+                    InstallationError::ApplicationAlreadyInstalled(name),
+                ));
             }
             let app = Application::new(container);
             self.resources.insert((name, version), app);
         } else {
             if self.applications.get(&name).is_some() {
-                return Err(InstallationError::ApplicationAlreadyInstalled(name));
+                return Err(Error::Installation(
+                    InstallationError::ApplicationAlreadyInstalled(name),
+                ));
             }
             let app = Application::new(container);
             self.applications.insert(name, app);
@@ -334,7 +336,7 @@ impl State {
         }
 
         for (name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
-            if let Err(e) = crate::runtime::npk::umount(container)
+            if let Err(e) = umount_and_remove(container)
                 .await
                 .map_err(Error::UninstallationError)
             {
@@ -344,7 +346,7 @@ impl State {
 
         for (name, container) in self.resources().map(|a| (a.name(), &a.container)) {
             info!("Umounting {}", name);
-            crate::runtime::npk::umount(container)
+            umount_and_remove(container)
                 .await
                 .map_err(Error::UninstallationError)?;
         }
@@ -353,8 +355,8 @@ impl State {
     }
 
     /// Install a npk
-    pub async fn install(&mut self, npk: &Path) -> Result<(), InstallationError> {
-        let manifest = read_manifest(npk, &self.signing_keys)?;
+    pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
+        let manifest = read_manifest(npk, &self.signing_keys).map_err(Error::NpkError)?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -362,15 +364,21 @@ impl State {
             manifest.name
         );
 
+        // TODO: get correct registry from config
         let registry = self
             .config
             .directories
             .container_dirs
             .first()
-            .unwrap()
-            .join(&package);
+            .expect("No registry configured!");
 
-        debug!("Trying to install to registry {}", registry.display());
+        let package_in_registry = registry.join(&package);
+
+        debug!(
+            "Trying to install {} to registry {}",
+            package,
+            registry.display()
+        );
 
         if manifest.is_resource() {
             if self
@@ -378,33 +386,43 @@ impl State {
                 .contains_key(&(manifest.name.clone(), manifest.version.clone()))
             {
                 warn!("Resource container with same version already installed");
-                return Err(InstallationError::DuplicateResource);
+                return Err(Error::Installation(InstallationError::DuplicateResource));
             }
         } else if self.applications.contains_key(&manifest.name) {
-            return Err(InstallationError::ApplicationAlreadyInstalled(
-                manifest.name.clone(),
+            return Err(Error::Installation(
+                InstallationError::ApplicationAlreadyInstalled(manifest.name.clone()),
             ));
         }
 
         // Copy tmpfile into registry
-        fs::copy(&npk, &registry)
+        fs::copy(&npk, &package_in_registry)
             .await
-            .map_err(|error| InstallationError::Io {
+            .map_err(|error| Error::Io {
                 context: "Failed to copy npk to registry".to_string(),
                 error,
             })?;
 
         // Install and mount npk
-        npk::mount(self, &registry).await?;
+        let mounted_containers = unpack_and_mount(
+            &self.config.directories.run_dir,
+            &self.signing_keys,
+            &self.config.devices.device_mapper_dev,
+            &self.config.devices.device_mapper,
+            &self.config.devices.loop_control,
+            &self.config.devices.loop_dev,
+            &package_in_registry,
+        )
+        .await?;
+        for container in mounted_containers {
+            self.add(container)?;
+        }
 
         // Remove tmpfile
         // TODO: move this to console?
-        fs::remove_file(npk)
-            .await
-            .map_err(|error| InstallationError::Io {
-                context: format!("Failed to remove {}", npk.display()),
-                error,
-            })?;
+        fs::remove_file(npk).await.map_err(|error| Error::Io {
+            context: format!("Failed to remove {}", npk.display()),
+            error,
+        })?;
 
         // Send notification about newly install npk
         Self::notification(
@@ -451,37 +469,35 @@ impl State {
                 return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
             }
             info!("Uninstalling {}", app);
-            npk::umount(app.container())
+            umount_and_remove(app.container())
                 .await
-                .map_err(Error::UninstallationError)?;
+                .map_err(Error::Linux)?;
             self.applications.remove(name);
             self.resources.remove(&(name.to_string(), version.clone()));
 
             // Remove npk from registry
             for d in &self.config.directories.container_dirs {
-                let mut dir = fs::read_dir(&d).await.map_err(|e| {
-                    Error::UninstallationError(InstallationError::Io {
-                        context: format!("Failed to read {}", d.display()),
-                        error: e,
-                    })
+                let mut dir = fs::read_dir(&d).await.map_err(|e| Error::Io {
+                    context: format!("Failed to read {}", d.display()),
+                    error: e,
                 })?;
                 while let Some(res) = dir.next().await {
                     let entry = res.map_err(|e| {
-                        Error::UninstallationError(InstallationError::Io {
+                        Error::Io {
                             context: "Could not read directory".to_string(), // TODO: Which directory?
                             error: e,
-                        })
+                        }
                     })?;
                     let manifest = read_manifest(entry.path().as_path(), &self.signing_keys)
-                        .map_err(Error::UninstallationError)?;
+                        .map_err(Error::NpkError)?;
 
                     if manifest.name == name && manifest.version == *version {
-                        fs::remove_file(&entry.path()).await.map_err(|e| {
-                            Error::UninstallationError(InstallationError::Io {
+                        fs::remove_file(&entry.path())
+                            .await
+                            .map_err(|e| Error::Io {
                                 context: format!("Failed to remove {}", entry.path().display()),
                                 error: e,
-                            })
-                        })?;
+                            })?;
                     }
                 }
             }

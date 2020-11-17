@@ -12,14 +12,16 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use floating_duration::TimeAsFloat;
 use libc::{c_int, ioctl};
+use log::*;
 use nix::{errno::Errno, Error::Sys};
 use std::{
     os::unix::prelude::*,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
-use tokio::{fs, io};
+use tokio::{fs, io, time};
 
 const LOOP_SET_FD: u16 = 0x4C00;
 const LOOP_CLR_FD: u16 = 0x4C01;
@@ -252,4 +254,36 @@ impl Default for loop_info64 {
             lo_init: [0; 2],
         }
     }
+}
+
+pub async fn losetup(
+    lc: &LoopControl,
+    fs_path: &Path,
+    fs: &mut fs::File,
+    fs_offset: u64,
+    lo_size: u64,
+) -> Result<LoopDevice, super::Error> {
+    let start = time::Instant::now();
+    let loop_device = lc
+        .next_free()
+        .await
+        .map_err(super::Error::LoopDeviceError)?;
+
+    debug!("Using loop device {:?}", loop_device.path().await);
+
+    loop_device
+        .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
+        .map_err(super::Error::LoopDeviceError)?;
+
+    if let Err(error) = loop_device.set_direct_io(true) {
+        warn!("Failed to enable direct io: {:?}", error);
+    }
+
+    let losetup_duration = start.elapsed();
+    debug!(
+        "Loopback setup took {:.03}s",
+        losetup_duration.as_fractional_secs(),
+    );
+
+    Ok(loop_device)
 }
