@@ -19,3 +19,337 @@ pub(super) mod inotify;
 pub(super) mod loopdev;
 pub(super) mod minijail;
 pub(super) mod mount;
+
+use super::linux::{
+    self, device_mapper as dm,
+    loopdev::{losetup, LoopControl},
+    mount as linux_mount,
+};
+use crate::runtime::npk::{
+    verity::{check_verity_config, get_fs_type, read_verity_header, veritysetup, VerityHeader},
+    Container,
+};
+use crate::{
+    manifest::Mount,
+    runtime::npk::{self, ArchiveReader},
+};
+use ed25519_dalek::PublicKey;
+use floating_duration::TimeAsFloat;
+use log::*;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::{path::Path, process};
+use thiserror::Error;
+use tokio::{fs, fs::metadata, stream::StreamExt, time};
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Mount error")]
+    Mount(#[from] mount::Error),
+    #[error("Unshare error: {context}")]
+    Unshare {
+        context: String,
+        #[source]
+        error: nix::Error,
+    },
+    #[error("Minijail error")]
+    Minijail(#[from] minijail::Error),
+    #[error("Verity device mapper problem ({0})")]
+    VerityError(String),
+    #[error("Missing verity header")]
+    NoVerityHeader,
+    #[error("Unsupported verity version {0}")]
+    UnexpectedVerityVersion(u32),
+    #[error("Unsupported verity algorithm: {0}")]
+    UnexpectedVerityAlgorithm(String),
+    // #[error("Application {0} already installed")]
+    // ApplicationAlreadyInstalled(String),
+    // #[error("Timeout: {0}")]
+    // Timeout(String),
+    // #[error("Duplicate resource")]
+    // DuplicateResource,
+    #[error("Failed archive operation")]
+    Achrive(npk::Error),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Device mapper error: {0}")]
+    DeviceMapper(device_mapper::Error),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    #[error("Loop device error: {0}")]
+    LoopDeviceError(loopdev::Error),
+    #[error("Inotify")]
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    INotify(#[from] inotify::Error),
+    #[error("IO error: {context}")]
+    Io {
+        context: String,
+        #[source]
+        error: std::io::Error,
+    },
+}
+
+pub async fn mount_all(
+    run_dir: &Path,
+    signing_keys: &HashMap<String, PublicKey>,
+    device_mapper_dev: &str,
+    device_mapper: &Path,
+    loop_control: &Path,
+    loop_dev: &str,
+    dir: &Path,
+) -> Result<Vec<Container>, linux::Error> {
+    info!("Installing containers from {}", dir.display());
+
+    let npks = fs::read_dir(&dir)
+        .await
+        .map_err(|e| linux::Error::Io {
+            context: format!("Failed to read {}", dir.display()),
+            error: e,
+        })?
+        .filter_map(move |d| d.ok())
+        .map(|d| d.path());
+
+    let dm = dm::Dm::new(&device_mapper).map_err(linux::Error::DeviceMapper)?;
+    let lc = LoopControl::open(loop_control, loop_dev)
+        .await
+        .map_err(linux::Error::LoopDeviceError)?;
+
+    let mut npks = Box::pin(npks);
+
+    let mut containers: Vec<Vec<Container>> = vec![];
+    while let Some(npk) = npks.next().await {
+        containers.push(
+            mount_internal(&run_dir, &signing_keys, &device_mapper_dev, &dm, &lc, &npk).await?,
+        );
+    }
+    Ok(containers.into_iter().flatten().collect())
+}
+
+pub async fn unpack_and_mount(
+    run_dir: &Path,
+    signing_keys: &HashMap<String, PublicKey>,
+    device_mapper_dev: &str,
+    device_mapper: &Path,
+    loop_control: &Path,
+    loop_dev: &str,
+    npk: &Path,
+) -> Result<Vec<Container>, linux::Error> {
+    debug!("Mounting {}", npk.display());
+
+    let dm = dm::Dm::new(&device_mapper).map_err(linux::Error::DeviceMapper)?;
+    let lc = LoopControl::open(loop_control, loop_dev)
+        .await
+        .map_err(linux::Error::LoopDeviceError)?;
+
+    let mounted_containers =
+        mount_internal(run_dir, signing_keys, device_mapper_dev, &dm, &lc, npk).await?;
+
+    Ok(mounted_containers)
+}
+
+pub async fn umount_and_remove(container: &Container) -> Result<(), linux::Error> {
+    debug!("Umounting {}", container.root.display());
+    linux_mount::unmount(&container.root)
+        .await
+        .map_err(linux::Error::Mount)?;
+
+    debug!("Waiting for dm device removal");
+    inotify::wait_for_file_deleted(&container.dm_dev, std::time::Duration::from_secs(5))
+        .await
+        .map_err(linux::Error::INotify)?;
+
+    debug!("Removing mountpoint {}", container.root.display());
+    // Root which is the container version
+    fs::remove_dir(&container.root)
+        .await
+        .map_err(|e| linux::Error::Io {
+            context: format!("Failed to remove {}", container.root.display()),
+            error: e,
+        })?;
+    // Container name
+    fs::remove_dir(
+        container
+            .root
+            .parent()
+            .expect("Could not get parent dir of container!"),
+    )
+    .await
+    .map_err(|e| linux::Error::Io {
+        context: format!("Failed to remove {}", container.root.display()),
+        error: e,
+    })?;
+
+    Ok(())
+}
+
+async fn mount_internal(
+    run_dir: &Path,
+    signing_keys: &HashMap<String, PublicKey>,
+    device_mapper_dev: &str,
+    dm: &dm::Dm,
+    lc: &LoopControl,
+    npk: &Path,
+) -> Result<Vec<Container>, linux::Error> {
+    let start = time::Instant::now();
+
+    if let Ok(meta) = metadata(&npk).await {
+        debug!("Mounting NPK with size {}", meta.len());
+    }
+    let mut archive_reader =
+        ArchiveReader::new(&npk, signing_keys).map_err(linux::Error::Achrive)?;
+
+    let hashes = archive_reader
+        .extract_hashes()
+        .map_err(linux::Error::Achrive)?;
+
+    let manifest = archive_reader
+        .extract_manifest_from_archive()
+        .map_err(linux::Error::Achrive)?;
+    debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
+
+    let resources: Vec<String> = manifest
+        .mounts
+        .iter()
+        .filter_map(|m| match m {
+            Mount::Resource { name, version, .. } => Some(format!("{} ({})", name, version)),
+            _ => None,
+        })
+        .collect();
+
+    if !resources.is_empty() {
+        debug!("Using {:?}", resources);
+    }
+
+    let (fs_offset, fs_size) = archive_reader
+        .extract_fs_start_and_size()
+        .map_err(linux::Error::Achrive)?;
+
+    let mut fs = fs::File::open(&npk)
+        .await
+        .map_err(|error| linux::Error::Io {
+            context: format!("Failed to open {:?}", npk),
+            error,
+        })?;
+
+    let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset)
+        .await
+        .map_err(|e| linux::Error::VerityError(format!("Failed read verity header {}", e)))?;
+
+    check_verity_config(&verity)?;
+
+    let instances = manifest.instances.unwrap_or(1);
+
+    let mut mounted_containers = vec![];
+    for instance in 0..instances {
+        let mut manifest = manifest.clone();
+        if instances > 1 {
+            manifest.name.push_str(&format!("-{:03}", instance));
+        }
+        let root = run_dir
+            .join(&manifest.name)
+            .join(&format!("{}", manifest.version));
+
+        if !root.exists() {
+            info!("Creating mountpoint {}", root.display());
+            fs::create_dir_all(&root)
+                .await
+                .map_err(|e| linux::Error::Io {
+                    context: format!("Failed to create mountpoint: {}", e),
+                    error: e,
+                })?;
+        }
+
+        let name = format!(
+            "north_{}_{}_{}",
+            process::id(),
+            manifest.name,
+            manifest.version
+        );
+
+        let dm_dev = setup_and_mount(
+            dm,
+            lc,
+            &verity,
+            &name,
+            device_mapper_dev,
+            hashes.fs_verity_offset,
+            &hashes.fs_verity_hash,
+            &npk,
+            &mut fs,
+            fs_offset,
+            fs_size,
+            &root,
+        )
+        .await?;
+
+        let container = Container {
+            root,
+            manifest,
+            dm_dev,
+        };
+
+        let duration = start.elapsed();
+
+        info!(
+            "Installed {}:{} Mounting: {:.03}s",
+            container.manifest.name,
+            container.manifest.version,
+            duration.as_fractional_secs(),
+        );
+        mounted_containers.push(container);
+    }
+
+    Ok(mounted_containers)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn setup_and_mount(
+    dm: &dm::Dm,
+    lc: &LoopControl,
+    verity: &VerityHeader,
+    name: &str,
+    dm_dev: &str,
+    dm_device_size: u64,
+    verity_hash: &str,
+    fs_path: &Path,
+    mut fs: &mut fs::File,
+    fs_offset: u64,
+    lo_size: u64,
+    root: &Path,
+) -> Result<PathBuf, linux::Error> {
+    let fs_type = get_fs_type(&mut fs, fs_offset)
+        .await
+        .map_err(|e| linux::Error::Io {
+            context: format!("Failed get file-system-type {}", e),
+            error: e,
+        })?;
+
+    let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size).await?;
+
+    let loop_device_id = loop_device
+        .dev_id()
+        .await
+        .map(|(major, minor)| format!("{}:{}", major, minor))
+        .map_err(linux::Error::LoopDeviceError)?;
+
+    let dm_dev = veritysetup(
+        &dm,
+        &dm_dev,
+        &loop_device_id,
+        &verity,
+        name,
+        verity_hash,
+        dm_device_size,
+    )
+    .await
+    .map_err(|e| linux::Error::VerityError(format!("Failed to find file-system {}", e)))?;
+
+    linux_mount::mount_device(&dm_dev, root, fs_type).await?;
+
+    dm.device_remove(
+        &name.to_string(),
+        &dm::DmOptions::new().set_flags(dm::DmFlags::DM_DEFERRED_REMOVE),
+    )
+    .await
+    .map_err(linux::Error::DeviceMapper)?;
+
+    Ok(dm_dev)
+}

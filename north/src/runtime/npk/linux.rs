@@ -15,8 +15,8 @@
 use super::{
     super::{
         linux::{
-            device_mapper as dm,
-            loopdev::{LoopControl, LoopDevice},
+            self, device_mapper as dm, inotify,
+            loopdev::{self, LoopControl, LoopDevice},
             mount as linux_mount,
         },
         state::State,
@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     manifest::{Mount, Name, Version},
-    runtime::npk::{ArchiveReader, InstallationError},
+    runtime::npk::{self, ArchiveReader},
 };
 use floating_duration::TimeAsFloat;
 use fmt::Debug;
@@ -49,12 +49,12 @@ struct VerityHeader {
     pub salt: String,
 }
 
-pub async fn mount_all(state: &mut State, dir: &Path) -> Result<(), InstallationError> {
+pub async fn mount_all(state: &mut State, dir: &Path) -> Result<(), linux::Error> {
     info!("Installing containers from {}", dir.display());
 
     let npks = fs::read_dir(&dir)
         .await
-        .map_err(|e| InstallationError::Io {
+        .map_err(|e| linux::Error::Io {
             context: format!("Failed to read {}", dir.display()),
             error: e,
         })?
@@ -62,11 +62,11 @@ pub async fn mount_all(state: &mut State, dir: &Path) -> Result<(), Installation
         .map(|d| d.path());
 
     let dm = state.config.devices.device_mapper.clone();
-    let dm = dm::Dm::new(&dm).map_err(InstallationError::DeviceMapper)?;
+    let dm = dm::Dm::new(&dm).map_err(linux::Error::DeviceMapper)?;
     let lc = &state.config.devices.loop_control;
     let lc = LoopControl::open(lc, &state.config.devices.loop_dev)
         .await
-        .map_err(InstallationError::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDeviceError)?;
 
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
@@ -75,16 +75,16 @@ pub async fn mount_all(state: &mut State, dir: &Path) -> Result<(), Installation
     Ok(())
 }
 
-pub async fn mount(state: &mut State, npk: &Path) -> Result<(Name, Version), InstallationError> {
+pub async fn mount(state: &mut State, npk: &Path) -> Result<(Name, Version), linux::Error> {
     debug!("Mounting {}", npk.display());
 
     let dm = &state.config.devices.device_mapper.clone();
-    let dm = dm::Dm::new(&dm).map_err(InstallationError::DeviceMapper)?;
+    let dm = dm::Dm::new(&dm).map_err(linux::Error::DeviceMapper)?;
 
     let lc = &state.config.devices.loop_control;
     let lc = LoopControl::open(lc, &state.config.devices.loop_dev)
         .await
-        .map_err(InstallationError::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDeviceError)?;
 
     let (name, version) = mount_internal(state, &dm, &lc, npk).await?;
 
@@ -92,7 +92,7 @@ pub async fn mount(state: &mut State, npk: &Path) -> Result<(Name, Version), Ins
 }
 
 #[allow(dead_code)]
-pub async fn umount(container: &Container) -> Result<(), InstallationError> {
+pub async fn umount(container: &Container) -> Result<(), linux::Error> {
     debug!("Umounting {}", container.root.display());
     linux_mount::unmount(&container.root)
         .await
@@ -130,17 +130,22 @@ async fn mount_internal(
     dm: &dm::Dm,
     lc: &LoopControl,
     npk: &Path,
-) -> Result<(Name, Version), InstallationError> {
+) -> Result<(Name, Version), linux::Error> {
     let start = time::Instant::now();
 
     if let Ok(meta) = metadata(&npk).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
-    let mut archive_reader = ArchiveReader::new(&npk, &state.signing_keys)?;
+    let mut archive_reader =
+        ArchiveReader::new(&npk, &state.signing_keys).map_err(linux::Error::Achrive)?;
 
-    let hashes = archive_reader.extract_hashes()?;
+    let hashes = archive_reader
+        .extract_hashes()
+        .map_err(linux::Error::Achrive)?;
 
-    let manifest = archive_reader.extract_manifest_from_archive()?;
+    let manifest = archive_reader
+        .extract_manifest_from_archive()
+        .map_err(linux::Error::Achrive)?;
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
     let resources: Vec<String> = manifest
@@ -156,18 +161,20 @@ async fn mount_internal(
         debug!("Using {:?}", resources);
     }
 
-    let (fs_offset, fs_size) = archive_reader.extract_fs_start_and_size()?;
+    let (fs_offset, fs_size) = archive_reader
+        .extract_fs_start_and_size()
+        .map_err(linux::Error::Achrive)?;
 
     let mut fs = fs::File::open(&npk)
         .await
-        .map_err(|error| InstallationError::Io {
+        .map_err(|error| linux::Error::Io {
             context: format!("Failed to open {:?}", npk),
             error,
         })?;
 
     let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset)
         .await
-        .map_err(|e| InstallationError::VerityError(format!("Failed read verity header {}", e)))?;
+        .map_err(|e| linux::Error::VerityError(format!("Failed read verity header {}", e)))?;
 
     check_verity_config(&verity)?;
 
@@ -189,7 +196,7 @@ async fn mount_internal(
             info!("Creating mountpoint {}", root.display());
             fs::create_dir_all(&root)
                 .await
-                .map_err(|e| InstallationError::Io {
+                .map_err(|e| linux::Error::Io {
                     context: format!("Failed to create mountpoint: {}", e),
                     error: e,
                 })?;
@@ -239,15 +246,15 @@ async fn mount_internal(
     Ok((manifest.name, manifest.version))
 }
 
-fn check_verity_config(verity: &VerityHeader) -> Result<(), InstallationError> {
+fn check_verity_config(verity: &VerityHeader) -> Result<(), linux::Error> {
     if &verity.header != b"verity" {
-        return Err(InstallationError::NoVerityHeader);
+        return Err(linux::Error::NoVerityHeader);
     }
     if verity.version != SUPPORTED_VERITY_VERSION {
-        return Err(InstallationError::UnexpectedVerityVersion(verity.version));
+        return Err(linux::Error::UnexpectedVerityVersion(verity.version));
     }
     if verity.algorithm != "sha256" {
-        return Err(InstallationError::UnexpectedVerityAlgorithm(
+        return Err(linux::Error::UnexpectedVerityAlgorithm(
             verity.algorithm.clone(),
         ));
     }
@@ -268,10 +275,10 @@ async fn setup_and_mount(
     fs_offset: u64,
     lo_size: u64,
     root: &Path,
-) -> Result<PathBuf, InstallationError> {
+) -> Result<PathBuf, linux::Error> {
     let fs_type = get_fs_type(&mut fs, fs_offset)
         .await
-        .map_err(|e| InstallationError::Io {
+        .map_err(|e| linux::Error::Io {
             context: format!("Failed get file-system-type {}", e),
             error: e,
         })?;
@@ -282,7 +289,7 @@ async fn setup_and_mount(
         .dev_id()
         .await
         .map(|(major, minor)| format!("{}:{}", major, minor))
-        .map_err(InstallationError::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDeviceError)?;
 
     let dm_dev = veritysetup(
         &dm,
@@ -294,7 +301,7 @@ async fn setup_and_mount(
         dm_device_size,
     )
     .await
-    .map_err(|e| InstallationError::VerityError(format!("Failed to find file-system {}", e)))?;
+    .map_err(|e| linux::Error::VerityError(format!("Failed to find file-system {}", e)))?;
 
     mount_device(&dm_dev, root, fs_type).await?;
 
@@ -303,7 +310,7 @@ async fn setup_and_mount(
         &dm::DmOptions::new().set_flags(dm::DmFlags::DM_DEFERRED_REMOVE),
     )
     .await
-    .map_err(InstallationError::DeviceMapper)?;
+    .map_err(linux::Error::DeviceMapper)?;
 
     Ok(dm_dev)
 }
@@ -326,16 +333,16 @@ async fn read_verity_header(
     fs: &mut fs::File,
     fs_offset: u64,
     verity_offset: u64,
-) -> Result<VerityHeader, InstallationError> {
+) -> Result<VerityHeader, linux::Error> {
     let mut header = [0u8; 512];
     fs.seek(std::io::SeekFrom::Start(fs_offset + verity_offset))
         .await
         .map_err(|e| {
-            InstallationError::VerityError(format!("Could not seek to verity header: {}", e))
+            linux::Error::VerityError(format!("Could not seek to verity header: {}", e))
         })?;
-    fs.read_exact(&mut header).await.map_err(|e| {
-        InstallationError::VerityError(format!("Could not read verity header: {}", e))
-    })?;
+    fs.read_exact(&mut header)
+        .await
+        .map_err(|e| linux::Error::VerityError(format!("Could not read verity header: {}", e)))?;
     #[allow(clippy::too_many_arguments)]
     let s = structure::structure!("=6s2xII16s6s26xIIQH6x256s168x"); // "a8 L L a16 A32 L L Q S x6 a256"
     let (
@@ -349,16 +356,16 @@ async fn read_verity_header(
         data_blocks,
         salt_size,
         salt,
-    ) = s.unpack(header.to_vec()).map_err(|e| {
-        InstallationError::VerityError(format!("Failed to decode verity block: {}", e))
-    })?;
+    ) = s
+        .unpack(header.to_vec())
+        .map_err(|e| linux::Error::VerityError(format!("Failed to decode verity block: {}", e)))?;
 
     Ok(VerityHeader {
         header,
         version,
         algorithm: std::str::from_utf8(&algorithm)
             .map_err(|e| {
-                InstallationError::VerityError(format!("Invalid algorithm in verity block: {}", e))
+                linux::Error::VerityError(format!("Invalid algorithm in verity block: {}", e))
             })?
             .to_string(),
         data_block_size,
@@ -374,18 +381,18 @@ async fn losetup(
     fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
-) -> Result<LoopDevice, InstallationError> {
+) -> Result<LoopDevice, linux::Error> {
     let start = time::Instant::now();
     let loop_device = lc
         .next_free()
         .await
-        .map_err(InstallationError::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDeviceError)?;
 
     debug!("Using loop device {:?}", loop_device.path().await);
 
     loop_device
         .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
-        .map_err(InstallationError::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDeviceError)?;
 
     if let Err(error) = loop_device.set_direct_io(true) {
         warn!("Failed to enable direct io: {:?}", error);
@@ -408,7 +415,7 @@ async fn veritysetup(
     name: &str,
     verity_hash: &str,
     size: u64,
-) -> Result<PathBuf, InstallationError> {
+) -> Result<PathBuf, linux::Error> {
     debug!("Creating a read-only verity device (name: {})", &name);
     let start = time::Instant::now();
     let dm_device = dm
@@ -417,7 +424,7 @@ async fn veritysetup(
             &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
         )
         .await
-        .map_err(InstallationError::DeviceMapper)?;
+        .map_err(linux::Error::DeviceMapper)?;
 
     let verity_table = format!(
         "{} {} {} {} {} {} {} {} {} {}",
@@ -443,12 +450,12 @@ async fn veritysetup(
         dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
     )
     .await
-    .map_err(InstallationError::DeviceMapper)?;
+    .map_err(linux::Error::DeviceMapper)?;
 
     debug!("Resuming device");
     dm.device_suspend(&name, &dm::DmOptions::new())
         .await
-        .map_err(InstallationError::DeviceMapper)?;
+        .map_err(linux::Error::DeviceMapper)?;
 
     debug!("Waiting for device {}", dm_dev.display());
     while !dm_dev.exists() {
@@ -464,7 +471,7 @@ async fn veritysetup(
     Ok(dm_dev)
 }
 
-async fn mount_device(device: &Path, root: &Path, r#type: &str) -> Result<(), InstallationError> {
+async fn mount_device(device: &Path, root: &Path, r#type: &str) -> Result<(), linux::Error> {
     let start = time::Instant::now();
     debug!(
         "Mount {} fs on {} to {}",

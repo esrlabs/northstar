@@ -22,6 +22,7 @@ pub(self) mod npk;
 pub(self) mod process;
 pub(super) mod state;
 
+use crate::runtime::linux::mount_all;
 use crate::{api, api::Notification, manifest::Name, runtime::error::Error};
 use config::Config;
 use console::Request;
@@ -144,9 +145,20 @@ pub async fn runtime_task(config: Config, stop: oneshot::Receiver<()>) -> Result
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to mount the content.
     for registry in &config.directories.container_dirs {
-        npk::mount_all(&mut state, &registry)
-            .await
-            .map_err(Error::Installation)?;
+        let mounted_containers = mount_all(
+            &config.directories.run_dir,
+            &state.signing_keys,
+            &config.devices.device_mapper_dev,
+            &config.devices.device_mapper,
+            &config.devices.loop_control,
+            &config.devices.loop_dev,
+            &registry,
+        )
+        .await?;
+
+        for container in mounted_containers {
+            state.add(container)?;
+        }
     }
 
     info!("Mounted {} containers", state.applications.len());
