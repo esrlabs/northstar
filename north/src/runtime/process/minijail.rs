@@ -22,7 +22,7 @@ use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
-use std::{fmt, os::unix::io::AsRawFd, path::Path, ops};
+use std::{fmt, ops, os::unix::io::AsRawFd, path::Path};
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt, AsyncWriteExt},
