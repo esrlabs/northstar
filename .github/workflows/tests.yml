@@ -1,0 +1,38 @@
+name: Integration Tests
+
+on: [push, pull_request]
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install libcap
+        run: sudo apt install libcap-dev
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+      - name: Build containers
+        shell: bash
+        run: |
+            ./examples/build_examples.sh
+            ./north_tests/build_test_container.sh
+        env:
+            TERM: xterm
+      - name: Build
+        run: cargo build
+      - name: Integration Tests
+        run: cargo test -p north_tests -- --test-threads 1 --ignored --nocapture
+        env:
+            RUST_LOG: debug
