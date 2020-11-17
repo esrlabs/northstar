@@ -30,12 +30,7 @@ jobs:
 
   check:
     name: Check
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-    runs-on: ${{matrix.os}}
+    runs-on: ubuntu-latest
     steps:
       - name: Cache
         uses: actions/cache@v2
@@ -46,7 +41,6 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install libcap
-        if: startsWith(matrix.os,'ubuntu')
         run: sudo apt install libcap-dev
       - name: Checkout
         uses: actions/checkout@v2
@@ -63,12 +57,7 @@ jobs:
 
   test:
     name: Tests
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-    runs-on: ${{matrix.os}}
+    runs-on: ubuntu-latest
     steps:
       - name: Cache
         uses: actions/cache@v2
@@ -79,7 +68,6 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install libcap
-        if: startsWith(matrix.os,'ubuntu')
         run: sudo apt install libcap-dev
       - name: Checkout
         uses: actions/checkout@v2
