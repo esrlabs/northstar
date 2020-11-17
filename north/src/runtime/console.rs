@@ -122,14 +122,12 @@ impl Console {
                                 }
                             }
                         }
-                        api::Request::Shutdown => match state.shutdown().await {
-                            Ok(_) => api::Response::Shutdown {
+                        api::Request::Shutdown => {
+                            state.initiate_shutdown().await;
+                            api::Response::Shutdown {
                                 result: api::ShutdownResult::Success,
-                            },
-                            Err(e) => api::Response::Shutdown {
-                                result: api::ShutdownResult::Error(e.to_string()),
-                            },
-                        },
+                            }
+                        }
                         api::Request::Install(_) => unreachable!(),
                     };
 

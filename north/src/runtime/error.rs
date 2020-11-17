@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
-use super::linux::{self, device_mapper, mount};
+use super::linux::{device_mapper, mount};
 #[cfg(any(target_os = "android", target_os = "linux"))]
 use super::linux::{inotify, loopdev};
 use super::Name;
@@ -50,12 +50,12 @@ pub enum Error {
         error: io::Error,
     },
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    #[error("Linux error")]
-    Linux(#[from] linux::Error),
     #[error("Protocol error: {0}")]
     Protocol(String),
     #[error("Configuration error: {0}")]
     Configuration(String),
+    #[error("Minijail error: {0}")]
+    Minijail(super::linux::minijail::Error),
     #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("CGroups error: {0}")]
     CGroup(super::linux::cgroups::Error),

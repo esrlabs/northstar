@@ -29,15 +29,14 @@ use crate::{
     },
 };
 use ed25519_dalek::*;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter,
     path::Path,
-    result, time,
+    result,
 };
-use time::Duration;
-use tokio::{fs, stream::StreamExt};
+use tokio::{fs, stream::StreamExt, time};
 
 #[derive(Debug)]
 pub struct State {
@@ -72,7 +71,7 @@ impl ProcessContext {
         self.process.as_mut()
     }
 
-    pub fn uptime(&self) -> Duration {
+    pub fn uptime(&self) -> time::Duration {
         self.start_timestamp.elapsed()
     }
 }
@@ -276,7 +275,7 @@ impl State {
 
     /// Stop a application. Timeout specifies the time until the process is
     /// SIGKILLed if it doesn't exit when receiving a SIGTERM
-    pub async fn stop(&mut self, name: &str, timeout: Duration) -> result::Result<(), Error> {
+    pub async fn stop(&mut self, name: &str, timeout: time::Duration) -> result::Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
             if let Some(mut context) = app.process.take() {
                 info!("Stopping {}", app);
@@ -315,6 +314,15 @@ impl State {
         }
     }
 
+    /// Send a shutdown request to the main loop
+    pub async fn initiate_shutdown(&mut self) {
+        self.events_tx
+            .send(Event::Shutdown)
+            .await
+            .expect("Internal channel error on main");
+    }
+
+    /// Shutdown the runtime: stop running applications and umount npks
     pub async fn shutdown(&mut self) -> result::Result<(), Error> {
         let running_containers: Vec<String> = self
             .applications
@@ -322,27 +330,24 @@ impl State {
             .filter_map(|a| a.process.as_ref().and(Some(a.name().clone())))
             .collect();
         for name in running_containers {
-            self.stop(&name, Duration::from_secs(5)).await?;
+            self.stop(&name, time::Duration::from_secs(5)).await?;
         }
 
-        for (name, container) in self.applications().map(|a| (a.name(), &a.container)) {
-            info!("Removing {}", name);
-            crate::runtime::npk::uninstall(container)
+        for (name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
+            if let Err(e) = crate::runtime::npk::umount(container)
                 .await
-                .map_err(Error::UninstallationError)?;
+                .map_err(Error::UninstallationError)
+            {
+                error!("Failed to umount {}: {:?}", name, e);
+            }
         }
 
         for (name, container) in self.resources().map(|a| (a.name(), &a.container)) {
-            info!("Removing {}", name);
-            crate::runtime::npk::uninstall(container)
+            info!("Umounting {}", name);
+            crate::runtime::npk::umount(container)
                 .await
                 .map_err(Error::UninstallationError)?;
         }
-
-        self.events_tx
-            .send(Event::Shutdown)
-            .await
-            .expect("Internal channel error on main");
 
         Ok(())
     }
@@ -390,7 +395,7 @@ impl State {
             })?;
 
         // Install and mount npk
-        npk::install(self, &registry).await?;
+        npk::mount(self, &registry).await?;
 
         // Remove tmpfile
         // TODO: move this to console?
@@ -446,7 +451,7 @@ impl State {
                 return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
             }
             info!("Uninstalling {}", app);
-            npk::uninstall(app.container())
+            npk::umount(app.container())
                 .await
                 .map_err(Error::UninstallationError)?;
             self.applications.remove(name);
@@ -541,7 +546,7 @@ impl State {
                 info!("Stopping {}", app);
                 context
                     .process_mut()
-                    .stop(Duration::from_secs(1))
+                    .stop(time::Duration::from_secs(1))
                     .await
                     .map_err(Error::Process)?;
 
