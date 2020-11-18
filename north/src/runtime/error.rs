@@ -64,7 +64,7 @@ pub enum Error {
     #[error("Internal error: {0}")]
     Internal(&'static str),
     #[error("Wrong permissions: {0}")]
-    Permissions(String),
+    FsPermissions(String),
 }
 
 #[derive(Error, Debug)]
