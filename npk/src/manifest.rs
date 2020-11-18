@@ -319,8 +319,14 @@ impl MountsSerialization {
             where
                 A: serde::de::MapAccess<'de>,
             {
-                let mut entries = HashMap::new();
+                let mut entries = HashMap::<PathBuf, Mount>::new();
                 while let Some((target, source)) = map.next_entry()? {
+                    if entries.contains_key(&target) {
+                        return Err(serde::de::Error::custom(format!(
+                            "Duplicate mountpoint: {:?}",
+                            target
+                        )));
+                    }
                     entries.insert(
                         target,
                         match source {
@@ -428,7 +434,6 @@ mod tests {
         let m = "
 name: hello
 version: 0.0.0
-arch: aarch64-linux-android
 init: /binary
 args:
     - one
@@ -540,6 +545,36 @@ log:
         seccomp.insert("fork".to_string(), "1".to_string());
         seccomp.insert("waitpid".to_string(), "1".to_string());
         assert_eq!(manifest.seccomp, Some(seccomp));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn dupllicate_mount() -> Result<()> {
+        use std::{fs::File, io, path::PathBuf};
+
+        let file = tempfile::NamedTempFile::new()?;
+        let path = file.path();
+        let m = "
+name: hello
+version: 0.0.0
+init: /binary
+mounts:
+    /lib:
+      host: /foo
+      flags:
+          - rw
+    /lib:
+      host: /bar
+      flags:
+          - rw
+";
+
+        let mut file = File::create(path)?;
+        io::copy(&mut m.as_bytes(), &mut file)?;
+        drop(file);
+
+        assert!(Manifest::from_path(&PathBuf::from(path)).await.is_err());
 
         Ok(())
     }
