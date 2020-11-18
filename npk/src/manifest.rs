@@ -137,6 +137,15 @@ pub enum MountFlag {
     // NoSuid,
 }
 
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Dev {
+    #[serde(rename = "minimal")]
+    Minimal,
+    #[serde(rename = "full")]
+    Full,
+}
+
+/// Mounts
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
     Resource {
@@ -150,6 +159,11 @@ pub enum Mount {
         host: PathBuf,
         flags: HashSet<MountFlag>,
     },
+    /// Mount /dev with flavor `dev`
+    Dev {
+        dev: Dev,
+    },
+    /// Mount a host directory optionally RW to `target`
     Persist {
         target: PathBuf,
         flags: HashSet<MountFlag>,
@@ -214,6 +228,9 @@ enum MountSource {
         #[serde(default)]
         flags: HashSet<MountFlag>,
     },
+    Dev {
+        dev: Dev,
+    },
     Persist {
         #[serde(default)]
         flags: HashSet<MountFlag>,
@@ -275,6 +292,9 @@ impl MountsSerialization {
                         flags: flags.clone(),
                     },
                 )?,
+                Mount::Dev { dev } => {
+                    map.serialize_entry("/dev", &MountSource::Dev { dev: dev.clone() })?
+                }
                 Mount::Persist { target, flags } => map.serialize_entry(
                     &target,
                     &MountSource::Persist {
@@ -320,6 +340,7 @@ impl MountsSerialization {
                             host,
                             flags,
                         },
+                        MountSource::Dev { dev } => Mount::Dev { dev },
                         MountSource::Tmpfs { size } => Mount::Tmpfs { target, size },
                         MountSource::Persist { flags } => Mount::Persist { target, flags },
                         MountSource::Resource { resource } => {
@@ -443,6 +464,8 @@ mounts:
         size: 42
     /big_tmpfs:
         size: 42G
+    /dev:
+        dev: minimal
 autostart: true
 cgroups:
   mem:
@@ -505,6 +528,7 @@ log:
                 target: PathBuf::from("/big_tmpfs"),
                 size: "42G".to_string(),
             },
+            Mount::Dev { dev: Dev::Minimal },
         ];
         assert_eq!(manifest.mounts, mounts);
         assert_eq!(
@@ -549,6 +573,8 @@ mounts:
         size: 42
     /big_tmpfs:
         size: 42G
+    /dev:
+        dev: minimal
 autostart: true
 cgroups:
   mem:
@@ -565,10 +591,10 @@ log:
 ";
 
         let manifest = serde_yaml::from_str::<Manifest>(m)?;
-        let string_copie = serde_yaml::to_string(&manifest)?;
-        let manifest_copie = serde_yaml::from_str::<Manifest>(&string_copie)?;
+        println!("{}", serde_yaml::to_string(&manifest)?);
+        let deserialized = serde_yaml::from_str::<Manifest>(&serde_yaml::to_string(&manifest)?)?;
 
-        assert_eq!(manifest, manifest_copie);
+        assert_eq!(manifest, deserialized);
         Ok(())
     }
 
