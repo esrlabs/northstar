@@ -202,7 +202,7 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instances: Option<u32>,
     /// List of bind mounts and resources
-    #[serde(with = "MountsSerialization")]
+    #[serde(with = "MountsSerialization", skip_serializing_if = "HashMap::is_empty")]
     #[serde(default)]
     pub mounts: HashMap<PathBuf, Mount>,
 }
