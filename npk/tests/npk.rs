@@ -17,7 +17,7 @@ mod npk {
     use npk::npk::{gen_key, pack, unpack};
     use std::{
         fs::File,
-        io::{Read, Write},
+        io::{Write},
         path::{Path, PathBuf},
     };
 
@@ -26,32 +26,13 @@ mod npk {
 version: 0.0.2
 init: /hello
 env:
-  HELLO: north
-# autostart: true
-# instances: 20
-mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system";
+  HELLO: north";
     const TEST_MANIFEST_UNPACKED: &str = "---
 name: hello
 version: 0.0.2
 init: /hello
 env:
-  HELLO: north
-mounts:
-  /lib:
-    host: /lib
-    flags: []
-  /lib64:
-    host: /lib64
-    flags: []
-  /system:
-    host: /system
-    flags: []";
+  HELLO: north";
 
     fn create_test_npk(dest: &Path) -> PathBuf {
         let src = create_tmp_dir();
@@ -122,13 +103,10 @@ mounts:
         assert!(npk.exists());
         let unpack_dest = create_tmp_dir();
         unpack(&npk, &unpack_dest).expect("Unpack NPK");
-        let manifest_path = unpack_dest.join("manifest").with_extension("yaml");
-        assert!(manifest_path.exists());
-        let mut manifest: String = "".to_string();
-        File::open(manifest_path)
-            .expect("Open unpacked manifest")
-            .read_to_string(&mut manifest)
-            .expect("Read unpacked manifest");
+        let manifest = unpack_dest.join("manifest").with_extension("yaml");
+        assert!(manifest.exists());
+        let manifest = std::fs::read_to_string(&manifest).expect("Failed to parse manifest");
+
         assert_eq!(TEST_MANIFEST_UNPACKED, manifest);
     }
 
