@@ -87,6 +87,7 @@ impl Runtime {
         let (stop_tx, stop_rx) = oneshot::channel();
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
+        #[cfg(any(target_os = "android", target_os = "linux"))]
         linux::minijail::init().await.map_err(Error::Minijail)?;
 
         // Ensure the configured run_dir exists

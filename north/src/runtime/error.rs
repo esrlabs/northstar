@@ -49,11 +49,11 @@ pub enum Error {
         #[source]
         error: io::Error,
     },
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Protocol error: {0}")]
     Protocol(String),
     #[error("Configuration error: {0}")]
     Configuration(String),
+    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Minijail error: {0}")]
     Minijail(super::linux::minijail::Error),
     #[cfg(any(target_os = "android", target_os = "linux"))]

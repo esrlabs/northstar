@@ -172,7 +172,7 @@ pub async fn mount(state: &mut State, npk: &Path) -> Result<(Name, Version), Ins
     Ok((manifest.name, manifest.version))
 }
 
-pub async fn uninstall(container: &Container) -> Result<(), InstallationError> {
+pub async fn umount(container: &Container) -> Result<(), InstallationError> {
     debug!("Removing {}", container.root.display());
     fs::remove_dir_all(&container.root)
         .await
