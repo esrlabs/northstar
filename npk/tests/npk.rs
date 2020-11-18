@@ -17,7 +17,7 @@ mod npk {
     use npk::npk::{gen_key, pack, unpack};
     use std::{
         fs::File,
-        io::{Write},
+        io::Write,
         path::{Path, PathBuf},
     };
 
