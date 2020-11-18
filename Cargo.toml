@@ -17,6 +17,10 @@ members = [
     "examples/container/resource/ferris",
 ]
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
+panic = "abort"
 lto = true
 opt-level = 'z' # Optimize for size
