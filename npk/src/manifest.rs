@@ -137,10 +137,13 @@ pub enum MountFlag {
     // NoSuid,
 }
 
+/// Configuration for the /dev mount
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Dev {
+    /// Use minijail minimal /dev tmps meachnism
     #[serde(rename = "minimal")]
     Minimal,
+    /// Bind mount the full /dev of the host
     #[serde(rename = "full")]
     Full,
 }
@@ -148,26 +151,23 @@ pub enum Dev {
 /// Mounts
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
+    /// Mount a directory from a resouce
     Resource {
         name: String,
         version: Version,
         dir: PathBuf,
     },
+    /// Bind mount of a host dir with flags
     Bind {
         host: PathBuf,
         flags: HashSet<MountFlag>,
     },
     /// Mount /dev with flavor `dev`
-    Dev {
-        dev: Dev,
-    },
+    Dev { r#type: Dev },
     /// Mount a host directory optionally RW to `target`
-    Persist {
-        flags: HashSet<MountFlag>,
-    },
-    Tmpfs {
-        size: String,
-    },
+    Persist { flags: HashSet<MountFlag> },
+    /// Mount a tmpfs with size
+    Tmpfs { size: String },
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -224,9 +224,7 @@ enum MountSource {
         #[serde(default)]
         flags: HashSet<MountFlag>,
     },
-    Dev {
-        dev: Dev,
-    },
+    Dev(Dev),
     Persist {
         #[serde(default)]
         flags: HashSet<MountFlag>,
@@ -284,9 +282,7 @@ impl MountsSerialization {
                         flags: flags.clone(),
                     },
                 )?,
-                Mount::Dev { dev } => {
-                    map.serialize_entry(&target, &MountSource::Dev { dev: dev.clone() })?
-                }
+                Mount::Dev { r#type } => map.serialize_entry(&target, &r#type)?,
                 Mount::Persist { flags } => map.serialize_entry(
                     &target,
                     &MountSource::Persist {
@@ -331,7 +327,7 @@ impl MountsSerialization {
                         target,
                         match source {
                             MountSource::Bind { host, flags } => Mount::Bind { host, flags },
-                            MountSource::Dev { dev } => Mount::Dev { dev },
+                            MountSource::Dev(dev) => Mount::Dev { r#type: dev },
                             MountSource::Tmpfs { size } => Mount::Tmpfs { size },
                             MountSource::Persist { flags } => Mount::Persist { flags },
                             MountSource::Resource { resource } => {
@@ -455,8 +451,7 @@ mounts:
         size: 42
     /big_tmpfs:
         size: 42G
-    /dev:
-        dev: minimal
+    /dev: minimal
 autostart: true
 cgroups:
   mem:
@@ -531,7 +526,12 @@ log:
                 size: "42G".to_string(),
             },
         );
-        mounts.insert(PathBuf::from("/dev"), Mount::Dev { dev: Dev::Minimal });
+        mounts.insert(
+            PathBuf::from("/dev"),
+            Mount::Dev {
+                r#type: Dev::Minimal,
+            },
+        );
         assert_eq!(manifest.mounts, mounts);
         assert_eq!(
             manifest.cgroups,
@@ -560,14 +560,8 @@ name: hello
 version: 0.0.0
 init: /binary
 mounts:
-    /lib:
-      host: /foo
-      flags:
-          - rw
-    /lib:
-      host: /bar
-      flags:
-          - rw
+    /dev: minimal
+    /dev: full 
 ";
 
         let mut file = File::create(path)?;
@@ -605,8 +599,7 @@ mounts:
         size: 42
     /big_tmpfs:
         size: 42G
-    /dev:
-        dev: minimal
+    /dev: minimal
 autostart: true
 cgroups:
   mem:
@@ -623,7 +616,6 @@ log:
 ";
 
         let manifest = serde_yaml::from_str::<Manifest>(m)?;
-        println!("{}", serde_yaml::to_string(&manifest)?);
         let deserialized = serde_yaml::from_str::<Manifest>(&serde_yaml::to_string(&manifest)?)?;
 
         assert_eq!(manifest, deserialized);
