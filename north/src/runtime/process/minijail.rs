@@ -362,13 +362,12 @@ async fn setup_mounts(
             Mount::Dev { r#type } => {
                 match r#type {
                     Dev::Minimal => {
-                        debug!("Mounting minimal dev");
+                        debug!("Mounting minimal /dev");
                         jail.mount_dev();
                     }
                     // The Full mount of /dev is a simple rw bind mount of /dev
                     Dev::Full => {
-                        debug!("Mounting full dev");
-                        let dev = Path::new("dev");
+                        let dev = Path::new("/dev");
                         mount_bind(jail, &dev, &dev, true)?;
                     }
                 }
