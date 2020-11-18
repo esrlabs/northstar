@@ -3121,6 +3121,13 @@ static int minijail_run_internal(struct minijail *j,
 	minijail_free_run_state(state_out);
 
 	/*
+	 * Set a parent death signal. The kernel will send a SIGKILL to this process
+	 * when the parent exits.
+	 */
+	if(prctl(PR_SET_PDEATHSIG, SIGKILL))
+		pdie("failed to set parent death signal to SIGKILL");
+
+	/*
 	 * If we aren't pid-namespaced, or the jailed program asked to be init:
 	 *   calling process
 	 *   -> execve()-ing process
