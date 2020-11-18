@@ -19,10 +19,7 @@ use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
-use npk::{
-    archive::Container,
-    manifest::{Mount, MountFlag},
-};
+use npk::{archive::Container, manifest::{Dev, Mount, MountFlag}};
 use std::{fmt, ops, os::unix::io::AsRawFd, path::Path};
 use tokio::{
     fs,
@@ -279,35 +276,40 @@ async fn setup_mounts(
     gid: u32,
     run_dir: &Path,
 ) -> Result<(), Error> {
-    // Create a minimal dev folder in a tmpfs and mount on /dev
-    jail.mount_dev();
-    // Mount a tmpfs on /tmp
-    jail.mount_tmp();
-
     // Mount /proc
     mount_bind(jail, Path::new("/proc"), Path::new("/proc"), false)?;
     // Instruct minijail to remount /proc ro after entering the mount ns
     // with MS_NODEV | MS_NOEXEC | MS_NOSUID
     jail.remount_proc_readonly();
 
-    for mount in container.manifest.mounts.iter() {
+    let mut mounts = container.manifest.mounts.clone();
+    // If there's no explicit mount for /dev add a minimal variant
+    if !container.manifest.mounts.iter().any(|m| {
+        if let Mount::Dev { dev: _ } = m {
+            true
+        } else {
+            false
+        }
+    }) {
+        mounts.push(Mount::Dev { dev: Dev::Minimal });
+    }
+    for mount in &mounts {
         match &mount {
             Mount::Bind {
                 target,
                 host,
                 flags,
             } => {
-                let source = host.as_path();
-                if !source.exists() {
+                if !&host.exists() {
                     warn!(
                         "Cannot bind mount nonexitent source {} to {}",
-                        source.display(),
+                        host.display(),
                         target.display()
                     );
                     continue;
                 }
                 let rw = flags.contains(&MountFlag::Rw);
-                mount_bind(jail, &source, &target, rw)?;
+                mount_bind(jail, &host, &target, rw)?;
             }
             Mount::Persist { target, flags } => {
                 let dir = data_dir.join(&container.manifest.name);
@@ -365,6 +367,20 @@ async fn setup_mounts(
                 let data = format!("size={},mode=1777", size);
                 jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
                     .map_err(Error::Minijail)?;
+            }
+            Mount::Dev { dev } => {
+                match dev {
+                    Dev::Minimal => {
+                        debug!("Mounting minimal dev");
+                        jail.mount_dev();
+                    }
+                    // The Full mount of /dev is a simple rw bind mount of /dev
+                    Dev::Full => {
+                        debug!("Mounting full dev");
+                        let dev = Path::new("dev");
+                        mount_bind(jail, &dev, &dev, true)?;
+                    }
+                }
             }
         }
     }
