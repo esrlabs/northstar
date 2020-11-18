@@ -201,7 +201,7 @@ impl State {
         }
 
         // Check for all required resources
-        for mount in app.container.manifest.mounts.iter() {
+        for mount in app.container.manifest.mounts.values() {
             if let Mount::Resource { name, .. } = mount {
                 if !resources.contains(name) {
                     return Err(Error::MissingResource(name.clone()));

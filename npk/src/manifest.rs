@@ -149,13 +149,11 @@ pub enum Dev {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
     Resource {
-        target: PathBuf,
         name: String,
         version: Version,
         dir: PathBuf,
     },
     Bind {
-        target: PathBuf,
         host: PathBuf,
         flags: HashSet<MountFlag>,
     },
@@ -165,11 +163,9 @@ pub enum Mount {
     },
     /// Mount a host directory optionally RW to `target`
     Persist {
-        target: PathBuf,
         flags: HashSet<MountFlag>,
     },
     Tmpfs {
-        target: PathBuf,
         size: String,
     },
 }
@@ -208,7 +204,7 @@ pub struct Manifest {
     /// List of bind mounts and resources
     #[serde(with = "MountsSerialization")]
     #[serde(default)]
-    pub mounts: Vec<Mount>,
+    pub mounts: HashMap<PathBuf, Mount>,
 }
 
 struct MountsSerialization;
@@ -274,18 +270,14 @@ where
 }
 
 impl MountsSerialization {
-    fn serialize<S>(mounts: &[Mount], serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(mounts: &HashMap<PathBuf, Mount>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let mut map = serializer.serialize_map(Some(mounts.len()))?;
-        for mount in mounts {
+        for (target, mount) in mounts {
             match mount {
-                Mount::Bind {
-                    target,
-                    host,
-                    flags,
-                } => map.serialize_entry(
+                Mount::Bind { host, flags } => map.serialize_entry(
                     &target,
                     &MountSource::Bind {
                         host: host.clone(),
@@ -293,26 +285,21 @@ impl MountsSerialization {
                     },
                 )?,
                 Mount::Dev { dev } => {
-                    map.serialize_entry("/dev", &MountSource::Dev { dev: dev.clone() })?
+                    map.serialize_entry(&target, &MountSource::Dev { dev: dev.clone() })?
                 }
-                Mount::Persist { target, flags } => map.serialize_entry(
+                Mount::Persist { flags } => map.serialize_entry(
                     &target,
                     &MountSource::Persist {
                         flags: flags.clone(),
                     },
                 )?,
-                Mount::Resource {
-                    target,
-                    name,
-                    version,
-                    dir,
-                } => map.serialize_entry(
+                Mount::Resource { name, version, dir } => map.serialize_entry(
                     &target,
                     &MountSource::Resource {
                         resource: format!("{}:{}{}", name, version, dir.display()),
                     },
                 )?,
-                Mount::Tmpfs { target, size } => {
+                Mount::Tmpfs { size } => {
                     map.serialize_entry(&target, &MountSource::Tmpfs { size: size.clone() })?
                 }
             }
@@ -320,54 +307,53 @@ impl MountsSerialization {
         map.end()
     }
 
-    fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Mount>, D::Error>
+    fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<PathBuf, Mount>, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct MountVectorVisitor;
         impl<'de> Visitor<'de> for MountVectorVisitor {
-            type Value = Vec<Mount>;
+            type Value = HashMap<PathBuf, Mount>;
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
             {
-                let mut entries = Vec::new();
+                let mut entries = HashMap::new();
                 while let Some((target, source)) = map.next_entry()? {
-                    entries.push(match source {
-                        MountSource::Bind { host, flags } => Mount::Bind {
-                            target,
-                            host,
-                            flags,
+                    entries.insert(
+                        target,
+                        match source {
+                            MountSource::Bind { host, flags } => Mount::Bind { host, flags },
+                            MountSource::Dev { dev } => Mount::Dev { dev },
+                            MountSource::Tmpfs { size } => Mount::Tmpfs { size },
+                            MountSource::Persist { flags } => Mount::Persist { flags },
+                            MountSource::Resource { resource } => {
+                                lazy_static! {
+                                    static ref RE: regex::Regex = regex::Regex::new(
+                                        r"(?P<name>\w+):(?P<version>[\d.]+)(?P<dir>[\w/]+)?"
+                                    )
+                                    .expect("Invalid regex");
+                                }
+
+                                let caps = RE.captures(&resource).ok_or_else(|| {
+                                    serde::de::Error::custom(format!(
+                                        "Invalid resource: {}",
+                                        resource
+                                    ))
+                                })?;
+
+                                let name = caps.name("name").unwrap().as_str().to_string();
+                                let version =
+                                    Version::parse(caps.name("version").unwrap().as_str())
+                                        .map_err(serde::de::Error::custom)?;
+                                let dir =
+                                    PathBuf::from(caps.name("dir").map_or("/", |m| m.as_str()));
+
+                                Mount::Resource { name, version, dir }
+                            }
                         },
-                        MountSource::Dev { dev } => Mount::Dev { dev },
-                        MountSource::Tmpfs { size } => Mount::Tmpfs { target, size },
-                        MountSource::Persist { flags } => Mount::Persist { target, flags },
-                        MountSource::Resource { resource } => {
-                            lazy_static! {
-                                static ref RE: regex::Regex = regex::Regex::new(
-                                    r"(?P<name>\w+):(?P<version>[\d.]+)(?P<dir>[\w/]+)?"
-                                )
-                                .expect("Invalid regex");
-                            }
-
-                            let caps = RE.captures(&resource).ok_or_else(|| {
-                                serde::de::Error::custom(format!("Invalid resource: {}", resource))
-                            })?;
-
-                            let name = caps.name("name").unwrap().as_str().to_string();
-                            let version = Version::parse(caps.name("version").unwrap().as_str())
-                                .map_err(serde::de::Error::custom)?;
-                            let dir = PathBuf::from(caps.name("dir").map_or("/", |m| m.as_str()));
-
-                            Mount::Resource {
-                                target,
-                                name,
-                                version,
-                                dir,
-                            }
-                        }
-                    })
+                    );
                 }
                 Ok(entries)
             }
@@ -458,7 +444,7 @@ mounts:
     /data_rw:
       flags:
           - rw
-    /here/we/go:
+    /resource:
         resource: bla:1.0.0/bin/foo
     /tmpfs:
         size: 42
@@ -500,36 +486,47 @@ log:
             env.get("LD_LIBRARY_PATH"),
             Some("/lib".to_string()).as_ref()
         );
-        let mounts = vec![
+        let mut mounts = HashMap::new();
+        mounts.insert(
+            PathBuf::from("/lib"),
             Mount::Bind {
-                target: PathBuf::from("/lib"),
                 host: PathBuf::from("/lib"),
                 flags: [MountFlag::Rw].iter().cloned().collect(),
             },
+        );
+        mounts.insert(
+            PathBuf::from("/data"),
             Mount::Persist {
-                target: PathBuf::from("/data"),
                 flags: HashSet::new(),
             },
+        );
+        mounts.insert(
+            PathBuf::from("/data_rw"),
             Mount::Persist {
-                target: PathBuf::from("/data_rw"),
                 flags: [MountFlag::Rw].iter().cloned().collect(),
             },
+        );
+        mounts.insert(
+            PathBuf::from("/resource"),
             Mount::Resource {
-                target: PathBuf::from("/here/we/go"),
                 name: "bla".to_string(),
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
             },
+        );
+        mounts.insert(
+            PathBuf::from("/tmpfs"),
             Mount::Tmpfs {
-                target: PathBuf::from("/tmpfs"),
                 size: "42".to_string(),
             },
+        );
+        mounts.insert(
+            PathBuf::from("/big_tmpfs"),
             Mount::Tmpfs {
-                target: PathBuf::from("/big_tmpfs"),
                 size: "42G".to_string(),
             },
-            Mount::Dev { dev: Dev::Minimal },
-        ];
+        );
+        mounts.insert(PathBuf::from("/dev"), Mount::Dev { dev: Dev::Minimal });
         assert_eq!(manifest.mounts, mounts);
         assert_eq!(
             manifest.cgroups,
@@ -567,7 +564,7 @@ mounts:
     /data_rw:
       flags:
           - rw
-    /here/we/go:
+    /resource:
         resource: bla:1.0.0/bin/foo
     /tmpfs:
         size: 42

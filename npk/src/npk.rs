@@ -280,9 +280,9 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
         ];
     }
 
-    for mount in manifest.mounts.iter() {
+    for (target, mount) in &manifest.mounts {
         match mount {
-            Mount::Bind { target, flags, .. } | Mount::Persist { target, flags, .. } => {
+            Mount::Bind { flags, .. } | Mount::Persist { flags, .. } => {
                 let mode = if flags.contains(&MountFlag::Rw) {
                     777
                 } else {
@@ -291,8 +291,8 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
                 pseudo_files.push((target.display().to_string(), mode));
             }
             // /dev is default
-            Mount::Dev { dev: _ } => (),
-            Mount::Resource { target, .. } => {
+            Mount::Dev { .. } => (),
+            Mount::Resource { .. } => {
                 // In order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
                 // e.g. to support res/foo in our image, we need to add /res/foo AND /res
                 // ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
@@ -301,7 +301,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
                     pseudo_files.push((path.display().to_string(), 555));
                 }
             }
-            Mount::Tmpfs { target, .. } => {
+            Mount::Tmpfs { .. } => {
                 let mode = 777;
                 pseudo_files.push((target.display().to_string(), mode));
             }

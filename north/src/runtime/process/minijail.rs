@@ -284,22 +284,13 @@ async fn setup_mounts(
 
     let mut mounts = container.manifest.mounts.clone();
     // If there's no explicit mount for /dev add a minimal variant
-    if !container.manifest.mounts.iter().any(|m| {
-        if let Mount::Dev { dev: _ } = m {
-            true
-        } else {
-            false
-        }
-    }) {
-        mounts.push(Mount::Dev { dev: Dev::Minimal });
+    let dev = PathBuf::from("/dev");
+    if !container.manifest.mounts.contains_key(&dev) {
+        mounts.insert(dev, Mount::Dev { dev: Dev::Minimal });
     }
-    for mount in &mounts {
+    for (target, mount) in &mounts {
         match &mount {
-            Mount::Bind {
-                target,
-                host,
-                flags,
-            } => {
+            Mount::Bind { host, flags } => {
                 if !&host.exists() {
                     warn!(
                         "Cannot bind mount nonexitent source {} to {}",
@@ -311,7 +302,7 @@ async fn setup_mounts(
                 let rw = flags.contains(&MountFlag::Rw);
                 mount_bind(jail, &host, &target, rw)?;
             }
-            Mount::Persist { target, flags } => {
+            Mount::Persist { flags } => {
                 let dir = data_dir.join(&container.manifest.name);
                 debug!("Creating {}", dir.display());
                 fs::create_dir_all(&dir).await.map_err(|e| Error::Io {
@@ -333,12 +324,7 @@ async fn setup_mounts(
                 let rw = flags.contains(&MountFlag::Rw);
                 mount_bind(jail, &dir, &target, rw)?;
             }
-            Mount::Resource {
-                target,
-                name,
-                version,
-                dir,
-            } => {
+            Mount::Resource { name, version, dir } => {
                 let shared_resource_path = {
                     let dir_in_container_path = dir.clone();
                     let first_part_of_path = run_dir.join(&name).join(&version.to_string());
@@ -362,7 +348,7 @@ async fn setup_mounts(
 
                 mount_bind(jail, &shared_resource_path, &target.as_path(), false)?;
             }
-            Mount::Tmpfs { target, size } => {
+            Mount::Tmpfs { size } => {
                 debug!("Mounting tmpfs to {}", target.display());
                 let data = format!("size={},mode=1777", size);
                 jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
