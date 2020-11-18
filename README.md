@@ -65,18 +65,22 @@ The `manifest.yaml` contains essential information about the package like id and
 This is what a typical manifest looks like (taken from the examples)
 
 ```yaml
-# Use the ferris interpreter from the resouce listed below
 name: ferris_says_hello
 version: 0.0.1
 init: /bin/ferris
-# Pass the filename with the hello message
 args:
   - /message/hello
 mounts:
-  /bin:
-    resource: ferris:0.0.2
-  /message:
-    resource: hello_message:0.1.2
+    /lib:
+      host: /lib
+    /lib64:
+      host: /lib64
+    /system:
+      host: /system
+    /bin:
+      resource: ferris:0.0.2
+    /message:
+      resource: hello_message:0.1.2
 ```
 
 The `signature.yaml` contains signatures that are used to verify the package and the included file system. It is automatically created by the tooling.
