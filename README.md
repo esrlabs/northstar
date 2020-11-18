@@ -202,7 +202,6 @@ Here is an example:
 ```toml
 debug = true
 console_address = "localhost:4200"
-global_data_dir = false
 container_uid = 1000
 container_gid = 1000
 
