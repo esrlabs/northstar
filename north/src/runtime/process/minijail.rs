@@ -286,7 +286,12 @@ async fn setup_mounts(
     // If there's no explicit mount for /dev add a minimal variant
     let dev = PathBuf::from("/dev");
     if !container.manifest.mounts.contains_key(&dev) {
-        mounts.insert(dev, Mount::Dev { dev: Dev::Minimal });
+        mounts.insert(
+            dev,
+            Mount::Dev {
+                r#type: Dev::Minimal,
+            },
+        );
     }
     for (target, mount) in &mounts {
         match &mount {
@@ -354,8 +359,8 @@ async fn setup_mounts(
                 jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
                     .map_err(Error::Minijail)?;
             }
-            Mount::Dev { dev } => {
-                match dev {
+            Mount::Dev { r#type } => {
+                match r#type {
                     Dev::Minimal => {
                         debug!("Mounting minimal dev");
                         jail.mount_dev();
