@@ -16,18 +16,19 @@ use super::{
     config::Config,
     error::{Error, InstallationError},
     keys,
-    npk::read_manifest,
-    npk::Container,
     process::{ExitStatus, Process},
     Event, EventTx,
 };
-use crate::runtime::linux::{umount_and_remove, unpack_and_mount};
 use crate::{
     api::Notification,
-    manifest::{Manifest, Mount, Name, Version},
+    runtime::linux::{umount_and_remove, unpack_and_mount},
 };
 use ed25519_dalek::*;
 use log::{debug, error, info, warn};
+use npk::{
+    archive::{read_manifest, Container},
+    manifest::{Manifest, Mount, Name, Version},
+};
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter,

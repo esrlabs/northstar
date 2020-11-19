@@ -4,6 +4,7 @@ members = [
     "minijail/rust/minijail",
     "minijail/rust/minijail-sys",
     "north",
+    "npk",
     "nstar",
     "sextant",
     "tests",

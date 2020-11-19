@@ -1,18 +1,4 @@
-// Copyright (c) 2019 - 2020 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
-
-use crate::manifest::Manifest;
+use crate::{manifest::Manifest, Error as NpkError};
 use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
 use fmt::Debug;
 use log::trace;
@@ -27,8 +13,6 @@ use std::{
     str::FromStr,
 };
 use thiserror::Error;
-
-pub mod verity;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -194,7 +178,7 @@ const MANIFEST: &str = "manifest.yaml";
 const SIGNATURE: &str = "signature.yaml";
 const FS_IMAGE: &str = "fs.img";
 
-pub(crate) struct ArchiveReader<'a> {
+pub struct ArchiveReader<'a> {
     archive: zip::ZipArchive<std::io::BufReader<std::fs::File>>,
     signing_keys: &'a HashMap<String, PublicKey>,
 }
@@ -202,15 +186,17 @@ pub(crate) struct ArchiveReader<'a> {
 pub fn read_manifest(
     npk: &Path,
     signing_keys: &HashMap<String, PublicKey>,
-) -> Result<Manifest, Error> {
-    let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
-    archive_reader.extract_manifest_from_archive()
+) -> Result<Manifest, NpkError> {
+    let mut archive_reader = ArchiveReader::new(&npk, &signing_keys).map_err(NpkError::Archive)?;
+    archive_reader
+        .extract_manifest_from_archive()
+        .map_err(NpkError::Archive)
 }
 
 impl<'a> ArchiveReader<'a> {
     pub fn new(npk: &Path, signing_keys: &'a HashMap<String, PublicKey>) -> Result<Self, Error> {
         let file =
-            std::fs::File::open(&npk).map_err(|e| Error::CouldNotOpenFile(PathBuf::from(npk)))?;
+            std::fs::File::open(&npk).map_err(|_e| Error::CouldNotOpenFile(PathBuf::from(npk)))?;
 
         let reader: std::io::BufReader<std::fs::File> = std::io::BufReader::new(file);
         let archive: zip::ZipArchive<std::io::BufReader<std::fs::File>> =

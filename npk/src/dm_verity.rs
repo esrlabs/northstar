@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{anyhow, Context, Result};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::{
@@ -20,6 +19,7 @@ use std::{
     io::{BufReader, Read, Seek, SeekFrom::Start, Write},
     path::Path,
 };
+use thiserror::Error;
 use uuid::Uuid;
 
 pub const SHA256_SIZE: usize = 32;
@@ -28,24 +28,31 @@ pub const BLOCK_SIZE: usize = 4096;
 pub type Sha256Digest = [u8; SHA256_SIZE];
 pub type Salt = Sha256Digest;
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Error generating hash tree: {0}")]
+    HashTree(String),
+    #[error("Error creating valid uuid")]
+    Uuid,
+    #[error("OS error: {context}")]
+    Os {
+        context: String,
+        #[source]
+        error: std::io::Error,
+    },
+}
+
 /// Generate and append a dm-verity superblock
 /// (https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format)
 /// and a dm-verity hash_tree
 /// https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#hash-tree
 /// to the given file.
-pub fn append_dm_verity_block(fsimg_path: &Path, fsimg_size: u64) -> Result<Sha256Digest> {
+pub fn append_dm_verity_block(fsimg_path: &Path, fsimg_size: u64) -> Result<Sha256Digest, Error> {
     let (level_offsets, tree_size) =
         calc_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
-    let (salt, root_hash, hash_tree) = gen_hash_tree(
-        &File::open(&fsimg_path)
-            .with_context(|| format!("Cannot open '{}'", &fsimg_path.display()))?,
-        fsimg_size,
-        &level_offsets,
-        tree_size,
-    )
-    .with_context(|| "Error while generating hash tree")?;
-    append_superblock_and_hashtree(&fsimg_path, fsimg_size, &salt, &hash_tree)
-        .with_context(|| "Error while writing verity header")?;
+    let (salt, root_hash, hash_tree) =
+        gen_hash_tree(&fsimg_path, fsimg_size, &level_offsets, tree_size)?;
+    append_superblock_and_hashtree(&fsimg_path, fsimg_size, &salt, &hash_tree)?;
     Ok(root_hash)
 }
 
@@ -88,24 +95,27 @@ fn calc_hash_tree_level_offsets(
 }
 
 fn gen_hash_tree(
-    image: &File,
+    fsimg_path: &Path,
     image_size: u64,
     level_offsets: &[usize],
     tree_size: usize,
-) -> Result<(Salt, Sha256Digest, Vec<u8>)> {
+) -> Result<(Salt, Sha256Digest, Vec<u8>), Error> {
     // For a description of the overall hash tree generation logic see
     // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
+    let image = &File::open(&fsimg_path).map_err(|e| Error::Os {
+        context: format!("Cannot open '{}'", &fsimg_path.display()),
+        error: e,
+    })?;
     let mut hashes: Vec<[u8; SHA256_SIZE]> = vec![];
     let mut level_num = 0;
     let mut level_size = image_size;
     let mut hash_tree = vec![0_u8; tree_size];
 
     if image_size % BLOCK_SIZE as u64 != 0 {
-        return Err(anyhow!(
-            "Failed to generate verity has tree. The image size {} is not a multiple of the block size {}",
+        return Err(Error::HashTree(format!("Failed to generate verity has tree. The image size {} is not a multiple of the block size {}",
             image_size,
-            BLOCK_SIZE
+            BLOCK_SIZE)
         ));
     }
 
@@ -134,8 +144,14 @@ fn gen_hash_tree(
                 let offset = level_size - rem_size;
                 let mut data = vec![0_u8; BLOCK_SIZE];
                 let mut image_reader = BufReader::new(image);
-                image_reader.seek(Start(offset))?;
-                image_reader.read_exact(&mut data)?;
+                image_reader.seek(Start(offset)).map_err(|e| Error::Os {
+                    context: format!("Failed to seek in file {}", &fsimg_path.display()),
+                    error: e,
+                })?;
+                image_reader.read_exact(&mut data).map_err(|e| Error::Os {
+                    context: "Failed to read from fs-image".to_string(),
+                    error: e,
+                })?;
                 sha256.update(&data);
             } else {
                 // hash block of previous level
@@ -177,7 +193,7 @@ fn append_superblock_and_hashtree(
     fsimg_size: u64,
     salt: &Salt,
     hash_tree: &[u8],
-) -> Result<()> {
+) -> Result<(), Error> {
     let uuid = Uuid::new_v4();
     assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
     let data_blocks = fsimg_size / BLOCK_SIZE as u64;
@@ -186,7 +202,10 @@ fn append_superblock_and_hashtree(
         .write(true)
         .append(true)
         .open(&fsimg_path)
-        .with_context(|| format!("Cannot open '{}'", &fsimg_path.display()))?;
+        .map_err(|e| Error::Os {
+            context: format!("Cannot open '{}'", &fsimg_path.display()),
+            error: e,
+        })?;
 
     // write verity superblock
     // https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format
@@ -196,7 +215,7 @@ fn append_superblock_and_hashtree(
     raw_sb.extend(VERITY_SIGNATURE);
     raw_sb.extend(&1_u32.to_ne_bytes()); // superblock version
     raw_sb.extend(&1_u32.to_ne_bytes()); // hash type 'normal'
-    raw_sb.extend(&hex::decode(uuid.to_string().replace("-", ""))?);
+    raw_sb.extend(&hex::decode(uuid.to_string().replace("-", "")).map_err(|_e| Error::Uuid)?);
     raw_sb.extend(HASH_ALG_NAME);
     raw_sb.extend(&[0_u8; 26]);
     raw_sb.extend(&(BLOCK_SIZE as u32).to_ne_bytes()); // data block in bytes
@@ -206,10 +225,16 @@ fn append_superblock_and_hashtree(
     raw_sb.extend(&[0_u8; 6]); // padding
     raw_sb.extend(salt);
     raw_sb.extend(&vec![0_u8; 256 - salt.len()]); // padding
-    fsimg.write_all(&raw_sb)?;
 
-    fsimg.write_all(vec![0u8; BLOCK_SIZE - raw_sb.len()].as_slice())?; // pad to BLOCK_SIZE
-    fsimg.write_all(&hash_tree)?;
+    || -> Result<(), std::io::Error> {
+        fsimg.write_all(&raw_sb)?;
+        fsimg.write_all(vec![0u8; BLOCK_SIZE - raw_sb.len()].as_slice())?; // pad to BLOCK_SIZE
+        fsimg.write_all(&hash_tree)
+    }()
+    .map_err(|e| Error::Os {
+        context: "Failed to write to fs-image".to_string(),
+        error: e,
+    })?;
     Ok(())
 }
 

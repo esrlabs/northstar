@@ -15,7 +15,7 @@
 use derive_new::new;
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{Manifest, Version};
+use npk::manifest::{Manifest, Version};
 
 pub type Name = String;
 pub type MessageId = String; // UUID

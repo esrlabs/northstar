@@ -12,12 +12,15 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::dm_verity::{append_dm_verity_block, BLOCK_SIZE};
-use anyhow::{anyhow, Context, Result};
-use colored::Colorize;
+use crate::{
+    dm_verity::{append_dm_verity_block, Error as VerityError, BLOCK_SIZE},
+    manifest::{Manifest, Mount, MountFlag},
+};
+use ed25519_dalek::SignatureError;
+use zip::result::ZipError;
+// use colored::Colorize;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
-use north::manifest::{Manifest, Mount, MountFlag};
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 use std::{
@@ -29,10 +32,11 @@ use std::{
     process::Command,
 };
 use tempfile::TempDir;
+use thiserror::Error;
 use zip::ZipArchive;
 
 const MKSQUASHFS_BIN: &str = "mksquashfs";
-const UNSQUASHFS_BIN: &str = "unsquashfs";
+pub const UNSQUASHFS_BIN: &str = "unsquashfs";
 
 // user and group id for squashfs pseudo directories ('/dev', '/proc', '/tmp' etc.)
 const PSEUDO_DIR_UID: u32 = 1000;
@@ -42,12 +46,42 @@ const PSEUDO_DIR_GID: u32 = 1000;
 const NPK_EXT: &str = "npk";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
-const FS_IMG_NAME: &str = "fs.img";
+pub const FS_IMG_NAME: &str = "fs.img";
 const MANIFEST_BASE: &str = "manifest";
 const MANIFEST_EXT: &str = "yaml";
-const MANIFEST_NAME: &str = "manifest.yaml";
-const SIGNATURE_NAME: &str = "signature.yaml";
+pub const MANIFEST_NAME: &str = "manifest.yaml";
+pub const SIGNATURE_NAME: &str = "signature.yaml";
 const ROOT_DIR_NAME: &str = "root";
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Manifest format error: {0}")]
+    Manifest(String),
+    #[error("File operation error: {0}")]
+    FileOperation(String),
+    #[error("Squashfs error: {0}")]
+    Squashfs(String),
+    #[error("Archive error: {context}")]
+    Archive {
+        context: String,
+        #[source]
+        error: ZipError,
+    },
+    #[error("Verity error")]
+    Verity(#[source] VerityError),
+    #[error("OS error: {context}")]
+    Os {
+        context: String,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Key error: {context}")]
+    Key {
+        context: String,
+        #[source]
+        error: SignatureError,
+    },
+}
 
 /// Create an NPK for the north runtime.
 /// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
@@ -61,11 +95,14 @@ const ROOT_DIR_NAME: &str = "root";
 /// --dir examples/container/hello \
 /// --out target/north/registry \
 /// --key examples/keys/north.key \
-pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<()> {
+pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;
 
     // add manifest and root dir to tmp dir
-    let tmp = tempfile::TempDir::new().with_context(|| "Failed to create temporary directory")?;
+    let tmp = tempfile::TempDir::new().map_err(|e| Error::Os {
+        context: "Failed to create temporary directory".to_string(),
+        error: e,
+    })?;
     let tmp_root = copy_src_root_to_tmp(&dir, &tmp)?;
     let tmp_manifest = write_manifest(&manifest, &tmp)?;
 
@@ -76,69 +113,20 @@ pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<()> {
     // create NPK
     let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
     write_npk(&out, &manifest, &fsimg, &signature)
-        .with_context(|| format!("Failed to create NPK at {}", &out.display()))?;
-    Ok(())
 }
 
-pub fn unpack(npk: &Path, out: &Path) -> Result<()> {
+pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
     let mut zip = open_zipped_npk(&npk)?;
-    zip.extract(&out)
-        .with_context(|| format!("Failed to extract NPK to '{}'", &out.display()))?;
+    zip.extract(&out).map_err(|e| Error::Archive {
+        context: format!("Failed to extract NPK to '{}'", &out.display()),
+        error: e,
+    })?;
     let fsimg = out.join(&FS_IMG_NAME);
     unpack_squashfs(&fsimg, &out)
-        .with_context(|| format!("Failed to unsquash image at '{}'", &fsimg.display()))?;
-    Ok(())
-}
-
-pub fn inspect(npk: &Path) -> Result<()> {
-    let mut zip = open_zipped_npk(&npk)?;
-    let mut print_buf: String = String::new();
-    println!(
-        "{}",
-        format!("# inspection of '{}'", &npk.display()).green()
-    );
-    println!("{}", "## NPK Content".to_string().green());
-    zip.file_names().for_each(|f| println!("{}", f));
-    println!();
-
-    // print manifest
-    let mut man = zip
-        .by_name(MANIFEST_NAME)
-        .context("Failed to find manifest in NPK")?;
-    println!("{}", format!("## {}", MANIFEST_NAME).green());
-    man.read_to_string(&mut print_buf)
-        .with_context(|| "Failed to read manifest")?;
-    println!("{}", &print_buf);
-    print!("\n\n");
-    print_buf.clear();
-    drop(man);
-
-    // print signature
-    let mut sig = zip
-        .by_name(SIGNATURE_NAME)
-        .context("Failed to find signature in NPK")?;
-    println!("{}", format!("## {}", SIGNATURE_NAME).green());
-    sig.read_to_string(&mut print_buf)
-        .with_context(|| "Failed to read signature")?;
-    println!("{}", &print_buf);
-    print!("\n\n");
-    print_buf.clear();
-    drop(sig);
-
-    // print squashfs listing
-    let mut dest_fsimage = tempfile::NamedTempFile::new().context("Failed to create tmp file")?;
-    let mut src_fsimage = zip
-        .by_name(FS_IMG_NAME)
-        .context("Failed to find filesystem image in NPK")?;
-    io::copy(&mut src_fsimage, &mut dest_fsimage)?;
-    let path = dest_fsimage.path();
-    print_squashfs(&path)?;
-
-    Ok(())
 }
 
 /// Generate a keypair suitable for signing and verifying NPKs
-pub fn gen_key(name: &str, out: &Path) -> Result<()> {
+pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     let mut csprng = OsRng {};
     let key_pair = Keypair::generate(&mut csprng);
     let pub_key = out.join(name).with_extension("pub");
@@ -146,11 +134,16 @@ pub fn gen_key(name: &str, out: &Path) -> Result<()> {
     assume_non_existing(&pub_key)?;
     assume_non_existing(&prv_key)?;
 
-    fn write(data: &[u8], path: &Path) -> Result<()> {
-        let mut file = File::create(&path)
-            .with_context(|| format!("Failed to create '{}'", &path.display()))?;
-        file.write_all(&data)
-            .with_context(|| format!("Failed to write to '{}'", &path.display()))?;
+    fn write(data: &[u8], path: &Path) -> Result<(), Error> {
+        let mut file = File::create(&path).map_err(|e| Error::Os {
+            context: format!("Failed to create '{}'", &path.display()),
+            error: e,
+        })?;
+
+        file.write_all(&data).map_err(|e| Error::Os {
+            context: format!("Failed to write to '{}'", &path.display()),
+            error: e,
+        })?;
         Ok(())
     }
     write(&key_pair.public.to_bytes(), &pub_key)?;
@@ -158,42 +151,64 @@ pub fn gen_key(name: &str, out: &Path) -> Result<()> {
     Ok(())
 }
 
-fn open_zipped_npk(npk: &&Path) -> Result<ZipArchive<File>> {
-    let zip = zip::ZipArchive::new(
-        File::open(&npk).with_context(|| format!("Failed to open NPK at '{}'", &npk.display()))?,
-    )
-    .with_context(|| format!("Failed to parse ZIP format of NPK at '{}'", &npk.display()))?;
+pub fn open_zipped_npk(npk: &&Path) -> Result<ZipArchive<File>, Error> {
+    let zip = zip::ZipArchive::new(File::open(&npk).map_err(|e| Error::Os {
+        context: format!("Failed to open NPK at '{}'", &npk.display()),
+        error: e,
+    })?)
+    .map_err(|e| Error::Archive {
+        context: format!("Failed to parse ZIP format of NPK at '{}'", &npk.display()),
+        error: e,
+    })?;
+
     Ok(zip)
 }
 
-fn read_manifest(src: &Path) -> Result<Manifest> {
+fn read_manifest(src: &Path) -> Result<Manifest, Error> {
     let manifest_path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
-    let manifest = std::fs::File::open(&manifest_path)
-        .with_context(|| format!("Failed to open manifest at '{}'", &manifest_path.display()))?;
-    serde_yaml::from_reader(manifest)
-        .with_context(|| format!("Failed to parse manifest '{}'", &manifest_path.display()))
+    let manifest = std::fs::File::open(&manifest_path).map_err(|e| Error::Os {
+        context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
+        error: e,
+    })?;
+
+    serde_yaml::from_reader(manifest).map_err(|_e| {
+        Error::Manifest(format!(
+            "Failed to parse manifest '{}'",
+            &manifest_path.display()
+        ))
+    })
 }
 
-fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf> {
+fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf, Error> {
     let tmp_manifest_path = tmp
         .path()
         .join(&MANIFEST_BASE)
         .with_extension(&MANIFEST_EXT);
-    let tmp_manifest = File::create(&tmp_manifest_path)
-        .with_context(|| format!("Failed to create '{}'", &tmp_manifest_path.display()))?;
+    let tmp_manifest = File::create(&tmp_manifest_path).map_err(|e| Error::Os {
+        context: format!("Failed to create '{}'", &tmp_manifest_path.display()),
+        error: e,
+    })?;
     serde_yaml::to_writer(&tmp_manifest, &manifest)
-        .with_context(|| "Failed to serialize manifest")?;
+        .map_err(|_e| Error::Manifest("Failed to serialize manifest".to_string()))?;
     Ok(tmp_manifest_path)
 }
 
-fn read_keypair(key_file: &Path) -> Result<Keypair> {
+fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     File::open(&key_file)
-        .with_context(|| format!("Failed to open '{}'", &key_file.display()))?
+        .map_err(|e| Error::Os {
+            context: format!("Failed to open '{}'", &key_file.display()),
+            error: e,
+        })?
         .read_exact(&mut secret_key_bytes)
-        .with_context(|| format!("Failed to read key data from '{}'", &key_file.display()))?;
-    let secret_key = SecretKey::from_bytes(&secret_key_bytes)
-        .with_context(|| format!("Failed to derive secret key from '{}'", &key_file.display()))?;
+        .map_err(|e| Error::Os {
+            context: format!("Failed to read key data from '{}'", &key_file.display()),
+            error: e,
+        })?;
+    let secret_key = SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
+        context: format!("Failed to derive secret key from '{}'", &key_file.display()),
+        error: e,
+    })?;
     let public_key = PublicKey::from(&secret_key);
     Ok(Keypair {
         secret: secret_key,
@@ -206,17 +221,26 @@ fn gen_hashes_yaml(
     fsimg_path: &Path,
     fsimg_size: u64,
     verity_hash: &[u8],
-) -> Result<String> {
+) -> Result<String, Error> {
     // Create hashes YAML
     let mut sha256 = Sha256::new();
-    let mut tmp_manifest = File::open(&tmp_manifest_path)
-        .with_context(|| format!("Failed to open '{}'", &tmp_manifest_path.display()))?;
-    io::copy(&mut tmp_manifest, &mut sha256)?;
+    let mut tmp_manifest = File::open(&tmp_manifest_path).map_err(|e| Error::Os {
+        context: format!("Failed to open '{}'", &tmp_manifest_path.display()),
+        error: e,
+    })?;
+    io::copy(&mut tmp_manifest, &mut sha256)
+        .map_err(|_e| Error::Manifest("Failed to calculate manifest checksum".to_string()))?;
+
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
-    let mut fsimg = File::open(&fsimg_path)
-        .with_context(|| format!("Failed to open '{}'", &fsimg_path.display()))?;
-    io::copy(&mut fsimg, &mut sha256).context("Failed to read fs image")?;
+    let mut fsimg = File::open(&fsimg_path).map_err(|e| Error::Os {
+        context: format!("Failed to open '{}'", &fsimg_path.display()),
+        error: e,
+    })?;
+    io::copy(&mut fsimg, &mut sha256).map_err(|e| Error::Os {
+        context: "Failed to read fs image".to_string(),
+        error: e,
+    })?;
 
     let fs_hash = sha256.finalize();
     let hashes = format!(
@@ -232,18 +256,21 @@ fn gen_hashes_yaml(
     Ok(hashes)
 }
 
-fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String> {
+fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String, Error> {
     let fsimg_size = fs::metadata(&fsimg)
-        .with_context(|| format!("Fail to read read size of '{}'", &fsimg.display()))?
+        .map_err(|e| Error::Os {
+            context: format!("Fail to read read size of '{}'", &fsimg.display()),
+            error: e,
+        })?
         .len();
-    let root_hash = append_dm_verity_block(&fsimg, fsimg_size)?;
+    let root_hash = append_dm_verity_block(&fsimg, fsimg_size).map_err(Error::Verity)?;
     let key_pair = read_keypair(&key_file)?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest, &fsimg, fsimg_size, &root_hash)?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
     Ok(signature_yaml)
 }
 
-fn gen_pseudo_files(manifest: &Manifest) -> Result<Vec<(String, u32)>> {
+fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
     let mut pseudo_files: Vec<(String, u32)> = vec![];
     if manifest.init.is_some() {
         pseudo_files = vec![
@@ -277,7 +304,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<Vec<(String, u32)>> {
             }
         }
     }
-    Ok(pseudo_files)
+    pseudo_files
 }
 
 fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
@@ -291,48 +318,52 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     signature_yaml
 }
 
-fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf> {
+fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     let src_root = src.join(&ROOT_DIR_NAME);
     let tmp_root = tmp.path().join(&ROOT_DIR_NAME);
     let options = fs_extra::dir::CopyOptions::new();
     if src_root.exists() {
-        fs_extra::dir::copy(&src_root, &tmp, &options).with_context(|| {
-            format!(
+        fs_extra::dir::copy(&src_root, &tmp, &options).map_err(|_e| {
+            Error::FileOperation(format!(
                 "Failed to copy from '{}' to '{}'",
                 &src_root.display(),
                 &tmp.path().display()
-            )
+            ))
         })?;
     } else {
         // create empty root dir at destination if we have nothing to copy
-        fs_extra::dir::create(&tmp_root, false)
-            .with_context(|| format!("Failed to create directory '{}'", &tmp_root.display()))?;
+        fs_extra::dir::create(&tmp_root, false).map_err(|_e| {
+            Error::FileOperation(format!(
+                "Failed to create directory '{}'",
+                &tmp_root.display()
+            ))
+        })?;
     }
     Ok(tmp_root)
 }
 
-fn create_fs_img(tmp_root: &Path, manifest: &Manifest, fsimg: &Path) -> Result<()> {
-    let pseudo_files =
-        gen_pseudo_files(&manifest).with_context(|| "Failed to generate list of pseudo files")?;
+fn create_fs_img(tmp_root: &Path, manifest: &Manifest, fsimg: &Path) -> Result<(), Error> {
+    let pseudo_files = gen_pseudo_files(&manifest);
     create_squashfs(&tmp_root, &fsimg, &pseudo_files)
-        .with_context(|| format!("Failed to create squashfs in '{}'", &fsimg.display()))?;
-    Ok(())
 }
 
-fn create_squashfs(out: &Path, src: &Path, pseudo_dirs: &[(String, u32)]) -> Result<()> {
+fn create_squashfs(out: &Path, src: &Path, pseudo_dirs: &[(String, u32)]) -> Result<(), Error> {
     #[cfg(target_os = "linux")]
     let compression_alg = "gzip";
     #[cfg(not(target_os = "linux"))]
     let compression_alg = "zstd";
 
     if which::which(&MKSQUASHFS_BIN).is_err() {
-        return Err(anyhow!("Failed to locate '{}'", &MKSQUASHFS_BIN));
+        return Err(Error::Squashfs(format!(
+            "Failed to locate '{}'",
+            &MKSQUASHFS_BIN
+        )));
     }
     if !out.exists() {
-        return Err(anyhow!(
+        return Err(Error::Squashfs(format!(
             "Output directory '{}' does not exist",
             &out.display()
-        ));
+        )));
     }
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
     cmd.arg(&out.display().to_string())
@@ -353,28 +384,30 @@ fn create_squashfs(out: &Path, src: &Path, pseudo_dirs: &[(String, u32)]) -> Res
         ));
     }
     cmd.output()
-        .with_context(|| format!("Failed to execute '{}'", &MKSQUASHFS_BIN))?;
+        .map_err(|_e| Error::Squashfs(format!("Failed to execute '{}'", &MKSQUASHFS_BIN)))?;
 
     if !src.exists() {
-        Err(anyhow!(
+        Err(Error::Squashfs(format!(
             "'{}' did not create '{}'",
-            &MKSQUASHFS_BIN,
-            &FS_IMG_NAME
-        ))
+            &MKSQUASHFS_BIN, &FS_IMG_NAME
+        )))
     } else {
         Ok(())
     }
 }
 
-fn unpack_squashfs(image: &Path, out: &Path) -> Result<()> {
+fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     if which::which(&UNSQUASHFS_BIN).is_err() {
-        return Err(anyhow!("Failed to locate '{}'", &UNSQUASHFS_BIN));
+        return Err(Error::Squashfs(format!(
+            "Failed to locate '{}'",
+            &UNSQUASHFS_BIN
+        )));
     }
     if !image.exists() {
-        return Err(anyhow!(
+        return Err(Error::Squashfs(format!(
             "Squashfs image at '{}' does not exist",
             &image.display()
-        ));
+        )));
     }
     let squashfs_root = out.join("squashfs-root");
     let mut cmd = Command::new(&UNSQUASHFS_BIN);
@@ -382,11 +415,11 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<()> {
         .arg(&squashfs_root.display().to_string())
         .arg(&image.display().to_string())
         .output()
-        .with_context(|| format!("Error while executing '{}'", &UNSQUASHFS_BIN))?;
+        .map_err(|_e| Error::Squashfs(format!("Error while executing '{}'", &UNSQUASHFS_BIN)))?;
     Ok(())
 }
 
-fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> Result<()> {
+fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> Result<(), Error> {
     let npk = npk
         .join(format!(
             "{}-{}.",
@@ -394,42 +427,49 @@ fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> 
             &manifest.version.to_string()
         ))
         .with_extension(&NPK_EXT);
-    let npk = File::create(&npk)
-        .with_context(|| format!("Failed to create NPK at '{}'", &npk.display()))?;
+    let npk = File::create(&npk).map_err(|e| Error::Os {
+        context: format!("Failed to create NPK at '{}'", &npk.display()),
+        error: e,
+    })?;
+
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let manifest_string = serde_yaml::to_string(&manifest)
+        .map_err(|e| Error::Manifest(format!("Could not serialize manifest: {}", e)))?;
     let mut zip = zip::ZipWriter::new(&npk);
-    zip.start_file(SIGNATURE_NAME, options)?;
-    zip.write_all(signature.as_bytes())?;
-    zip.start_file(MANIFEST_NAME, options)?;
-    let manifest_string = serde_yaml::to_string(&manifest)?;
-    zip.write_all(manifest_string.as_bytes())?;
+    || -> Result<(), ZipError> {
+        zip.start_file(SIGNATURE_NAME, options)?;
+        zip.write_all(signature.as_bytes())?;
+        zip.start_file(MANIFEST_NAME, options)
+    }()
+    .map_err(|e| Error::Archive {
+        context: "Could not write manifest to archive".to_string(),
+        error: e,
+    })?;
+    zip.write_all(manifest_string.as_bytes())
+        .map_err(|e| Error::Os {
+            context: "Failed to convert manifest to bytes".to_string(),
+            error: e,
+        })?;
 
     /* We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
      * 'extra data' to inflate the header of the ZIP file.
      * See chapter 4.3.6 of APPNOTE.TXT
      * (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) */
-    zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)?;
-    let mut fsimg =
-        File::open(&fsimg).with_context(|| format!("Failed to open '{}'", &fsimg.display()))?;
-    io::copy(&mut fsimg, &mut zip)?;
+    zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
+        .map_err(|e| Error::Archive {
+            context: "Could create aligned zip-file".to_string(),
+            error: e,
+        })?;
+    let mut fsimg = File::open(&fsimg).map_err(|e| Error::Os {
+        context: format!("Failed to open '{}'", &fsimg.display()),
+        error: e,
+    })?;
 
-    Ok(())
-}
-
-fn print_squashfs(fsimg_path: &Path) -> Result<()> {
-    which::which(&UNSQUASHFS_BIN)
-        .with_context(|| anyhow!("Failed to find '{}'", &UNSQUASHFS_BIN))?;
-
-    let mut cmd = Command::new(&UNSQUASHFS_BIN);
-    cmd.arg("-ll").arg(fsimg_path.display().to_string());
-
-    let output = cmd
-        .output()
-        .with_context(|| format!("Failed to execute '{}'", &UNSQUASHFS_BIN))?;
-
-    println!("{}", String::from_utf8_lossy(&output.stdout));
-
+    io::copy(&mut fsimg, &mut zip).map_err(|e| Error::Os {
+        context: "Failed to write the filesystem image to the archive".to_string(),
+        error: e,
+    })?;
     Ok(())
 }
 
@@ -445,9 +485,12 @@ fn path_trail(path: &Path) -> Vec<&Path> {
     ret
 }
 
-fn assume_non_existing(path: &Path) -> Result<()> {
+fn assume_non_existing(path: &Path) -> Result<(), Error> {
     if path.exists() {
-        Err(anyhow!("File '{}' already exists", &path.display()))
+        Err(Error::FileOperation(format!(
+            "File '{}' already exists",
+            &path.display()
+        )))
     } else {
         Ok(())
     }

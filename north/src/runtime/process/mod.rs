@@ -58,7 +58,6 @@ pub enum Error {
     Stop,
     #[error("Wrong container type: {0}")]
     WrongContainerType(String),
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Minijail error: {0}")]
     Minijail(#[from] ::minijail::Error),
     #[error("IO error: {context}")]
