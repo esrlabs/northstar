@@ -82,7 +82,11 @@ impl CaptureReader {
 }
 
 pub fn cargo_bin<S: AsRef<str>>(name: S) -> PathBuf {
-    cargo_bin_str(name.as_ref())
+    let path = cargo_bin_str(name.as_ref());
+    if !path.exists() {
+        panic!("Required binary {} does not exist", path.display());
+    }
+    path
 }
 
 fn target_dir() -> PathBuf {
