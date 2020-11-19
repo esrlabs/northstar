@@ -71,6 +71,7 @@ impl Runtime {
             let mut child = Command::new(cargo_bin("north"))
                 .current_dir("..")
                 .stdout(Stdio::piped())
+                .kill_on_drop(true)
                 .spawn()
                 .context("Could not spawn north")?;
 
