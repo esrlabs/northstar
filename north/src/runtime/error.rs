@@ -12,10 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#[cfg(any(target_os = "android", target_os = "linux"))]
-use super::linux::{self};
-#[cfg(any(target_os = "android", target_os = "linux"))]
-use super::Name;
+use super::{
+    linux::{self},
+    Name,
+};
 use crate::api::InstallationResult;
 use std::io;
 use thiserror::Error;
@@ -26,13 +26,11 @@ pub enum Error {
     #[error("Process error: {0}")]
     Process(super::process::Error),
     // linux
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Linux error")]
     Linux(#[from] linux::Error),
     #[error("Failed to uninstall")]
     UninstallationError(linux::Error),
     // linux -- cgroups
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("CGroups error: {0}")]
     CGroup(super::linux::cgroups::Error),
     // keys
@@ -40,7 +38,7 @@ pub enum Error {
     KeyError(super::keys::Error),
     // npk
     #[error("NPK error: {0}")]
-    NpkError(super::npk::Error),
+    NpkError(npk::Error),
 
     // installation
     #[error("Failed to install")]
@@ -70,7 +68,6 @@ pub enum Error {
     Protocol(String),
     #[error("Configuration error: {0}")]
     Configuration(String),
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     #[error("Minijail error: {0}")]
     Minijail(super::linux::minijail::Error),
     #[error("Internal error: {0}")]
@@ -81,38 +78,10 @@ pub enum Error {
 
 #[derive(Error, Debug)]
 pub enum InstallationError {
-    //     #[error("Verity device mapper problem ({0})")]
-    //     VerityError(String),
-    //     #[error("Missing verity header")]
-    //     NoVerityHeader,
-    //     #[error("Unsupported verity version {0}")]
-    //     UnexpectedVerityVersion(u32),
-    //     #[error("Unsupported verity algorithm: {0}")]
-    //     UnexpectedVerityAlgorithm(String),
     #[error("Application {0} already installed")]
     ApplicationAlreadyInstalled(String),
-    //     #[error("Timeout: {0}")]
-    //     Timeout(String),
     #[error("Duplicate resource")]
     DuplicateResource,
-    //     #[cfg(any(target_os = "android", target_os = "linux"))]
-    //     #[error("Device mapper error: {0}")]
-    //     DeviceMapper(device_mapper::Error),
-    //     #[cfg(any(target_os = "android", target_os = "linux"))]
-    //     #[error("Loop device error: {0}")]
-    //     LoopDeviceError(loopdev::Error),
-    //     #[cfg(any(target_os = "android", target_os = "linux"))]
-    //     #[error("Failed to mount")]
-    //     Mount(#[from] mount::Error),
-    //     #[error("Inotify")]
-    //     #[cfg(any(target_os = "android", target_os = "linux"))]
-    //     INotify(#[from] inotify::Error),
-    //     #[error("IO error: {context}")]
-    //     Io {
-    //         context: String,
-    //         #[source]
-    //         error: io::Error,
-    //     },
 }
 
 impl From<Error> for InstallationResult {

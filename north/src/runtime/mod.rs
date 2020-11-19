@@ -18,16 +18,19 @@ pub mod error;
 pub(self) mod keys;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub(self) mod linux;
-pub(self) mod npk;
 pub(self) mod process;
 pub(super) mod state;
 
-use crate::runtime::linux::mount_all;
-use crate::{api, api::Notification, manifest::Name, runtime::error::Error};
+use crate::{
+    api,
+    api::Notification,
+    runtime::{error::Error, linux::mount_all},
+};
 use config::Config;
 use console::Request;
 use log::*;
 use nix::{sys::stat, unistd};
+use npk::manifest::Name;
 use process::ExitStatus;
 use state::State;
 use std::{

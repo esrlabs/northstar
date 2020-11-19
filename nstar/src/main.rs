@@ -16,10 +16,8 @@ use anyhow::{anyhow, Context, Result};
 use futures::{sink::SinkExt, Sink};
 use itertools::Itertools;
 use log::{info, warn};
-use north::{
-    api::{self, Container, Message, Notification, Payload, Request, Response},
-    manifest::Version,
-};
+use north::api::{self, Container, Message, Notification, Payload, Request, Response};
+use npk::manifest::Version;
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{env, path::Path, sync::Arc};
 use structopt::StructOpt;

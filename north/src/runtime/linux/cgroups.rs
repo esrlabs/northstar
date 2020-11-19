@@ -13,8 +13,8 @@
 //   limitations under the License.
 
 use super::super::super::runtime::{config, Event, EventTx};
-use crate::manifest;
 use log::{debug, warn};
+use npk::manifest;
 use proc_mounts::MountIter;
 use std::{
     path::{Path, PathBuf},

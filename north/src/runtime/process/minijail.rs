@@ -13,14 +13,15 @@
 //   limitations under the License.
 
 use super::{exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
-use crate::{
-    manifest::{Mount, MountFlag},
-    runtime::{npk::Container, Event, EventTx},
-};
+use crate::runtime::{Event, EventTx};
 use log::{debug, warn};
 use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
+};
+use npk::{
+    archive::Container,
+    manifest::{Mount, MountFlag},
 };
 use std::{fmt, ops, os::unix::io::AsRawFd, path::Path};
 use tokio::{

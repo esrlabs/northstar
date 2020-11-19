@@ -106,6 +106,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3441f0f7b02788e948e47f457ca01f1d7e6d92c693bc132c22b087d3141c03ff"
 
 [[package]]
+name = "base64"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
+
+[[package]]
 name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -508,7 +514,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44533bbbb3bb3c1fa17d9f2e4e38bbbaf8396ba82193c4cb1b6445d711445d36"
 dependencies = [
  "atty",
- "humantime",
+ "humantime 1.3.0",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f26ecb66b4bdca6c1409b40fb255eefc2bd4f6d135dab3c3124f80ffa2a9661e"
+dependencies = [
+ "atty",
+ "humantime 2.0.1",
  "log",
  "regex",
  "termcolor",
@@ -757,6 +776,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "humantime"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c1ad908cc71012b7bea4d0c53ba96a8cba9962f048fa68d143376143d863b7a"
+
+[[package]]
 name = "idna"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,7 +860,7 @@ dependencies = [
  "bytes 0.5.6",
  "chrono",
  "crossbeam",
- "env_logger",
+ "env_logger 0.7.1",
  "libc",
  "log",
  "redox_syscall",
@@ -970,7 +995,7 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
+ "base64 0.12.3",
  "bitflags",
  "byteorder",
  "derive-new",
@@ -984,6 +1009,7 @@ dependencies = [
  "logd-logger",
  "minijail",
  "nix 0.17.0",
+ "npk",
  "proc-mounts",
  "procinfo",
  "regex",
@@ -1005,6 +1031,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "npk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.13.0",
+ "ed25519-dalek",
+ "fs_extra",
+ "hex",
+ "itertools",
+ "lazy_static",
+ "log",
+ "rand",
+ "regex",
+ "semver 0.11.0",
+ "serde",
+ "serde_yaml",
+ "sha2",
+ "structure",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "which",
+ "zip 0.5.8 (git+https://github.com/esrlabs/zip.git?branch=support-extra-field)",
+]
+
+[[package]]
 name = "nstar"
 version = "0.2.1"
 dependencies = [
@@ -1016,6 +1069,7 @@ dependencies = [
  "itertools",
  "log",
  "north",
+ "npk",
  "pretty_env_logger",
  "prettytable-rs",
  "regex",
@@ -1187,7 +1241,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "926d36b9553851b8b0005f1275891b392ee4d2d833852c417ed025477350fb9d"
 dependencies = [
- "env_logger",
+ "env_logger 0.7.1",
  "log",
 ]
 
@@ -1408,7 +1462,7 @@ version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9dab61250775933275e84053ac235621dfb739556d5c54a2f2e9313b7cf43a19"
 dependencies = [
- "base64",
+ "base64 0.12.3",
  "blake2b_simd",
  "constant_time_eq",
  "crossbeam-utils",
@@ -1557,16 +1611,17 @@ name = "sextant"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.13.0",
  "colored",
  "ed25519-dalek",
- "env_logger",
+ "env_logger 0.8.2",
  "fs_extra",
  "glob",
  "hex",
  "itertools",
  "log",
  "north",
+ "npk",
  "rand",
  "serde_yaml",
  "sha2",
@@ -1769,7 +1824,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "env_logger",
+ "env_logger 0.7.1",
  "log",
  "north",
  "regex",

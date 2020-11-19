@@ -14,7 +14,7 @@
 
 #[cfg(test)]
 mod npk {
-    use sextant::npk::{gen_key, inspect, pack, unpack};
+    use npk::npk::{gen_key, pack, unpack};
     use std::{
         fs::File,
         io::{Read, Write},
@@ -130,19 +130,6 @@ mounts:
             .read_to_string(&mut manifest)
             .expect("Read unpacked manifest");
         assert_eq!(TEST_MANIFEST_UNPACKED, manifest);
-    }
-
-    #[cfg(not(target_os = "macos"))] // no 'mksquashfs' binary available on CI
-    #[test]
-    fn inspect_npk() {
-        let npk = create_test_npk(&create_tmp_dir());
-        assert!(npk.exists());
-        inspect(&npk).expect("Inspect NPK");
-    }
-
-    #[test]
-    fn inspect_npk_no_file() {
-        inspect(&Path::new("invalid")).expect_err("Invalid NPK");
     }
 
     #[test]

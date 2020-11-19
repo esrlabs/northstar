@@ -14,13 +14,10 @@
 
 #![deny(clippy::all)]
 
-#[cfg(all(feature = "runtime", any(target_os = "android", target_os = "linux")))]
-#[macro_use]
+#[cfg(all(feature = "runtime"))]
 extern crate structure;
 
 #[cfg(feature = "api")]
 pub mod api;
-#[cfg(feature = "manifest")]
-pub mod manifest;
 #[cfg(feature = "runtime")]
 pub mod runtime;
