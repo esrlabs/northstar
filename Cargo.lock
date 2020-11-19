@@ -563,6 +563,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "escargot"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74cf96bec282dcdb07099f7e31d9fed323bca9435a09aba7b6d99b7617bca96d"
+dependencies = [
+ "lazy_static",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ferris"
 version = "0.1.0"
 dependencies = [
@@ -1044,10 +1056,12 @@ dependencies = [
  "anyhow",
  "async-trait",
  "env_logger 0.7.1",
+ "escargot",
+ "lazy_static",
  "log",
- "north",
- "nstar",
+ "npk",
  "regex",
+ "tempfile",
  "tokio",
 ]
 

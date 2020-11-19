@@ -20,7 +20,7 @@ use crate::{
 };
 use anyhow::{anyhow, Context, Error, Result};
 use log::{error, info};
-use std::process::Stdio;
+use std::{path::Path, process::Stdio};
 use tokio::{
     process::{Child, Command},
     select, time,
@@ -147,6 +147,14 @@ impl Runtime {
             .or_timeout(TIMEOUT)
             .await
             .context(format!("Failed to stop container {}", container_name))?
+    }
+
+    pub async fn install(&mut self, npk: &Path) -> Result<()> {
+        let command = format!("install {}", npk.display());
+        select! {
+            result = nstar(&command) => result,
+            _ = time::sleep(TIMEOUT) => Err(anyhow!("Failed to install npk")),
+        }
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
