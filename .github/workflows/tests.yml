@@ -27,7 +27,6 @@ jobs:
         shell: bash
         run: |
             ./examples/build_examples.sh
-            ./north_tests/build_test_container.sh
         env:
             TERM: xterm
       - name: Build

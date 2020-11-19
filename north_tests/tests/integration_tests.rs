@@ -13,12 +13,64 @@
 //   limitations under the License.
 
 use anyhow::{Context, Result};
+use escargot::CargoBuild;
+use lazy_static::lazy_static;
 use north_tests::{runtime::Runtime, util::Timeout};
-use std::path::Path;
+use npk::npk;
+use std::{
+    path::{Path, PathBuf},
+    sync::Once,
+};
+use tempfile::TempDir;
 use tokio::fs;
 
+static INIT: Once = Once::new();
+
 fn init_logger() {
-    env_logger::builder().is_test(true).try_init().ok();
+    INIT.call_once(|| {
+        env_logger::builder().is_test(true).try_init().ok();
+    })
+}
+
+lazy_static! {
+    static ref TEST_CONTAINER_NPK_DIR: TempDir = TempDir::new().unwrap();
+    static ref TEST_CONTAINER_NPK: PathBuf = {
+        let build_dir = TempDir::new().unwrap();
+        let package_dir = TempDir::new().unwrap();
+        let root = package_dir.path().join("root");
+
+        let binary_path = CargoBuild::new()
+            .manifest_path("test_container/Cargo.toml")
+            .target_dir(build_dir.path())
+            .run()
+            .unwrap()
+            .path()
+            .to_owned();
+
+        std::fs::create_dir_all(&root).unwrap();
+        copy_file(&binary_path, &root);
+        copy_file(
+            Path::new("test_container/manifest.yaml"),
+            package_dir.path(),
+        );
+
+        npk::pack(
+            package_dir.path(),
+            TEST_CONTAINER_NPK_DIR.path(),
+            Path::new("../examples/keys/north.key"),
+        )
+        .unwrap();
+        TEST_CONTAINER_NPK_DIR
+            .path()
+            .join("test_container-0.0.1.npk")
+    };
+}
+
+fn copy_file(file: &Path, dir: &Path) {
+    assert!(file.is_file());
+    assert!(dir.is_dir());
+    let filename = file.file_name().unwrap();
+    std::fs::copy(file, dir.join(filename)).unwrap();
 }
 
 #[ignore]
@@ -80,6 +132,9 @@ async fn check_datarw_mount() -> Result<()> {
 
     let mut runtime = Runtime::launch().await?;
 
+    // install test container
+    runtime.install(TEST_CONTAINER_NPK.as_path()).await?;
+
     let data_dir = Path::new("../target/north/data/test_container-000/").canonicalize()?;
     let input_file = data_dir.join("input.txt");
 
@@ -111,6 +166,9 @@ async fn check_crashing_container() -> Result<()> {
     let data_dir = Path::new("../target/north/data/").canonicalize()?;
 
     let mut runtime = Runtime::launch().await?;
+
+    // install test container
+    runtime.install(&TEST_CONTAINER_NPK.as_path()).await?;
 
     for i in 0..5 {
         let dir = data_dir.join(format!("test_container-0{:02}", i));
