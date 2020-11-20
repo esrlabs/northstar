@@ -16,6 +16,7 @@ use super::{
     config::Config,
     error::{Error, InstallationError},
     keys,
+    linux::Error as LinuxError,
     process::{ExitStatus, Process},
     Event, EventTx,
 };
@@ -24,7 +25,7 @@ use crate::{
     runtime::linux::{umount_and_remove, unpack_and_mount},
 };
 use ed25519_dalek::*;
-use log::{debug, error, info, warn};
+use log::*;
 use npk::{
     archive::{read_manifest, Container},
     manifest::{Manifest, Mount, Name, Version},
@@ -118,9 +119,7 @@ impl State {
     /// Create a new empty State instance
     pub async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         // Load keys for manifest verification
-        let signing_keys = keys::load(&config.directories.key_dir)
-            .await
-            .map_err(Error::KeyError)?;
+        let signing_keys = keys::load(&config.directories.key_dir).await?;
 
         Ok(State {
             events_tx: tx,
@@ -245,10 +244,10 @@ impl State {
                 self.events_tx.clone(),
             )
             .await
-            .map_err(Error::CGroup)?;
+            .map_err(Error::Linux)?;
 
             debug!("Assigning {} to cgroup {}", process.pid(), app);
-            cgroups.assign(process.pid()).await.map_err(Error::CGroup)?;
+            cgroups.assign(process.pid()).await.map_err(Error::Linux)?;
             Some(cgroups)
         } else {
             None
@@ -292,7 +291,10 @@ impl State {
                 {
                     if let Some(cgroups) = context.cgroups {
                         debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::CGroup)?;
+                        cgroups
+                            .destroy()
+                            .await
+                            .map_err(|e| Error::from(LinuxError::CGroup(e)))?;
                     }
                 }
 
@@ -336,20 +338,13 @@ impl State {
             self.stop(&name, time::Duration::from_secs(5)).await?;
         }
 
-        for (name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
-            if let Err(e) = umount_and_remove(container)
-                .await
-                .map_err(Error::UninstallationError)
-            {
-                error!("Failed to umount {}: {:?}", name, e);
-            }
+        for (_name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
+            umount_and_remove(container).await?;
         }
 
         for (name, container) in self.resources().map(|a| (a.name(), &a.container)) {
             info!("Umounting {}", name);
-            umount_and_remove(container)
-                .await
-                .map_err(Error::UninstallationError)?;
+            umount_and_remove(container).await?;
         }
 
         Ok(())
@@ -357,7 +352,7 @@ impl State {
 
     /// Install a npk
     pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
-        let manifest = read_manifest(npk, &self.signing_keys).map_err(Error::NpkError)?;
+        let manifest = read_manifest(npk, &self.signing_keys).map_err(Error::Npk)?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -398,10 +393,7 @@ impl State {
         // Copy tmpfile into registry
         fs::copy(&npk, &package_in_registry)
             .await
-            .map_err(|error| Error::Io {
-                context: "Failed to copy npk to registry".to_string(),
-                error,
-            })?;
+            .map_err(|error| Error::Io("Failed to copy npk to registry".to_string(), error))?;
 
         // Install and mount npk
         let mounted_containers = unpack_and_mount(
@@ -420,10 +412,9 @@ impl State {
 
         // Remove tmpfile
         // TODO: move this to console?
-        fs::remove_file(npk).await.map_err(|error| Error::Io {
-            context: format!("Failed to remove {}", npk.display()),
-            error,
-        })?;
+        fs::remove_file(npk)
+            .await
+            .map_err(|error| Error::Io(format!("Failed to remove {}", npk.display()), error))?;
 
         // Send notification about newly install npk
         Self::notification(
@@ -447,7 +438,6 @@ impl State {
 
     /// Remove and umount a specific app
     /// app has to be stopped before it can be uninstalled
-    // TODO uninstall resource
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> result::Result<(), Error> {
         if !self.is_installed(name, version) {
             return Err(Error::ApplicationNotFound);
@@ -478,27 +468,23 @@ impl State {
 
             // Remove npk from registry
             for d in &self.config.directories.container_dirs {
-                let mut dir = fs::read_dir(&d).await.map_err(|e| Error::Io {
-                    context: format!("Failed to read {}", d.display()),
-                    error: e,
-                })?;
+                let mut dir = fs::read_dir(&d)
+                    .await
+                    .map_err(|e| Error::Io(format!("Failed to read {}", d.display()), e))?;
                 while let Some(res) = dir.next().await {
                     let entry = res.map_err(|e| {
-                        Error::Io {
-                            context: "Could not read directory".to_string(), // TODO: Which directory?
-                            error: e,
-                        }
+                        Error::Io(
+                            "Could not read directory".to_string(), // TODO: Which directory?
+                            e,
+                        )
                     })?;
                     let manifest = read_manifest(entry.path().as_path(), &self.signing_keys)
-                        .map_err(Error::NpkError)?;
+                        .map_err(Error::Npk)?;
 
                     if manifest.name == name && manifest.version == *version {
-                        fs::remove_file(&entry.path())
-                            .await
-                            .map_err(|e| Error::Io {
-                                context: format!("Failed to remove {}", entry.path().display()),
-                                error: e,
-                            })?;
+                        fs::remove_file(&entry.path()).await.map_err(|e| {
+                            Error::Io(format!("Failed to remove {}", entry.path().display()), e)
+                        })?;
                     }
                 }
             }
@@ -530,7 +516,10 @@ impl State {
                     let mut context = context;
                     if let Some(cgroups) = context.cgroups.take() {
                         debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::CGroup)?;
+                        cgroups
+                            .destroy()
+                            .await
+                            .map_err(|e| Error::from(LinuxError::CGroup(e)))?;
                     }
                 }
                 let exit_info = match exit_status {

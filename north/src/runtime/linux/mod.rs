@@ -21,10 +21,13 @@ pub(super) mod minijail;
 pub(super) mod mount;
 pub(super) mod verity;
 
-use super::linux::{
-    self, device_mapper as dm,
-    loopdev::{losetup, LoopControl},
-    mount as linux_mount,
+use super::{
+    error::Error as NorthError,
+    linux::{
+        self, device_mapper as dm,
+        loopdev::{losetup, LoopControl},
+        mount as linux_mount,
+    },
 };
 use crate::runtime::linux::verity::veritysetup;
 use ed25519_dalek::PublicKey;
@@ -38,6 +41,7 @@ use npk::{
 };
 use std::{
     collections::HashMap,
+    io,
     path::{Path, PathBuf},
     process,
 };
@@ -48,28 +52,20 @@ use tokio::{fs, fs::metadata, stream::StreamExt, time};
 pub enum Error {
     #[error("Mount error")]
     Mount(#[from] mount::Error),
-    #[error("Unshare error: {context}")]
-    Unshare {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
-    #[error("Minijail error")]
-    Minijail(#[from] minijail::Error),
-    #[error("NPK package problem")]
-    Package(#[from] npk::Error),
+    #[error("Unshare error: {0}")]
+    Unshare(String, #[source] nix::Error),
+    #[error("Pipe error")]
+    Pipe(#[from] nix::Error),
     #[error("Device mapper error: {0}")]
     DeviceMapper(device_mapper::Error),
     #[error("Loop device error: {0}")]
-    LoopDeviceError(loopdev::Error),
+    LoopDevice(loopdev::Error),
     #[error("Inotify")]
     INotify(#[from] inotify::Error),
-    #[error("File operation error: {context}")]
-    FileOperation {
-        context: String,
-        #[source]
-        error: std::io::Error,
-    },
+    #[error("CGroups error: {0}")]
+    CGroup(#[from] cgroups::Error),
+    #[error("File operation error: {0}")]
+    FileOperation(String, #[source] io::Error),
 }
 
 pub async fn mount_all(
@@ -80,22 +76,19 @@ pub async fn mount_all(
     loop_control: &Path,
     loop_dev: &str,
     dir: &Path,
-) -> Result<Vec<Container>, linux::Error> {
+) -> Result<Vec<Container>, NorthError> {
     info!("Installing containers from {}", dir.display());
 
     let npks = fs::read_dir(&dir)
         .await
-        .map_err(|e| linux::Error::FileOperation {
-            context: format!("Failed to read {}", dir.display()),
-            error: e,
-        })?
+        .map_err(|e| linux::Error::FileOperation(format!("Failed to read {}", dir.display()), e))?
         .filter_map(move |d| d.ok())
         .map(|d| d.path());
 
     let dm = dm::Dm::new(&device_mapper).map_err(linux::Error::DeviceMapper)?;
     let lc = LoopControl::open(loop_control, loop_dev)
         .await
-        .map_err(linux::Error::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDevice)?;
 
     let mut npks = Box::pin(npks);
 
@@ -116,13 +109,13 @@ pub async fn unpack_and_mount(
     loop_control: &Path,
     loop_dev: &str,
     npk: &Path,
-) -> Result<Vec<Container>, linux::Error> {
+) -> Result<Vec<Container>, NorthError> {
     debug!("Mounting {}", npk.display());
 
     let dm = dm::Dm::new(&device_mapper).map_err(linux::Error::DeviceMapper)?;
     let lc = LoopControl::open(loop_control, loop_dev)
         .await
-        .map_err(linux::Error::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDevice)?;
 
     let mounted_containers =
         mount_internal(run_dir, signing_keys, device_mapper_dev, &dm, &lc, npk).await?;
@@ -143,12 +136,9 @@ pub async fn umount_and_remove(container: &Container) -> Result<(), linux::Error
 
     debug!("Removing mountpoint {}", container.root.display());
     // Root which is the container version
-    fs::remove_dir(&container.root)
-        .await
-        .map_err(|e| linux::Error::FileOperation {
-            context: format!("Failed to remove {}", container.root.display()),
-            error: e,
-        })?;
+    fs::remove_dir(&container.root).await.map_err(|e| {
+        linux::Error::FileOperation(format!("Failed to remove {}", container.root.display()), e)
+    })?;
     // Container name
     fs::remove_dir(
         container
@@ -157,9 +147,8 @@ pub async fn umount_and_remove(container: &Container) -> Result<(), linux::Error
             .expect("Could not get parent dir of container!"),
     )
     .await
-    .map_err(|e| linux::Error::FileOperation {
-        context: format!("Failed to remove {}", container.root.display()),
-        error: e,
+    .map_err(|e| {
+        linux::Error::FileOperation(format!("Failed to remove {}", container.root.display()), e)
     })?;
 
     Ok(())
@@ -172,22 +161,22 @@ async fn mount_internal(
     dm: &dm::Dm,
     lc: &LoopControl,
     npk: &Path,
-) -> Result<Vec<Container>, linux::Error> {
+) -> Result<Vec<Container>, NorthError> {
     let start = time::Instant::now();
 
     if let Ok(meta) = metadata(&npk).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
     let mut archive_reader =
-        ArchiveReader::new(&npk, signing_keys).map_err(|e| linux::Error::Package(e.into()))?;
+        ArchiveReader::new(&npk, signing_keys).map_err(|e| NorthError::Npk(e.into()))?;
 
     let hashes = archive_reader
         .extract_hashes()
-        .map_err(|e| linux::Error::Package(e.into()))?;
+        .map_err(|e| NorthError::Npk(e.into()))?;
 
     let manifest = archive_reader
         .extract_manifest_from_archive()
-        .map_err(|e| linux::Error::Package(e.into()))?;
+        .map_err(|e| NorthError::Npk(e.into()))?;
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
     let resources: Vec<String> = manifest
@@ -205,20 +194,17 @@ async fn mount_internal(
 
     let (fs_offset, fs_size) = archive_reader
         .extract_fs_start_and_size()
-        .map_err(|e| linux::Error::Package(npk::Error::Archive(e)))?;
+        .map_err(|e| NorthError::Npk(e.into()))?;
 
     let mut fs = fs::File::open(&npk)
         .await
-        .map_err(|error| linux::Error::FileOperation {
-            context: format!("Failed to open {:?}", npk),
-            error,
-        })?;
+        .map_err(|error| linux::Error::FileOperation(format!("Failed to open {:?}", npk), error))?;
 
     let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset)
         .await
-        .map_err(linux::Error::Package)?;
+        .map_err(NorthError::Npk)?;
 
-    check_verity_config(&verity).map_err(linux::Error::Package)?;
+    check_verity_config(&verity).map_err(NorthError::Npk)?;
 
     let instances = manifest.instances.unwrap_or(1);
 
@@ -234,12 +220,9 @@ async fn mount_internal(
 
         if !root.exists() {
             info!("Creating mountpoint {}", root.display());
-            fs::create_dir_all(&root)
-                .await
-                .map_err(|e| linux::Error::FileOperation {
-                    context: format!("Failed to create mountpoint: {}", e),
-                    error: e,
-                })?;
+            fs::create_dir_all(&root).await.map_err(|e| {
+                linux::Error::FileOperation(format!("Failed to create mountpoint: {}", e), e)
+            })?;
         }
 
         let name = format!(
@@ -300,13 +283,9 @@ async fn setup_and_mount(
     lo_size: u64,
     root: &Path,
 ) -> Result<PathBuf, linux::Error> {
-    let fs_type =
-        get_fs_type(&mut fs, fs_offset)
-            .await
-            .map_err(|e| linux::Error::FileOperation {
-                context: format!("Failed get file-system-type {}", e),
-                error: e,
-            })?;
+    let fs_type = get_fs_type(&mut fs, fs_offset).await.map_err(|e| {
+        linux::Error::FileOperation(format!("Failed get file-system-type {}", e), e)
+    })?;
 
     let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size).await?;
 
@@ -314,7 +293,7 @@ async fn setup_and_mount(
         .dev_id()
         .await
         .map(|(major, minor)| format!("{}:{}", major, minor))
-        .map_err(linux::Error::LoopDeviceError)?;
+        .map_err(linux::Error::LoopDevice)?;
 
     let dm_dev = veritysetup(
         &dm,

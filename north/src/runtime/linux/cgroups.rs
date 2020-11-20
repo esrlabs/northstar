@@ -12,7 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::super::super::runtime::{config, Event, EventTx};
+use super::{
+    super::super::runtime::{config, Event, EventTx},
+    Error as LinuxError,
+};
 use log::{debug, warn};
 use npk::manifest;
 use proc_mounts::MountIter;
@@ -35,7 +38,7 @@ pub enum Error {
     #[error("Internal error: {0}")]
     InternalError(String),
     #[error("Problem destroying cgroug: {context}")]
-    DestroyError {
+    Destroy {
         context: String,
         #[source]
         error: io::Error,
@@ -46,23 +49,14 @@ pub enum Error {
         #[source]
         error: Option<io::Error>,
     },
-    #[error("File problem cgroup: {context}")]
-    FileProblem {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
 }
 
 #[async_trait::async_trait]
 trait CGroup: Sized {
     /// Assign a PID to this cgroup
-    async fn assign(&self, pid: u32) -> Result<(), Error> {
+    async fn assign(&self, pid: u32) -> Result<(), LinuxError> {
         if !self.path().exists() {
-            Err(Error::InternalError(format!(
-                "Invalid cgroup {}",
-                self.path().display()
-            )))
+            Err(Error::InternalError(format!("Invalid cgroup {}", self.path().display())).into())
         } else {
             debug!("Assigning {} to {}", pid, self.path().display());
             let tasks = self.path().join(TASKS);
@@ -80,12 +74,10 @@ trait CGroup: Sized {
             )))
         } else {
             debug!("Destroying cgroup {}", path.display());
-            fs::remove_dir(&path)
-                .await
-                .map_err(|e| Error::DestroyError {
-                    context: format!("Failed to remove {}", path.display()),
-                    error: e,
-                })
+            fs::remove_dir(&path).await.map_err(|e| Error::Destroy {
+                context: format!("Failed to remove {}", path.display()),
+                error: e,
+            })
         }
     }
 
@@ -111,7 +103,7 @@ impl CGroupMem {
         name: &str,
         cgroup: &manifest::CGroupMem,
         tx: EventTx,
-    ) -> Result<CGroupMem, Error> {
+    ) -> Result<CGroupMem, LinuxError> {
         let mount_point = get_mount_point("memory")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
@@ -183,7 +175,7 @@ impl CGroupCpu {
         parent: &Path,
         name: &str,
         cgroup: &manifest::CGroupCpu,
-    ) -> Result<CGroupCpu, Error> {
+    ) -> Result<CGroupCpu, LinuxError> {
         let mount_point = get_mount_point("cpu")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
@@ -213,7 +205,7 @@ impl CGroups {
         name: &str,
         cgroups: &manifest::CGroups,
         tx: EventTx,
-    ) -> Result<CGroups, Error> {
+    ) -> Result<CGroups, LinuxError> {
         let mem = if let Some(ref mem) = cgroups.mem {
             let parent = &config.memory;
             let group = CGroupMem::new(parent, &name, &mem, tx).await?;
@@ -233,7 +225,7 @@ impl CGroups {
         Ok(CGroups { mem, cpu })
     }
 
-    pub async fn assign(&self, pid: u32) -> Result<(), Error> {
+    pub async fn assign(&self, pid: u32) -> Result<(), LinuxError> {
         if let Some(ref mem) = self.mem {
             mem.assign(pid).await?;
         }
@@ -254,38 +246,28 @@ impl CGroups {
     }
 }
 
-async fn create(path: &Path) -> Result<(), Error> {
+async fn create(path: &Path) -> Result<(), LinuxError> {
     debug!("Creating {}", path.display());
     if !path.exists() {
-        fs::create_dir_all(&path)
-            .await
-            .map_err(|e| Error::FileProblem {
-                context: format!("Failed to create {}", path.display()),
-                error: e,
-            })?;
+        fs::create_dir_all(&path).await.map_err(|e| {
+            LinuxError::FileOperation(format!("Failed to create {}", path.display()), e)
+        })?;
     }
     Ok(())
 }
 
-async fn write(path: &Path, value: &str) -> Result<(), Error> {
+async fn write(path: &Path, value: &str) -> Result<(), LinuxError> {
     let mut file = OpenOptions::new()
         .write(true)
         .open(path)
         .await
-        .map_err(|e| Error::FileProblem {
-            context: format!("Failed open {}", path.display()),
-            error: e,
-        })?;
+        .map_err(|e| LinuxError::FileOperation(format!("Failed open {}", path.display()), e))?;
     file.write_all(format!("{}\n", value).as_bytes())
         .await
-        .map_err(|e| Error::FileProblem {
-            context: format!("Failed write to {}", path.display()),
-            error: e,
-        })?;
-    file.sync_all().await.map_err(|e| Error::FileProblem {
-        context: format!("Failed synd {}", path.display()),
-        error: e,
-    })?;
+        .map_err(|e| LinuxError::FileOperation(format!("Failed write to {}", path.display()), e))?;
+    file.sync_all()
+        .await
+        .map_err(|e| LinuxError::FileOperation(format!("Failed synd {}", path.display()), e))?;
     Ok(())
 }
 

@@ -264,16 +264,13 @@ pub async fn losetup(
     lo_size: u64,
 ) -> Result<LoopDevice, super::Error> {
     let start = time::Instant::now();
-    let loop_device = lc
-        .next_free()
-        .await
-        .map_err(super::Error::LoopDeviceError)?;
+    let loop_device = lc.next_free().await.map_err(super::Error::LoopDevice)?;
 
     debug!("Using loop device {:?}", loop_device.path().await);
 
     loop_device
         .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
-        .map_err(super::Error::LoopDeviceError)?;
+        .map_err(super::Error::LoopDevice)?;
 
     if let Err(error) = loop_device.set_direct_io(true) {
         warn!("Failed to enable direct io: {:?}", error);

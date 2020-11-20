@@ -86,47 +86,33 @@ impl Console {
                             api::Response::Containers(list_containers(&state))
                         }
                         api::Request::Start(name) => match state.start(&name).await {
-                            Ok(_) => api::Response::Start {
-                                result: api::StartResult::Success,
-                            },
+                            Ok(_) => api::Response::Start(api::OperationResult::Ok),
                             Err(e) => {
                                 error!("Failed to start {}: {}", name, e);
-                                api::Response::Start {
-                                    result: api::StartResult::Error(e.to_string()),
-                                }
+                                api::Response::Start(api::OperationResult::Error(e.into()))
                             }
                         },
                         api::Request::Stop(name) => {
                             match state.stop(&name, std::time::Duration::from_secs(1)).await {
-                                Ok(_) => api::Response::Stop {
-                                    result: api::StopResult::Success,
-                                },
+                                Ok(_) => api::Response::Start(api::OperationResult::Ok),
                                 Err(e) => {
                                     error!("Failed to stop {}: {}", name, e);
-                                    api::Response::Stop {
-                                        result: api::StopResult::Error(e.to_string()),
-                                    }
+                                    api::Response::Stop(api::OperationResult::Error(e.into()))
                                 }
                             }
                         }
                         api::Request::Uninstall { name, version } => {
                             match state.uninstall(name, version).await {
-                                Ok(_) => api::Response::Uninstall {
-                                    result: api::UninstallResult::Success,
-                                },
+                                Ok(_) => api::Response::Uninstall(api::OperationResult::Ok),
                                 Err(e) => {
                                     error!("Failed to uninstall {}: {}", name, e);
-                                    api::Response::Uninstall {
-                                        result: api::UninstallResult::Error(e.to_string()),
-                                    }
+                                    api::Response::Uninstall(api::OperationResult::Error(e.into()))
                                 }
                             }
                         }
                         api::Request::Shutdown => {
                             state.initiate_shutdown().await;
-                            api::Response::Shutdown {
-                                result: api::ShutdownResult::Success,
-                            }
+                            api::Response::Shutdown(api::OperationResult::Ok)
                         }
                         api::Request::Install(_) => unreachable!(),
                     };
@@ -145,10 +131,8 @@ impl Console {
             }
             Request::Install(message, path) => {
                 let payload = match state.install(&path).await {
-                    Ok(_) => api::Response::Install {
-                        result: api::InstallationResult::Success,
-                    },
-                    Err(e) => api::Response::Install { result: e.into() },
+                    Ok(_) => api::Response::Install(api::OperationResult::Ok),
+                    Err(e) => api::Response::Install(api::OperationResult::Error(e.into())),
                 };
 
                 let message = api::Message {
@@ -169,10 +153,7 @@ impl Console {
         let event_tx = self.event_tx.clone();
         let mut listener = TcpListener::bind(&self.address)
             .await
-            .map_err(|e| Error::Io {
-                context: format!("Failed to open listener on {}", self.address),
-                error: e,
-            })?;
+            .map_err(|e| Error::Io(format!("Failed to open listener on {}", self.address), e))?;
 
         let notification_tx = self.notification_tx.clone();
         task::spawn(async move {
@@ -205,16 +186,13 @@ impl Console {
         event_tx: EventTx,
         mut notification_rx: NotificationRx,
     ) -> Result<(), Error> {
-        let peer = stream.peer_addr().map_err(|e| Error::Io {
-            context: "Failed to get peer from command connection".to_string(),
-            error: e,
-        })?;
+        let peer = stream
+            .peer_addr()
+            .map_err(|e| Error::Io("Failed to get peer from command connection".to_string(), e))?;
         debug!("Client {:?} connected", peer);
 
-        let tmpdir = tempdir().map_err(|e| Error::Io {
-            context: "Error creating temp installation dir".to_string(),
-            error: e,
-        })?;
+        let tmpdir = tempdir()
+            .map_err(|e| Error::Io("Error creating temp installation dir".to_string(), e))?;
 
         let dir = tmpdir.path().to_owned();
 
@@ -373,9 +351,11 @@ async fn read<R: AsyncRead + Unpin>(
 ) -> Result<ConnectionEvent, Error> {
     // Read frame length
     let mut buf = [0u8; 4];
-    reader.read_exact(&mut buf).await.map_err(|e| Error::Io {
-        context: "Failed to read frame length of network package".to_string(),
-        error: e,
+    reader.read_exact(&mut buf).await.map_err(|e| {
+        Error::Io(
+            "Failed to read frame length of network package".to_string(),
+            e,
+        )
     })?;
     let frame_len = BigEndian::read_u32(&buf) as usize;
 
@@ -384,10 +364,7 @@ async fn read<R: AsyncRead + Unpin>(
     reader
         .read_exact(&mut buffer)
         .await
-        .map_err(|e| Error::Io {
-            context: "Failed to read payload".to_string(),
-            error: e,
-        })?;
+        .map_err(|e| Error::Io("Failed to read payload".to_string(), e))?;
 
     // Deserialize message
     let message: api::Message = serde_json::from_slice(&buffer)
@@ -404,19 +381,15 @@ async fn read<R: AsyncRead + Unpin>(
                 .append(true)
                 .open(&file)
                 .await
-                .map_err(|e| Error::Io {
-                    context: format!("Failed to create file in {}", tmpdir.display()),
-                    error: e,
+                .map_err(|e| {
+                    Error::Io(format!("Failed to create file in {}", tmpdir.display()), e)
                 })?;
 
             // Stream size bytes into tmpfile
             let mut writer = BufWriter::new(tmpfile);
             let n = io::copy(&mut reader.take(*size as u64), &mut writer)
                 .await
-                .map_err(|e| Error::Io {
-                    context: format!("Failed to receive {} bytes", size),
-                    error: e,
-                })?;
+                .map_err(|e| Error::Io(format!("Failed to receive {} bytes", size), e))?;
             debug!("Received {} bytes. Starting installation", n);
             Ok(ConnectionEvent::Install(message, file))
         }

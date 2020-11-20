@@ -31,7 +31,7 @@ const SUPPORTED_VERITY_VERSION: u32 = 1;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Verity device mapper problem ({0})")]
-    VerityError(String),
+    Verity(String),
     #[error("Missing verity header")]
     NoVerityHeader,
     #[error("Unsupported verity version {0}")]
@@ -87,10 +87,10 @@ pub async fn read_verity_header(
     let mut header = [0u8; 512];
     fs.seek(std::io::SeekFrom::Start(fs_offset + verity_offset))
         .await
-        .map_err(|e| Error::VerityError(format!("Could not seek to verity header: {}", e)))?;
+        .map_err(|e| Error::Verity(format!("Could not seek to verity header: {}", e)))?;
     fs.read_exact(&mut header)
         .await
-        .map_err(|e| Error::VerityError(format!("Could not read verity header: {}", e)))?;
+        .map_err(|e| Error::Verity(format!("Could not read verity header: {}", e)))?;
     #[allow(clippy::too_many_arguments)]
     let s = structure::structure!("=6s2xII16s6s26xIIQH6x256s168x"); // "a8 L L a16 A32 L L Q S x6 a256"
     let (
@@ -106,13 +106,13 @@ pub async fn read_verity_header(
         salt,
     ) = s
         .unpack(header.to_vec())
-        .map_err(|e| Error::VerityError(format!("Failed to decode verity block: {}", e)))?;
+        .map_err(|e| Error::Verity(format!("Failed to decode verity block: {}", e)))?;
 
     Ok(VerityHeader {
         header,
         version,
         algorithm: std::str::from_utf8(&algorithm)
-            .map_err(|e| Error::VerityError(format!("Invalid algorithm in verity block: {}", e)))?
+            .map_err(|e| Error::Verity(format!("Invalid algorithm in verity block: {}", e)))?
             .to_string(),
         data_block_size,
         hash_block_size,
