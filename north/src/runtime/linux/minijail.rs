@@ -12,10 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::super::linux::Error as LinuxError;
 use log::Level;
 use nix::unistd::pipe;
 use std::os::unix::prelude::FromRawFd;
-use thiserror::Error;
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt},
@@ -23,14 +23,8 @@ use tokio::{
     task,
 };
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Init error: {0}")]
-    Init(#[from] nix::Error),
-}
-
 /// Initialize minijail logging
-pub async fn init() -> Result<(), Error> {
+pub async fn init() -> Result<(), LinuxError> {
     #[allow(non_camel_case_types)]
     #[allow(dead_code)]
     #[repr(i32)]
@@ -55,7 +49,7 @@ pub async fn init() -> Result<(), Error> {
             Level::Trace => SyslogLevel::MAX,
         };
 
-        let (readfd, writefd) = pipe().map_err(Error::Init)?;
+        let (readfd, writefd) = pipe().map_err(LinuxError::Pipe)?;
 
         let pipe = unsafe { fs::File::from_raw_fd(readfd) };
         minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);

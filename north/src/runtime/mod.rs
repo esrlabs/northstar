@@ -35,6 +35,7 @@ use process::ExitStatus;
 use state::State;
 use std::{
     future::Future,
+    io,
     path::Path,
     pin::Pin,
     task::{Context, Poll},
@@ -95,7 +96,7 @@ impl Runtime {
 
         // Initialize minijails static functionality
         #[cfg(any(target_os = "android", target_os = "linux"))]
-        linux::minijail::init().await.map_err(Error::Minijail)?;
+        linux::minijail::init().await.map_err(Error::Linux)?;
 
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.directories.data_dir).await?;
@@ -241,15 +242,18 @@ async fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
 /// read and writeable
 async fn mkdir_p_rw(path: &Path) -> Result<(), Error> {
     if path.exists() && !is_rw(&path) {
-        Err(Error::FsPermissions(format!(
-            "Directory {} is not read and writeable",
-            path.display()
-        )))
+        let context = format!("Directory {} is not read and writeable", path.display());
+        Err(Error::Io(
+            context.clone(),
+            io::Error::new(io::ErrorKind::PermissionDenied, context),
+        ))
     } else {
         debug!("Creating {}", path.display());
-        fs::create_dir_all(&path).await.map_err(|error| Error::Io {
-            context: format!("Failed to create directory {}", path.display()),
-            error,
+        fs::create_dir_all(&path).await.map_err(|error| {
+            Error::Io(
+                format!("Failed to create directory {}", path.display()),
+                error,
+            )
         })
     }
 }

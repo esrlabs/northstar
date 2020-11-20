@@ -14,9 +14,11 @@
 
 use super::{
     linux::{self},
+    process::Error as ProcessError,
     Name,
 };
-use crate::api::InstallationResult;
+use crate::api::ApiError;
+use ed25519_dalek::SignatureError;
 use std::io;
 use thiserror::Error;
 
@@ -24,21 +26,16 @@ use thiserror::Error;
 pub enum Error {
     // process
     #[error("Process error: {0}")]
-    Process(super::process::Error),
+    Process(ProcessError),
     // linux
     #[error("Linux error")]
     Linux(#[from] linux::Error),
-    #[error("Failed to uninstall")]
-    UninstallationError(linux::Error),
-    // linux -- cgroups
-    #[error("CGroups error: {0}")]
-    CGroup(super::linux::cgroups::Error),
     // keys
     #[error("Key error: {0}")]
-    KeyError(super::keys::Error),
+    KeyError(#[from] SignatureError),
     // npk
     #[error("NPK error: {0}")]
-    NpkError(npk::Error),
+    Npk(npk::Error),
 
     // installation
     #[error("Failed to install")]
@@ -52,28 +49,12 @@ pub enum Error {
     MissingResource(String),
     #[error("Application(s) \"{0:?}\" is/are running")]
     ApplicationRunning(Vec<Name>),
-    #[error("OS error: {context}")]
-    Os {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
-    #[error("IO error: {context}")]
-    Io {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
+    #[error("IO error: {0}")]
+    Io(String, #[source] io::Error),
     #[error("Protocol error: {0}")]
     Protocol(String),
     #[error("Configuration error: {0}")]
     Configuration(String),
-    #[error("Minijail error: {0}")]
-    Minijail(super::linux::minijail::Error),
-    #[error("Internal error: {0}")]
-    Internal(&'static str),
-    #[error("Wrong permissions: {0}")]
-    FsPermissions(String),
 }
 
 #[derive(Error, Debug)]
@@ -84,53 +65,52 @@ pub enum InstallationError {
     DuplicateResource,
 }
 
-impl From<Error> for InstallationResult {
-    fn from(error: Error) -> InstallationResult {
-        // TODO error translation to API
-        InstallationResult::ApplicationAlreadyInstalled
-        // match error {
-        //     _ => unreachable!()
-        //     // InstallationError::Zip(_) => InstallationResult::FileCorrupted,
-        //     // InstallationError::SignatureFileInvalid(_) => InstallationResult::SignatureFileInvalid,
-        //     // InstallationError::MalformedSignature => InstallationResult::MalformedSignature,
-        //     // InstallationError::MalformedHashes(_) => InstallationResult::MalformedHashes,
-        //     // InstallationError::MalformedManifest(s) => InstallationResult::MalformedManifest(s),
-        //     // InstallationError::VerityError(s) => InstallationResult::VerityProblem(s),
-        //     // InstallationError::ArchiveError(s) => InstallationResult::ArchiveError(s),
-        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
-        //     // InstallationError::DeviceMapper(e) => {
-        //     //     InstallationResult::DeviceMapperProblem(format!("{:?}", e))
-        //     // }
-        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
-        //     // InstallationError::LoopDeviceError(e) => {
-        //     //     InstallationResult::LoopDeviceError(format!("{}", e))
-        //     // }
-        //     // InstallationError::HashInvalid(s) => InstallationResult::HashInvalid(s),
-        //     // InstallationError::KeyNotFound(s) => InstallationResult::KeyNotFound(s),
-        //     // InstallationError::ApplicationAlreadyInstalled(_) => {
-        //     //     InstallationResult::ApplicationAlreadyInstalled
-        //     // }
-        //     // InstallationError::Io { context, error: _ } => {
-        //     //     InstallationResult::FileIoProblem(context)
-        //     // }
-        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
-        //     // InstallationError::Mount(e) => InstallationResult::MountError(format!("{}", e)),
-        //     // #[cfg(any(target_os = "android", target_os = "linux"))]
-        //     // InstallationError::INotify(e) => InstallationResult::INotifyError(format!("{}", e)),
-        //     // InstallationError::Timeout(s) => InstallationResult::TimeoutError(s),
-        //     // InstallationError::NoVerityHeader => {
-        //     //     InstallationResult::VerityProblem("Verity header missing".to_string())
-        //     // }
-        //     // InstallationError::UnexpectedVerityAlgorithm(s) => {
-        //     //     InstallationResult::VerityProblem(format!("Unexpected verity algorithm: {}", s))
-        //     // }
-        //     // InstallationError::UnexpectedVerityVersion(n) => {
-        //     //     InstallationResult::VerityProblem(format!("Unexpected verity version: {}", n))
-        //     // }
-        //     // InstallationError::SignatureVerificationError(s) => {
-        //     //     InstallationResult::SignatureVerificationFailed(s)
-        //     // }
-        //     // InstallationError::DuplicateResource => InstallationResult::DuplicateResource,
-        // }
+impl From<Error> for ApiError {
+    fn from(error: Error) -> ApiError {
+        match error {
+            Error::Process(ProcessError::Start(s)) => ApiError::StartProcess(s),
+            Error::Process(ProcessError::Stop) => ApiError::StopProcess,
+            Error::Process(ProcessError::WrongContainerType(s)) => ApiError::WrongContainerType(s),
+            Error::Process(ProcessError::Minijail(e)) => ApiError::ProcessJail(format!("{}", e)),
+            Error::Process(ProcessError::Io { context, error: _r }) => ApiError::ProcessIo(context),
+            Error::Process(ProcessError::Os { context, error: _r }) => ApiError::ProcessOs(context),
+            Error::Linux(linux::Error::Mount(e)) => ApiError::LinuxMount(format!("{:?}", e)),
+            Error::Linux(linux::Error::Unshare(context, _e)) => ApiError::LinuxUnshare(context),
+            Error::Linux(linux::Error::Pipe(e)) => ApiError::LinuxPipe(format!("{}", e)),
+            Error::Linux(linux::Error::DeviceMapper(e)) => {
+                ApiError::LinuxDeviceMapper(format!("{:?}", e))
+            }
+            Error::Linux(linux::Error::LoopDevice(e)) => {
+                ApiError::LinuxLoopDevice(format!("{:?}", e))
+            }
+            Error::Linux(linux::Error::INotify(e)) => ApiError::LinuxINotifiy(format!("{:?}", e)),
+            Error::Linux(linux::Error::CGroup(e)) => ApiError::LinuxCGroups(format!("{:?}", e)),
+            Error::Linux(linux::Error::FileOperation(context, error)) => match error.kind() {
+                io::ErrorKind::NotFound => ApiError::IoNotFound(context),
+                io::ErrorKind::PermissionDenied => ApiError::IoPermissionDenied(context),
+                io::ErrorKind::NotConnected => ApiError::IoNotConnected(context),
+                io::ErrorKind::BrokenPipe => ApiError::IoBrokenPipe(context),
+                io::ErrorKind::AlreadyExists => ApiError::IoAlreadyExists(context),
+                io::ErrorKind::InvalidInput => ApiError::IoInvalidInput(context),
+                io::ErrorKind::InvalidData => ApiError::IoInvalidData(context),
+                io::ErrorKind::TimedOut => ApiError::TimedOut(context),
+                _ => ApiError::Io(context),
+            },
+            Error::KeyError(s) => ApiError::KeyError(format!("Key signature error: {}", s)),
+            Error::Npk(e) => ApiError::Npk(format!("Error with npk: {:?}", e)),
+            Error::Installation(e) => match e {
+                InstallationError::ApplicationAlreadyInstalled(_) => {
+                    ApiError::ApplicationAlreadyInstalled
+                }
+                InstallationError::DuplicateResource => ApiError::DuplicateResource,
+            },
+            Error::ApplicationNotFound => ApiError::ApplicationNotFound,
+            Error::ApplicationNotRunning => ApiError::ApplicationNotRunning,
+            Error::ApplicationRunning(_) => ApiError::ApplicationRunning,
+            Error::MissingResource(s) => ApiError::MissingResource(s),
+            Error::Io(context, _e) => ApiError::IoError(context),
+            Error::Protocol(s) => ApiError::Protocol(s),
+            Error::Configuration(s) => ApiError::Configuration(s),
+        }
     }
 }

@@ -104,76 +104,55 @@ pub struct Memory {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Response {
     Containers(Vec<Container>),
-    Start { result: StartResult },
-    Stop { result: StopResult },
-    Uninstall { result: UninstallResult },
-    Install { result: InstallationResult },
-    Shutdown { result: ShutdownResult },
+    Start(OperationResult),
+    Stop(OperationResult),
+    Uninstall(OperationResult),
+    Install(OperationResult),
+    Shutdown(OperationResult),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum StartResult {
-    Success,
-    Error(String),
+pub enum OperationResult {
+    Ok,
+    Error(ApiError),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum StopResult {
-    Success,
-    Error(String), // TODO
-}
-
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum UninstallResult {
-    Success,
-    Error(String), // TODO
-}
-
-/// A lot can go wrong when trying to install an NPK
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum InstallationResult {
-    /// Everything went smooth
-    Success,
-    /// Cannot install an already installed application (only 1 version can be installed)
+pub enum ApiError {
+    /// Error operating a container process
+    StartProcess(String),
+    StopProcess,
+    WrongContainerType(String),
+    ProcessJail(String),
+    ProcessIo(String),
+    ProcessOs(String),
+    /// Errors from linux module
+    LinuxMount(String),
+    LinuxUnshare(String),
+    LinuxPipe(String),
+    LinuxDeviceMapper(String),
+    LinuxLoopDevice(String),
+    LinuxINotifiy(String),
+    LinuxCGroups(String),
+    /// IO Errors
+    IoNotFound(String),
+    Io(String),
+    IoPermissionDenied(String),
+    IoNotConnected(String),
+    IoBrokenPipe(String),
+    IoAlreadyExists(String),
+    IoInvalidInput(String),
+    IoInvalidData(String),
+    TimedOut(String),
+    KeyError(String),
+    Npk(String),
     ApplicationAlreadyInstalled,
-    /// Cannot install the same version a resource container (multiple versions permitted)
     DuplicateResource,
-    /// The npk file seems to be corrupted
-    FileCorrupted,
-    /// The signature file in the npk is invalid
-    SignatureFileInvalid,
-    /// The signature file in the npk contains malformed signatures
-    MalformedSignature,
-    /// Signature check failed
-    SignatureVerificationFailed(String),
-    /// The hashes in the npk file could not be read
-    MalformedHashes,
-    /// There was a problem reading the manifest in the npk package
-    MalformedManifest(String),
-    /// Problem with the verity device
-    VerityProblem(String),
-    /// npk archive seems to be incorrecxt
-    ArchiveError(String),
-    /// Problems with the device mapper
-    DeviceMapperProblem(String),
-    /// Problems with the loopback device
-    LoopDeviceError(String),
-    /// cryptographic hash check failed
-    HashInvalid(String),
-    /// keyfile seems to be missing
-    KeyNotFound(String),
-    /// Some problem with managing files
-    FileIoProblem(String),
-    /// Mount or Un-mount problem
-    MountError(String),
-    /// A timeout occurred
-    TimeoutError(String),
-    /// Problems with Inotify
-    INotifyError(String),
-}
-
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum ShutdownResult {
-    Success,
-    Error(String), // TODO
+    ApplicationNotFound,
+    ApplicationNotRunning,
+    ApplicationRunning,
+    MissingResource(String),
+    IoError(String),
+    Protocol(String),
+    Configuration(String),
 }
