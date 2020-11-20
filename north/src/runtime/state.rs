@@ -217,8 +217,8 @@ impl State {
         let process = super::process::minijail::Process::start(
             &app.container,
             self.events_tx.clone(),
-            self.config.directories.run_dir.as_path(),
-            self.config.directories.data_dir.as_path(),
+            &self.config.directories.run_dir,
+            &self.config.directories.data_dir,
             self.config.container_uid,
             self.config.container_gid,
         )
