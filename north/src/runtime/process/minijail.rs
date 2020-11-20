@@ -14,13 +14,14 @@
 
 use super::{exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
 use crate::runtime::{Event, EventTx};
+use itertools::Itertools;
 use log::{debug, warn};
 use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
 use npk::{archive::Container, manifest::{Dev, Mount, MountFlag}};
-use std::{fmt, ops, os::unix::io::AsRawFd, path::Path};
+use std::{path::PathBuf, fmt, iter, ops, os::unix::io::AsRawFd, path::Path};
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt, AsyncWriteExt},
@@ -220,17 +221,12 @@ impl Process {
 
         setup_mounts(&mut jail, container, &data_dir, uid, gid, &run_dir).await?;
 
-        let mut args: Vec<&str> = Vec::new();
-        if let Some(init) = &manifest.init {
-            if let Some(init_path_str) = init.to_str() {
-                args.push(init_path_str);
-            }
-        };
-        if let Some(ref manifest_args) = manifest.args {
-            for a in manifest_args {
-                args.push(a);
-            }
-        }
+        // Arguments
+        let args = manifest.args.clone().unwrap_or_default();
+        let init_str = init.display().to_string();
+        let argv: Vec<&str> = iter::once(init_str.as_str())
+            .chain(args.iter().map(|s| s.as_str()))
+            .collect();
 
         // Create environment for process. Set data directory, container name and version
         let mut env = manifest.env.clone().unwrap_or_default();
@@ -242,13 +238,20 @@ impl Process {
             .collect::<Vec<String>>();
         let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
 
+        debug!(
+            "Executing \"{}{}{}\"",
+            init.display(),
+            if args.len() > 1 { " " } else { "" },
+            argv.iter().skip(1).join(" ")
+        );
+
         let pid = jail.run_remap_env_preload(
             &init.as_path(),
             &[
                 (stderr.write_fd(), stderr.read_fd()),
                 (stdout.write_fd(), stdout.read_fd()),
             ],
-            &args,
+            &argv,
             &env,
             false,
         )? as u32;
@@ -276,24 +279,22 @@ async fn setup_mounts(
     gid: u32,
     run_dir: &Path,
 ) -> Result<(), Error> {
-    // Mount /proc
-    mount_bind(jail, Path::new("/proc"), Path::new("/proc"), false)?;
-    // Instruct minijail to remount /proc ro after entering the mount ns
-    // with MS_NODEV | MS_NOEXEC | MS_NOSUID
+    let proc = Path::new("/proc");
+    jail.mount_bind(&proc, &proc, false)
+        .map_err(Error::Minijail)?;
     jail.remount_proc_readonly();
 
-    let mut mounts = container.manifest.mounts.clone();
     // If there's no explicit mount for /dev add a minimal variant
-    let dev = PathBuf::from("/dev");
-    if !container.manifest.mounts.contains_key(&dev) {
-        mounts.insert(
-            dev,
-            Mount::Dev {
-                r#type: Dev::Minimal,
-            },
-        );
+    if !container
+        .manifest
+        .mounts
+        .contains_key(&PathBuf::from("/dev"))
+    {
+        debug!("Mounting minimal /dev");
+        jail.mount_dev();
     }
-    for (target, mount) in &mounts {
+
+    for (target, mount) in &container.manifest.mounts {
         match &mount {
             Mount::Bind { host, flags } => {
                 if !&host.exists() {
@@ -305,15 +306,24 @@ async fn setup_mounts(
                     continue;
                 }
                 let rw = flags.contains(&MountFlag::Rw);
-                mount_bind(jail, &host, &target, rw)?;
+                debug!(
+                    "Mounting {} on {}{}",
+                    host.display(),
+                    target.display(),
+                    if rw { " (rw)" } else { "" }
+                );
+                jail.mount_bind(&host, &target, rw)
+                    .map_err(Error::Minijail)?;
             }
-            Mount::Persist { flags } => {
+            Mount::Persist => {
                 let dir = data_dir.join(&container.manifest.name);
-                debug!("Creating {}", dir.display());
-                fs::create_dir_all(&dir).await.map_err(|e| Error::Io {
-                    context: format!("Failed to create {}", dir.display()),
-                    error: e,
-                })?;
+                if !dir.exists() {
+                    debug!("Creating {}", dir.display());
+                    fs::create_dir_all(&dir).await.map_err(|e| Error::Io {
+                        context: format!("Failed to create {}", dir.display()),
+                        error: e,
+                    })?;
+                }
 
                 debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
                 chown(
@@ -322,75 +332,60 @@ async fn setup_mounts(
                     Some(unistd::Gid::from_raw(gid)),
                 )
                 .map_err(|e| Error::Os {
-                    context: format!("Failed to chown {} to {}:{}", dir.display(), uid, gid,),
+                    context: format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
                     error: e,
                 })?;
 
-                let rw = flags.contains(&MountFlag::Rw);
-                mount_bind(jail, &dir, &target, rw)?;
+                debug!("Mounting {} on {}", dir.display(), target.display(),);
+                jail.mount_bind(&dir, &target, true)
+                    .map_err(Error::Minijail)?;
             }
             Mount::Resource { name, version, dir } => {
-                let shared_resource_path = {
-                    let dir_in_container_path = dir.clone();
-                    let first_part_of_path = run_dir.join(&name).join(&version.to_string());
-
-                    let src_dir = dir_in_container_path
+                let src = {
+                    // Join the source of the resource container with the mount dir
+                    let resource_root = run_dir.join(&name).join(&version.to_string());
+                    let dir = dir
                         .strip_prefix("/")
-                        .map(|dir_in_resource_container| {
-                            first_part_of_path.join(dir_in_resource_container)
-                        })
-                        .unwrap_or(first_part_of_path);
+                        .map(|d| resource_root.join(d))
+                        .unwrap_or(resource_root);
 
-                    if !src_dir.exists() {
+                    if !dir.exists() {
                         return Err(Error::Start(format!(
                             "Resource folder {} is missing",
-                            src_dir.display()
+                            dir.display()
                         )));
                     }
 
-                    src_dir
+                    dir
                 };
 
-                mount_bind(jail, &shared_resource_path, &target.as_path(), false)?;
+                debug!("Mounting {} on {}", src.display(), target.display());
+
+                jail.mount_bind(&src, &target, false)
+                    .map_err(Error::Minijail)?;
             }
             Mount::Tmpfs { size } => {
-                debug!("Mounting tmpfs to {}", target.display());
+                debug!(
+                    "Mounting tmpfs with size {} on {}",
+                    bytesize::ByteSize::b(*size),
+                    target.display()
+                );
                 let data = format!("size={},mode=1777", size);
                 jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
                     .map_err(Error::Minijail)?;
             }
             Mount::Dev { r#type } => {
                 match r#type {
-                    Dev::Minimal => {
-                        debug!("Mounting minimal /dev");
-                        jail.mount_dev();
-                    }
                     // The Full mount of /dev is a simple rw bind mount of /dev
                     Dev::Full => {
                         let dev = Path::new("/dev");
-                        mount_bind(jail, &dev, &dev, true)?;
+                        jail.mount_bind(&dev, &dev, true).map_err(Error::Minijail)?;
                     }
                 }
             }
         }
     }
     Ok(())
-}
-
-fn mount_bind(
-    jail: &mut ::minijail::Minijail,
-    source: &Path,
-    target: &Path,
-    rw: bool,
-) -> Result<(), Error> {
-    debug!(
-        "Bind mounting {} to {}{}",
-        source.display(),
-        target.display(),
-        if rw { " (rw)" } else { "" }
-    );
-    jail.mount_bind(&source, &target, rw)
-        .map_err(Error::Minijail)
 }
 
 #[async_trait::async_trait]

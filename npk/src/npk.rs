@@ -274,7 +274,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
     let mut pseudo_files: Vec<(String, u32)> = vec![];
     if manifest.init.is_some() {
         pseudo_files = vec![
-            // The default is to have at least a Dev::Minimal mount
+            // The default is to have at least a minimal /dev mount
             ("/dev".to_string(), 444),
             ("/proc".to_string(), 444),
         ];
@@ -282,14 +282,15 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
 
     for (target, mount) in &manifest.mounts {
         match mount {
-            Mount::Bind { flags, .. } | Mount::Persist { flags, .. } => {
+            Mount::Bind { flags, .. } => {
                 let mode = if flags.contains(&MountFlag::Rw) {
                     777
                 } else {
-                    444
+                    555
                 };
                 pseudo_files.push((target.display().to_string(), mode));
             }
+            Mount::Persist => pseudo_files.push((target.display().to_string(), 777)),
             // /dev is default
             Mount::Dev { .. } => (),
             Mount::Resource { .. } => {
@@ -301,10 +302,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
                     pseudo_files.push((path.display().to_string(), 555));
                 }
             }
-            Mount::Tmpfs { .. } => {
-                let mode = 777;
-                pseudo_files.push((target.display().to_string(), mode));
-            }
+            Mount::Tmpfs { .. } => pseudo_files.push((target.display().to_string(), 777)),
         }
     }
     pseudo_files

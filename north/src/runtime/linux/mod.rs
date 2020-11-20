@@ -36,7 +36,6 @@ use log::*;
 use npk::{
     archive::{ArchiveReader, Container},
     check_verity_config, get_fs_type,
-    manifest::Mount,
     read_verity_header, VerityHeader,
 };
 use std::{
@@ -178,19 +177,6 @@ async fn mount_internal(
         .extract_manifest_from_archive()
         .map_err(|e| NorthError::Npk(e.into()))?;
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
-
-    let resources: Vec<String> = manifest
-        .mounts
-        .iter()
-        .filter_map(|m| match m {
-            Mount::Resource { name, version, .. } => Some(format!("{} ({})", name, version)),
-            _ => None,
-        })
-        .collect();
-
-    if !resources.is_empty() {
-        debug!("Using {:?}", resources);
-    }
 
     let (fs_offset, fs_size) = archive_reader
         .extract_fs_start_and_size()

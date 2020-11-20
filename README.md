@@ -71,6 +71,7 @@ init: /bin/ferris
 args:
   - /message/hello
 mounts:
+    /dev: full
     /lib:
       host: /lib
     /lib64:
@@ -78,9 +79,10 @@ mounts:
     /system:
       host: /system
     /bin:
-      resource: ferris:0.0.2
+      resource: ferris:0.0.2/
     /message:
-      resource: hello_message:0.1.2
+      resource: hello_message:0.1.2/
+    /data: persist
 ```
 
 The `signature.yaml` contains signatures that are used to verify the package and the included file system. It is automatically created by the tooling.

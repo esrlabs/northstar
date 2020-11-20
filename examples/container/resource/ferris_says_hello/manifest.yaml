@@ -1,19 +1,18 @@
 ---
 # Use the ferris interpreter from the resouce listed below
 name: ferris_says_hello
-version: 0.0.3
+version: 0.0.1
 init: /bin/ferris
+args:
+  - /message/hello
 mounts:
+    /bin:
+      resource: ferris:0.0.1/
     /lib:
       host: /lib
     /lib64:
       host: /lib64
     /system:
       host: /system
-    /bin:
-      resource: ferris:0.0.2
     /message:
-      resource: hello_message:0.1.2
-# Pass the filename with the hello message
-args:
-  - /message/hello
+      resource: hello_message:0.0.1/

@@ -3,9 +3,7 @@ version: 0.0.1
 init: /test_container
 instances: 5
 mounts:
-    /data:
-      flags:
-          - rw
+    /data: persist
     /lib:
       host: /lib
     /lib64:
@@ -13,4 +11,4 @@ mounts:
     /system:
       host: /system
     /tmpfs:
-      size: 20480000
+      tmpfs: 20480000
