@@ -2,9 +2,7 @@ name: datarw
 version: 0.0.1
 init: /datarw
 mounts:
-  /data:
-    flags:
-        - rw
+  /data: persist
   /lib:
     host: /lib
   /lib64:
