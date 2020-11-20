@@ -165,7 +165,10 @@ pub async fn runtime_task(config: Config, stop: oneshot::Receiver<()>) -> Result
         }
     }
 
-    info!("Mounted {} containers", state.applications.len());
+    info!(
+        "Mounted {} containers",
+        state.applications.len() + state.resources.len()
+    );
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
