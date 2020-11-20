@@ -175,10 +175,7 @@ impl Console {
 
     /// Send a notification to the notification broadcast
     pub async fn notification(&self, notification: api::Notification) {
-        debug!("sending notification: {:?}", notification);
-        if self.notification_tx.send(notification).is_err() {
-            debug!("No subscribers received the notification");
-        }
+        self.notification_tx.send(notification).ok();
     }
 
     async fn connection(
