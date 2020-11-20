@@ -11,3 +11,4 @@ mounts:
 cgroups:
   memory:
     limit_in_bytes: 10000000
+    swappiness: 0
