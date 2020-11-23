@@ -151,7 +151,7 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn open_zipped_npk(npk: &&Path) -> Result<ZipArchive<File>, Error> {
+pub fn open_zipped_npk(npk: &Path) -> Result<ZipArchive<File>, Error> {
     let zip = zip::ZipArchive::new(File::open(&npk).map_err(|e| Error::Os {
         context: format!("Failed to open NPK at '{}'", &npk.display()),
         error: e,
