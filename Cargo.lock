@@ -991,7 +991,7 @@ checksum = "cf51a729ecf40266a2368ad335a5fdde43471f545a967109cd62146ecf8b66ff"
 
 [[package]]
 name = "north"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "nstar"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "sextant"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
