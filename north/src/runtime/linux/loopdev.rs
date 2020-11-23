@@ -14,7 +14,7 @@
 
 use floating_duration::TimeAsFloat;
 use libc::{c_int, ioctl};
-use log::*;
+use log::{debug, warn};
 use nix::{errno::Errno, Error::Sys};
 use std::{
     os::unix::prelude::*,

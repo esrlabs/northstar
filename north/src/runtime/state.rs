@@ -25,7 +25,7 @@ use crate::{
     runtime::linux::{umount_and_remove, unpack_and_mount},
 };
 use ed25519_dalek::*;
-use log::*;
+use log::{debug, info, warn};
 use npk::{
     archive::{read_manifest, Container},
     manifest::{Manifest, Mount, Name, Version},

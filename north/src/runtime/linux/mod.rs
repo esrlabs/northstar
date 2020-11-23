@@ -32,7 +32,7 @@ use super::{
 use crate::runtime::linux::verity::veritysetup;
 use ed25519_dalek::PublicKey;
 use floating_duration::TimeAsFloat;
-use log::*;
+use log::{debug, info};
 use npk::{
     archive::{ArchiveReader, Container},
     check_verity_config, get_fs_type, read_verity_header, VerityHeader,
