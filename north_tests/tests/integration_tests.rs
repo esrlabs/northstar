@@ -33,7 +33,7 @@ fn init_logger() {
 }
 
 lazy_static! {
-    static ref TEST_CONTAINER_NPK_DIR: TempDir = TempDir::new().unwrap();
+    static ref REPOSITORIES_DIR: TempDir = TempDir::new().unwrap();
     static ref TEST_CONTAINER_NPK: PathBuf = {
         let build_dir = TempDir::new().unwrap();
         let package_dir = TempDir::new().unwrap();
@@ -56,13 +56,20 @@ lazy_static! {
 
         npk::pack(
             package_dir.path(),
-            TEST_CONTAINER_NPK_DIR.path(),
+            REPOSITORIES_DIR.path(),
             Path::new("../examples/keys/north.key"),
         )
         .unwrap();
-        TEST_CONTAINER_NPK_DIR
-            .path()
-            .join("test_container-0.0.1.npk")
+        REPOSITORIES_DIR.path().join("test_container-0.0.1.npk")
+    };
+    static ref TEST_RESOURCE_NPK: PathBuf = {
+        npk::pack(
+            Path::new("test_resource"),
+            REPOSITORIES_DIR.path(),
+            Path::new("../examples/keys/north.key"),
+        )
+        .unwrap();
+        REPOSITORIES_DIR.path().join("test_resource-0.0.1.npk")
     };
 }
 
@@ -127,25 +134,28 @@ async fn check_memeater() -> Result<()> {
 
 #[ignore]
 #[tokio::test]
-async fn check_datarw_mount() -> Result<()> {
+async fn check_data_and_resource_mount() -> Result<()> {
     init_logger();
 
     let mut runtime = Runtime::launch().await?;
 
-    // install test container
+    // install test container & resource
+    runtime.install(TEST_RESOURCE_NPK.as_path()).await?;
     runtime.install(TEST_CONTAINER_NPK.as_path()).await?;
 
-    let data_dir = Path::new("../target/north/data/test_container-000/").canonicalize()?;
+    let data_dir = Path::new("../target/north/data/test_container-000");
+    fs::create_dir_all(&data_dir).await?;
+
     let input_file = data_dir.join("input.txt");
 
     // Write the input to the test_container
-    fs::write(&input_file, b"echo hello there!").await?;
+    fs::write(&input_file, b"cat /resource/hello").await?;
 
-    // Start the test_container process
+    // // Start the test_container process
     runtime.start("test_container-000").await.map(drop)?;
 
     runtime
-        .expect_output("hello there!")
+        .expect_output("hello from test resource")
         .or_timeout_in_secs(5)
         .await?
         .context("Failed to find expected test_container output")?;
@@ -153,7 +163,7 @@ async fn check_datarw_mount() -> Result<()> {
     runtime.try_stop("test_container-000").await?;
 
     // Remove the temporary data directory
-    fs::remove_file(input_file).await?;
+    fs::remove_dir_all(&data_dir).await?;
 
     runtime.shutdown().await
 }
@@ -168,6 +178,7 @@ async fn check_crashing_container() -> Result<()> {
     let mut runtime = Runtime::launch().await?;
 
     // install test container
+    runtime.install(TEST_RESOURCE_NPK.as_path()).await?;
     runtime.install(&TEST_CONTAINER_NPK.as_path()).await?;
 
     for i in 0..5 {

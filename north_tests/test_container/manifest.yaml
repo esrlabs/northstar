@@ -12,3 +12,5 @@ mounts:
       host: /system
     /tmpfs:
       tmpfs: 20480000
+    /resource:
+        resource: test_resource:0.0.1/
