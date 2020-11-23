@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.5.0] - 2020-11-22
+## [0.6.0] - 2020-11-22
 ### Added
 * Support for cross compilation for `musl`
 * Check that run-dir and data-dir have correct rw permissions
@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 * Rewrite of nstar for a better user experience
-* Simplified error types in runtime and API
 * Extract all npk handling to separate crate
+* Simplified error types in runtime and API
+
+<img src="doc/images/error_hierarchy.png" class="inline" width=300/>
 
 ### Removed
 * Mock runtime support for MacOS
