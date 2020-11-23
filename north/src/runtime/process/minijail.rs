@@ -20,8 +20,15 @@ use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
-use npk::{archive::Container, manifest::{Dev, Mount, MountFlag}};
-use std::{path::PathBuf, fmt, iter, ops, os::unix::io::AsRawFd, path::Path};
+use npk::{
+    archive::Container,
+    manifest::{Dev, Mount, MountFlag},
+};
+use std::{
+    fmt, iter, ops,
+    os::unix::io::AsRawFd,
+    path::{Path, PathBuf},
+};
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt, AsyncWriteExt},
