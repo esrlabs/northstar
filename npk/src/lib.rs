@@ -21,7 +21,7 @@ pub mod manifest;
 pub mod npk;
 
 use fmt::Debug;
-use log::*;
+use log::debug;
 use std::fmt;
 use thiserror::Error;
 use tokio::{fs, io, prelude::*};

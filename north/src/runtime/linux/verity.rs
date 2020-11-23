@@ -14,7 +14,7 @@
 
 use super::super::linux::{self, device_mapper as dm};
 use floating_duration::TimeAsFloat;
-use log::*;
+use log::debug;
 use npk::VerityHeader;
 use std::path::PathBuf;
 use tokio::time;

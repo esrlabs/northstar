@@ -28,7 +28,7 @@ use crate::{
 };
 use config::Config;
 use console::Request;
-use log::*;
+use log::{debug, info};
 use nix::{sys::stat, unistd};
 use npk::manifest::Name;
 use process::ExitStatus;

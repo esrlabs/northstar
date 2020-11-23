@@ -12,11 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use log::debug;
 use std::path::Path;
 use thiserror::Error;
 
 use floating_duration::TimeAsFloat;
-use log::*;
 pub use nix::mount::MsFlags as MountFlags;
 use tokio::{task, time};
 
