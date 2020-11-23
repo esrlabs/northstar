@@ -35,8 +35,7 @@ use floating_duration::TimeAsFloat;
 use log::*;
 use npk::{
     archive::{ArchiveReader, Container},
-    check_verity_config, get_fs_type,
-    read_verity_header, VerityHeader,
+    check_verity_config, get_fs_type, read_verity_header, VerityHeader,
 };
 use std::{
     collections::HashMap,
