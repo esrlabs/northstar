@@ -318,14 +318,16 @@ fn list_containers(state: &State) -> Vec<api::Container> {
                     {
                         const PAGE_SIZE: usize = 4096;
                         let pid = f.process().pid();
-                        let statm = procinfo::pid::statm(pid as i32).expect("Failed get statm");
-                        Some(api::Memory {
-                            size: (statm.size * PAGE_SIZE) as u64,
-                            resident: (statm.resident * PAGE_SIZE) as u64,
-                            shared: (statm.share * PAGE_SIZE) as u64,
-                            text: (statm.text * PAGE_SIZE) as u64,
-                            data: (statm.data * PAGE_SIZE) as u64,
-                        })
+
+                        procinfo::pid::statm(pid as i32)
+                            .ok()
+                            .map(|statm| api::Memory {
+                                size: (statm.size * PAGE_SIZE) as u64,
+                                resident: (statm.resident * PAGE_SIZE) as u64,
+                                shared: (statm.share * PAGE_SIZE) as u64,
+                                text: (statm.text * PAGE_SIZE) as u64,
+                                data: (statm.data * PAGE_SIZE) as u64,
+                            })
                     }
                 },
             }),
