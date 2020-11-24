@@ -125,8 +125,11 @@ async fn check_memeater() -> Result<()> {
     // Here goes some kind of health check for the spawned process
     assert!(memeater.is_running().await?);
 
-    // TODO why is this not equal?
-    // println!("{} != {}", memeater.get_limit_in_bytes().await?, 100000000);
+    // NOTE
+    // The limit in bytes indicated in the memory cgroup wont necessary be equal to the one
+    // requested exactly. The kernel will assign some value close to it. For this reason we check
+    // here that the limit assigned is greater than zero.
+    assert!(memeater.get_limit_in_bytes().await? > 0);
 
     // stop the memeater process
     runtime.stop("memeater").await?;
