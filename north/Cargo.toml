@@ -23,6 +23,7 @@ bytesize = { version = "1.0.1", optional = true }
 derive-new = { version = "0.5.8", optional = true }
 ed25519-dalek = { version = "1.0.1", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
+hex = "0.4.2"
 itertools = { version = "0.9.0", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 libc = { version = "0.2.80", optional = true }

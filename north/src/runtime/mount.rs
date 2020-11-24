@@ -16,6 +16,7 @@ use super::{
     device_mapper as dm, device_mapper,
     loopdev::{losetup, LoopControl},
 };
+use bitflags::_core::str::Utf8Error;
 use device_mapper::Dm;
 use floating_duration::TimeAsFloat;
 use log::{debug, info};
@@ -23,11 +24,12 @@ pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use npk::{
     archive::{ArchiveReader, Container},
-    check_verity_config, parse_verity_header, VerityHeader,
+    dm_verity::VerityHeader,
 };
 use std::{
     collections::HashMap,
     io,
+    io::Cursor,
     path::{Path, PathBuf},
     process,
 };
@@ -49,10 +51,12 @@ pub enum Error {
     LoopDevice(super::loopdev::Error),
     #[error("IO error: {0}: {1:?}")]
     Io(String, io::Error),
+    #[error("DM Verity error: {0:?}")]
+    DmVerity(npk::dm_verity::Error),
     #[error("NPK error: {0:?}")]
-    Npk(npk::Error),
-    #[error("NPK error: {0:?}")]
-    NpkArchive(npk::archive::Error),
+    Npk(npk::archive::Error),
+    #[error("UTF-8 conversion error: {0:?}")]
+    Utf8Conversion(Utf8Error),
     #[error("Inotify timeout error {0}")]
     Timeout(String),
     #[error("Task join error")]
@@ -154,18 +158,18 @@ async fn mount_internal(
     if let Ok(meta) = metadata(&npk).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
-    let mut archive_reader = ArchiveReader::new(&npk, signing_keys).map_err(Error::NpkArchive)?;
+    let mut archive_reader = ArchiveReader::new(&npk, signing_keys).map_err(Error::Npk)?;
 
-    let hashes = archive_reader.extract_hashes().map_err(Error::NpkArchive)?;
+    let hashes = archive_reader.extract_hashes().map_err(Error::Npk)?;
 
     let manifest = archive_reader
         .extract_manifest_from_archive()
-        .map_err(Error::NpkArchive)?;
+        .map_err(Error::Npk)?;
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
     let (fs_offset, fs_size) = archive_reader
         .extract_fs_start_and_size()
-        .map_err(Error::NpkArchive)?;
+        .map_err(Error::Npk)?;
 
     let mut fs = fs::File::open(&npk)
         .await
@@ -181,9 +185,9 @@ async fn mount_internal(
         .await
         .map_err(|e| Error::Io("Failed to read verity header".into(), e))?;
 
-    let verity = parse_verity_header(&header).await.map_err(Error::Npk)?;
+    let verity = VerityHeader::from_bytes(&mut Cursor::new(&header)).map_err(Error::DmVerity)?;
 
-    check_verity_config(&verity).map_err(Error::Npk)?;
+    &verity.check().map_err(Error::DmVerity)?;
 
     let instances = manifest.instances.unwrap_or(1);
 
@@ -247,7 +251,7 @@ async fn mount_internal(
     Ok(mounted_containers)
 }
 
-pub async fn veritysetup(
+pub async fn verity_setup(
     dm: &dm::Dm,
     dm_dev: &str,
     dev: &str,
@@ -266,6 +270,9 @@ pub async fn veritysetup(
         .await
         .map_err(Error::DeviceMapper)?;
 
+    let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
+        .map_err(Error::Utf8Conversion)?;
+    let hex_salt = hex::encode(&verity.salt[..(verity.salt_size as usize)]);
     let verity_table = format!(
         "{} {} {} {} {} {} {} {} {} {}",
         verity.version,
@@ -275,9 +282,9 @@ pub async fn veritysetup(
         verity.hash_block_size,
         verity.data_blocks,
         verity.data_blocks + 1,
-        verity.algorithm,
+        alg_no_pad,
         verity_hash,
-        verity.salt
+        hex_salt
     );
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
@@ -351,7 +358,7 @@ async fn setup_and_mount(
         .map(|(major, minor)| format!("{}:{}", major, minor))
         .map_err(Error::LoopDevice)?;
 
-    let dm_dev = veritysetup(
+    let dm_dev = verity_setup(
         &dm,
         &dm_dev,
         &loop_device_id,

@@ -13,6 +13,7 @@
 //   limitations under the License.
 
 use crate::api;
+use npk::archive;
 use std::io;
 use thiserror::Error;
 
@@ -31,8 +32,8 @@ pub enum Error {
     #[error("Resource {0} is already installed")]
     ResourceAlreadyInstalled(String),
 
-    #[error("NPK: {0:?}")]
-    Npk(npk::Error),
+    #[error("Npk: {0:?}")]
+    Npk(archive::Error),
     #[error("Process: {0:?}")]
     Process(super::process::Error),
     #[error("Console: {0:?}")]

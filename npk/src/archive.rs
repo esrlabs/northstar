@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{manifest::Manifest, Error as NpkError};
+use crate::manifest::Manifest;
 use ed25519_dalek::ed25519::signature::Signature as _;
 use fmt::Debug;
 use log::trace;
@@ -44,7 +44,7 @@ pub enum Error {
     KeyNotFound(String),
     #[error("Hashes malformed ({0})")]
     MalformedHashes(String),
-    #[error("Problem verifiing content with signature ({0})")]
+    #[error("Problem verifying content with signature ({0})")]
     SignatureVerificationError(String),
     #[error("Failed to verify manifest: {0}")]
     MalformedManifest(String),
@@ -202,11 +202,9 @@ pub struct ArchiveReader<'a> {
 pub fn read_manifest(
     npk: &Path,
     signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
-) -> Result<Manifest, NpkError> {
-    let mut archive_reader = ArchiveReader::new(&npk, &signing_keys).map_err(NpkError::Archive)?;
-    archive_reader
-        .extract_manifest_from_archive()
-        .map_err(NpkError::Archive)
+) -> Result<Manifest, Error> {
+    let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
+    archive_reader.extract_manifest_from_archive()
 }
 
 impl<'a> ArchiveReader<'a> {

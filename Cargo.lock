@@ -1081,6 +1081,7 @@ dependencies = [
  "derive-new",
  "ed25519-dalek",
  "floating-duration",
+ "hex",
  "itertools",
  "lazy_static",
  "libc",
@@ -1129,6 +1130,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.13.0",
+ "byteorder",
  "ed25519-dalek",
  "fs_extra",
  "hex",
