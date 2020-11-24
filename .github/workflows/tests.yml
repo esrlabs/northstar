@@ -32,6 +32,6 @@ jobs:
       - name: Build
         run: cargo build
       - name: Integration Tests
-        run: cargo test -p north_tests -- --test-threads 1 --ignored --nocapture
+        run: cargo test -p north_tests -- --test-threads 1 --ignored --nocapture --color always
         env:
             RUST_LOG: debug

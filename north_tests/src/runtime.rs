@@ -16,14 +16,15 @@
 
 use crate::{
     process_assert::ProcessAssert,
-    util::{cargo_bin, CaptureReader, Timeout},
+    util::{cargo_bin, CaptureReader},
 };
-use anyhow::{anyhow, Context, Error, Result};
+use color_eyre::eyre::{eyre, Error, Result, WrapErr};
 use log::{error, info};
 use std::{path::Path, process::Stdio};
 use tokio::{
     process::{Child, Command},
     select, time,
+    time::timeout,
 };
 
 const TIMEOUT: time::Duration = time::Duration::from_secs(3);
@@ -38,7 +39,7 @@ async fn nstar(command: &str) -> Result<()> {
     if command != "shutdown" && !output.status.success() {
         let error_msg = String::from_utf8(output.stderr)?;
         error!("Failed to run nstar {}: {}", command, error_msg);
-        Err(anyhow!("Failed to run nstar {}: {}", command, error_msg))
+        Err(eyre!("Failed to run nstar {}: {}", command, error_msg))
     } else {
         info!("nstar {}: {}", command, String::from_utf8(output.stdout)?);
         Ok(())
@@ -57,7 +58,7 @@ impl Runtime {
     /// # Examples
     ///
     /// ```no_run
-    /// use anyhow::Result;
+    /// use color_eyre::eyre::Result;
     /// use north_tests::runtime::Runtime;
     ///
     /// #[tokio::main]
@@ -66,42 +67,46 @@ impl Runtime {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn launch() -> Result<Runtime> {
-        async move {
+    pub async fn launch() -> Result<Runtime, Error> {
+        let launch = async move {
             let mut child = Command::new(cargo_bin("north"))
                 .current_dir("..")
                 .stdout(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
-                .context("Could not spawn north")?;
+                .wrap_err("Could not spawn north")?;
 
             let stdout = child
                 .stdout
                 .take()
-                .ok_or_else(|| anyhow!("Cannot get stdout of child"))?;
+                .ok_or_else(|| eyre!("Cannot get stdout of child"))?;
             let mut output = CaptureReader::new(stdout).await;
 
             output
                 .captures("Starting console on localhost:4200")
                 .await
-                .context("Failed to open north console")?;
+                .wrap_err("Failed to open north console")?;
 
-            Ok(Runtime { child, output })
-        }
-        .or_timeout(TIMEOUT)
-        .await
-        .context("Failed to launch north")?
+            Ok::<Runtime, Error>(Runtime { child, output })
+        };
+
+        timeout(TIMEOUT, launch)
+            .await
+            .wrap_err("launching north timed out")
+            .and_then(|result| result)
     }
 
     pub async fn expect_output(&mut self, regex: &str) -> Result<Vec<String>> {
-        self.output
-            .captures(regex)
-            .await?
-            .ok_or_else(|| anyhow!("Pattern not found"))
+        let search = self.output.captures(regex);
+        timeout(TIMEOUT, search)
+            .await
+            .wrap_err_with(|| format!("Search for pattern \"{}\" timed out", regex))
+            .and_then(|res| res)?
+            .ok_or_else(|| eyre!("Pattern not found"))
     }
 
     pub async fn start(&mut self, name: &str) -> Result<ProcessAssert> {
-        async move {
+        let start = async move {
             nstar(&format!("start {}", name)).await?;
 
             // Get container's pid out north's stdout
@@ -109,51 +114,56 @@ impl Runtime {
                 .output
                 .captures(&format!("\\[(\\d+)\\] {}: 1: ", name))
                 .await?
-                .context(format!("couldn't find {}'s pid", name))?;
+                .ok_or_else(|| eyre!("Couldn't find {}'s pid", name))?;
 
             let pid = captures
                 .into_iter()
                 .nth(1)
                 .unwrap()
                 .parse::<u64>()
-                .context(format!("Could not capture {}'s PID", name))?;
+                .wrap_err(format!("Could not capture {}'s PID", name))?;
 
-            Ok(ProcessAssert::new(pid))
-        }
-        .or_timeout(TIMEOUT)
-        .await
-        .context(format!("Failed to start container {}", name))?
+            Ok::<ProcessAssert, Error>(ProcessAssert::new(pid))
+        };
+
+        timeout(TIMEOUT, start)
+            .await
+            .wrap_err_with(|| format!("Failed to start container {}", name))
+            .and_then(|result| result)
     }
 
     pub async fn stop(&mut self, container_name: &str) -> Result<()> {
-        async move {
+        let stop = async move {
             nstar(&format!("stop {}", container_name)).await?;
 
             // Check that the container stopped
             self.output
                 .captures(&format!("Stopped {}", container_name))
                 .await
-                .context(format!("Failed to wait for {} to stop", container_name))?;
+                .wrap_err(format!("Failed to wait for {} to stop", container_name))?;
 
-            Ok(())
-        }
-        .or_timeout(TIMEOUT)
-        .await
-        .context(format!("Failed to stop container {}", container_name))?
+            Ok::<(), Error>(())
+        };
+
+        timeout(TIMEOUT, stop)
+            .await
+            .wrap_err_with(|| format!("Failed to stop {}", container_name))
+            .and_then(|result| result)
     }
 
     pub async fn try_stop(&mut self, container_name: &str) -> Result<()> {
-        nstar(&format!("stop {}", container_name))
-            .or_timeout(TIMEOUT)
+        let command = format!("stop {}", container_name);
+        timeout(TIMEOUT, nstar(&command))
             .await
-            .context(format!("Failed to stop container {}", container_name))?
+            .wrap_err_with(|| format!("Failed to stop {}", container_name))
+            .and_then(|result| result)
     }
 
     pub async fn install(&mut self, npk: &Path) -> Result<()> {
         let command = format!("install {}", npk.display());
         select! {
             result = nstar(&command) => result,
-            _ = time::sleep(TIMEOUT) => Err(anyhow!("Failed to install npk")),
+            _ = time::sleep(TIMEOUT) => Err(eyre!("Failed to install npk")),
         }
     }
 
@@ -165,17 +175,17 @@ impl Runtime {
             self.output
                 .captures("Shutting down...")
                 .await
-                .context("Shutdown request was not received")?;
+                .wrap_err("Shutdown request was not received")?;
 
             self.child.wait().await?;
-            Ok::<(), Error>(())
+            Ok::<(), color_eyre::eyre::Error>(())
         };
 
         let timeout = time::sleep(TIMEOUT);
 
         select! {
             _ = shutdown => (),
-            _ = timeout => self.child.kill().await.context("Failed to kill runtime")?,
+            _ = timeout => self.child.kill().await.wrap_err("Failed to kill runtime")?,
         }
         Ok(())
     }
