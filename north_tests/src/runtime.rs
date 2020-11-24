@@ -23,7 +23,7 @@ use log::{error, info};
 use std::{path::Path, process::Stdio};
 use tokio::{
     process::{Child, Command},
-    select, time,
+    time,
     time::timeout,
 };
 
@@ -161,10 +161,18 @@ impl Runtime {
 
     pub async fn install(&mut self, npk: &Path) -> Result<()> {
         let command = format!("install {}", npk.display());
-        select! {
-            result = nstar(&command) => result,
-            _ = time::sleep(TIMEOUT) => Err(eyre!("Failed to install npk")),
-        }
+        timeout(TIMEOUT, nstar(&command))
+            .await
+            .wrap_err("Installing npk timed out")
+            .and_then(|res| res)
+    }
+
+    pub async fn uninstall(&mut self, name: &str, version: &str) -> Result<()> {
+        let command = format!("uninstall {} {}", name, version);
+        timeout(TIMEOUT, nstar(&command))
+            .await
+            .wrap_err("Uninstalling npk timed out")
+            .and_then(|res| res)
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
@@ -181,12 +189,9 @@ impl Runtime {
             Ok::<(), color_eyre::eyre::Error>(())
         };
 
-        let timeout = time::sleep(TIMEOUT);
-
-        select! {
-            _ = shutdown => (),
-            _ = timeout => self.child.kill().await.wrap_err("Failed to kill runtime")?,
-        }
-        Ok(())
+        timeout(TIMEOUT, shutdown)
+            .await
+            .wrap_err("Shutting down runtime timed out")
+            .and_then(|res| res)
     }
 }

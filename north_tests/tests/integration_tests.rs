@@ -165,6 +165,13 @@ async fn check_data_and_resource_mount() -> Result<()> {
     // Remove the temporary data directory
     fs::remove_dir_all(&data_dir).await?;
 
+    for i in 0..5 {
+        runtime
+            .uninstall(&format!("test_container-0{:02}", i), "0.0.1")
+            .await?;
+    }
+    runtime.uninstall("test_resource", "0.0.1").await?;
+
     runtime.shutdown().await
 }
 
@@ -199,6 +206,13 @@ async fn check_crashing_container() -> Result<()> {
             .try_stop(&format!("test_container-0{:02}", i))
             .await?;
     }
+
+    for i in 0..5 {
+        runtime
+            .uninstall(&format!("test_container-0{:02}", i), "0.0.1")
+            .await?;
+    }
+    runtime.uninstall("test_resource", "0.0.1").await?;
 
     runtime.shutdown().await
 }
