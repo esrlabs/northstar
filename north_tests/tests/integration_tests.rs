@@ -12,10 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{Context, Result};
+use color_eyre::eyre::{Result, WrapErr};
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
-use north_tests::{runtime::Runtime, util::Timeout};
+use north_tests::runtime::Runtime;
 use npk::npk;
 use std::{
     path::{Path, PathBuf},
@@ -26,8 +26,9 @@ use tokio::fs;
 
 static INIT: Once = Once::new();
 
-fn init_logger() {
+fn init() {
     INIT.call_once(|| {
+        color_eyre::install().unwrap();
         env_logger::builder().is_test(true).try_init().ok();
     })
 }
@@ -83,7 +84,7 @@ fn copy_file(file: &Path, dir: &Path) {
 #[ignore]
 #[tokio::test]
 async fn check_hello() -> Result<()> {
-    init_logger();
+    init();
     let mut runtime = Runtime::launch().await?;
 
     let hello = runtime.start("hello").await?;
@@ -98,14 +99,14 @@ async fn check_hello() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn check_cpueater() -> Result<()> {
-    init_logger();
+    init();
     let mut runtime = Runtime::launch().await?;
 
     let cpueater = runtime.start("cpueater").await?;
 
     // Here goes some kind of health check for the spawned process
     assert_eq!(cpueater.get_cpu_shares().await?, 100);
-    assert!(cpueater.is_running().or_timeout_in_secs(1).await??);
+    assert!(cpueater.is_running().await?);
 
     // Stop the cpueater process
     runtime.stop("cpueater").await?;
@@ -115,14 +116,14 @@ async fn check_cpueater() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn check_memeater() -> Result<()> {
-    init_logger();
+    init();
 
     let mut runtime = Runtime::launch().await?;
 
     let memeater = runtime.start("memeater").await?;
 
     // Here goes some kind of health check for the spawned process
-    assert!(memeater.is_running().or_timeout_in_secs(1).await??);
+    assert!(memeater.is_running().await?);
 
     // TODO why is this not equal?
     // println!("{} != {}", memeater.get_limit_in_bytes().await?, 100000000);
@@ -135,7 +136,7 @@ async fn check_memeater() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn check_data_and_resource_mount() -> Result<()> {
-    init_logger();
+    init();
 
     let mut runtime = Runtime::launch().await?;
 
@@ -156,9 +157,8 @@ async fn check_data_and_resource_mount() -> Result<()> {
 
     runtime
         .expect_output("hello from test resource")
-        .or_timeout_in_secs(5)
-        .await?
-        .context("Failed to find expected test_container output")?;
+        .await
+        .wrap_err("Failed to read text from resource container")?;
 
     runtime.try_stop("test_container-000").await?;
 
@@ -171,7 +171,7 @@ async fn check_data_and_resource_mount() -> Result<()> {
 #[ignore]
 #[tokio::test]
 async fn check_crashing_container() -> Result<()> {
-    init_logger();
+    init();
 
     let data_dir = Path::new("../target/north/data/").canonicalize()?;
 

@@ -14,35 +14,16 @@
 
 //! Extends Future with timeout methods
 
-use anyhow::{Context, Result};
-use async_trait::async_trait;
+use color_eyre::eyre::{Result, WrapErr};
 use log::debug;
 use regex::Regex;
-use std::{env, future::Future, path::PathBuf};
+use std::{env, path::PathBuf};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     stream::StreamExt,
     sync::mpsc::{channel, Receiver},
-    task, time,
-    time::timeout,
+    task,
 };
-
-/// Extends Future with timeout methods
-#[async_trait]
-pub trait Timeout: Sized + Future {
-    /// Times out if the tasks takes longer than `duration`
-    async fn or_timeout(self, duration: time::Duration) -> Result<Self::Output> {
-        timeout(duration, self).await.map_err(anyhow::Error::new)
-    }
-
-    /// Times out if the tasks takes longer than the `secs`
-    async fn or_timeout_in_secs(self, secs: u64) -> Result<Self::Output> {
-        self.or_timeout(time::Duration::from_secs(secs)).await
-    }
-}
-
-#[async_trait]
-impl<T: Sized + Future> Timeout for T {}
 
 pub struct CaptureReader {
     receiver: Receiver<String>,
@@ -67,7 +48,7 @@ impl CaptureReader {
 
     /// Consumes the stdout till a match to the input regex is found.
     pub async fn captures(&mut self, regex: &str) -> Result<Option<Vec<String>>> {
-        let re = Regex::new(regex).context("Invalid regular expression")?;
+        let re = Regex::new(regex).wrap_err("Invalid regular expression")?;
         while let Some(line) = self.receiver.recv().await {
             if let Some(cap) = re.captures(&line) {
                 return Ok(Some(

@@ -14,7 +14,7 @@
 
 //! Set of assertions wrapped to OS processes
 
-use anyhow::{anyhow, Context, Result};
+use color_eyre::eyre::{eyre, Result, WrapErr};
 use regex::Regex;
 use std::path::PathBuf;
 use tokio::fs;
@@ -52,14 +52,14 @@ impl ProcessAssert {
         let mut cgroup_path = self
             .get_cgroup_path("cpu")
             .await
-            .context("Could not find the cgroup path")?;
+            .wrap_err("Failed to find the cgroup path")?;
         cgroup_path.push("cpu.shares");
 
         fs::read_to_string(cgroup_path.as_path())
             .await
             .map(|s| s.trim().to_owned())?
             .parse()
-            .context("Could not parse CPU shares")
+            .wrap_err("Failed to parse CPU shares")
     }
 
     /// Return the limit in bytes set in the process's memory cgroup
@@ -67,20 +67,20 @@ impl ProcessAssert {
         let cgroup_path = self
             .get_cgroup_path("memory")
             .await
-            .context("Could not find the cgroup path")?
+            .wrap_err("Failed to find the cgroup path")?
             .join("memory.limit_in_bytes");
         fs::read_to_string(&cgroup_path)
             .await
             .map(|s| s.trim().to_owned())?
             .parse()
-            .context("Could not parse memory limit")
+            .wrap_err("Failed to parse memory limit")
     }
 
     /// Checks the process's state
     async fn get_state(&self) -> Result<Option<ProcessState>> {
         let stat = fs::read_to_string(format!("/proc/{}/stat", self.pid))
             .await
-            .context("Failed to read proc stat")?;
+            .wrap_err("Failed to read proc stat")?;
 
         use ProcessState::*;
         match stat.split_whitespace().nth(2) {
@@ -108,7 +108,7 @@ impl ProcessAssert {
         {
             Ok(format!("/sys/fs/cgroup/{}{}", cgroup_name, path).into())
         } else {
-            Err(anyhow!("Could not find cgroup configuration"))
+            Err(eyre!("Failed to find cgroup configuration"))
         }
     }
 }
