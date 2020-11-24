@@ -6,6 +6,8 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    env:
+        TERM: xterm-256color
     steps:
       - name: Cache
         uses: actions/cache@v2
@@ -27,8 +29,6 @@ jobs:
         shell: bash
         run: |
             ./examples/build_examples.sh
-        env:
-            TERM: xterm
       - name: Build
         run: cargo build
       - name: Integration Tests
