@@ -12,10 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use byteorder::{LittleEndian, ReadBytesExt};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
+    io,
     io::{BufReader, Read, Seek, SeekFrom::Start, Write},
     path::Path,
 };
@@ -30,6 +32,12 @@ pub type Salt = Sha256Digest;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Invalid verity header")]
+    InvalidHeader,
+    #[error("Unsupported verity version {0}")]
+    UnsupportedVersion(u32),
+    #[error("Unsupported verity algorithm")]
+    UnsupportedAlgorithm(),
     #[error("Error generating hash tree: {0}")]
     HashTree(String),
     #[error("Error creating valid uuid")]
@@ -40,6 +48,114 @@ pub enum Error {
         #[source]
         error: std::io::Error,
     },
+}
+
+// https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format
+#[derive(Debug)]
+pub struct VerityHeader {
+    pub header: [u8; 8],
+    pub version: u32,
+    pub hash_type: u32,
+    pub uuid: [u8; 16],
+    pub algorithm: [u8; 32],
+    pub data_block_size: u32,
+    pub hash_block_size: u32,
+    pub data_blocks: u64,
+    pub salt_size: u16,
+    pub salt: [u8; 256],
+}
+
+impl VerityHeader {
+    pub const HEADER: &'static [u8; 6] = b"verity";
+    pub const ALGORITHM: &'static [u8; 6] = b"sha256";
+    pub const VERITY_VERSION: u32 = 1;
+
+    fn new(uuid: &[u8; 16], data_blocks: u64, salt_size: u16, salt: &Salt) -> VerityHeader {
+        let mut padded_header = [0u8; 8];
+        padded_header[..VerityHeader::HEADER.len()].copy_from_slice(VerityHeader::HEADER);
+        let mut padded_algorithm = [0u8; 32];
+        padded_algorithm[..VerityHeader::ALGORITHM.len()].copy_from_slice(VerityHeader::ALGORITHM);
+        let mut padded_salt = [0u8; 256];
+        padded_salt[..salt.len()].copy_from_slice(&salt.to_vec());
+        VerityHeader {
+            header: padded_header,
+            version: 1,
+            hash_type: 1,
+            uuid: *uuid,
+            algorithm: padded_algorithm,
+            data_block_size: BLOCK_SIZE as u32,
+            hash_block_size: BLOCK_SIZE as u32,
+            data_blocks,
+            salt_size,
+            salt: padded_salt,
+        }
+    }
+
+    pub fn from_bytes<T: Read>(src: &mut T) -> Result<VerityHeader, Error> {
+        || -> Result<VerityHeader, std::io::Error> {
+            let mut header = [0u8; 8];
+            src.read_exact(&mut header)?;
+            let version = src.read_u32::<LittleEndian>()?;
+            let hash_type = src.read_u32::<LittleEndian>()?;
+            let mut uuid = [0u8; 16];
+            src.read_exact(&mut uuid)?;
+            let mut algorithm = [0u8; 32];
+            src.read_exact(&mut algorithm)?;
+            let data_block_size = src.read_u32::<LittleEndian>()?;
+            let hash_block_size = src.read_u32::<LittleEndian>()?;
+            let data_blocks = src.read_u64::<LittleEndian>()?;
+            let salt_size = src.read_u16::<LittleEndian>()?;
+            io::copy(&mut src.take(6), &mut io::sink())?; // skip padding
+            let mut salt = [0u8; 256];
+            src.read_exact(&mut salt)?;
+            Ok(VerityHeader {
+                header,
+                version,
+                hash_type,
+                uuid,
+                algorithm,
+                data_block_size,
+                hash_block_size,
+                data_blocks,
+                salt_size,
+                salt,
+            })
+        }()
+        .map_err(|e| Error::Os {
+            context: "Failed to read verity header".to_string(),
+            error: e,
+        })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut raw_sb: Vec<u8> = vec![];
+        raw_sb.extend(&self.header);
+        raw_sb.extend(&self.version.to_ne_bytes());
+        raw_sb.extend(&self.hash_type.to_ne_bytes());
+        raw_sb.extend(&self.uuid);
+        raw_sb.extend(&self.algorithm);
+        raw_sb.extend(&self.data_block_size.to_ne_bytes());
+        raw_sb.extend(&self.hash_block_size.to_ne_bytes());
+        raw_sb.extend(&self.data_blocks.to_ne_bytes());
+        raw_sb.extend(&self.salt_size.to_ne_bytes());
+        raw_sb.extend(&[0_u8; 6]); // padding
+        raw_sb.extend(&self.salt);
+        raw_sb.extend(vec![0u8; BLOCK_SIZE - raw_sb.len()]); // pad to block size
+        raw_sb
+    }
+
+    pub fn check(&self) -> Result<(), Error> {
+        if !self.header.starts_with(VerityHeader::HEADER) {
+            return Err(Error::InvalidHeader);
+        }
+        if self.version != VerityHeader::VERITY_VERSION {
+            return Err(Error::UnsupportedVersion(self.version));
+        }
+        if !self.algorithm.starts_with(VerityHeader::ALGORITHM) {
+            return Err(Error::UnsupportedAlgorithm());
+        }
+        Ok(())
+    }
 }
 
 /// Generate and append a dm-verity superblock
@@ -194,10 +310,6 @@ fn append_superblock_and_hashtree(
     salt: &Salt,
     hash_tree: &[u8],
 ) -> Result<(), Error> {
-    let uuid = Uuid::new_v4();
-    assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
-    let data_blocks = fsimg_size / BLOCK_SIZE as u64;
-
     let mut fsimg = OpenOptions::new()
         .write(true)
         .append(true)
@@ -207,28 +319,17 @@ fn append_superblock_and_hashtree(
             error: e,
         })?;
 
-    // write verity superblock
-    // https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format
-    const VERITY_SIGNATURE: &[u8; 8] = b"verity\x00\x00";
-    const HASH_ALG_NAME: &[u8; 6] = b"sha256";
-    let mut raw_sb: Vec<u8> = vec![];
-    raw_sb.extend(VERITY_SIGNATURE);
-    raw_sb.extend(&1_u32.to_ne_bytes()); // superblock version
-    raw_sb.extend(&1_u32.to_ne_bytes()); // hash type 'normal'
-    raw_sb.extend(&hex::decode(uuid.to_string().replace("-", "")).map_err(|_e| Error::Uuid)?);
-    raw_sb.extend(HASH_ALG_NAME);
-    raw_sb.extend(&[0_u8; 26]);
-    raw_sb.extend(&(BLOCK_SIZE as u32).to_ne_bytes()); // data block in bytes
-    raw_sb.extend(&(BLOCK_SIZE as u32).to_ne_bytes()); // hash block in bytes
-    raw_sb.extend(&data_blocks.to_ne_bytes()); // number of data blocks
-    raw_sb.extend(&(SHA256_SIZE as u16).to_ne_bytes()); // salt size
-    raw_sb.extend(&[0_u8; 6]); // padding
-    raw_sb.extend(salt);
-    raw_sb.extend(&vec![0_u8; 256 - salt.len()]); // padding
-
+    let mut uuid = [0u8; 16];
+    uuid.copy_from_slice(
+        hex::decode(Uuid::new_v4().to_string().replace("-", ""))
+            .map_err(|_e| Error::Uuid)?
+            .as_slice(),
+    );
+    assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
+    let data_blocks = fsimg_size / BLOCK_SIZE as u64;
+    let header = VerityHeader::new(&uuid, data_blocks, SHA256_SIZE as u16, &salt).to_bytes();
     || -> Result<(), std::io::Error> {
-        fsimg.write_all(&raw_sb)?;
-        fsimg.write_all(vec![0u8; BLOCK_SIZE - raw_sb.len()].as_slice())?; // pad to BLOCK_SIZE
+        fsimg.write_all(&header)?;
         fsimg.write_all(&hash_tree)
     }()
     .map_err(|e| Error::Os {
