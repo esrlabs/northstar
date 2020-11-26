@@ -87,6 +87,7 @@ pub struct Runtime {
     // channel. If a error happens during normal operation the error is also
     // sent to this channel.
     stopped: oneshot::Receiver<RuntimeResult>,
+    event_tx: mpsc::Sender<Event>,
 }
 
 impl Runtime {
@@ -102,14 +103,23 @@ impl Runtime {
         mkdir_p_rw(&config.directories.data_dir).await?;
         mkdir_p_rw(&config.directories.run_dir).await?;
 
+        // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
+        let (event_tx, event_rx) = mpsc::channel::<Event>(100);
+
         // Start a task that drives the main loop and wait for shutdown results
-        task::spawn(async {
-            stopped_tx.send(runtime_task(config, stop_rx).await).ok(); // Ignore error if calle dropped the handle
-        });
+        {
+            let event_tx = event_tx.clone();
+            task::spawn(async move {
+                stopped_tx
+                    .send(runtime_task(config, event_tx, event_rx, stop_rx).await)
+                    .ok(); // Ignore error if calle dropped the handle
+            });
+        }
 
         Ok(Runtime {
             stop: Some(stop_tx),
             stopped: stopped_rx,
+            event_tx,
         })
     }
 
@@ -123,6 +133,26 @@ impl Runtime {
     pub fn stop_wait(mut self) -> impl Future<Output = RuntimeResult> {
         self.stop.take();
         self
+    }
+
+    /// Send a request to the runtime directly
+    pub async fn request(&self, request: api::Request) -> Result<api::Response, Error> {
+        let (response_tx, response_rx) = oneshot::channel::<api::Message>();
+
+        let request = api::Message::new(api::Payload::Request(request));
+        self.event_tx
+            .send(Event::Console(
+                console::Request::Message(request),
+                response_tx,
+            ))
+            .await
+            .ok();
+
+        match response_rx.await.ok().map(|message| message.payload) {
+            Some(api::Payload::Response(response)) => Ok(response),
+            Some(_) => unreachable!(),
+            None => Err(Error::Internal("Failed to receive response".to_string())),
+        }
     }
 }
 
@@ -141,9 +171,12 @@ impl Future for Runtime {
     }
 }
 
-pub async fn runtime_task(config: Config, stop: oneshot::Receiver<()>) -> Result<(), Error> {
-    // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
-    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+async fn runtime_task(
+    config: Config,
+    event_tx: mpsc::Sender<Event>,
+    mut event_rx: mpsc::Receiver<Event>,
+    stop: oneshot::Receiver<()>,
+) -> Result<(), Error> {
     let mut state = State::new(&config, event_tx.clone()).await?;
 
     // Iterate all files in SETTINGS.directories.container_dirs and try

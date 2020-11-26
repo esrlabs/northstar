@@ -55,6 +55,8 @@ pub enum Error {
     Protocol(String),
     #[error("Configuration error: {0}")]
     Configuration(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 #[derive(Error, Debug)]
@@ -111,6 +113,7 @@ impl From<Error> for ApiError {
             Error::Io(context, _e) => ApiError::IoError(context),
             Error::Protocol(s) => ApiError::Protocol(s),
             Error::Configuration(s) => ApiError::Configuration(s),
+            Error::Internal(s) => ApiError::Internal(s),
         }
     }
 }
