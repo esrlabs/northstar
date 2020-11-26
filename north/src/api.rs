@@ -156,4 +156,5 @@ pub enum ApiError {
     Npk(String),
     Protocol(String),
     Cgroups(String),
+    INotify(String),
 }

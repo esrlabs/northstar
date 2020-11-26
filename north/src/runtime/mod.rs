@@ -16,6 +16,7 @@ mod cgroups;
 pub mod config;
 pub(self) mod console;
 pub mod error;
+mod inotify;
 pub(self) mod keys;
 pub(self) mod linux;
 pub(self) mod process;
