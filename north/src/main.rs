@@ -60,7 +60,6 @@ fn main() -> Result<(), Error> {
     );
 
     // Set the mount propagation of unshare_root to MS_PRIVATE
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     nix::mount::mount(
         Option::<&'static [u8]>::None,
         config.devices.unshare_root.as_os_str(),
@@ -71,7 +70,6 @@ fn main() -> Result<(), Error> {
 
     // Enter a mount namespace. This needs to be done before spawning
     // the tokio threadpool.
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

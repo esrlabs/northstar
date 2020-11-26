@@ -67,7 +67,6 @@ env:
         (pub_key, prv_key)
     }
 
-    #[cfg(not(target_os = "macos"))] // no 'mksquashfs' binary available on CI
     #[test]
     fn pack_npk() {
         create_test_npk(&create_tmp_dir());
@@ -96,7 +95,6 @@ env:
         pack(&src, &create_tmp_dir(), &Path::new("invalid")).expect_err("Invalid key dir");
     }
 
-    #[cfg(not(target_os = "macos"))] // no 'mksquashfs' binary available on CI
     #[test]
     fn unpack_npk() {
         let npk = create_test_npk(&create_tmp_dir());

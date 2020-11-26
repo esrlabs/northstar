@@ -57,7 +57,6 @@ pub struct ProcessContext {
     process: Box<dyn Process>,
     incarnation: u32,
     start_timestamp: time::Instant,
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     cgroups: Option<super::cgroups::CGroups>,
 }
 
@@ -211,8 +210,6 @@ impl State {
         // Spawn process
         info!("Starting {}", app);
 
-        // Android and Linux
-        #[cfg(any(target_os = "android", target_os = "linux"))]
         let process = super::process::minijail::Process::start(
             &app.container,
             self.events_tx.clone(),
@@ -224,16 +221,9 @@ impl State {
         .await
         .map_err(Error::Process)?;
 
-        // Not Android or Linux
-        #[cfg(not(any(target_os = "android", target_os = "linux")))]
-        let process = super::process::raw::Process::start(&app.container, self.events_tx.clone())
-            .await
-            .map_err(Error::Process)?;
-
         let process = Box::new(process) as Box<dyn Process>;
 
         // CGroups
-        #[cfg(any(target_os = "android", target_os = "linux"))]
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
             debug!("Creating cgroup configuration for {}", app);
             let cgroups = super::cgroups::CGroups::new(
@@ -259,7 +249,6 @@ impl State {
             process,
             incarnation: 0,
             start_timestamp: time::Instant::now(),
-            #[cfg(any(target_os = "android", target_os = "linux"))]
             cgroups,
         });
 
@@ -289,12 +278,9 @@ impl State {
                     .await
                     .map_err(Error::Process)?;
 
-                #[cfg(any(target_os = "android", target_os = "linux"))]
-                {
-                    if let Some(cgroups) = context.cgroups {
-                        debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::Cgroups)?;
-                    }
+                if let Some(cgroups) = context.cgroups {
+                    debug!("Destroying cgroup configuration of {}", app);
+                    cgroups.destroy().await.map_err(Error::Cgroups)?;
                 }
 
                 // Send notification to main loop
@@ -510,14 +496,12 @@ impl State {
                     exit_status,
                 );
 
-                #[cfg(any(target_os = "android", target_os = "linux"))]
-                {
-                    let mut context = context;
-                    if let Some(cgroups) = context.cgroups.take() {
-                        debug!("Destroying cgroup configuration of {}", app);
-                        cgroups.destroy().await.map_err(Error::Cgroups)?;
-                    }
+                let mut context = context;
+                if let Some(cgroups) = context.cgroups.take() {
+                    debug!("Destroying cgroup configuration of {}", app);
+                    cgroups.destroy().await.map_err(Error::Cgroups)?;
                 }
+
                 let exit_info = match exit_status {
                     ExitStatus::Exit(c) => format!("Exited with code {}", c),
                     ExitStatus::Signaled(s) => format!("Terminated by signal {}", s.as_str()),

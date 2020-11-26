@@ -129,7 +129,6 @@ mounts:
         (pub_key, prv_key)
     }
 
-    #[cfg(not(target_os = "macos"))] // no 'mksquashfs' binary available on CI
     #[test]
     fn inspect_npk() {
         let npk = create_test_npk(&create_tmp_dir());
