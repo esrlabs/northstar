@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-pub(super) mod cgroups;
 #[allow(unused)]
 pub(super) mod device_mapper;
 pub(super) mod inotify;
@@ -60,8 +59,6 @@ pub enum Error {
     LoopDevice(loopdev::Error),
     #[error("Inotify")]
     INotify(#[from] inotify::Error),
-    #[error("CGroups error: {0}")]
-    CGroup(#[from] cgroups::Error),
     #[error("File operation error: {0}")]
     FileOperation(String, #[source] io::Error),
 }

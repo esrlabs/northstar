@@ -155,5 +155,5 @@ pub enum ApiError {
     MissingResource(String),
     Npk(String),
     Protocol(String),
-    TimedOut(String),
+    Cgroups(String),
 }

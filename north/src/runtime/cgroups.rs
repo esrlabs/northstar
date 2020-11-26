@@ -12,20 +12,19 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    super::super::runtime::{config, Event, EventTx},
-    Error as LinuxError,
-};
 use log::{debug, warn};
 use npk::manifest;
 use proc_mounts::MountIter;
 use std::{
+    io::ErrorKind,
     path::{Path, PathBuf},
     time::Duration,
 };
 use sync::mpsc;
 use thiserror::Error;
 use tokio::{fs, fs::OpenOptions, io, prelude::*, select, sync, task, time};
+
+use super::{config, Event, EventTx};
 
 const LIMIT_IN_BYTES: &str = "memory.limit_in_bytes";
 const OOM_CONTROL: &str = "memory.oom_control";
@@ -36,27 +35,24 @@ const TASKS: &str = "tasks";
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Internal error: {0}")]
-    InternalError(String),
-    #[error("Problem destroying cgroug: {context}")]
-    Destroy {
-        context: String,
-        #[source]
-        error: io::Error,
-    },
-    #[error("Problem mounting cgroup: {context}")]
-    MountProblem {
-        context: String,
-        #[source]
-        error: Option<io::Error>,
-    },
+    Internal(String),
+    #[error("Failed to destroy: {0}: {1}")]
+    Destroy(String, #[source] io::Error),
+    #[error("Mount error: {0}: {1}")]
+    Mount(String, #[source] io::Error),
+    #[error("Io error: {0}: {1}")]
+    Io(String, #[source] io::Error),
 }
 
 #[async_trait::async_trait]
 trait CGroup: Sized {
     /// Assign a PID to this cgroup
-    async fn assign(&self, pid: u32) -> Result<(), LinuxError> {
+    async fn assign(&self, pid: u32) -> Result<(), Error> {
         if !self.path().exists() {
-            Err(Error::InternalError(format!("Invalid cgroup {}", self.path().display())).into())
+            Err(Error::Internal(format!(
+                "Invalid cgroup {}",
+                self.path().display()
+            )))
         } else {
             debug!("Assigning {} to {}", pid, self.path().display());
             let tasks = self.path().join(TASKS);
@@ -68,16 +64,15 @@ trait CGroup: Sized {
     async fn destroy(self) -> Result<(), Error> {
         let path = self.path().to_owned();
         if !path.exists() {
-            Err(Error::InternalError(format!(
+            Err(Error::Internal(format!(
                 "CGroup {} not found",
                 path.display()
             )))
         } else {
             debug!("Destroying cgroup {}", path.display());
-            fs::remove_dir(&path).await.map_err(|e| Error::Destroy {
-                context: format!("Failed to remove {}", path.display()),
-                error: e,
-            })
+            fs::remove_dir(&path)
+                .await
+                .map_err(|e| Error::Destroy(format!("Failed to remove {}", path.display()), e))
         }
     }
 
@@ -103,7 +98,7 @@ impl CGroupMem {
         name: &str,
         cgroup: &manifest::CGroupMem,
         tx: EventTx,
-    ) -> Result<CGroupMem, LinuxError> {
+    ) -> Result<CGroupMem, Error> {
         let mount_point = get_mount_point("memory")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
@@ -175,7 +170,7 @@ impl CGroupCpu {
         parent: &Path,
         name: &str,
         cgroup: &manifest::CGroupCpu,
-    ) -> Result<CGroupCpu, LinuxError> {
+    ) -> Result<CGroupCpu, Error> {
         let mount_point = get_mount_point("cpu")?;
         let path = mount_point.join(parent).join(name);
         create(&path).await?;
@@ -205,7 +200,7 @@ impl CGroups {
         name: &str,
         cgroups: &manifest::CGroups,
         tx: EventTx,
-    ) -> Result<CGroups, LinuxError> {
+    ) -> Result<CGroups, Error> {
         let mem = if let Some(ref mem) = cgroups.mem {
             let parent = &config.memory;
             let group = CGroupMem::new(parent, &name, &mem, tx).await?;
@@ -225,7 +220,7 @@ impl CGroups {
         Ok(CGroups { mem, cpu })
     }
 
-    pub async fn assign(&self, pid: u32) -> Result<(), LinuxError> {
+    pub async fn assign(&self, pid: u32) -> Result<(), Error> {
         if let Some(ref mem) = self.mem {
             mem.assign(pid).await?;
         }
@@ -246,43 +241,42 @@ impl CGroups {
     }
 }
 
-async fn create(path: &Path) -> Result<(), LinuxError> {
+async fn create(path: &Path) -> Result<(), Error> {
     debug!("Creating {}", path.display());
     if !path.exists() {
-        fs::create_dir_all(&path).await.map_err(|e| {
-            LinuxError::FileOperation(format!("Failed to create {}", path.display()), e)
-        })?;
+        fs::create_dir_all(&path)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to create {}", path.display()), e))?;
     }
     Ok(())
 }
 
-async fn write(path: &Path, value: &str) -> Result<(), LinuxError> {
+async fn write(path: &Path, value: &str) -> Result<(), Error> {
     let mut file = OpenOptions::new()
         .write(true)
         .open(path)
         .await
-        .map_err(|e| LinuxError::FileOperation(format!("Failed open {}", path.display()), e))?;
+        .map_err(|e| Error::Io(format!("Failed open {}", path.display()), e))?;
     file.write_all(format!("{}\n", value).as_bytes())
         .await
-        .map_err(|e| LinuxError::FileOperation(format!("Failed write to {}", path.display()), e))?;
+        .map_err(|e| Error::Io(format!("Failed write to {}", path.display()), e))?;
     file.sync_all()
         .await
-        .map_err(|e| LinuxError::FileOperation(format!("Failed synd {}", path.display()), e))?;
+        .map_err(|e| Error::Io(format!("Failed synd {}", path.display()), e))?;
     Ok(())
 }
 
 fn get_mount_point(cgroup: &str) -> Result<PathBuf, Error> {
     let cgroup = String::from(cgroup);
     MountIter::new()
-        .map_err(|e| Error::MountProblem {
-            context: "Cannot access mount points".to_string(),
-            error: Some(e),
-        })?
+        .map_err(|e| Error::Mount("Failed to access mount points".to_string(), e))?
         .filter_map(|m| m.ok())
         .find(|m| m.fstype == "cgroup" && m.options.contains(&cgroup))
         .map(|m| m.dest)
-        .ok_or_else(|| Error::MountProblem {
-            context: format!("No mount point for cgroup {}", &cgroup),
-            error: None,
+        .ok_or_else(|| {
+            Error::Mount(
+                format!("No mount point for cgroup {}", &cgroup),
+                io::Error::new(ErrorKind::Other, ""),
+            )
         })
 }
