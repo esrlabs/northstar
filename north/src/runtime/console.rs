@@ -310,11 +310,6 @@ fn list_containers(state: &State) -> Vec<api::Container> {
                 pid: f.process().pid(),
                 uptime: f.uptime().as_nanos() as u64,
                 memory: {
-                    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-                    {
-                        None
-                    }
-                    #[cfg(any(target_os = "linux", target_os = "android"))]
                     {
                         const PAGE_SIZE: usize = 4096;
                         let pid = f.process().pid();

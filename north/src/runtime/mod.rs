@@ -17,7 +17,6 @@ pub mod config;
 pub(self) mod console;
 pub mod error;
 pub(self) mod keys;
-#[cfg(any(target_os = "android", target_os = "linux"))]
 pub(self) mod linux;
 pub(self) mod process;
 pub(super) mod state;
@@ -97,7 +96,6 @@ impl Runtime {
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
         // Initialize minijails static functionality
-        #[cfg(any(target_os = "android", target_os = "linux"))]
         linux::minijail::init().await.map_err(Error::Linux)?;
 
         // Ensure the configured run_dir exists
