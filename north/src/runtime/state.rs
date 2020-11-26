@@ -16,7 +16,6 @@ use super::{
     config::Config,
     error::{Error, InstallationError},
     keys,
-    linux::Error as LinuxError,
     process::{ExitStatus, Process},
     Event, EventTx,
 };
@@ -59,7 +58,7 @@ pub struct ProcessContext {
     incarnation: u32,
     start_timestamp: time::Instant,
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    cgroups: Option<super::linux::cgroups::CGroups>,
+    cgroups: Option<super::cgroups::CGroups>,
 }
 
 impl ProcessContext {
@@ -237,17 +236,20 @@ impl State {
         #[cfg(any(target_os = "android", target_os = "linux"))]
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
             debug!("Creating cgroup configuration for {}", app);
-            let cgroups = crate::runtime::linux::cgroups::CGroups::new(
+            let cgroups = super::cgroups::CGroups::new(
                 &self.config.cgroups,
                 app.name(),
                 c,
                 self.events_tx.clone(),
             )
             .await
-            .map_err(Error::Linux)?;
+            .map_err(Error::Cgroups)?;
 
             debug!("Assigning {} to cgroup {}", process.pid(), app);
-            cgroups.assign(process.pid()).await.map_err(Error::Linux)?;
+            cgroups
+                .assign(process.pid())
+                .await
+                .map_err(Error::Cgroups)?;
             Some(cgroups)
         } else {
             None
@@ -291,10 +293,7 @@ impl State {
                 {
                     if let Some(cgroups) = context.cgroups {
                         debug!("Destroying cgroup configuration of {}", app);
-                        cgroups
-                            .destroy()
-                            .await
-                            .map_err(|e| Error::from(LinuxError::CGroup(e)))?;
+                        cgroups.destroy().await.map_err(Error::Cgroups)?;
                     }
                 }
 
@@ -516,10 +515,7 @@ impl State {
                     let mut context = context;
                     if let Some(cgroups) = context.cgroups.take() {
                         debug!("Destroying cgroup configuration of {}", app);
-                        cgroups
-                            .destroy()
-                            .await
-                            .map_err(|e| Error::from(LinuxError::CGroup(e)))?;
+                        cgroups.destroy().await.map_err(Error::Cgroups)?;
                     }
                 }
                 let exit_info = match exit_status {

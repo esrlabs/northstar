@@ -57,6 +57,8 @@ pub enum Error {
     Configuration(String),
     #[error("Internal error: {0}")]
     Internal(String),
+    #[error("Cgroups error: {0}")]
+    Cgroups(#[from] super::cgroups::Error),
 }
 
 #[derive(Error, Debug)]
@@ -86,7 +88,6 @@ impl From<Error> for ApiError {
                 ApiError::LinuxLoopDevice(format!("{:?}", e))
             }
             Error::Linux(linux::Error::INotify(e)) => ApiError::LinuxINotifiy(format!("{:?}", e)),
-            Error::Linux(linux::Error::CGroup(e)) => ApiError::LinuxCGroups(format!("{:?}", e)),
             Error::Linux(linux::Error::FileOperation(context, error)) => match error.kind() {
                 io::ErrorKind::NotFound => ApiError::IoNotFound(context),
                 io::ErrorKind::PermissionDenied => ApiError::IoPermissionDenied(context),
@@ -95,7 +96,6 @@ impl From<Error> for ApiError {
                 io::ErrorKind::AlreadyExists => ApiError::IoAlreadyExists(context),
                 io::ErrorKind::InvalidInput => ApiError::IoInvalidInput(context),
                 io::ErrorKind::InvalidData => ApiError::IoInvalidData(context),
-                io::ErrorKind::TimedOut => ApiError::TimedOut(context),
                 _ => ApiError::Io(context),
             },
             Error::KeyError(s) => ApiError::KeyError(format!("Key signature error: {}", s)),
@@ -114,6 +114,7 @@ impl From<Error> for ApiError {
             Error::Protocol(s) => ApiError::Protocol(s),
             Error::Configuration(s) => ApiError::Configuration(s),
             Error::Internal(s) => ApiError::Internal(s),
+            Error::Cgroups(error) => ApiError::Cgroups(format!("{:?}", error.to_string())),
         }
     }
 }
