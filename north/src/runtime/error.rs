@@ -59,6 +59,8 @@ pub enum Error {
     Internal(String),
     #[error("Cgroups error: {0}")]
     Cgroups(#[from] super::cgroups::Error),
+    #[error("INotify")]
+    INotify(#[from] super::inotify::Error),
 }
 
 #[derive(Error, Debug)]
@@ -79,6 +81,7 @@ impl From<Error> for ApiError {
             Error::Process(ProcessError::Io { context, error: _r }) => ApiError::ProcessIo(context),
             Error::Process(ProcessError::Os { context, error: _r }) => ApiError::ProcessOs(context),
             Error::Linux(linux::Error::Mount(e)) => ApiError::LinuxMount(format!("{:?}", e)),
+            Error::Linux(linux::Error::INotify(e)) => ApiError::LinuxMount(format!("{:?}", e)),
             Error::Linux(linux::Error::Unshare(context, _e)) => ApiError::LinuxUnshare(context),
             Error::Linux(linux::Error::Pipe(e)) => ApiError::LinuxPipe(format!("{}", e)),
             Error::Linux(linux::Error::DeviceMapper(e)) => {
@@ -87,7 +90,6 @@ impl From<Error> for ApiError {
             Error::Linux(linux::Error::LoopDevice(e)) => {
                 ApiError::LinuxLoopDevice(format!("{:?}", e))
             }
-            Error::Linux(linux::Error::INotify(e)) => ApiError::LinuxINotifiy(format!("{:?}", e)),
             Error::Linux(linux::Error::FileOperation(context, error)) => match error.kind() {
                 io::ErrorKind::NotFound => ApiError::IoNotFound(context),
                 io::ErrorKind::PermissionDenied => ApiError::IoPermissionDenied(context),
@@ -115,6 +117,7 @@ impl From<Error> for ApiError {
             Error::Configuration(s) => ApiError::Configuration(s),
             Error::Internal(s) => ApiError::Internal(s),
             Error::Cgroups(error) => ApiError::Cgroups(format!("{:?}", error.to_string())),
+            Error::INotify(e) => ApiError::INotify(format!("{:?}", e)),
         }
     }
 }

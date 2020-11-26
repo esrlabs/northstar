@@ -14,7 +14,6 @@
 
 #[allow(unused)]
 pub(super) mod device_mapper;
-pub(super) mod inotify;
 pub(super) mod loopdev;
 pub(super) mod minijail;
 pub(super) mod mount;
@@ -58,7 +57,7 @@ pub enum Error {
     #[error("Loop device error: {0}")]
     LoopDevice(loopdev::Error),
     #[error("Inotify")]
-    INotify(#[from] inotify::Error),
+    INotify(#[from] super::inotify::Error),
     #[error("File operation error: {0}")]
     FileOperation(String, #[source] io::Error),
 }
@@ -125,9 +124,9 @@ pub async fn umount_and_remove(container: &Container) -> Result<(), linux::Error
         .map_err(linux::Error::Mount)?;
 
     debug!("Waiting for dm device removal");
-    inotify::wait_for_file_deleted(&container.dm_dev, std::time::Duration::from_secs(5))
+    super::inotify::wait_for_file_deleted(&container.dm_dev, std::time::Duration::from_secs(5))
         .await
-        .map_err(linux::Error::INotify)?;
+        .map_err(Error::INotify)?;
 
     debug!("Removing mountpoint {}", container.root.display());
     // Root which is the container version
