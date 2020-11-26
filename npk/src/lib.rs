@@ -21,10 +21,8 @@ pub mod manifest;
 pub mod npk;
 
 use fmt::Debug;
-use log::debug;
 use std::fmt;
 use thiserror::Error;
-use tokio::{fs, io, prelude::*};
 
 const SUPPORTED_VERITY_VERSION: u32 = 1;
 
@@ -65,33 +63,8 @@ pub fn check_verity_config(verity: &VerityHeader) -> Result<(), Error> {
     Ok(())
 }
 
-pub async fn get_fs_type(fs: &mut fs::File, fs_offset: u64) -> Result<&'static str, io::Error> {
-    let mut fstype = [0u8; 4];
-    fs.seek(io::SeekFrom::Start(fs_offset)).await?;
-    fs.read_exact(&mut fstype).await?;
-
-    Ok(if &fstype == b"hsqs" {
-        debug!("Detected SquashFS file system");
-        "squashfs"
-    } else {
-        debug!("Defaulting to ext filesystem type");
-        "ext4"
-    })
-}
-
-pub async fn read_verity_header(
-    fs: &mut fs::File,
-    fs_offset: u64,
-    verity_offset: u64,
-) -> Result<VerityHeader, Error> {
-    let mut header = [0u8; 512];
-    fs.seek(std::io::SeekFrom::Start(fs_offset + verity_offset))
-        .await
-        .map_err(|e| Error::Verity(format!("Could not seek to verity header: {}", e)))?;
-    fs.read_exact(&mut header)
-        .await
-        .map_err(|e| Error::Verity(format!("Could not read verity header: {}", e)))?;
-    #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
+pub async fn parse_verity_header(buf: &[u8; 512]) -> Result<VerityHeader, Error> {
     let s = structure::structure!("=6s2xII16s6s26xIIQH6x256s168x"); // "a8 L L a16 A32 L L Q S x6 a256"
     let (
         header,
@@ -105,7 +78,7 @@ pub async fn read_verity_header(
         salt_size,
         salt,
     ) = s
-        .unpack(header.to_vec())
+        .unpack(buf)
         .map_err(|e| Error::Verity(format!("Failed to decode verity block: {}", e)))?;
 
     Ok(VerityHeader {

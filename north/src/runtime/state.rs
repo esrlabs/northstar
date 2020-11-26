@@ -357,7 +357,7 @@ impl State {
             registry.display()
         );
 
-        if manifest.is_resource() {
+        if manifest.init.is_none() {
             if self
                 .resources
                 .contains_key(&(manifest.name.clone(), manifest.version.clone()))

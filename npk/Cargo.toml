@@ -21,7 +21,6 @@ sha2 = "0.9.2"
 structure = "0.1.2"
 tempfile = "3.1.0"
 thiserror = "1.0.22"
-tokio = { version = "0.3.4", features = ["full"] }
 uuid = { version = "0.8.1", features = ["v4"] }
 which = "4.0.2"
 zip = { git = "https://github.com/esrlabs/zip.git", branch = "support-extra-field", features = ["unreserved"] }

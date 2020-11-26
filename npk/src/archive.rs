@@ -1,5 +1,19 @@
+// Copyright (c) 2020 ESRLabs
+//
+//   Licensed under the Apache License, Version 2.0 (the "License");
+//   you may not use this file except in compliance with the License.
+//   You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//   Unless required by applicable law or agreed to in writing, software
+//   distributed under the License is distributed on an "AS IS" BASIS,
+//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//   See the License for the specific language governing permissions and
+//   limitations under the License.
+
 use crate::{manifest::Manifest, Error as NpkError};
-use ed25519_dalek::{ed25519::signature::Signature as EdSignature, PublicKey};
+use ed25519_dalek::ed25519::signature::Signature as _;
 use fmt::Debug;
 use log::trace;
 use serde::{Deserialize, Serialize};
@@ -48,7 +62,7 @@ pub struct Container {
 
 impl Container {
     pub fn is_resource_container(&self) -> bool {
-        self.manifest.is_resource()
+        self.manifest.init.is_none()
     }
 }
 
@@ -66,8 +80,10 @@ struct Signature {
 }
 
 impl Hashes {
-    #[allow(unused)]
-    pub fn from_str(file: &str, keys: &HashMap<String, PublicKey>) -> Result<Hashes, Error> {
+    pub fn from_str(
+        file: &str,
+        keys: &HashMap<String, ed25519_dalek::PublicKey>,
+    ) -> Result<Hashes, Error> {
         let mut docs = file.splitn(2, "---");
 
         // Manifest hash and fs.img part
@@ -78,16 +94,16 @@ impl Hashes {
         // Signature
         let next = docs.next().ok_or(Error::MalformedSignature)?;
         let signature: Signature = serde_yaml::from_str::<SerdeSignature>(next)
-            .map_err(|e| Error::MalformedSignature)?
+            .map_err(|_| Error::MalformedSignature)?
             .try_into()
-            .map_err(|e| Error::MalformedSignature)?;
+            .map_err(|_| Error::MalformedSignature)?;
 
         // Check signature
         let key = keys
             .get(&signature.key)
             .ok_or_else(|| Error::KeyNotFound(format!("Key {} not found", &signature.key)))?;
-        let signature =
-            EdSignature::from_bytes(&signature.signature).map_err(|e| Error::MalformedSignature)?;
+        let signature = ed25519_dalek::Signature::from_bytes(&signature.signature)
+            .map_err(|_| Error::MalformedSignature)?;
         key.verify_strict(&hashes.as_bytes(), &signature)
             .map_err(|e| Error::SignatureVerificationError(format!("Problem hash key: {}", e)))?;
 
@@ -180,12 +196,12 @@ const FS_IMAGE: &str = "fs.img";
 
 pub struct ArchiveReader<'a> {
     archive: zip::ZipArchive<std::io::BufReader<std::fs::File>>,
-    signing_keys: &'a HashMap<String, PublicKey>,
+    signing_keys: &'a HashMap<String, ed25519_dalek::PublicKey>,
 }
 
 pub fn read_manifest(
     npk: &Path,
-    signing_keys: &HashMap<String, PublicKey>,
+    signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
 ) -> Result<Manifest, NpkError> {
     let mut archive_reader = ArchiveReader::new(&npk, &signing_keys).map_err(NpkError::Archive)?;
     archive_reader
@@ -194,7 +210,10 @@ pub fn read_manifest(
 }
 
 impl<'a> ArchiveReader<'a> {
-    pub fn new(npk: &Path, signing_keys: &'a HashMap<String, PublicKey>) -> Result<Self, Error> {
+    pub fn new(
+        npk: &Path,
+        signing_keys: &'a HashMap<String, ed25519_dalek::PublicKey>,
+    ) -> Result<Self, Error> {
         let file =
             std::fs::File::open(&npk).map_err(|_e| Error::CouldNotOpenFile(PathBuf::from(npk)))?;
 
@@ -268,8 +287,8 @@ signature: +lUTeD1YQDAmZTa32Ni1EhztzpaOgN329kNbWEo5NA+hbKRQjIaP6jXffHWSL3x/glZ54
 
     let key_bytes = base64::decode("DKkTMfhuqOggK4Bx3H8cgDAz3LH1AhiKu9gknCGOsCE=")
         .expect("Cannot parse base64 key");
-    let key = PublicKey::from_bytes(&key_bytes).expect("Cannot parse public key");
-    let mut signing_keys: HashMap<String, PublicKey> = HashMap::new();
+    let key = ed25519_dalek::PublicKey::from_bytes(&key_bytes).expect("Cannot parse public key");
+    let mut signing_keys: HashMap<String, ed25519_dalek::PublicKey> = HashMap::new();
     signing_keys.insert("north".to_string(), key);
     let s = Hashes::from_str(signature, &signing_keys).expect("Failed to parse signature");
 

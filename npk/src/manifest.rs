@@ -21,11 +21,10 @@ use serde::{
 use std::{
     collections::{HashMap, HashSet},
     fmt, io,
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
 };
 use thiserror::Error;
-use tokio::fs;
 
 /// A container version. Versions follow the semver format
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
@@ -446,19 +445,6 @@ impl Manifest {
         }
         Ok(())
     }
-
-    pub async fn from_path(f: &Path) -> Result<Manifest, ManifestError> {
-        let f = f.to_owned();
-        let manifest = fs::read_to_string(&f).await.map_err(ManifestError::Io)?;
-        let manifest: Manifest = Manifest::from_str(&manifest)?;
-        manifest.verify()?;
-        Ok(manifest)
-    }
-
-    /// used to find out if this manifest describes a resource container
-    pub fn is_resource(&self) -> bool {
-        self.init.is_none()
-    }
 }
 
 impl FromStr for Manifest {
@@ -567,8 +553,8 @@ log:
     }
 
     /// Two mounts on the same target are invalid
-    #[tokio::test]
-    async fn duplicate_mount() -> Result<()> {
+    #[test]
+    fn duplicate_mount() -> Result<()> {
         let manifest = "
 name: hello
 version: 0.0.0

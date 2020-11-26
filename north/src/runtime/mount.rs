@@ -23,7 +23,7 @@ pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use npk::{
     archive::{ArchiveReader, Container},
-    check_verity_config, get_fs_type, read_verity_header, VerityHeader,
+    check_verity_config, parse_verity_header, VerityHeader,
 };
 use std::{
     collections::HashMap,
@@ -32,7 +32,14 @@ use std::{
     process,
 };
 use thiserror::Error;
-use tokio::{fs, fs::metadata, select, stream::StreamExt, task, time};
+use tokio::{
+    fs,
+    fs::metadata,
+    io::{AsyncReadExt, AsyncSeekExt},
+    select,
+    stream::StreamExt,
+    task, time,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -164,9 +171,17 @@ async fn mount_internal(
         .await
         .map_err(|error| Error::Io(format!("Failed to open {:?}", npk), error))?;
 
-    let verity = read_verity_header(&mut fs, fs_offset, hashes.fs_verity_offset)
+    let mut header = [0u8; 512];
+    fs.seek(std::io::SeekFrom::Start(
+        fs_offset + hashes.fs_verity_offset,
+    ))
+    .await
+    .map_err(|e| Error::Io("Failed to seek to verity header".into(), e))?;
+    fs.read_exact(&mut header)
         .await
-        .map_err(Error::Npk)?;
+        .map_err(|e| Error::Io("Failed to read verity header".into(), e))?;
+
+    let verity = parse_verity_header(&header).await.map_err(Error::Npk)?;
 
     check_verity_config(&verity).map_err(Error::Npk)?;
 
@@ -306,14 +321,25 @@ async fn setup_and_mount(
     dm_device_size: u64,
     verity_hash: &str,
     fs_path: &Path,
-    mut fs: &mut fs::File,
+    fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
     root: &Path,
 ) -> Result<PathBuf, Error> {
-    let fs_type = get_fs_type(&mut fs, fs_offset)
+    let mut fstype = [0u8; 4];
+    fs.seek(io::SeekFrom::Start(fs_offset))
         .await
-        .map_err(|e| Error::Io(format!("Failed get file-system-type {}", e), e))?;
+        .map_err(|e| Error::Io("Failed seek to fs type".into(), e))?;
+    fs.read_exact(&mut fstype)
+        .await
+        .map_err(|e| Error::Io("Failed read fs type".into(), e))?;
+    let fs_type = if &fstype == b"hsqs" {
+        debug!("Detected SquashFS file system");
+        "squashfs"
+    } else {
+        debug!("Defaulting to ext filesystem type");
+        "ext4"
+    };
 
     let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size)
         .await
