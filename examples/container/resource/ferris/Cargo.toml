@@ -5,4 +5,4 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
-ferris-says = "0.2"
+ferris-says = "0.2.0"

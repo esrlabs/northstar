@@ -800,12 +800,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6503fe142514ca4799d4c26297c4248239fe8838d827db6bd6065c6ed29a6ce"
 
 [[package]]
-name = "glob"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
-
-[[package]]
 name = "heck"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1046,22 +1040,21 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50e4785f2c3b7589a0d0c1dd60285e1188adac4006e8abd6dd578e1567027363"
+checksum = "83450fe6a6142ddd95fb064b746083fc4ef1705fe81f64a64e1d4b39f54a1055"
 dependencies = [
  "bitflags",
  "cc",
  "cfg-if 0.1.10",
  "libc",
- "void",
 ]
 
 [[package]]
 name = "nix"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83450fe6a6142ddd95fb064b746083fc4ef1705fe81f64a64e1d4b39f54a1055"
+checksum = "85db2feff6bf70ebc3a4793191517d5f0331100a2f10f9bf93b5e5214f32b7b7"
 dependencies = [
  "bitflags",
  "cc",
@@ -1081,7 +1074,7 @@ version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.12.3",
+ "base64 0.13.0",
  "bitflags",
  "byteorder",
  "bytesize",
@@ -1095,7 +1088,7 @@ dependencies = [
  "log",
  "logd-logger",
  "minijail",
- "nix 0.17.0",
+ "nix 0.19.0",
  "npk",
  "proc-mounts",
  "procinfo",
@@ -1114,7 +1107,6 @@ dependencies = [
  "url",
  "uuid",
  "vergen",
- "zip 0.5.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1122,7 +1114,7 @@ name = "north_tests"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
- "env_logger 0.7.1",
+ "env_logger 0.8.2",
  "escargot",
  "lazy_static",
  "log",
@@ -1156,7 +1148,7 @@ dependencies = [
  "tokio",
  "uuid",
  "which",
- "zip 0.5.8 (git+https://github.com/esrlabs/zip.git?branch=support-extra-field)",
+ "zip",
 ]
 
 [[package]]
@@ -1735,21 +1727,12 @@ dependencies = [
  "colored",
  "ed25519-dalek",
  "env_logger 0.8.2",
- "fs_extra",
- "glob",
- "hex",
- "itertools",
  "log",
  "north",
  "npk",
- "rand",
- "serde_yaml",
- "sha2",
  "structopt",
  "tempfile",
- "uuid",
  "which",
- "zip 0.5.8 (git+https://github.com/esrlabs/zip.git?branch=support-extra-field)",
 ]
 
 [[package]]
@@ -2219,12 +2202,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5a972e5669d67ba988ce3dc826706fb0a8b01471c088cb0b6110b805cc36aed"
 
 [[package]]
-name = "void"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
-
-[[package]]
 name = "wasi"
 version = "0.9.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2305,20 +2282,6 @@ dependencies = [
  "quote 1.0.7",
  "syn",
  "synstructure",
-]
-
-[[package]]
-name = "zip"
-version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "543adf038106b64cfca4711c82c917d785e3540e04f7996554488f988ec43124"
-dependencies = [
- "byteorder",
- "bzip2",
- "crc32fast",
- "flate2",
- "thiserror",
- "time",
 ]
 
 [[package]]

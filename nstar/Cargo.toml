@@ -16,14 +16,14 @@ north = { path = "../north", features = ["api"], default-features = false }
 npk = { path = "../npk" }
 pretty_env_logger = "0.4.0"
 prettytable-rs = "0.8.0"
-regex = "1.4.1"
+regex = "1.4.2"
 rustyline = "6.3.0"
 rustyline-derive = "0.3.1"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0.117", features = ["derive"] }
 serde_json = "1.0.59"
 strsim = "0.10.0"
 structopt = "0.3.20"
-thiserror = "1.0.21"
-tokio = { version = "0.3.3", features = ["full"] }
+thiserror = "1.0.22"
+tokio = { version = "0.3.4", features = ["full"] }
 tokio-util = { version = "0.5.0", features = ["io", "codec"] }
 uuid = { version = "0.8.1", features = ["v4"] }

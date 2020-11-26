@@ -14,12 +14,11 @@
 
 #![deny(clippy::all)]
 
-pub mod inspect;
-
-use crate::inspect::inspect;
 use anyhow::Result;
 use std::path::PathBuf;
 use structopt::StructOpt;
+
+mod inspect;
 
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Northstar CLI")]
@@ -62,10 +61,11 @@ enum Opt {
 
 fn main() -> Result<()> {
     env_logger::init();
+
     match Opt::from_args() {
         Opt::Pack { dir, out, key } => npk::npk::pack(&dir, &out, &key)?,
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
-        Opt::Inspect { npk } => inspect(&npk)?,
+        Opt::Inspect { npk } => inspect::inspect(&npk)?,
         Opt::GenKey { name, out } => npk::npk::gen_key(&name, &out)?,
     }
     Ok(())
