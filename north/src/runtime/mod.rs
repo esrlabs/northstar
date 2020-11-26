@@ -14,23 +14,26 @@
 
 mod cgroups;
 pub mod config;
-pub(self) mod console;
-pub mod error;
-mod inotify;
-pub(self) mod keys;
-pub(self) mod linux;
-pub(self) mod process;
-pub(super) mod state;
+mod console;
+#[allow(unused)]
+mod device_mapper;
+mod error;
+mod keys;
+mod loopdev;
+mod minijail;
+mod mount;
+mod process;
+mod state;
 
-use crate::{
-    api,
-    api::Notification,
-    runtime::{error::Error, linux::mount_all},
-};
+use crate::{api, api::Notification};
 use config::Config;
 use console::Request;
-use log::{debug, info};
-use nix::{sys::stat, unistd};
+use error::Error;
+use log::{debug, info, Level};
+use nix::{
+    sys::stat,
+    unistd::{self, pipe},
+};
 use npk::manifest::Name;
 use process::ExitStatus;
 use state::State;
@@ -48,11 +51,11 @@ use tokio::{
     task,
 };
 
-pub type EventTx = mpsc::Sender<Event>;
+pub(crate) type EventTx = mpsc::Sender<Event>;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
-pub enum Event {
+pub(crate) enum Event {
     /// Incomming command
     Console(Request, oneshot::Sender<api::Message>),
     /// A instance exited with return code
@@ -65,14 +68,6 @@ pub enum Event {
     ChildOutput { name: Name, fd: i32, line: String },
     /// Notification events
     Notification(Notification),
-}
-
-#[derive(Clone, Debug)]
-pub enum TerminationReason {
-    /// Process was stopped by north. Normal exit
-    Stopped,
-    /// Process stopped by north because if is signalled out of memory
-    OutOfMemory,
 }
 
 /// Result of a Runtime action
@@ -97,7 +92,7 @@ impl Runtime {
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
         // Initialize minijails static functionality
-        linux::minijail::init().await.map_err(Error::Linux)?;
+        minijail_init().await?;
 
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.directories.data_dir).await?;
@@ -151,7 +146,7 @@ impl Runtime {
         match response_rx.await.ok().map(|message| message.payload) {
             Some(api::Payload::Response(response)) => Ok(response),
             Some(_) => unreachable!(),
-            None => Err(Error::Internal("Failed to receive response".to_string())),
+            None => panic!("Internal channel error"),
         }
     }
 }
@@ -182,7 +177,7 @@ async fn runtime_task(
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to mount the content.
     for registry in &config.directories.container_dirs {
-        let mounted_containers = mount_all(
+        let mounted_containers = mount::mount_npk_dir(
             &config.directories.run_dir,
             &state.signing_keys,
             &config.devices.device_mapper_dev,
@@ -191,7 +186,8 @@ async fn runtime_task(
             &config.devices.loop_dev,
             &registry,
         )
-        .await?;
+        .await
+        .map_err(Error::Mount)?;
 
         for container in mounted_containers {
             state.add(container)?;
@@ -219,7 +215,7 @@ async fn runtime_task(
     // Initialize console
     let console = console::Console::new(&config.console_address, &event_tx);
     // Start to listen for incoming connections
-    console.listen().await?;
+    console.listen().await.map_err(Error::Console)?;
 
     // Wait for a external shutdown request
     let shutdown_tx = event_tx.clone();
@@ -313,4 +309,50 @@ fn is_rw(path: &Path) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Initialize minijail logging
+pub async fn minijail_init() -> Result<(), Error> {
+    use std::{io::BufRead, os::unix::io::FromRawFd};
+
+    #[allow(non_camel_case_types)]
+    #[allow(dead_code)]
+    #[repr(i32)]
+    enum SyslogLevel {
+        LOG_EMERG = 0,
+        LOG_ALERT = 1,
+        LOG_CRIT = 2,
+        LOG_ERR = 3,
+        LOG_WARNING = 4,
+        LOG_NOTICE = 5,
+        LOG_INFO = 6,
+        LOG_DEBUG = 7,
+        MAX = i32::MAX,
+    }
+
+    if let Some(log_level) = log::max_level().to_level() {
+        let minijail_log_level = match log_level {
+            Level::Error => SyslogLevel::LOG_ERR,
+            Level::Warn => SyslogLevel::LOG_WARNING,
+            Level::Info => SyslogLevel::LOG_INFO,
+            Level::Debug => SyslogLevel::LOG_DEBUG,
+            Level::Trace => SyslogLevel::MAX,
+        };
+
+        let (readfd, writefd) =
+            pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
+
+        let pipe = unsafe { std::fs::File::from_raw_fd(readfd) };
+        ::minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);
+
+        let mut lines = std::io::BufReader::new(pipe).lines();
+        task::spawn_blocking(move || {
+            while let Some(Ok(line)) = lines.next() {
+                // TODO: Format the logs to make them seemless
+                log::log!(log_level, "{}", line);
+            }
+        });
+    }
+
+    Ok(())
 }

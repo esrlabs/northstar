@@ -24,10 +24,8 @@ use thiserror::Error;
 use tokio::{sync::mpsc, task};
 use wait::WaitStatus;
 
-pub mod minijail;
-
-const ENV_NAME: &str = "NAME";
-const ENV_VERSION: &str = "VERSION";
+pub(crate) const ENV_NAME: &str = "NAME";
+pub(crate) const ENV_VERSION: &str = "VERSION";
 
 pub type ExitCode = i32;
 pub type Pid = u32;
@@ -40,7 +38,7 @@ pub enum ExitStatus {
     Signaled(signal::Signal),
 }
 
-type ExitHandleWait = mpsc::Receiver<ExitStatus>;
+pub(crate) type ExitHandleWait = mpsc::Receiver<ExitStatus>;
 type ExitHandleSignal = mpsc::Sender<ExitStatus>;
 
 pub fn exit_handle() -> (ExitHandleSignal, ExitHandleWait) {
@@ -57,18 +55,10 @@ pub enum Error {
     WrongContainerType(String),
     #[error("Minijail error: {0}")]
     Minijail(#[from] ::minijail::Error),
-    #[error("IO error: {context}")]
-    Io {
-        context: String,
-        #[source]
-        error: std::io::Error,
-    },
-    #[error("OS error: {context}")]
-    Os {
-        context: String,
-        #[source]
-        error: nix::Error,
-    },
+    #[error("IO error: {0}: {1:?}")]
+    Io(String, std::io::Error),
+    #[error("OS error: {0}: {1:?}")]
+    Os(String, nix::Error),
 }
 
 #[async_trait]
@@ -79,7 +69,12 @@ pub trait Process: Debug + Sync + Send {
 
 /// Spawn a task that waits for the process to exit. Once the process is exited send the return code
 // (if any) to the exit_tx handle passed
-async fn waitpid(name: &str, pid: u32, exit_handle: ExitHandleSignal, event_handle: EventTx) {
+pub(crate) async fn waitpid(
+    name: &str,
+    pid: u32,
+    exit_handle: ExitHandleSignal,
+    event_handle: EventTx,
+) {
     let name = name.to_string();
     task::spawn_blocking(move || {
         let pid = unistd::Pid::from_raw(pid as i32);

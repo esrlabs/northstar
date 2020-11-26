@@ -52,7 +52,7 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub struct LoopControl {
+pub(super) struct LoopControl {
     dev_file: fs::File,
     dev: String,
 }
@@ -85,7 +85,7 @@ impl LoopControl {
 
 /// Interface to a loop device ie `/dev/loop0`.
 #[derive(Debug)]
-pub struct LoopDevice {
+pub(super) struct LoopDevice {
     device: fs::File,
     path: PathBuf,
 }
@@ -256,21 +256,19 @@ impl Default for loop_info64 {
     }
 }
 
-pub async fn losetup(
+pub(super) async fn losetup(
     lc: &LoopControl,
     fs_path: &Path,
     fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
-) -> Result<LoopDevice, super::Error> {
+) -> Result<LoopDevice, Error> {
     let start = time::Instant::now();
-    let loop_device = lc.next_free().await.map_err(super::Error::LoopDevice)?;
+    let loop_device = lc.next_free().await?;
 
     debug!("Using loop device {:?}", loop_device.path().await);
 
-    loop_device
-        .attach_file(fs_path, fs, fs_offset, lo_size, true, true)
-        .map_err(super::Error::LoopDevice)?;
+    loop_device.attach_file(fs_path, fs, fs_offset, lo_size, true, true)?;
 
     if let Err(error) = loop_device.set_direct_io(true) {
         warn!("Failed to enable direct io: {:?}", error);

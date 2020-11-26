@@ -12,29 +12,31 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::Error as NorthError;
 use ed25519_dalek::*;
 use log::info;
 use std::{collections::HashMap, path::Path};
-use tokio::{fs, stream::StreamExt};
+use thiserror::Error;
+use tokio::{fs, io, stream::StreamExt};
 
-// #[derive(Error, Debug)]
-// pub enum Error {
-//     #[error("Invalid key signature: {0}")]
-//     Signature(#[from] SignatureError),
-// }
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Invalid key signature: {0}")]
+    Signature(#[from] SignatureError),
+    #[error("IO error: {0}: {1:?}")]
+    Io(String, io::Error),
+}
 
-pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, NorthError> {
+pub(super) async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, Error> {
     let mut signing_keys = HashMap::new();
     let mut key_dir = fs::read_dir(&key_dir).await.map_err(|e| {
-        NorthError::Io(
+        Error::Io(
             format!("Failed to load keys from: {}", key_dir.display()),
             e,
         )
     })?;
     while let Some(entry) = key_dir.next().await {
         let path = entry
-            .map_err(|e| NorthError::Io("Failed to read dir entry".to_string(), e))?
+            .map_err(|e| Error::Io("Failed to read dir entry".to_string(), e))?
             .path();
         if path.extension().filter(|ext| *ext == "pub").is_none() || !path.is_file() {
             continue;
@@ -42,10 +44,10 @@ pub async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, NorthErr
 
         if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {
             info!("Loading signing key {}", key_id);
-            let key_bytes = fs::read(&path).await.map_err(|e| {
-                NorthError::Io(format!("Failed to load key from {}", path.display()), e)
-            })?;
-            let key = PublicKey::from_bytes(&key_bytes).map_err(NorthError::KeyError)?;
+            let key_bytes = fs::read(&path)
+                .await
+                .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
+            let key = PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)?;
             signing_keys.insert(key_id, key);
         }
     }

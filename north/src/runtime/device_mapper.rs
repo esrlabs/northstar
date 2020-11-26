@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use nix::libc::{c_ulong, ioctl as nix_ioctl};
-use std::{borrow::Cow, cmp, fmt, mem::size_of, os::unix::io::AsRawFd, path::Path, slice};
+use std::{borrow::Cow, cmp, fmt, mem::size_of, path::Path, slice};
 use thiserror::Error;
 use tokio::{io, task};
 
@@ -134,14 +134,12 @@ impl Default for Struct_dm_ioctl {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failure opening file for device mapper")]
-    Open(#[from] io::Error),
-    #[error("Failure issuing an IO-CTL call")]
-    IoCtrl(#[from] nix::Error),
-    #[error("Response DM buffer requires too much space")]
+    #[error("Failed to opening file for device mapper: {0:?}")]
+    Open(io::Error),
+    #[error("Failed to ioctl: {0:?}")]
+    IoCtrl(nix::Error),
+    #[error("DM buffer full")]
     BufferFull,
-    #[error("Failure to suspend device")]
-    Suspend,
 }
 
 pub struct Dm {
@@ -304,8 +302,7 @@ impl Dm {
         );
 
         self.do_ioctl(DM_DEV_SUSPEND_CMD as u8, &mut hdr, None)
-            .await
-            .map_err(|_| Error::Suspend);
+            .await?;
 
         Ok(DeviceInfo::new(hdr))
     }
@@ -359,6 +356,7 @@ impl Dm {
         let op =
             nix::request_code_readwrite!(DM_IOCTL, ioctl, size_of::<Struct_dm_ioctl>()) as c_ulong;
 
+        use std::os::unix::io::AsRawFd;
         let fd = self.file.as_raw_fd();
         task::block_in_place(move || {
             loop {
