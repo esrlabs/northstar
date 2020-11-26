@@ -14,15 +14,13 @@
 
 use super::{
     config::Config,
-    error::{Error, InstallationError},
+    error::Error,
     keys,
+    mount::{mount_npk, umount_npk},
     process::{ExitStatus, Process},
     Event, EventTx,
 };
-use crate::{
-    api::Notification,
-    runtime::linux::{umount_and_remove, unpack_and_mount},
-};
+use crate::api::Notification;
 use ed25519_dalek::*;
 use log::{debug, info, warn};
 use npk::{
@@ -115,9 +113,11 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
+    pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         // Load keys for manifest verification
-        let signing_keys = keys::load(&config.directories.key_dir).await?;
+        let signing_keys = keys::load(&config.directories.key_dir)
+            .await
+            .map_err(Error::Key)?;
 
         Ok(State {
             events_tx: tx,
@@ -153,17 +153,13 @@ impl State {
                 .get(&(name.clone(), version.clone()))
                 .is_some()
             {
-                return Err(Error::Installation(
-                    InstallationError::ApplicationAlreadyInstalled(name),
-                ));
+                return Err(Error::ApplicationAlreadyInstalled(name));
             }
             let app = Application::new(container);
             self.resources.insert((name, version), app);
         } else {
             if self.applications.get(&name).is_some() {
-                return Err(Error::Installation(
-                    InstallationError::ApplicationAlreadyInstalled(name),
-                ));
+                return Err(Error::ApplicationAlreadyInstalled(name));
             }
             let app = Application::new(container);
             self.applications.insert(name, app);
@@ -189,7 +185,7 @@ impl State {
         // Check if application is already running
         if app.process.is_some() {
             warn!("Application {} is already running", app.manifest().name);
-            return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
+            return Err(Error::ApplicationRunning(app.manifest().name.clone()));
         }
 
         // Check if app is a resource container that cannot be started
@@ -210,7 +206,7 @@ impl State {
         // Spawn process
         info!("Starting {}", app);
 
-        let process = super::process::minijail::Process::start(
+        let process = super::minijail::Process::start(
             &app.container,
             self.events_tx.clone(),
             &self.config.directories.run_dir,
@@ -324,12 +320,12 @@ impl State {
         }
 
         for (_name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
-            umount_and_remove(container).await?;
+            umount_npk(container).await.map_err(Error::Mount)?;
         }
 
         for (name, container) in self.resources().map(|a| (a.name(), &a.container)) {
             info!("Umounting {}", name);
-            umount_and_remove(container).await?;
+            umount_npk(container).await.map_err(Error::Mount)?;
         }
 
         Ok(())
@@ -367,12 +363,10 @@ impl State {
                 .contains_key(&(manifest.name.clone(), manifest.version.clone()))
             {
                 warn!("Resource container with same version already installed");
-                return Err(Error::Installation(InstallationError::DuplicateResource));
+                return Err(Error::ResourceAlreadyInstalled(manifest.name.clone()));
             }
         } else if self.applications.contains_key(&manifest.name) {
-            return Err(Error::Installation(
-                InstallationError::ApplicationAlreadyInstalled(manifest.name.clone()),
-            ));
+            return Err(Error::ApplicationAlreadyInstalled(manifest.name.clone()));
         }
 
         // Copy tmpfile into registry
@@ -381,7 +375,7 @@ impl State {
             .map_err(|error| Error::Io("Failed to copy npk to registry".to_string(), error))?;
 
         // Install and mount npk
-        let mounted_containers = unpack_and_mount(
+        let mounted_containers = mount_npk(
             &self.config.directories.run_dir,
             &self.signing_keys,
             &self.config.devices.device_mapper_dev,
@@ -390,7 +384,9 @@ impl State {
             &self.config.devices.loop_dev,
             &package_in_registry,
         )
-        .await?;
+        .await
+        .map_err(Error::Mount)?;
+
         for container in mounted_containers {
             self.add(container)?;
         }
@@ -433,7 +429,7 @@ impl State {
             Some(app) => {
                 if app.is_running() {
                     warn!("Cannot uninstall started container {}", app);
-                    return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
+                    return Err(Error::ApplicationRunning(app.manifest().name.clone()));
                 }
                 Some(app)
             }
@@ -442,12 +438,10 @@ impl State {
         if let Some(app) = to_uninstall {
             if app.is_running() {
                 warn!("Cannot uninstall started container {}", app);
-                return Err(Error::ApplicationRunning(vec![app.manifest().name.clone()]));
+                return Err(Error::ApplicationRunning(app.manifest().name.clone()));
             }
             info!("Uninstalling {}", app);
-            umount_and_remove(app.container())
-                .await
-                .map_err(Error::Linux)?;
+            umount_npk(app.container()).await.map_err(Error::Mount)?;
             self.applications.remove(name);
             self.resources.remove(&(name.to_string(), version.clone()));
 

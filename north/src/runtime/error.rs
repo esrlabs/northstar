@@ -12,112 +12,65 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    linux::{self},
-    process::Error as ProcessError,
-    Name,
-};
-use crate::api::ApiError;
-use ed25519_dalek::SignatureError;
+use crate::api;
 use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    // process
-    #[error("Process error: {0}")]
-    Process(ProcessError),
-    // linux
-    #[error("Linux error")]
-    Linux(#[from] linux::Error),
-    // keys
-    #[error("Key error: {0}")]
-    KeyError(#[from] SignatureError),
-    // npk
-    #[error("NPK error: {0}")]
-    Npk(npk::Error),
-
-    // installation
-    #[error("Failed to install")]
-    Installation(InstallationError),
-
     #[error("No application found")]
     ApplicationNotFound,
     #[error("Application is not running")]
     ApplicationNotRunning,
+    #[error("Application {0} is running")]
+    ApplicationRunning(String),
     #[error("Missing resource {0}")]
     MissingResource(String),
-    #[error("Application(s) \"{0:?}\" is/are running")]
-    ApplicationRunning(Vec<Name>),
-    #[error("IO error: {0}")]
-    Io(String, #[source] io::Error),
-    #[error("Protocol error: {0}")]
-    Protocol(String),
-    #[error("Configuration error: {0}")]
-    Configuration(String),
-    #[error("Internal error: {0}")]
-    Internal(String),
-    #[error("Cgroups error: {0}")]
-    Cgroups(#[from] super::cgroups::Error),
-    #[error("INotify")]
-    INotify(#[from] super::inotify::Error),
-}
-
-#[derive(Error, Debug)]
-pub enum InstallationError {
     #[error("Application {0} already installed")]
     ApplicationAlreadyInstalled(String),
-    #[error("Duplicate resource")]
-    DuplicateResource,
+    #[error("Resource {0} is already installed")]
+    ResourceAlreadyInstalled(String),
+
+    #[error("NPK: {0:?}")]
+    Npk(npk::Error),
+    #[error("Process: {0:?}")]
+    Process(super::process::Error),
+    #[error("Console: {0:?}")]
+    Console(super::console::Error),
+    #[error("Cgroups: {0}")]
+    Cgroups(#[from] super::cgroups::Error),
+    #[error("Mount: {0:?}")]
+    Mount(super::mount::Error),
+    #[error("Key: {0:?}")]
+    Key(super::keys::Error),
+
+    #[error("Io: {0}: {1:?}")]
+    Io(String, io::Error),
+    #[error("Os: {0}: {1:?}")]
+    Os(String, nix::Error),
 }
 
-impl From<Error> for ApiError {
-    fn from(error: Error) -> ApiError {
+impl From<Error> for api::Error {
+    fn from(error: Error) -> api::Error {
         match error {
-            Error::Process(ProcessError::Start(s)) => ApiError::StartProcess(s),
-            Error::Process(ProcessError::Stop) => ApiError::StopProcess,
-            Error::Process(ProcessError::WrongContainerType(s)) => ApiError::WrongContainerType(s),
-            Error::Process(ProcessError::Minijail(e)) => ApiError::ProcessJail(format!("{}", e)),
-            Error::Process(ProcessError::Io { context, error: _r }) => ApiError::ProcessIo(context),
-            Error::Process(ProcessError::Os { context, error: _r }) => ApiError::ProcessOs(context),
-            Error::Linux(linux::Error::Mount(e)) => ApiError::LinuxMount(format!("{:?}", e)),
-            Error::Linux(linux::Error::INotify(e)) => ApiError::LinuxMount(format!("{:?}", e)),
-            Error::Linux(linux::Error::Unshare(context, _e)) => ApiError::LinuxUnshare(context),
-            Error::Linux(linux::Error::Pipe(e)) => ApiError::LinuxPipe(format!("{}", e)),
-            Error::Linux(linux::Error::DeviceMapper(e)) => {
-                ApiError::LinuxDeviceMapper(format!("{:?}", e))
+            Error::ApplicationNotFound => api::Error::ApplicationNotFound,
+            Error::ApplicationNotRunning => api::Error::ApplicationNotRunning,
+            Error::ApplicationRunning(name) => api::Error::ApplicationRunning(name),
+            Error::MissingResource(resource) => api::Error::MissingResource(resource),
+            Error::ApplicationAlreadyInstalled(name) => {
+                api::Error::ApplicationAlreadyInstalled(name)
             }
-            Error::Linux(linux::Error::LoopDevice(e)) => {
-                ApiError::LinuxLoopDevice(format!("{:?}", e))
+            Error::ResourceAlreadyInstalled(resource) => {
+                api::Error::ResourceAlreadyInstalled(resource)
             }
-            Error::Linux(linux::Error::FileOperation(context, error)) => match error.kind() {
-                io::ErrorKind::NotFound => ApiError::IoNotFound(context),
-                io::ErrorKind::PermissionDenied => ApiError::IoPermissionDenied(context),
-                io::ErrorKind::NotConnected => ApiError::IoNotConnected(context),
-                io::ErrorKind::BrokenPipe => ApiError::IoBrokenPipe(context),
-                io::ErrorKind::AlreadyExists => ApiError::IoAlreadyExists(context),
-                io::ErrorKind::InvalidInput => ApiError::IoInvalidInput(context),
-                io::ErrorKind::InvalidData => ApiError::IoInvalidData(context),
-                _ => ApiError::Io(context),
-            },
-            Error::KeyError(s) => ApiError::KeyError(format!("Key signature error: {}", s)),
-            Error::Npk(e) => ApiError::Npk(format!("Error with npk: {:?}", e)),
-            Error::Installation(e) => match e {
-                InstallationError::ApplicationAlreadyInstalled(_) => {
-                    ApiError::ApplicationAlreadyInstalled
-                }
-                InstallationError::DuplicateResource => ApiError::DuplicateResource,
-            },
-            Error::ApplicationNotFound => ApiError::ApplicationNotFound,
-            Error::ApplicationNotRunning => ApiError::ApplicationNotRunning,
-            Error::ApplicationRunning(_) => ApiError::ApplicationRunning,
-            Error::MissingResource(s) => ApiError::MissingResource(s),
-            Error::Io(context, _e) => ApiError::IoError(context),
-            Error::Protocol(s) => ApiError::Protocol(s),
-            Error::Configuration(s) => ApiError::Configuration(s),
-            Error::Internal(s) => ApiError::Internal(s),
-            Error::Cgroups(error) => ApiError::Cgroups(format!("{:?}", error.to_string())),
-            Error::INotify(e) => ApiError::INotify(format!("{:?}", e)),
+            Error::Npk(error) => api::Error::Npk(error.to_string()),
+            Error::Process(error) => api::Error::Process(error.to_string()),
+            Error::Console(error) => api::Error::Console(error.to_string()),
+            Error::Cgroups(error) => api::Error::Cgroups(error.to_string()),
+            Error::Mount(error) => api::Error::Mount(error.to_string()),
+            Error::Key(error) => api::Error::Key(error.to_string()),
+            Error::Io(cause, error) => api::Error::Io(format!("{}: {}", cause, error)),
+            Error::Os(cause, error) => api::Error::Os(format!("{}: {}", cause, error)),
         }
     }
 }

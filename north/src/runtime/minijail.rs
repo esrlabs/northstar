@@ -12,7 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION};
+use super::process::{
+    exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
+};
 use crate::runtime::{Event, EventTx};
 use itertools::Itertools;
 use log::{debug, warn};
@@ -26,7 +28,6 @@ use npk::{
 };
 use std::{
     fmt, iter, ops,
-    os::unix::io::AsRawFd,
     path::{Path, PathBuf},
 };
 use tokio::{
@@ -75,30 +76,22 @@ impl CaptureOutput {
         event_tx: EventTx,
     ) -> Result<CaptureOutput, Error> {
         let fifo = tmpdir.join(fd.to_string());
-        unistd::mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR).map_err(|e| Error::Os {
-            context: "Failed to mkfifo".to_string(),
-            error: e,
-        })?;
+        unistd::mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR)
+            .map_err(|e| Error::Os("Failed to mkfifo".to_string(), e))?;
 
         // Open the writing part in blocking mode
         let write = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(&fifo)
-            .map_err(|e| Error::Io {
-                context: format!("Failed to open fifo {}", fifo.display()),
-                error: e,
-            })?;
+            .map_err(|e| Error::Io(format!("Failed to open fifo {}", fifo.display()), e))?;
 
         let read = fs::OpenOptions::new()
             .read(true)
             .write(false)
             .open(&fifo)
             .await
-            .map_err(|e| Error::Io {
-                context: format!("Failed to open fifo {}", fifo.display()),
-                error: e,
-            })?;
+            .map_err(|e| Error::Io(format!("Failed to open fifo {}", fifo.display()), e))?;
 
         let mut lines = io::BufReader::new(read).lines();
 
@@ -126,11 +119,12 @@ impl CaptureOutput {
     }
 
     pub fn write_fd(&self) -> i32 {
+        use std::os::unix::io::AsRawFd;
         self.write.as_raw_fd()
     }
 }
 
-pub struct Process {
+pub(super) struct Process {
     /// PID of this process
     pid: u32,
     /// Handle to a libminijail configuration
@@ -154,7 +148,7 @@ impl fmt::Debug for Process {
 }
 
 impl Process {
-    pub async fn start(
+    pub(crate) async fn start(
         container: &Container,
         event_tx: EventTx,
         run_dir: &Path,
@@ -171,10 +165,8 @@ impl Process {
             .as_ref()
             .ok_or_else(|| Error::Start("Cannot start a resource".to_string()))?;
 
-        let tmpdir = tempfile::TempDir::new().map_err(|e| Error::Io {
-            context: format!("Failed to create tmpdir for {}", manifest.name),
-            error: e,
-        })?;
+        let tmpdir = tempfile::TempDir::new()
+            .map_err(|e| Error::Io(format!("Failed to create tmpdir for {}", manifest.name), e))?;
         let tmpdir_path = tmpdir.path();
 
         let stdout = CaptureOutput::new(tmpdir_path, 1, &manifest.name, event_tx.clone()).await?;
@@ -187,15 +179,11 @@ impl Process {
             let seccomp_config = tmpdir_path.join("seccomp");
             let mut f = fs::File::create(&seccomp_config)
                 .await
-                .map_err(|e| Error::Io {
-                    context: "Failed to create seccomp configuraiton".to_string(),
-                    error: e,
-                })?;
+                .map_err(|e| Error::Io("Failed to create seccomp configuraiton".to_string(), e))?;
             let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
-            f.write_all(s.as_bytes()).await.map_err(|e| Error::Io {
-                context: "Failed to write seccomp configuraiton".to_string(),
-                error: e,
-            })?;
+            f.write_all(s.as_bytes())
+                .await
+                .map_err(|e| Error::Io("Failed to write seccomp configuraiton".to_string(), e))?;
 
             // Temporary disabled
             // Must be called before parse_seccomp_filters
@@ -326,10 +314,9 @@ async fn setup_mounts(
                 let dir = data_dir.join(&container.manifest.name);
                 if !dir.exists() {
                     debug!("Creating {}", dir.display());
-                    fs::create_dir_all(&dir).await.map_err(|e| Error::Io {
-                        context: format!("Failed to create {}", dir.display()),
-                        error: e,
-                    })?;
+                    fs::create_dir_all(&dir)
+                        .await
+                        .map_err(|e| Error::Io(format!("Failed to create {}", dir.display()), e))?;
                 }
 
                 debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
@@ -338,9 +325,11 @@ async fn setup_mounts(
                     Some(unistd::Uid::from_raw(uid)),
                     Some(unistd::Gid::from_raw(gid)),
                 )
-                .map_err(|e| Error::Os {
-                    context: format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-                    error: e,
+                .map_err(|e| {
+                    Error::Os(
+                        format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
+                        e,
+                    )
                 })?;
 
                 debug!("Mounting {} on {}", dir.display(), target.display(),);
@@ -396,7 +385,7 @@ async fn setup_mounts(
 }
 
 #[async_trait::async_trait]
-impl super::Process for Process {
+impl super::process::Process for Process {
     fn pid(&self) -> Pid {
         self.pid
     }
@@ -405,12 +394,8 @@ impl super::Process for Process {
         // Send a SIGTERM to the application. If the application does not terminate with a timeout
         // it is SIGKILLed.
         let sigterm = signal::Signal::SIGTERM;
-        signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm)).map_err(|e| {
-            Error::Os {
-                context: format!("Failed to SIGTERM {}", self.pid),
-                error: e,
-            }
-        })?;
+        signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm))
+            .map_err(|e| Error::Os(format!("Failed to SIGTERM {}", self.pid), e))?;
 
         let timeout = Box::pin(time::sleep(timeout));
         let exited = Box::pin(self.exit_handle_wait.next());
@@ -422,7 +407,7 @@ impl super::Process for Process {
             },
             _ = timeout => {
                 signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))
-                    .map_err(|e| Error::Os { context: "Failed to kill process".to_string(), error: e})?;
+                    .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
                 ExitStatus::Signaled(signal::Signal::SIGKILL)
             }
         })

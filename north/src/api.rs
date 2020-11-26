@@ -103,58 +103,27 @@ pub struct Memory {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Response {
+    Ok(()),
     Containers(Vec<Container>),
-    Start(OperationResult),
-    Stop(OperationResult),
-    Uninstall(OperationResult),
-    Install(OperationResult),
-    Shutdown(OperationResult),
+    Err(Error),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum OperationResult {
-    Ok,
-    Error(ApiError),
-}
-
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum ApiError {
-    /// Error operating a container process
-    StartProcess(String),
-    StopProcess,
-    WrongContainerType(String),
-    ProcessJail(String),
-    ProcessIo(String),
-    ProcessOs(String),
-    /// Errors from linux module
-    LinuxMount(String),
-    LinuxUnshare(String),
-    LinuxPipe(String),
-    LinuxDeviceMapper(String),
-    LinuxLoopDevice(String),
-    LinuxINotifiy(String),
-    LinuxCGroups(String),
-    /// IO Errors
-    ApplicationAlreadyInstalled,
+pub enum Error {
     ApplicationNotFound,
     ApplicationNotRunning,
-    ApplicationRunning,
-    Configuration(String),
-    DuplicateResource,
-    Internal(String),
-    Io(String),
-    IoAlreadyExists(String),
-    IoBrokenPipe(String),
-    IoError(String),
-    IoInvalidData(String),
-    IoInvalidInput(String),
-    IoNotConnected(String),
-    IoNotFound(String),
-    IoPermissionDenied(String),
-    KeyError(String),
+    ApplicationRunning(String),
     MissingResource(String),
+    ApplicationAlreadyInstalled(String),
+    ResourceAlreadyInstalled(String),
+
     Npk(String),
-    Protocol(String),
+    Process(String),
+    Console(String),
     Cgroups(String),
-    INotify(String),
+    Mount(String),
+    Key(String),
+
+    Io(String),
+    Os(String),
 }

@@ -34,14 +34,12 @@ const TASKS: &str = "tasks";
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Internal error: {0}")]
-    Internal(String),
-    #[error("Failed to destroy: {0}: {1}")]
-    Destroy(String, #[source] io::Error),
-    #[error("Mount error: {0}: {1}")]
-    Mount(String, #[source] io::Error),
-    #[error("Io error: {0}: {1}")]
-    Io(String, #[source] io::Error),
+    #[error("Failed to destroy: {0}: {1:?}")]
+    Destroy(String, io::Error),
+    #[error("Mount error: {0}: {1:?}")]
+    Mount(String, io::Error),
+    #[error("Io error: {0}: {1:?}")]
+    Io(String, io::Error),
 }
 
 #[async_trait::async_trait]
@@ -49,10 +47,7 @@ trait CGroup: Sized {
     /// Assign a PID to this cgroup
     async fn assign(&self, pid: u32) -> Result<(), Error> {
         if !self.path().exists() {
-            Err(Error::Internal(format!(
-                "Invalid cgroup {}",
-                self.path().display()
-            )))
+            panic!("Failed to find cgroup {}", self.path().display());
         } else {
             debug!("Assigning {} to {}", pid, self.path().display());
             let tasks = self.path().join(TASKS);
@@ -64,10 +59,7 @@ trait CGroup: Sized {
     async fn destroy(self) -> Result<(), Error> {
         let path = self.path().to_owned();
         if !path.exists() {
-            Err(Error::Internal(format!(
-                "CGroup {} not found",
-                path.display()
-            )))
+            panic!("Failed to find cgroup {}", self.path().display());
         } else {
             debug!("Destroying cgroup {}", path.display());
             fs::remove_dir(&path)
@@ -93,7 +85,7 @@ impl CGroup for CGroupMem {
 }
 
 impl CGroupMem {
-    pub async fn new(
+    async fn new(
         parent: &Path,
         name: &str,
         cgroup: &manifest::CGroupMem,
@@ -166,7 +158,7 @@ impl CGroup for CGroupCpu {
 }
 
 impl CGroupCpu {
-    pub async fn new(
+    async fn new(
         parent: &Path,
         name: &str,
         cgroup: &manifest::CGroupCpu,
@@ -195,7 +187,7 @@ pub struct CGroups {
 }
 
 impl CGroups {
-    pub async fn new(
+    pub(super) async fn new(
         config: &config::CGroups,
         name: &str,
         cgroups: &manifest::CGroups,

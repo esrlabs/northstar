@@ -14,7 +14,7 @@
 
 use crate::{
     api,
-    runtime::{error::Error, state::State, Event, EventTx},
+    runtime::{state::State, Event, EventTx},
 };
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, error, warn};
@@ -24,6 +24,7 @@ use std::{
 };
 use sync::mpsc;
 use tempfile::tempdir;
+use thiserror::Error;
 use tokio::{
     fs::OpenOptions,
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
@@ -44,7 +45,7 @@ type NotificationRx = broadcast::Receiver<api::Notification>;
 
 // Request from the main loop to the console
 #[derive(Debug)]
-pub enum Request {
+pub(crate) enum Request {
     Message(api::Message),
     Install(api::Message, PathBuf),
 }
@@ -52,10 +53,18 @@ pub enum Request {
 /// A console is responsible for monitoring and serving incoming client connections
 /// It feeds relevant events back to the runtime and forwards responses and notifications
 /// to connected clients
-pub struct Console {
+pub(crate) struct Console {
     event_tx: EventTx,
     address: String,
     notification_tx: broadcast::Sender<api::Notification>,
+}
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Protocol error: {0}")]
+    Protocol(String),
+    #[error("IO error: {0}")]
+    Io(String, #[source] io::Error),
 }
 
 impl Console {
@@ -86,33 +95,33 @@ impl Console {
                             api::Response::Containers(list_containers(&state))
                         }
                         api::Request::Start(name) => match state.start(&name).await {
-                            Ok(_) => api::Response::Start(api::OperationResult::Ok),
+                            Ok(_) => api::Response::Ok(()),
                             Err(e) => {
                                 error!("Failed to start {}: {}", name, e);
-                                api::Response::Start(api::OperationResult::Error(e.into()))
+                                api::Response::Err(e.into())
                             }
                         },
                         api::Request::Stop(name) => {
                             match state.stop(&name, std::time::Duration::from_secs(1)).await {
-                                Ok(_) => api::Response::Start(api::OperationResult::Ok),
+                                Ok(_) => api::Response::Ok(()),
                                 Err(e) => {
                                     error!("Failed to stop {}: {}", name, e);
-                                    api::Response::Stop(api::OperationResult::Error(e.into()))
+                                    api::Response::Err(e.into())
                                 }
                             }
                         }
                         api::Request::Uninstall { name, version } => {
                             match state.uninstall(name, version).await {
-                                Ok(_) => api::Response::Uninstall(api::OperationResult::Ok),
+                                Ok(_) => api::Response::Ok(()),
                                 Err(e) => {
                                     error!("Failed to uninstall {}: {}", name, e);
-                                    api::Response::Uninstall(api::OperationResult::Error(e.into()))
+                                    api::Response::Err(e.into())
                                 }
                             }
                         }
                         api::Request::Shutdown => {
                             state.initiate_shutdown().await;
-                            api::Response::Shutdown(api::OperationResult::Ok)
+                            api::Response::Ok(())
                         }
                         api::Request::Install(_) => unreachable!(),
                     };
@@ -131,8 +140,8 @@ impl Console {
             }
             Request::Install(message, path) => {
                 let payload = match state.install(&path).await {
-                    Ok(_) => api::Response::Install(api::OperationResult::Ok),
-                    Err(e) => api::Response::Install(api::OperationResult::Error(e.into())),
+                    Ok(_) => api::Response::Ok(()),
+                    Err(e) => api::Response::Err(e.into()),
                 };
 
                 let message = api::Message {
@@ -148,7 +157,7 @@ impl Console {
 
     /// Open a TCP socket and listen for incoming connections
     /// spawn a task for each connection
-    pub async fn listen(&self) -> Result<(), Error> {
+    pub(crate) async fn listen(&self) -> Result<(), Error> {
         debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
         let mut listener = TcpListener::bind(&self.address)
