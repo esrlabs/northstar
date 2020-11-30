@@ -17,7 +17,7 @@ else
   PLATFORM=${1}
 fi
 
-exe() { echo " + $@" ; "$@" ; }
+exe() { echo " + $*" ; $* ; }
 
 log_err() {
   echo >&2 "$@"
@@ -32,17 +32,26 @@ assert_is_toplevel_dir() {
   fi
 }
 
+# In bash/sh, any global variable that is modified by a sub-shell will
+# lose it's binding when the subshell exits. For a cleanup 'trap' to
+# work correct, the scope must be global
+TMP_DIR=""
+cleanup_tmpdir() {
+	if [[ ! -z ${TMP_DIR} ]] ; then
+		rm -rf $TMP_DIR
+	fi
+}
+
 create_temp_dir() {
   # Create tmp directory and ensure its removal
-  local TMP_DIR=$(mktemp -d)
-  if [ ! -e "${TMP_DIR}" ]; then
+  local tmpdir=$(mktemp -d)
+
+  if [ ! -e "${tmpdir}" ]; then
     log_err "Failed to create tmp directory"
     exit 1
   fi
   trap "exit 1" HUP INT PIPE QUIT TERM
-  trap 'rm -rf "${TMP_DIR}"' EXIT
-
-  echo -n "${TMP_DIR}"
+  echo -n "${tmpdir}"
 }
 
 provision_artifact() {
@@ -72,9 +81,6 @@ provision_manifest() {
 build_example() {
   local EXAMPLE="$1"
   local OUTPUT_DIR="$2"
-
-  # Create tmp directory and ensure its removal
-  local TMP_DIR=$(create_temp_dir)
 
   local NAME="$(basename "${EXAMPLE}")"
   echo "${bold}Building ${NAME}${normal} (target: ${PLATFORM})"
@@ -116,5 +122,10 @@ main() {
     build_example "${EXAMPLE}" "${OUTPUT_DIR}"
   done
 }
+
+
+# Create tmp directory and ensure its removal
+TMP_DIR=$(create_temp_dir)
+trap "cleanup_tmpdir" EXIT
 
 main "$@"
