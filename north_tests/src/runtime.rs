@@ -14,184 +14,98 @@
 
 //! Controls North runtime instances
 
-use crate::{
-    process_assert::ProcessAssert,
-    util::{cargo_bin, CaptureReader},
-};
+use crate::process_assert::ProcessAssert;
 use color_eyre::eyre::{eyre, Error, Result, WrapErr};
-use log::{error, info};
-use std::{path::Path, process::Stdio};
-use tokio::{
-    process::{Child, Command},
-    time,
-    time::timeout,
-};
+use north::{api, runtime};
+use std::path::Path;
+use tokio::{time, time::timeout};
 
 const TIMEOUT: time::Duration = time::Duration::from_secs(3);
 
-async fn nstar(command: &str) -> Result<()> {
-    let output = Command::new(cargo_bin("nstar"))
-        .arg(&command)
-        .output()
-        .await?;
-
-    // TODO sometimes the shutdown command won't get a reply
-    if command != "shutdown" && !output.status.success() {
-        let error_msg = String::from_utf8(output.stderr)?;
-        error!("Failed to run nstar {}: {}", command, error_msg);
-        Err(eyre!("Failed to run nstar {}: {}", command, error_msg))
-    } else {
-        info!("nstar {}: {}", command, String::from_utf8(output.stdout)?);
-        Ok(())
-    }
-}
-
 /// A running instance of north.
-pub struct Runtime {
-    child: Child,
-    output: CaptureReader,
-}
+pub struct Runtime(runtime::Runtime);
 
 impl Runtime {
     /// Launches an instance of north
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use color_eyre::eyre::Result;
-    /// use north_tests::runtime::Runtime;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<()> {
-    ///     let north = Runtime::launch().await?;
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn launch() -> Result<Runtime, Error> {
-        let launch = async move {
-            let mut child = Command::new(cargo_bin("north"))
-                .current_dir("..")
-                .stdout(Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .wrap_err("Could not spawn north")?;
-
-            let stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| eyre!("Cannot get stdout of child"))?;
-            let mut output = CaptureReader::new(stdout).await;
-
-            output
-                .captures("Starting console on localhost:4200")
-                .await
-                .wrap_err("Failed to open north console")?;
-
-            Ok::<Runtime, Error>(Runtime { child, output })
-        };
-
-        timeout(TIMEOUT, launch)
+    pub async fn launch(config: runtime::config::Config) -> Result<Runtime, Error> {
+        let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
-            .wrap_err("launching north timed out")
-            .and_then(|result| result)
+            .wrap_err("Launching north timed out")
+            .and_then(|result| result.wrap_err("Failed to instantiate north runtime"))?;
+        Ok(Runtime(runtime))
     }
 
-    pub async fn expect_output(&mut self, regex: &str) -> Result<Vec<String>> {
-        let search = self.output.captures(regex);
-        timeout(TIMEOUT, search)
+    pub async fn start(&mut self, name: &str) -> Result<Option<ProcessAssert>> {
+        timeout(
+            TIMEOUT,
+            self.0.request(api::Request::Start(name.to_string())),
+        )
+        .await
+        .wrap_err("Starting container timed out")
+        .and_then(|result| result.wrap_err("Failed to start container"))?;
+
+        let response = timeout(TIMEOUT, self.0.request(api::Request::Containers))
             .await
-            .wrap_err_with(|| format!("Search for pattern \"{}\" timed out", regex))
-            .and_then(|res| res)?
-            .ok_or_else(|| eyre!("Pattern not found"))
+            .wrap_err("Getting containers status timed out")
+            .and_then(|result| result.wrap_err("Failed to get container status"))?;
+
+        match response {
+            api::Response::Containers(containers) => {
+                let process = containers
+                    .into_iter()
+                    .filter(|c| c.manifest.name == name)
+                    .filter_map(|c| c.process.map(|p| p.pid))
+                    .next()
+                    .map(|pid| ProcessAssert::new(pid as u64));
+                Ok(process)
+            }
+            _ => unreachable!(),
+        }
     }
 
-    pub async fn start(&mut self, name: &str) -> Result<ProcessAssert> {
-        let start = async move {
-            nstar(&format!("start {}", name)).await?;
-
-            // Get container's pid out north's stdout
-            let captures = self
-                .output
-                .captures(&format!("\\[(\\d+)\\] {}: 1: ", name))
-                .await?
-                .ok_or_else(|| eyre!("Couldn't find {}'s pid", name))?;
-
-            let pid = captures
-                .into_iter()
-                .nth(1)
-                .unwrap()
-                .parse::<u64>()
-                .wrap_err(format!("Could not capture {}'s PID", name))?;
-
-            Ok::<ProcessAssert, Error>(ProcessAssert::new(pid))
-        };
-
-        timeout(TIMEOUT, start)
-            .await
-            .wrap_err_with(|| format!("Failed to start container {}", name))
-            .and_then(|result| result)
-    }
-
-    pub async fn stop(&mut self, container_name: &str) -> Result<()> {
-        let stop = async move {
-            nstar(&format!("stop {}", container_name)).await?;
-
-            // Check that the container stopped
-            self.output
-                .captures(&format!("Stopped {}", container_name))
-                .await
-                .wrap_err(format!("Failed to wait for {} to stop", container_name))?;
-
-            Ok::<(), Error>(())
-        };
-
-        timeout(TIMEOUT, stop)
-            .await
-            .wrap_err_with(|| format!("Failed to stop {}", container_name))
-            .and_then(|result| result)
-    }
-
-    pub async fn try_stop(&mut self, container_name: &str) -> Result<()> {
-        let command = format!("stop {}", container_name);
-        timeout(TIMEOUT, nstar(&command))
-            .await
-            .wrap_err_with(|| format!("Failed to stop {}", container_name))
-            .and_then(|result| result)
+    pub async fn stop(&mut self, name: &str) -> Result<()> {
+        timeout(
+            TIMEOUT,
+            self.0.request(api::Request::Stop(name.to_string())),
+        )
+        .await
+        .wrap_err("Stopping container timed out")
+        .and_then(|result| result.wrap_err("Failed to stop container"))?;
+        Ok(())
     }
 
     pub async fn install(&mut self, npk: &Path) -> Result<()> {
-        let command = format!("install {}", npk.display());
-        timeout(TIMEOUT, nstar(&command))
+        let response = timeout(TIMEOUT, self.0.install(npk))
             .await
-            .wrap_err("Installing npk timed out")
-            .and_then(|res| res)
+            .wrap_err("Installing container timed out")
+            .and_then(|result| result.wrap_err("Failed to install container"))
+            .map_err(|e| eyre!("API error: {:?}", e))?;
+
+        match response {
+            api::Response::Ok(())
+            | api::Response::Err(api::Error::ContainerAlreadyInstalled(_)) => Ok(()),
+            api::Response::Err(e) => Err(eyre!("Install container response: {:?}", e)),
+            _ => unreachable!(),
+        }
     }
 
     pub async fn uninstall(&mut self, name: &str, version: &str) -> Result<()> {
-        let command = format!("uninstall {} {}", name, version);
-        timeout(TIMEOUT, nstar(&command))
+        let uninstall = api::Request::Uninstall {
+            name: name.to_string(),
+            version: npk::manifest::Version::parse(version)?,
+        };
+        timeout(TIMEOUT, self.0.request(uninstall))
             .await
-            .wrap_err("Uninstalling npk timed out")
-            .and_then(|res| res)
+            .wrap_err("Uninstalling container timed out")
+            .and_then(|result| result.wrap_err("Failed to uninstall container"))?;
+        Ok(())
     }
 
-    pub async fn shutdown(&mut self) -> Result<()> {
-        let shutdown = async {
-            nstar("shutdown").await?;
-
-            // Check that the shutdown request was received
-            self.output
-                .captures("Shutting down...")
-                .await
-                .wrap_err("Shutdown request was not received")?;
-
-            self.child.wait().await?;
-            Ok::<(), color_eyre::eyre::Error>(())
-        };
-
-        timeout(TIMEOUT, shutdown)
+    pub async fn shutdown(self) -> Result<()> {
+        timeout(TIMEOUT, self.0.stop_wait())
             .await
             .wrap_err("Shutting down runtime timed out")
-            .and_then(|res| res)
+            .and_then(|result| result.wrap_err("Failed to shutdown runtime"))?;
+        Ok(())
     }
 }

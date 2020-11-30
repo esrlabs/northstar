@@ -30,7 +30,7 @@ use npk::{
 use std::{
     collections::{HashMap, HashSet},
     fmt, iter,
-    path::Path,
+    path::{Path, PathBuf},
     result,
 };
 use tokio::{fs, stream::StreamExt, time};
@@ -153,13 +153,13 @@ impl State {
                 .get(&(name.clone(), version.clone()))
                 .is_some()
             {
-                return Err(Error::ApplicationAlreadyInstalled(name));
+                return Err(Error::ContainerAlreadyInstalled(name));
             }
             let app = Application::new(container);
             self.resources.insert((name, version), app);
         } else {
             if self.applications.get(&name).is_some() {
-                return Err(Error::ApplicationAlreadyInstalled(name));
+                return Err(Error::ContainerAlreadyInstalled(name));
             }
             let app = Application::new(container);
             self.applications.insert(name, app);
@@ -323,8 +323,7 @@ impl State {
             umount_npk(container).await.map_err(Error::Mount)?;
         }
 
-        for (name, container) in self.resources().map(|a| (a.name(), &a.container)) {
-            info!("Umounting {}", name);
+        for (_name, container) in self.resources().map(|a| (a.name(), &a.container)) {
             umount_npk(container).await.map_err(Error::Mount)?;
         }
 
@@ -357,16 +356,13 @@ impl State {
             registry.display()
         );
 
-        if manifest.init.is_none() {
-            if self
-                .resources
-                .contains_key(&(manifest.name.clone(), manifest.version.clone()))
-            {
-                warn!("Resource container with same version already installed");
-                return Err(Error::ResourceAlreadyInstalled(manifest.name.clone()));
-            }
-        } else if self.applications.contains_key(&manifest.name) {
-            return Err(Error::ApplicationAlreadyInstalled(manifest.name.clone()));
+        if self
+            .find_installed_npk(&manifest.name, &manifest.version)
+            .await?
+            .is_some()
+        {
+            warn!("Container with the same name and version already installed");
+            return Err(Error::ContainerAlreadyInstalled(manifest.name.clone()));
         }
 
         // Copy tmpfile into registry
@@ -391,12 +387,6 @@ impl State {
             self.add(container)?;
         }
 
-        // Remove tmpfile
-        // TODO: move this to console?
-        fs::remove_file(npk)
-            .await
-            .map_err(|error| Error::Io(format!("Failed to remove {}", npk.display()), error))?;
-
         // Send notification about newly install npk
         Self::notification(
             &self.events_tx,
@@ -407,73 +397,89 @@ impl State {
         Ok(())
     }
 
-    fn is_installed(&self, name: &str, version: &Version) -> bool {
-        match self.applications.get(name) {
-            None => self
-                .resources
-                .get(&(name.to_string(), version.clone())) // TODO get rid of copy
-                .is_some(),
-            Some(app) => app.container.manifest.version == *version,
+    async fn find_installed_npk(
+        &self,
+        name: &str,
+        version: &Version,
+    ) -> Result<Option<(Manifest, PathBuf)>, Error> {
+        for d in &self.config.directories.container_dirs {
+            let mut dir = fs::read_dir(&d)
+                .await
+                .map_err(|e| Error::Io(format!("Failed to read {}", d.display()), e))?;
+            while let Some(res) = dir.next().await {
+                let entry = res.map_err(|e| {
+                    Error::Io(
+                        "Could not read directory".to_string(), // TODO: Which directory?
+                        e,
+                    )
+                })?;
+                let manifest = read_manifest(entry.path().as_path(), &self.signing_keys)
+                    .map_err(Error::Npk)?;
+
+                if manifest.name == name && manifest.version == *version {
+                    return Ok(Some((manifest, entry.path())));
+                }
+            }
         }
+        Ok(None)
     }
 
     /// Remove and umount a specific app
     /// app has to be stopped before it can be uninstalled
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> result::Result<(), Error> {
-        if !self.is_installed(name, version) {
+        let installed_npk = self.find_installed_npk(name, version).await?;
+        if installed_npk.is_none() {
             return Err(Error::ApplicationNotFound);
         }
 
-        let installed_app = self.applications.get(name);
-        let to_uninstall = match installed_app {
-            Some(app) => {
-                if app.is_running() {
-                    warn!("Cannot uninstall started container {}", app);
-                    return Err(Error::ApplicationRunning(app.manifest().name.clone()));
-                }
-                Some(app)
-            }
-            None => self.resources.get(&(name.to_string(), version.clone())),
-        };
-        if let Some(app) = to_uninstall {
-            if app.is_running() {
-                warn!("Cannot uninstall started container {}", app);
-                return Err(Error::ApplicationRunning(app.manifest().name.clone()));
-            }
-            info!("Uninstalling {}", app);
-            umount_npk(app.container()).await.map_err(Error::Mount)?;
-            self.applications.remove(name);
-            self.resources.remove(&(name.to_string(), version.clone()));
+        let (manifest, path) = installed_npk.unwrap();
 
-            // Remove npk from registry
-            for d in &self.config.directories.container_dirs {
-                let mut dir = fs::read_dir(&d)
-                    .await
-                    .map_err(|e| Error::Io(format!("Failed to read {}", d.display()), e))?;
-                while let Some(res) = dir.next().await {
-                    let entry = res.map_err(|e| {
-                        Error::Io(
-                            "Could not read directory".to_string(), // TODO: Which directory?
-                            e,
-                        )
-                    })?;
-                    let manifest = read_manifest(entry.path().as_path(), &self.signing_keys)
-                        .map_err(Error::Npk)?;
+        let instances = manifest
+            .instances
+            .filter(|i| *i > 1)
+            .map(|i| {
+                (0..i)
+                    .into_iter()
+                    .map(|i| format!("{}-{:03}", manifest.name, i))
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![manifest.name.to_string()]);
 
-                    if manifest.name == name && manifest.version == *version {
-                        fs::remove_file(&entry.path()).await.map_err(|e| {
-                            Error::Io(format!("Failed to remove {}", entry.path().display()), e)
-                        })?;
-                    }
-                }
-            }
+        let (running, stopped): (Vec<_>, Vec<_>) = instances
+            .iter()
+            .filter_map(|name| {
+                self.applications
+                    .get(name)
+                    .or_else(|| self.resources.get(&(name.to_string(), version.clone())))
+            })
+            .partition(|app| app.is_running());
 
-            Self::notification(
-                &self.events_tx,
-                Notification::Uninstalled(name.to_owned(), version.clone()),
-            )
-            .await;
+        if !running.is_empty() {
+            warn!("Cannot uninstall while instances are running {:?}", running);
+            return Err(Error::ApplicationRunning(name.to_owned()));
         }
+
+        for app in stopped {
+            info!("Unmounting {}", app);
+            umount_npk(app.container()).await.map_err(Error::Mount)?;
+        }
+
+        for instance in instances {
+            let key = (instance, version.clone());
+            self.applications.remove(&key.0);
+            self.resources.remove(&key);
+        }
+
+        info!("Removing NPK {} from registry", path.display());
+        fs::remove_file(&path)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to remove {}", path.display()), e))?;
+
+        Self::notification(
+            &self.events_tx,
+            Notification::Uninstalled(name.to_owned(), version.clone()),
+        )
+        .await;
 
         Ok(())
     }

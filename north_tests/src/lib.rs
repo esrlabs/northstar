@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+pub mod logger;
 pub mod process_assert;
 pub mod runtime;
 pub mod util;

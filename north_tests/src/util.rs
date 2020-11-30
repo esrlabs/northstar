@@ -17,7 +17,6 @@
 use color_eyre::eyre::{Result, WrapErr};
 use log::debug;
 use regex::Regex;
-use std::{env, path::PathBuf};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, BufReader},
     stream::StreamExt,
@@ -60,29 +59,4 @@ impl CaptureReader {
         }
         Ok(None)
     }
-}
-
-pub fn cargo_bin<S: AsRef<str>>(name: S) -> PathBuf {
-    let path = cargo_bin_str(name.as_ref());
-    if !path.exists() {
-        panic!("Required binary {} does not exist", path.display());
-    }
-    path
-}
-
-fn target_dir() -> PathBuf {
-    env::current_exe()
-        .ok()
-        .map(|mut path| {
-            path.pop();
-            if path.ends_with("deps") {
-                path.pop();
-            }
-            path
-        })
-        .unwrap()
-}
-
-fn cargo_bin_str(name: &str) -> PathBuf {
-    target_dir().join(format!("{}{}", name, env::consts::EXE_SUFFIX))
 }

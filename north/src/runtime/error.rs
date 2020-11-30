@@ -26,10 +26,8 @@ pub enum Error {
     ApplicationRunning(String),
     #[error("Missing resource {0}")]
     MissingResource(String),
-    #[error("Application {0} already installed")]
-    ApplicationAlreadyInstalled(String),
-    #[error("Resource {0} is already installed")]
-    ResourceAlreadyInstalled(String),
+    #[error("Container {0} already installed")]
+    ContainerAlreadyInstalled(String),
 
     #[error("NPK: {0:?}")]
     Npk(npk::Error),
@@ -48,6 +46,8 @@ pub enum Error {
     Io(String, io::Error),
     #[error("Os: {0}: {1:?}")]
     Os(String, nix::Error),
+    #[error("Async runtime error: {0}")]
+    AsyncRuntime(String),
 }
 
 impl From<Error> for api::Error {
@@ -57,12 +57,7 @@ impl From<Error> for api::Error {
             Error::ApplicationNotRunning => api::Error::ApplicationNotRunning,
             Error::ApplicationRunning(name) => api::Error::ApplicationRunning(name),
             Error::MissingResource(resource) => api::Error::MissingResource(resource),
-            Error::ApplicationAlreadyInstalled(name) => {
-                api::Error::ApplicationAlreadyInstalled(name)
-            }
-            Error::ResourceAlreadyInstalled(resource) => {
-                api::Error::ResourceAlreadyInstalled(resource)
-            }
+            Error::ContainerAlreadyInstalled(name) => api::Error::ContainerAlreadyInstalled(name),
             Error::Npk(error) => api::Error::Npk(error.to_string()),
             Error::Process(error) => api::Error::Process(error.to_string()),
             Error::Console(error) => api::Error::Console(error.to_string()),
@@ -71,6 +66,7 @@ impl From<Error> for api::Error {
             Error::Key(error) => api::Error::Key(error.to_string()),
             Error::Io(cause, error) => api::Error::Io(format!("{}: {}", cause, error)),
             Error::Os(cause, error) => api::Error::Os(format!("{}: {}", cause, error)),
+            Error::AsyncRuntime(cause) => api::Error::AsyncRuntime(cause),
         }
     }
 }

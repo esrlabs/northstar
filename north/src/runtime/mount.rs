@@ -36,7 +36,6 @@ use tokio::{
     fs,
     fs::metadata,
     io::{AsyncReadExt, AsyncSeekExt},
-    select,
     stream::StreamExt,
     task, time,
 };
@@ -55,8 +54,8 @@ pub enum Error {
     NpkArchive(npk::archive::Error),
     #[error("Inotify timeout error {0}")]
     Timeout(String),
-    #[error("Task join error")]
-    JoinError,
+    #[error("Task join error: {0}")]
+    JoinError(tokio::task::JoinError),
     #[error("Os error: {0:?}")]
     Os(nix::Error),
 }
@@ -117,7 +116,7 @@ pub(super) async fn mount_npk(
 }
 
 pub async fn umount_npk(container: &Container) -> Result<(), Error> {
-    debug!("Umounting {}", container.root.display());
+    debug!("Unmounting {}", container.root.display());
     unmount(&container.root).await?;
 
     debug!("Waiting for dm device removal");
@@ -133,7 +132,7 @@ pub async fn umount_npk(container: &Container) -> Result<(), Error> {
         container
             .root
             .parent()
-            .expect("Could not get parent dir of container!"),
+            .expect("Failed to get parent dir of container!"),
     )
     .await
     .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
@@ -376,7 +375,7 @@ async fn setup_and_mount(
 
 async fn unmount(target: &Path) -> Result<(), Error> {
     debug!("Umounting {}", target.display(),);
-    task::block_in_place(|| nix::mount::umount(target.as_os_str()).map_err(Error::Os))
+    task::block_in_place(|| nix::mount::umount(target).map_err(Error::Os))
 }
 
 async fn mount(
@@ -394,14 +393,7 @@ async fn mount(
         target.display(),
     );
     task::block_in_place(|| {
-        nix::mount::mount(
-            Some(dev.as_os_str()),
-            target.as_os_str(),
-            Some(r#type),
-            flags,
-            data,
-        )
-        .map_err(Error::Os)
+        nix::mount::mount(Some(dev), target, Some(r#type), flags, data).map_err(Error::Os)
     })?;
 
     let mount_duration = start.elapsed();
@@ -412,7 +404,7 @@ async fn mount(
 
 async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
     let notify_path = path.to_owned();
-    let wait = task::spawn_blocking(move || {
+    let file_removed = task::spawn_blocking(move || {
         let inotify = Inotify::init(InitFlags::IN_CLOEXEC).map_err(Error::Os)?;
         inotify
             .add_watch(&notify_path, AddWatchFlags::IN_DELETE_SELF)
@@ -427,12 +419,9 @@ async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(
         Result::<(), Error>::Ok(())
     });
 
-    let timeout = time::sleep(timeout);
-    select! {
-        _ = timeout => Err(Error::Timeout(format!("Inotify error on {}", &path.display()))),
-        w = wait => match w {
-            Ok(r) => r,
-            Err(_) => Err(Error::JoinError),
-        }
-    }
+    time::timeout(timeout, file_removed)
+        .await
+        .map_err(|_| Error::Timeout(format!("Inotify error on {}", &path.display())))
+        .and_then(|r| r.map_err(Error::JoinError))
+        .and_then(|r| r)
 }

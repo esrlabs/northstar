@@ -6,11 +6,13 @@ edition = "2018"
 
 [dependencies]
 color-eyre = "0.5.8"
-env_logger = "0.8.2"
 escargot = "0.5.0"
 lazy_static = "1.4.0"
 log = "0.4.11"
-regex = "1.4.2"
+nix = "0.17.0"
+north = { path = "../north" }
 npk = { path = "../npk" }
+regex = "1.4.2"
 tempfile = "3.1.0"
 tokio = { version = "0.3.4", features = ["full"] }
+toml = { version = "0.5.6" }
