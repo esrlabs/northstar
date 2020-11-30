@@ -64,19 +64,11 @@ namespace :test do
     `cargo build -p north`
     `cargo build -p nstar`
     `cargo build --release -p test_container`
-
-    Dir.mktmpdir do |dir|
-      cp './tests/test_container/manifest.yaml', dir
-      root = "#{dir}/root"
-      mkdir_p root
-      cp 'target/release/test_container', root
-      `cargo run --bin sextant -- pack --dir #{dir} --key #{KEY} --out #{REGISTRY}`
-    end
   end
 
   desc 'Run integration tests'
-  task :run do
-    `cargo test -p tests -- --test-threads 1 --ignored`
+  task :run => :prepare do
+    puts `cargo test -p north_tests -- --test-threads 1 --ignored`
   end
 
   desc 'Test coverage'
