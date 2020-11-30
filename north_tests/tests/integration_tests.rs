@@ -12,28 +12,62 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::{eyre, Result, WrapErr};
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
-use north_tests::runtime::Runtime;
+use log::LevelFilter;
+use north::runtime;
+use north_tests::{
+    logger::{wait_for_log_pattern, LogParser},
+    runtime::Runtime,
+};
 use npk::npk;
 use std::{
     path::{Path, PathBuf},
     sync::Once,
+    time::Duration,
 };
 use tempfile::TempDir;
 use tokio::fs;
 
 static INIT: Once = Once::new();
+static LOGGER: LogParser = LogParser;
 
 fn init() {
     INIT.call_once(|| {
         color_eyre::install().unwrap();
-        env_logger::builder().is_test(true).try_init().ok();
+        log::set_logger(&LOGGER).unwrap();
+        log::set_max_level(LevelFilter::Debug);
+
+        // TODO make the test independent of the workspace structure
+        // set the CWD to the roo
+        std::env::set_current_dir("..").unwrap();
+
+        // Set the mount propagation of unshare_root to MS_PRIVATE
+        nix::mount::mount(
+            Option::<&'static [u8]>::None,
+            "/",
+            Some("ext4"),
+            nix::mount::MsFlags::MS_PRIVATE,
+            Option::<&'static [u8]>::None,
+        )
+        .unwrap();
+
+        // Enter a mount namespace. This needs to be done before spawning
+        // the tokio threadpool.
+        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).unwrap();
     })
 }
 
 lazy_static! {
+    static ref NORTH_CONFIG: runtime::config::Config = {
+        let content = std::fs::read_to_string("north.toml")
+            .wrap_err("Failed to read north.toml")
+            .unwrap();
+        toml::from_str(&content)
+            .wrap_err("Failed to parse north.toml")
+            .unwrap()
+    };
     static ref REPOSITORIES_DIR: TempDir = TempDir::new().unwrap();
     static ref TEST_CONTAINER_NPK: PathBuf = {
         let build_dir = TempDir::new().unwrap();
@@ -41,88 +75,95 @@ lazy_static! {
         let root = package_dir.path().join("root");
 
         let binary_path = CargoBuild::new()
-            .manifest_path("test_container/Cargo.toml")
+            .manifest_path("north_tests/test_container/Cargo.toml")
             .target_dir(build_dir.path())
             .run()
+            .wrap_err("Could not build test_container")
             .unwrap()
             .path()
             .to_owned();
 
         std::fs::create_dir_all(&root).unwrap();
+
+        fn copy_file(file: &Path, dir: &Path) {
+            assert!(file.is_file());
+            assert!(dir.is_dir());
+            let filename = file.file_name().unwrap();
+            std::fs::copy(file, dir.join(filename)).unwrap();
+        }
+
         copy_file(&binary_path, &root);
         copy_file(
-            Path::new("test_container/manifest.yaml"),
+            Path::new("north_tests/test_container/manifest.yaml"),
             package_dir.path(),
         );
 
         npk::pack(
             package_dir.path(),
             REPOSITORIES_DIR.path(),
-            Path::new("../examples/keys/north.key"),
+            Path::new("examples/keys/north.key"),
         )
         .unwrap();
         REPOSITORIES_DIR.path().join("test_container-0.0.1.npk")
     };
     static ref TEST_RESOURCE_NPK: PathBuf = {
         npk::pack(
-            Path::new("test_resource"),
+            Path::new("north_tests/test_resource"),
             REPOSITORIES_DIR.path(),
-            Path::new("../examples/keys/north.key"),
+            Path::new("examples/keys/north.key"),
         )
         .unwrap();
         REPOSITORIES_DIR.path().join("test_resource-0.0.1.npk")
     };
 }
 
-fn copy_file(file: &Path, dir: &Path) {
-    assert!(file.is_file());
-    assert!(dir.is_dir());
-    let filename = file.file_name().unwrap();
-    std::fs::copy(file, dir.join(filename)).unwrap();
+macro_rules! test {
+    ($name:ident, $e:expr) => {
+        #[ignore]
+        #[test]
+        fn $name() -> Result<()> {
+            init();
+            let tokio = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("$name")
+                .build()?;
+
+            tokio.block_on(async { $e })
+        }
+    };
 }
 
-#[ignore]
-#[tokio::test]
-async fn check_hello() -> Result<()> {
-    init();
-    let mut runtime = Runtime::launch().await?;
-
+test!(hello, {
+    let mut runtime = Runtime::launch(NORTH_CONFIG.clone()).await.unwrap();
     let hello = runtime.start("hello").await?;
+    let hello = hello.ok_or_else(|| eyre!("Failed to get hello's PID"))?;
 
     // Here goes some kind of health check for the spawned process
     assert!(hello.is_running().await?);
 
     runtime.stop("hello").await?;
-    runtime.shutdown().await
-}
+    runtime.shutdown().await?;
+    Ok(())
+});
 
-#[ignore]
-#[tokio::test]
-async fn check_cpueater() -> Result<()> {
-    init();
-    let mut runtime = Runtime::launch().await?;
-
+test!(cpueater, {
+    let mut runtime = Runtime::launch(NORTH_CONFIG.clone()).await.unwrap();
     let cpueater = runtime.start("cpueater").await?;
+    let cpueater = cpueater.ok_or_else(|| eyre!("Failed to get cpueater's PID"))?;
 
-    // Here goes some kind of health check for the spawned process
-    assert_eq!(cpueater.get_cpu_shares().await?, 100);
     assert!(cpueater.is_running().await?);
+    assert_eq!(cpueater.get_cpu_shares().await?, 100);
 
-    // Stop the cpueater process
     runtime.stop("cpueater").await?;
-    runtime.shutdown().await
-}
+    runtime.shutdown().await?;
+    Ok(())
+});
 
-#[ignore]
-#[tokio::test]
-async fn check_memeater() -> Result<()> {
-    init();
-
-    let mut runtime = Runtime::launch().await?;
-
+test!(memeater, {
+    let mut runtime = Runtime::launch(NORTH_CONFIG.clone()).await.unwrap();
     let memeater = runtime.start("memeater").await?;
+    let memeater = memeater.ok_or_else(|| eyre!("Failed to get memeater's PID"))?;
 
-    // Here goes some kind of health check for the spawned process
     assert!(memeater.is_running().await?);
 
     // NOTE
@@ -131,23 +172,19 @@ async fn check_memeater() -> Result<()> {
     // here that the limit assigned is greater than zero.
     assert!(memeater.get_limit_in_bytes().await? > 0);
 
-    // stop the memeater process
     runtime.stop("memeater").await?;
-    runtime.shutdown().await
-}
+    runtime.shutdown().await?;
+    Ok(())
+});
 
-#[ignore]
-#[tokio::test]
-async fn check_data_and_resource_mount() -> Result<()> {
-    init();
-
-    let mut runtime = Runtime::launch().await?;
+test!(data_and_resource_mounts, {
+    let mut runtime = Runtime::launch(NORTH_CONFIG.clone()).await.unwrap();
 
     // install test container & resource
     runtime.install(TEST_RESOURCE_NPK.as_path()).await?;
     runtime.install(TEST_CONTAINER_NPK.as_path()).await?;
 
-    let data_dir = Path::new("../target/north/data/test_container-000");
+    let data_dir = Path::new("target/north/data/test_container-000");
     fs::create_dir_all(&data_dir).await?;
 
     let input_file = data_dir.join("input.txt");
@@ -158,64 +195,49 @@ async fn check_data_and_resource_mount() -> Result<()> {
     // // Start the test_container process
     runtime.start("test_container-000").await.map(drop)?;
 
-    runtime
-        .expect_output("hello from test resource")
-        .await
-        .wrap_err("Failed to read text from resource container")?;
+    wait_for_log_pattern("hello from test resource", Duration::from_secs(5)).await?;
 
-    runtime.try_stop("test_container-000").await?;
+    runtime.stop("test_container-000").await?;
 
     // Remove the temporary data directory
     fs::remove_dir_all(&data_dir).await?;
 
-    for i in 0..5 {
-        runtime
-            .uninstall(&format!("test_container-0{:02}", i), "0.0.1")
-            .await?;
-    }
+    runtime.uninstall("test_container", "0.0.1").await?;
     runtime.uninstall("test_resource", "0.0.1").await?;
 
-    runtime.shutdown().await
-}
+    runtime.shutdown().await?;
+    Ok(())
+});
 
-#[ignore]
-#[tokio::test]
-async fn check_crashing_container() -> Result<()> {
+test!(crashing_containers, {
     init();
+    let mut runtime = Runtime::launch(NORTH_CONFIG.clone()).await.unwrap();
 
-    let data_dir = Path::new("../target/north/data/").canonicalize()?;
-
-    let mut runtime = Runtime::launch().await?;
+    let data_dir = Path::new("target/north/data/").canonicalize()?;
 
     // install test container
     runtime.install(TEST_RESOURCE_NPK.as_path()).await?;
     runtime.install(&TEST_CONTAINER_NPK.as_path()).await?;
 
     for i in 0..5 {
-        let dir = data_dir.join(format!("test_container-0{:02}", i));
+        let dir = data_dir.join(format!("test_container-{:03}", i));
         fs::create_dir_all(&dir).await?;
         fs::write(dir.join("input.txt"), b"crash").await?;
 
         // Start the test_container process
         runtime
-            .start(&format!("test_container-0{:02}", i))
+            .start(&format!("test_container-{:03}", i))
             .await
             .map(drop)?;
     }
 
     // Try to stop the containers before issuing the shutdown
     for i in 0..5 {
-        runtime
-            .try_stop(&format!("test_container-0{:02}", i))
-            .await?;
+        runtime.stop(&format!("test_container-{:03}", i)).await?;
     }
 
-    for i in 0..5 {
-        runtime
-            .uninstall(&format!("test_container-0{:02}", i), "0.0.1")
-            .await?;
-    }
+    runtime.uninstall("test_container", "0.0.1").await?;
     runtime.uninstall("test_resource", "0.0.1").await?;
 
     runtime.shutdown().await
-}
+});

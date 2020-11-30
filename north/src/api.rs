@@ -114,8 +114,7 @@ pub enum Error {
     ApplicationNotRunning,
     ApplicationRunning(String),
     MissingResource(String),
-    ApplicationAlreadyInstalled(String),
-    ResourceAlreadyInstalled(String),
+    ContainerAlreadyInstalled(String),
 
     Npk(String),
     Process(String),
@@ -126,4 +125,5 @@ pub enum Error {
 
     Io(String),
     Os(String),
+    AsyncRuntime(String),
 }

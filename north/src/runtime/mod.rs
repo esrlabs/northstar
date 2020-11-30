@@ -109,11 +109,10 @@ impl Runtime {
             let event_tx = event_tx.clone();
             task::spawn(async move {
                 let result = runtime_task(config, event_tx, event_rx, stop_rx).await;
-                if result.is_err() {
-                    log::error!("Error in runtime task: {:?}", result);
-                } else {
-                    log::debug!("Runtime task exited");
-                }
+                match &result {
+                    Err(e) => log::error!("Error in runtime task: {:?}", e),
+                    Ok(()) => log::debug!("Runtime task exited"),
+                };
                 stopped_tx.send(result).ok(); // Ignore error if calle dropped the handle
             });
         }
@@ -142,7 +141,7 @@ impl Runtime {
     pub async fn request(&self, request: api::Request) -> Result<api::Response, Error> {
         let (response_tx, response_rx) = oneshot::channel::<api::Message>();
 
-        let request = api::Message::new(api::Payload::Request(request));
+        let request = api::Message::new_request(request);
         self.event_tx
             .send(Event::Console(
                 console::Request::Message(request),
@@ -155,6 +154,29 @@ impl Runtime {
             Some(api::Payload::Response(response)) => Ok(response),
             Some(_) => unreachable!(),
             None => panic!("Internal channel error"),
+        }
+    }
+
+    /// Installs a container in the repository
+    pub async fn install(&self, npk: &Path) -> Result<api::Response, Error> {
+        let (response_tx, response_rx) = oneshot::channel::<api::Message>();
+
+        // The size does not matter here since the file is not received through the socket
+        let request = api::Message::new_request(api::Request::Install(0u64));
+        self.event_tx
+            .send(Event::Console(
+                console::Request::Install(request, npk.to_owned()),
+                response_tx,
+            ))
+            .await
+            .ok();
+
+        match response_rx.await.ok().map(|message| message.payload) {
+            Some(api::Payload::Response(response)) => Ok(response),
+            Some(_) => unreachable!(),
+            None => Err(Error::AsyncRuntime(
+                "Failed to receive response".to_string(),
+            )),
         }
     }
 }

@@ -288,6 +288,12 @@ impl Console {
                 ConnectionEvent::Request(request) => Request::Message(request),
                 ConnectionEvent::Install(message, npk) => Request::Install(message, npk),
             };
+
+            let tmp_npk = match &request {
+                Request::Install(_, npk) => Some(npk.to_owned()),
+                _ => None,
+            };
+
             let (reply_tx, reply_rx) = oneshot::channel();
             let event = Event::Console(request, reply_tx);
             event_tx
@@ -298,6 +304,12 @@ impl Console {
             let reply = reply_rx
                 .await
                 .expect("Internal channel error on client reply");
+
+            if let Some(file) = tmp_npk {
+                tokio::fs::remove_file(&file)
+                    .await
+                    .map_err(|e| Error::Io(format!("Failed to remove {}", file.display()), e))?;
+            }
 
             if client_out.send(reply).await.is_err() {
                 break;
