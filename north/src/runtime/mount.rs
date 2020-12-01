@@ -185,8 +185,7 @@ async fn mount_internal(
         .map_err(|e| Error::Io("Failed to read verity header".into(), e))?;
 
     let verity = VerityHeader::from_bytes(&mut Cursor::new(&header)).map_err(Error::DmVerity)?;
-
-    &verity.check().map_err(Error::DmVerity)?;
+    verity.check().map_err(Error::DmVerity)?;
 
     let instances = manifest.instances.unwrap_or(1);
 

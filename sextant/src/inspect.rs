@@ -57,6 +57,7 @@ pub fn inspect(npk: &Path) -> Result<()> {
     drop(sig);
 
     // print squashfs listing
+    println!("{}", "## SquashFS listing".green());
     let mut dest_fsimage = tempfile::NamedTempFile::new().context("Failed to create tmp file")?;
     let mut src_fsimage = zip
         .by_name(npk::FS_IMG_NAME)

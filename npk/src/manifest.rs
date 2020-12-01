@@ -65,6 +65,10 @@ impl<'de> Deserialize<'de> for Version {
 
         impl<'de> Visitor<'de> for VersionVisitor {
             type Value = Version;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
+                formatter.write_str("string v0.0.0")
+            }
+
             fn visit_str<E>(self, str_data: &str) -> Result<Version, E>
             where
                 E: serde::de::Error,
@@ -72,10 +76,6 @@ impl<'de> Deserialize<'de> for Version {
                 semver::Version::parse(str_data).map(Version).map_err(|_| {
                     serde::de::Error::invalid_value(::serde::de::Unexpected::Str(str_data), &self)
                 })
-            }
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
-                formatter.write_str("string v0.0.0")
             }
         }
 
@@ -346,6 +346,10 @@ impl MountsSerialization {
         impl<'de> Visitor<'de> for MountVectorVisitor {
             type Value = HashMap<PathBuf, Mount>;
 
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
+                formatter.write_str("{ /path/a: Bind {} | Persist {} | Resource {}, /path/b: ... }")
+            }
+
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::MapAccess<'de>,
@@ -414,10 +418,6 @@ impl MountsSerialization {
                     }
                 }
                 Ok(entries)
-            }
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
-                formatter.write_str("{ /path/a: Bind {} | Persist {} | Resource {}, /path/b: ... }")
             }
         }
 
@@ -585,21 +585,25 @@ mounts:
     tmpfs: 100g
 ";
         let manifest = Manifest::from_str(manifest).unwrap();
-        assert!(manifest.mounts.get(&PathBuf::from("/a")) == Some(&Mount::Tmpfs { size: 100 }));
-        assert!(
-            manifest.mounts.get(&PathBuf::from("/b")) == Some(&Mount::Tmpfs { size: 100 * 1024 })
+        assert_eq!(
+            manifest.mounts.get(&PathBuf::from("/a")),
+            Some(&Mount::Tmpfs { size: 100 })
         );
-        assert!(
-            manifest.mounts.get(&PathBuf::from("/c"))
-                == Some(&Mount::Tmpfs {
-                    size: 100 * 1024 * 1024
-                })
+        assert_eq!(
+            manifest.mounts.get(&PathBuf::from("/b")),
+            Some(&Mount::Tmpfs { size: 100 * 1024 })
         );
-        assert!(
-            manifest.mounts.get(&PathBuf::from("/d"))
-                == Some(&Mount::Tmpfs {
-                    size: 100 * 1024 * 1024 * 1024
-                })
+        assert_eq!(
+            manifest.mounts.get(&PathBuf::from("/c")),
+            Some(&Mount::Tmpfs {
+                size: 100 * 1024 * 1024
+            })
+        );
+        assert_eq!(
+            manifest.mounts.get(&PathBuf::from("/d")),
+            Some(&Mount::Tmpfs {
+                size: 100 * 1024 * 1024 * 1024
+            })
         );
 
         // Test a invalid tmpfs size string
