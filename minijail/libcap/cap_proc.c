@@ -102,6 +102,8 @@ void psx_load_syscalls(long int (**syscall_fn)(long int,
 						long int, long int, long int,
 						long int, long int, long int))
 {
+    (void)syscall_fn;
+    (void)syscall6_fn;
     _libcap_overrode_syscalls = 0;
 }
 
