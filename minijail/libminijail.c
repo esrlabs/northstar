@@ -20,11 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if MUSL_C
-#include <linux/capability.h>
-#else
-#include <sys/capability.h>
-#endif
 #include <sys/mount.h>
 #include <sys/param.h>
 #include <sys/prctl.h>
@@ -45,6 +40,13 @@
 #include "syscall_wrapper.h"
 #include "system.h"
 #include "util.h"
+
+/*
+ * To avoid issues with Android and the MUSL toolchain,
+ * we compile the functions we need from the capability
+ * library directly
+ */
+#include "libcap/include/sys/capability.h"
 
 /* Until these are reliably available in linux/prctl.h. */
 #ifndef PR_ALT_SYSCALL
@@ -1936,9 +1938,6 @@ static void drop_capbset(uint64_t keep_mask, unsigned int last_valid_cap)
 
 static void drop_caps(const struct minijail *j, unsigned int last_valid_cap)
 {
-	(void)j;
-	(void)last_valid_cap;
-#if 0
 	if (!j->flags.use_caps)
 		return;
 
@@ -2032,7 +2031,6 @@ static void drop_caps(const struct minijail *j, unsigned int last_valid_cap)
 	}
 
 	cap_free(caps);
-#endif
 }
 
 static void set_seccomp_filter(const struct minijail *j)
