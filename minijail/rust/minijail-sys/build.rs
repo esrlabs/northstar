@@ -113,6 +113,9 @@ fn main() -> io::Result<()> {
         "../../syscall_wrapper.c",
         "../../system.c",
         "../../util.c",
+        "../../libcap/cap_alloc.c",
+        "../../libcap/cap_flag.c",
+        "../../libcap/cap_proc.c",
     ];
 
     let mut build = cc::Build::new();
@@ -124,6 +127,7 @@ fn main() -> io::Result<()> {
         .define("ALLOW_DEBUG_LOGGING", "1")
         .define("PRELOADPATH", "\"invalid\"")
         .flag("-Wno-implicit-function-declaration")
+        .flag("-I../../libcap/include")
         .files(sources)
         .file(generate_syscall_constants(&target_os)?)
         .file(generate_syscall_table()?)
