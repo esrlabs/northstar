@@ -9,6 +9,8 @@
 
 #include "libcap.h"
 
+#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
+
 /*
  * Return the state of a specified capability flag.  The state is
  * returned as the contents of *raised.  The capability is from one of
