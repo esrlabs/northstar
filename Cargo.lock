@@ -1126,6 +1126,7 @@ name = "north_tests"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
+ "colored",
  "escargot",
  "lazy_static",
  "log",

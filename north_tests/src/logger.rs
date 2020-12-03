@@ -13,8 +13,9 @@
 //   limitations under the License.
 
 use color_eyre::eyre::{Result, WrapErr};
+use colored::Colorize;
 use lazy_static::lazy_static;
-use log::{Metadata, Record};
+use log::{Level, Metadata, Record};
 use regex::Regex;
 use std::{collections::VecDeque, sync::Mutex, time::Duration};
 use tokio::{task, time};
@@ -31,7 +32,29 @@ impl log::Log for LogParser {
     }
 
     fn log(&self, record: &Record) {
-        println!("{}", record.args());
+        fn level_format(level: Level) -> String {
+            let level = match level {
+                Level::Error => "E".red(),
+                Level::Warn => "W".truecolor(255, 69, 0),
+                Level::Info => "I".normal(),
+                Level::Debug => "D".green(),
+                Level::Trace => "T".yellow(),
+            };
+            format!("{} {} {}", "[".blue().bold(), level, "]".blue().bold())
+        }
+
+        fn message_format(record: &Record) -> String {
+            let args = record.args().to_string();
+            match record.level() {
+                Level::Error => format!("{}", args.red()),
+                Level::Warn => format!("{}", args.truecolor(255, 69, 0)),
+                _ => format!("{}", args.normal()),
+            }
+        }
+
+        let level = record.level();
+        println!("{} {}", level_format(level), message_format(record));
+
         LOG_BUFFER
             .lock()
             .unwrap()
@@ -53,7 +76,7 @@ pub async fn wait_for_log_pattern(pattern: &str, timeout: Duration) -> Result<()
     time::timeout(timeout, consume_log)
         .await
         .wrap_err(format!(
-            "Looking for pattern \"{}\" in log timed out",
+            "Failed to find pattern \"{}\" in log output",
             pattern
         ))
         .and_then(|r| r.wrap_err("Failed to join log parsing blocking call"))
