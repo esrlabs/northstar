@@ -108,9 +108,13 @@ impl Runtime {
         {
             let event_tx = event_tx.clone();
             task::spawn(async move {
-                stopped_tx
-                    .send(runtime_task(config, event_tx, event_rx, stop_rx).await)
-                    .ok(); // Ignore error if calle dropped the handle
+                let result = runtime_task(config, event_tx, event_rx, stop_rx).await;
+                if result.is_err() {
+                    log::error!("Error in runtime task: {:?}", result);
+                } else {
+                    log::debug!("Runtime task exited");
+                }
+                stopped_tx.send(result).ok(); // Ignore error if calle dropped the handle
             });
         }
 
