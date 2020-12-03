@@ -13,6 +13,7 @@
 //   limitations under the License.
 
 use color_eyre::eyre::{eyre, Result, WrapErr};
+use colored::control::ShouldColorize;
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
 use log::LevelFilter;
@@ -36,6 +37,7 @@ static LOGGER: LogParser = LogParser;
 fn init() {
     INIT.call_once(|| {
         color_eyre::install().unwrap();
+        ShouldColorize::from_env();
         log::set_logger(&LOGGER).unwrap();
         log::set_max_level(LevelFilter::Debug);
 

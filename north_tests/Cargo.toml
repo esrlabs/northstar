@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 color-eyre = "0.5.8"
+colored = "2.0.0"
 escargot = "0.5.0"
 lazy_static = "1.4.0"
 log = "0.4.11"
