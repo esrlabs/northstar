@@ -86,6 +86,10 @@ pub enum Error {
     Killed(u8),
     /// Process finished returning a non-zero code.
     ReturnCode(u8),
+    /// Update of process capabilities failed
+    UpdateCaps { error: i32, str: String },
+    /// Update of supplementary group list failed
+    UpdateSupplGroups { error: i32, str: String },
 }
 
 impl Display for Error {
@@ -174,6 +178,18 @@ impl Display for Error {
             SeccompViolation(s) => write!(f, "seccomp violation syscall #{}", s),
             Killed(s) => write!(f, "killed with signal number {}", s),
             ReturnCode(e) => write!(f, "exited with code {}", e),
+            UpdateCaps { error, str } => write!(
+                f,
+                "failed to update capability vector to {}: {}",
+                str,
+                io::Error::from_raw_os_error(*error),
+            ),
+            UpdateSupplGroups { error, str } => write!(
+                f,
+                "failed to update supplementary group list to {}: {}",
+                str,
+                io::Error::from_raw_os_error(*error),
+            ),
         }
     }
 }
@@ -811,6 +827,38 @@ impl Minijail {
             return Err(Error::ReturnCode(ret as u8));
         }
         unreachable!();
+    }
+
+    pub fn update_caps(&mut self, strarg: &str) -> Result<()> {
+        let ret: libc::c_int;
+        let libc_strarg =
+            CString::new(strarg).map_err(|_| Error::StrToCString(strarg.to_owned()))?;
+
+        unsafe { ret = minijail_update_caps(self.jail, libc_strarg.as_ptr()) }
+        if ret != 0 {
+            return Err(Error::UpdateCaps {
+                error: ret,
+                str: strarg.to_owned(),
+            });
+        }
+        return Ok(());
+    }
+
+    pub fn update_suppl_groups(&mut self, strarg: &str) -> Result<()> {
+        let ret: libc::c_int;
+        let libc_starg =
+            CString::new(strarg).map_err(|_| Error::StrToCString(strarg.to_owned()))?;
+
+        unsafe {
+            ret = minijail_update_suppl_groups(self.jail, libc_starg.as_ptr());
+        }
+        if ret != 0 {
+            return Err(Error::UpdateSupplGroups {
+                error: ret,
+                str: strarg.to_owned(),
+            });
+        }
+        return Ok(());
     }
 }
 

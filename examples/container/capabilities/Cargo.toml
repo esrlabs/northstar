@@ -1,0 +1,5 @@
+[package]
+name = "capabilities"
+version = "0.0.1"
+authors = ["ESRLabs"]
+edition = "2018"

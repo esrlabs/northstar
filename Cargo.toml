@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "examples/container/capabilities",
     "examples/container/cpueater",
     "examples/container/crashing",
     "examples/container/datarw",

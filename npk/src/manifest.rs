@@ -203,6 +203,13 @@ pub struct Manifest {
     )]
     #[serde(default)]
     pub mounts: HashMap<PathBuf, Mount>,
+    /// String containing capability names to give to
+    /// new container
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capability_str: Option<String>,
+    /// String containing group names to give to new container
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supplgroups_str: Option<String>,
 }
 
 /// Configuration for the persist mounts
@@ -507,6 +514,8 @@ log:
     tag: test
     buffer:
         custom: 8
+capability_str: cap_net_raw cap_mknod cap_sys_time
+supplgroups_str: inet log
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -556,6 +565,12 @@ log:
         seccomp.insert("fork".to_string(), "1".to_string());
         seccomp.insert("waitpid".to_string(), "1".to_string());
         assert_eq!(manifest.seccomp, Some(seccomp));
+
+        assert_eq!(
+            manifest.capability_str,
+            Some(String::from("cap_net_raw cap_mknod cap_sys_time"))
+        );
+        assert_eq!(manifest.supplgroups_str, Some(String::from("inet log")));
 
         Ok(())
     }

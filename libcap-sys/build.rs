@@ -16,6 +16,7 @@ fn main() {
         "libcap/cap_alloc.c",
         "libcap/cap_flag.c",
         "libcap/cap_proc.c",
+        "libcap/cap_text.c",
     ];
 
     let mut build = cc::Build::new();

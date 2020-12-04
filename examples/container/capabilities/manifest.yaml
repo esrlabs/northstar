@@ -1,8 +1,6 @@
-name: hello
+name: capabilities
 version: 0.0.1
-init: /hello
-env:
-  HELLO: north
+init: /capabilities
 mounts:
     /lib:
       host: /lib
@@ -10,3 +8,5 @@ mounts:
       host: /lib64
     /system:
       host: /system
+capability_str: cap_net_raw
+supplgroups_str: inet
