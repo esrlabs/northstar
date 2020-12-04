@@ -41,3 +41,5 @@ seccomp:
   exit: 1
   exit_group: 1
   rt_sigreturn: 1
+capability_str: cap_net_raw
+supplgroups_str: inet

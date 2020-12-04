@@ -199,6 +199,18 @@ impl Process {
         // Configure PID
         jail.change_gid(gid);
 
+        // Update the capability mask if specified
+        if let Some(caps) = &manifest.capability_str {
+            jail.update_caps(caps)
+                .map_err(Error::Minijail)?;
+        }
+
+        // Update the supplementary group list if specified
+        if let Some(suppl_groups) = &manifest.supplgroups_str {
+            jail.update_suppl_groups(suppl_groups)
+                .map_err(Error::Minijail)?;
+        }
+
         // TODO: Do not use pid namespace because of multithreadding
         // issues discovered by minijail. See libminijail.c for details.
         // Make the process enter a pid namespace

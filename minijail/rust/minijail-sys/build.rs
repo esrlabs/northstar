@@ -113,9 +113,11 @@ fn main() -> io::Result<()> {
         "../../syscall_wrapper.c",
         "../../system.c",
         "../../util.c",
+        "../../libmj_perms.c",
         "../../libcap/cap_alloc.c",
         "../../libcap/cap_flag.c",
         "../../libcap/cap_proc.c",
+        "../../libcap/cap_text.c",
     ];
 
     let mut build = cc::Build::new();

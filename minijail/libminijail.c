@@ -3285,3 +3285,49 @@ void API minijail_log_to_fd(int fd, int min_priority)
 {
 	init_logging(LOG_TO_FD, fd, min_priority);
 }
+
+/*
+ * Called in thread context when launching a container
+ *
+ * Since we are specifying the capability vector that will
+ * be present in the new process (after execve), we have to
+ * explicitly allow those capabilities to be ambient. This
+ * is the equivalent of specifying --ambient on the MJ command
+ * line. To quote from the minijail man page:
+ *
+ *	Raise ambient capabilities to match the mask specified
+ *	by -c.  Since ambient capabilities are preserved across
+ *	execve(2), this allows for process trees to have a restricted
+ *	set of capabilities, even if  they  are  capability-dumb  binaries
+ */
+int API minijail_update_caps(struct minijail *j, char *capstr)
+{
+	int error;
+	uint64_t capval = 0;
+
+	error = minijail_parse_caps(capstr, &capval);
+	if (error == 0) {
+		minijail_use_caps(j, capval);
+		minijail_set_ambient_caps(j);
+	}
+
+	return error;
+}
+
+/*
+ * Called in thread context when launching a container
+ */
+int API minijail_update_suppl_groups(struct minijail *j, char *groups)
+{
+	int error, gidcnt;
+	gid_t *gidbuf = NULL;
+
+	error = minijail_parse_groups(groups, &gidcnt, &gidbuf);
+	if (error == 0)
+		minijail_set_supplementary_gids(j, gidcnt, gidbuf);
+
+	if (gidbuf)
+		free(gidbuf);
+
+	return error;
+}

@@ -387,3 +387,15 @@ extern "C" {
 extern "C" {
     pub fn minijail_log_to_fd(fd: ::std::os::raw::c_int, min_priority: ::std::os::raw::c_int);
 }
+extern "C" {
+    pub fn minijail_update_caps(
+        j: *mut minijail,
+        str: *const ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn minijail_update_suppl_groups(
+        j: *mut minijail,
+        str: *const ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
+}
