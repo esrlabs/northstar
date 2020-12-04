@@ -87,9 +87,9 @@ pub enum Error {
     /// Process finished returning a non-zero code.
     ReturnCode(u8),
     /// Update of process capabilities failed
-    UpdateCaps {error: i32, str: String },
+    UpdateCaps { error: i32, str: String },
     /// Update of supplementary group list failed
-    UpdateSupplGroups {error: i32, str: String },
+    UpdateSupplGroups { error: i32, str: String },
 }
 
 impl Display for Error {
@@ -834,9 +834,7 @@ impl Minijail {
         let libc_strarg =
             CString::new(strarg).map_err(|_| Error::StrToCString(strarg.to_owned()))?;
 
-        unsafe {
-            ret = minijail_update_caps(self.jail, libc_strarg.as_ptr())
-        }
+        unsafe { ret = minijail_update_caps(self.jail, libc_strarg.as_ptr()) }
         if ret != 0 {
             return Err(Error::UpdateCaps {
                 error: ret,

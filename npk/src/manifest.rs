@@ -558,8 +558,10 @@ supplgroups_str: inet log
         seccomp.insert("waitpid".to_string(), "1".to_string());
         assert_eq!(manifest.seccomp, Some(seccomp));
 
-        assert_eq!(manifest.capability_str,
-                   Some(String::from("cap_net_raw cap_mknod cap_sys_time")));
+        assert_eq!(
+            manifest.capability_str,
+            Some(String::from("cap_net_raw cap_mknod cap_sys_time"))
+        );
         assert_eq!(manifest.supplgroups_str, Some(String::from("inet log")));
 
         Ok(())

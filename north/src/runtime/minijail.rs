@@ -201,8 +201,7 @@ impl Process {
 
         // Update the capability mask if specified
         if let Some(caps) = &manifest.capability_str {
-            jail.update_caps(caps)
-                .map_err(Error::Minijail)?;
+            jail.update_caps(caps).map_err(Error::Minijail)?;
         }
 
         // Update the supplementary group list if specified
