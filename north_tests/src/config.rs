@@ -12,9 +12,21 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-pub mod config;
-pub mod logger;
-pub mod macros;
-pub mod process_assert;
-pub mod runtime;
-pub mod test_container;
+use color_eyre::eyre::WrapErr;
+use lazy_static::lazy_static;
+use north::runtime::config::Config;
+
+lazy_static! {
+    static ref NORTH_CONFIG: Config = {
+        let content = std::fs::read_to_string("north.toml")
+            .wrap_err("Failed to read north.toml")
+            .unwrap();
+        toml::from_str(&content)
+            .wrap_err("Failed to parse north.toml")
+            .unwrap()
+    };
+}
+
+pub fn default_config() -> &'static Config {
+    &NORTH_CONFIG
+}
