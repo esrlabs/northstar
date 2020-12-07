@@ -13,8 +13,11 @@
 //   limitations under the License.
 
 use color_eyre::eyre::{eyre, Result};
+use northstar::{api, api::Response};
 use northstar_tests::{
-    logger,
+    config::default_config,
+    logger::wait_for_log_pattern,
+    process_assert::ProcessAssert,
     runtime::Runtime,
     test,
     test_container::{get_test_container_npk, get_test_resource_npk},
@@ -23,9 +26,9 @@ use std::{path::Path, time::Duration};
 use tokio::fs;
 
 test!(hello, {
-    let mut runtime = Runtime::launch().await.unwrap();
-    let hello = runtime.start("hello").await?;
-    let hello = hello.ok_or_else(|| eyre!("Failed to get hello's PID"))?;
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    runtime.start("hello").await?;
+    let hello = runtime.pid("hello").await.map(ProcessAssert::new)?;
 
     // Here goes some kind of health check for the spawned process
     assert!(hello.is_running().await?);
@@ -36,9 +39,9 @@ test!(hello, {
 });
 
 test!(cpueater, {
-    let mut runtime = Runtime::launch().await.unwrap();
-    let cpueater = runtime.start("cpueater").await?;
-    let cpueater = cpueater.ok_or_else(|| eyre!("Failed to get cpueater's PID"))?;
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    runtime.start("cpueater").await?;
+    let cpueater = runtime.pid("cpueater").await.map(ProcessAssert::new)?;
 
     assert!(cpueater.is_running().await?);
     assert_eq!(cpueater.get_cpu_shares().await?, 100);
@@ -49,9 +52,9 @@ test!(cpueater, {
 });
 
 test!(memeater, {
-    let mut runtime = Runtime::launch().await.unwrap();
-    let memeater = runtime.start("memeater").await?;
-    let memeater = memeater.ok_or_else(|| eyre!("Failed to get memeater's PID"))?;
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    runtime.start("memeater").await?;
+    let memeater = runtime.pid("memeater").await.map(ProcessAssert::new)?;
 
     assert!(memeater.is_running().await?);
 
@@ -62,6 +65,24 @@ test!(memeater, {
     assert!(memeater.get_limit_in_bytes().await? > 0);
 
     runtime.stop("memeater").await?;
+    runtime.shutdown().await?;
+    Ok(())
+});
+
+test!(missing_resource_container, {
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+
+    // install test container without resource
+    runtime.install(get_test_container_npk()).await?;
+
+    // Expect MissingResource Error
+    match runtime.start("test_container-000").await? {
+        Response::Err(api::Error::MissingResource(_)) => Ok(()),
+        _ => Err(eyre!("Starting container without resurce did not fail")),
+    }?;
+
+    runtime.uninstall("test_container", "0.0.1").await?;
+
     runtime.shutdown().await?;
     Ok(())
 });
@@ -81,8 +102,8 @@ test!(data_and_resource_mounts, {
     // Write the input to the test_container
     fs::write(&input_file, b"cat /resource/hello").await?;
 
-    // // Start the test_container process
-    runtime.start("test_container-000").await.map(drop)?;
+    // Start the test_container process
+    runtime.start("test_container-000").await?;
 
     logger::assume("hello from test resource", Duration::from_secs(5)).await?;
 
@@ -113,10 +134,7 @@ test!(crashing_containers, {
         fs::write(dir.join("input.txt"), b"crash").await?;
 
         // Start the test_container process
-        runtime
-            .start(&format!("test_container-{:03}", i))
-            .await
-            .map(drop)?;
+        runtime.start(&format!("test_container-{:03}", i)).await?;
     }
 
     // Try to stop the containers before issuing the shutdown
