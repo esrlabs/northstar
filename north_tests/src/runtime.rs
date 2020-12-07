@@ -14,9 +14,8 @@
 
 //! Controls North runtime instances
 
-use crate::process_assert::ProcessAssert;
-use color_eyre::eyre::{eyre, Error, Result, WrapErr};
-use north::{api, runtime};
+use color_eyre::eyre::{eyre, Result, WrapErr};
+use north::{api, api::Response, runtime};
 use std::path::Path;
 use tokio::{time, time::timeout};
 
@@ -27,7 +26,7 @@ pub struct Runtime(runtime::Runtime);
 
 impl Runtime {
     /// Launches an instance of north
-    pub async fn launch(config: runtime::config::Config) -> Result<Runtime, Error> {
+    pub async fn launch(config: runtime::config::Config) -> Result<Runtime> {
         let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
             .wrap_err("Launching north timed out")
@@ -35,70 +34,61 @@ impl Runtime {
         Ok(Runtime(runtime))
     }
 
-    pub async fn start(&mut self, name: &str) -> Result<Option<ProcessAssert>> {
+    pub async fn start(&mut self, name: &str) -> Result<Response> {
         timeout(
             TIMEOUT,
             self.0.request(api::Request::Start(name.to_string())),
         )
         .await
         .wrap_err("Starting container timed out")
-        .and_then(|result| result.wrap_err("Failed to start container"))?;
+        .and_then(|result| result.wrap_err("Failed to start container"))
+    }
 
+    pub async fn pid(&mut self, name: &str) -> Result<u32> {
         let response = timeout(TIMEOUT, self.0.request(api::Request::Containers))
             .await
             .wrap_err("Getting containers status timed out")
             .and_then(|result| result.wrap_err("Failed to get container status"))?;
 
         match response {
-            api::Response::Containers(containers) => {
-                let process = containers
-                    .into_iter()
-                    .filter(|c| c.manifest.name == name)
-                    .filter_map(|c| c.process.map(|p| p.pid))
-                    .next()
-                    .map(|pid| ProcessAssert::new(pid as u64));
-                Ok(process)
-            }
+            api::Response::Containers(containers) => containers
+                .into_iter()
+                .filter(|c| c.manifest.name == name)
+                .filter_map(|c| c.process.map(|p| p.pid))
+                .next()
+                .ok_or_else(|| eyre!("Failed to find PID")),
+            api::Response::Err(e) => Err(eyre!("Failed to request containers: {:?}", e)),
             _ => unreachable!(),
         }
     }
 
-    pub async fn stop(&mut self, name: &str) -> Result<()> {
+    pub async fn stop(&mut self, name: &str) -> Result<Response> {
         timeout(
             TIMEOUT,
             self.0.request(api::Request::Stop(name.to_string())),
         )
         .await
         .wrap_err("Stopping container timed out")
-        .and_then(|result| result.wrap_err("Failed to stop container"))?;
-        Ok(())
+        .and_then(|result| result.wrap_err("Failed to stop container"))
     }
 
-    pub async fn install(&mut self, npk: &Path) -> Result<()> {
-        let response = timeout(TIMEOUT, self.0.install(npk))
+    pub async fn install(&mut self, npk: &Path) -> Result<Response> {
+        timeout(TIMEOUT, self.0.install(npk))
             .await
             .wrap_err("Installing container timed out")
             .and_then(|result| result.wrap_err("Failed to install container"))
-            .map_err(|e| eyre!("API error: {:?}", e))?;
-
-        match response {
-            api::Response::Ok(())
-            | api::Response::Err(api::Error::ContainerAlreadyInstalled(_)) => Ok(()),
-            api::Response::Err(e) => Err(eyre!("Install container response: {:?}", e)),
-            _ => unreachable!(),
-        }
     }
 
-    pub async fn uninstall(&mut self, name: &str, version: &str) -> Result<()> {
+    pub async fn uninstall(&mut self, name: &str, version: &str) -> Result<Response> {
         let uninstall = api::Request::Uninstall {
             name: name.to_string(),
             version: npk::manifest::Version::parse(version)?,
         };
+
         timeout(TIMEOUT, self.0.request(uninstall))
             .await
             .wrap_err("Uninstalling container timed out")
-            .and_then(|result| result.wrap_err("Failed to uninstall container"))?;
-        Ok(())
+            .and_then(|result| result.wrap_err("Failed to uninstall container"))
     }
 
     pub async fn shutdown(self) -> Result<()> {

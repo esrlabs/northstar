@@ -29,12 +29,12 @@ pub enum ProcessState {
 
 /// Wrapper around a process's PID intended for assertions on the process configuration
 pub struct ProcessAssert {
-    pid: u64,
+    pid: u32,
 }
 
 impl ProcessAssert {
     /// Wraps `pid` with a ProcessAssert
-    pub fn new(pid: u64) -> ProcessAssert {
+    pub fn new(pid: u32) -> ProcessAssert {
         ProcessAssert { pid }
     }
 
@@ -48,7 +48,7 @@ impl ProcessAssert {
     }
 
     /// If the cpu cgroup is configured, returns the number of cpu shares
-    pub async fn get_cpu_shares(&self) -> Result<u64> {
+    pub async fn get_cpu_shares(&self) -> Result<u32> {
         let mut cgroup_path = self
             .get_cgroup_path("cpu")
             .await
@@ -63,7 +63,7 @@ impl ProcessAssert {
     }
 
     /// Return the limit in bytes set in the process's memory cgroup
-    pub async fn get_limit_in_bytes(&self) -> Result<u64> {
+    pub async fn get_limit_in_bytes(&self) -> Result<u32> {
         let cgroup_path = self
             .get_cgroup_path("memory")
             .await
