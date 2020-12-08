@@ -25,6 +25,18 @@ use north_tests::{
 use std::{path::Path, time::Duration};
 use tokio::fs;
 
+test!(stop_application_not_running, {
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+
+    match runtime.stop("hello").await? {
+        Response::Err(api::Error::ApplicationNotRunning) => Ok(()),
+        _ => Err(eyre!("Stopping not running app did not fail")),
+    }?;
+
+    runtime.shutdown().await?;
+    Ok(())
+});
+
 test!(hello, {
     let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
     runtime.start("hello").await?;
