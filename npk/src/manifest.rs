@@ -110,8 +110,7 @@ pub struct CGroupMem {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CGroupCpu {
-    /// CPU shares assigned to this container. CGroups cpu divide
-    /// the ressource CPU into 1024 shares
+    /// CPU shares assigned to this container. CGroups divide the resource CPU into 1024 shares.
     pub shares: u32,
 }
 
@@ -172,6 +171,9 @@ pub struct Manifest {
     pub name: Name,
     /// Container version
     pub version: Version,
+    /// Manifest version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manifest_version: Option<Version>,
     /// Path to init
     #[serde(skip_serializing_if = "Option::is_none")]
     pub init: Option<PathBuf>,
@@ -194,7 +196,7 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seccomp: Option<HashMap<String, String>>,
     /// Number of instances to mount of this container
-    /// The name get's extended with the instance id.
+    /// The name gets extended with the instance id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instances: Option<u32>,
     /// List of bind mounts and resources
@@ -469,6 +471,7 @@ mod tests {
         let manifest = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 args:
   - one
@@ -558,6 +561,7 @@ log:
         let manifest = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 mounts:
   /dev: full 
@@ -573,6 +577,7 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 mounts:
   /a:
@@ -610,6 +615,7 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 mounts:
   /tmp:
@@ -623,6 +629,7 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 mounts:
   /dev:
@@ -636,6 +643,7 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 mounts:
   /foo:
@@ -649,6 +657,7 @@ mounts:
         let m = "
 name: hello
 version: 0.0.0
+manifest_version: 1.0.0
 init: /binary
 args:
   - one

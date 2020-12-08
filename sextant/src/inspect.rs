@@ -98,6 +98,7 @@ mod test {
     const TEST_KEY_NAME: &str = "test_key";
     const TEST_MANIFEST: &str = "name: hello
 version: 0.0.2
+manifest_version: 1.0.0
 init: /hello
 env:
   HELLO: north

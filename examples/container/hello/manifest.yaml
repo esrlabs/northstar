@@ -1,5 +1,6 @@
 name: hello
 version: 0.0.2
+manifest_version: 1.0.0
 init: /hello
 env:
   HELLO: north

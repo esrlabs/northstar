@@ -1,5 +1,6 @@
 name: crashing
 version: 0.0.1
+manifest_version: 1.0.0
 init: /crashing
 env:
   RUST_BACKTRACE: 1
