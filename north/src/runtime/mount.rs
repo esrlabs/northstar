@@ -22,6 +22,7 @@ use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
+use npk::manifest::{Manifest, Version};
 use npk::{
     archive::{ArchiveReader, Container},
     dm_verity::VerityHeader,
@@ -158,12 +159,13 @@ async fn mount_internal(
         debug!("Mounting NPK with size {}", meta.len());
     }
     let mut archive_reader = ArchiveReader::new(&npk, signing_keys).map_err(Error::Npk)?;
-
     let hashes = archive_reader.extract_hashes().map_err(Error::Npk)?;
-
-    let manifest = archive_reader
-        .extract_manifest_from_archive()
-        .map_err(Error::Npk)?;
+    let manifest = archive_reader.extract_manifest().map_err(Error::Npk)?;
+    if !is_version_supported(&manifest) {
+        return Err(Error::Npk(npk::archive::Error::MalformedManifest(
+            "Invalid manifest version".into(),
+        )));
+    }
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
     let (fs_offset, fs_size) = archive_reader
@@ -430,4 +432,33 @@ async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(
         .map_err(|_| Error::Timeout(format!("Inotify error on {}", &path.display())))
         .and_then(|r| r.map_err(Error::JoinError))
         .and_then(|r| r)
+}
+
+fn is_version_supported(manifest: &Manifest) -> bool {
+    const V1: Version = Version(semver::Version {
+        major: 1,
+        minor: 0,
+        patch: 0,
+        pre: vec![],
+        build: vec![],
+    });
+    const SUPPORTED_MIN_VERSION: &Version = &V1;
+    const KNOWN_MAX_VERSION: &Version = &V1;
+    const DEFAULT_VERSION: &Version = &V1; // used if manifest has no 'manifest_version' entry
+    let manifest_version = manifest
+        .manifest_version
+        .as_ref()
+        .unwrap_or(DEFAULT_VERSION);
+
+    // compare major versions
+    if manifest_version.0.major < SUPPORTED_MIN_VERSION.0.major {
+        return false;
+    }
+    if manifest_version.0.major > KNOWN_MAX_VERSION.0.major {
+        debug!(
+            "Warning: unknown manifest major version {}",
+            manifest_version
+        );
+    }
+    true
 }

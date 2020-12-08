@@ -32,22 +32,22 @@ use thiserror::Error;
 pub enum Error {
     #[error("Archive error: {0}")]
     ArchiveError(String),
-    #[error("Could not open file {0}")]
+    #[error("Failed to open file {0}")]
     CouldNotOpenFile(PathBuf),
     #[error("Signature file invalid ({0})")]
     SignatureFileInvalid(String),
     #[error("Malformed signature")]
     MalformedSignature,
+    #[error("Hashes malformed ({0})")]
+    MalformedHashes(String),
+    #[error("Manifest malformed ({0})")]
+    MalformedManifest(String),
     #[error("Hash error: {0}")]
     HashInvalid(String),
     #[error("Key missing: {0}")]
     KeyNotFound(String),
-    #[error("Hashes malformed ({0})")]
-    MalformedHashes(String),
     #[error("Problem verifying content with signature ({0})")]
     SignatureVerificationError(String),
-    #[error("Failed to verify manifest: {0}")]
-    MalformedManifest(String),
     #[error("ZIP error")]
     Zip(#[from] zip::result::ZipError),
 }
@@ -88,7 +88,7 @@ impl Hashes {
 
         // Manifest hash and fs.img part
         let hashes = docs.next().ok_or_else(|| {
-            Error::SignatureFileInvalid("Could not read hashes section".to_string())
+            Error::SignatureFileInvalid("Failed to read hashes section".to_string())
         })?;
 
         // Signature
@@ -105,12 +105,12 @@ impl Hashes {
         let signature = ed25519_dalek::Signature::from_bytes(&signature.signature)
             .map_err(|_| Error::MalformedSignature)?;
         key.verify_strict(&hashes.as_bytes(), &signature)
-            .map_err(|e| Error::SignatureVerificationError(format!("Problem hash key: {}", e)))?;
+            .map_err(|e| {
+                Error::SignatureVerificationError(format!("Failed to verify signature: {}", e))
+            })?;
 
         let hashes: Hashes = serde_yaml::from_str::<SerdeHashes>(hashes)
-            .map_err(|e| {
-                Error::MalformedHashes(format!("Problem parsing the hash section: {}", e))
-            })?
+            .map_err(|e| Error::MalformedHashes(format!("Failed to parse hash section: {}", e)))?
             .try_into()?;
 
         trace!("manifest.yaml hash is {}", hashes.manifest_hash);
@@ -131,8 +131,9 @@ struct SerdeSignature {
 impl TryFrom<SerdeSignature> for Signature {
     type Error = Error;
     fn try_from(s: SerdeSignature) -> Result<Signature, Error> {
-        let signature = base64::decode(s.signature)
-            .map_err(|_e| Error::SignatureFileInvalid("Signature base64 error".to_string()))?;
+        let signature = base64::decode(s.signature).map_err(|_e| {
+            Error::SignatureFileInvalid("Failed to decode base64 signature".to_string())
+        })?;
         Ok(Signature {
             key: s.key,
             signature,
@@ -204,7 +205,7 @@ pub fn read_manifest(
     signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
 ) -> Result<Manifest, Error> {
     let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
-    archive_reader.extract_manifest_from_archive()
+    archive_reader.extract_manifest()
 }
 
 impl<'a> ArchiveReader<'a> {
@@ -243,12 +244,12 @@ impl<'a> ArchiveReader<'a> {
         signature_file
             .read_to_string(&mut signature)
             .map_err(|_e| {
-                Error::SignatureFileInvalid("Could not read signature file".to_string())
+                Error::SignatureFileInvalid("Failed to read signature file".to_string())
             })?;
         Hashes::from_str(&signature, &self.signing_keys)
     }
 
-    pub fn extract_manifest_from_archive(&mut self) -> Result<Manifest, Error> {
+    pub fn extract_manifest(&mut self) -> Result<Manifest, Error> {
         let hashes = self.extract_hashes()?;
         let mut manifest_file = self
             .archive
@@ -258,15 +259,15 @@ impl<'a> ArchiveReader<'a> {
         let mut manifest_string = String::new();
         manifest_file
             .read_to_string(&mut manifest_string)
-            .map_err(|e| Error::ArchiveError(format!("Error reading manifest file: {}", e)))?;
+            .map_err(|e| Error::ArchiveError(format!("Failed to read manifest file: {}", e)))?;
         let digest = sha2::Sha256::digest(manifest_string.as_bytes());
         let decoded_manifest_hash = hex::decode(&hashes.manifest_hash)
-            .map_err(|e| Error::ArchiveError(format!("Error decoding manifest hash: {}", e)))?;
+            .map_err(|e| Error::ArchiveError(format!("Failed to decode manifest hash: {}", e)))?;
         if decoded_manifest_hash != digest.as_slice() {
             return Err(Error::HashInvalid("Invalid manifest hash".to_string()));
         }
         Manifest::from_str(&manifest_string)
-            .map_err(|e| Error::MalformedManifest(format!("Error parsing manifest file: {}", e)))
+            .map_err(|e| Error::MalformedManifest(format!("Failed to parse manifest file: {}", e)))
     }
 }
 
@@ -284,8 +285,8 @@ signature: +lUTeD1YQDAmZTa32Ni1EhztzpaOgN329kNbWEo5NA+hbKRQjIaP6jXffHWSL3x/glZ54
 ";
 
     let key_bytes = base64::decode("DKkTMfhuqOggK4Bx3H8cgDAz3LH1AhiKu9gknCGOsCE=")
-        .expect("Cannot parse base64 key");
-    let key = ed25519_dalek::PublicKey::from_bytes(&key_bytes).expect("Cannot parse public key");
+        .expect("Failed to parse base64 key");
+    let key = ed25519_dalek::PublicKey::from_bytes(&key_bytes).expect("Failed to parse public key");
     let mut signing_keys: HashMap<String, ed25519_dalek::PublicKey> = HashMap::new();
     signing_keys.insert("north".to_string(), key);
     let s = Hashes::from_str(signature, &signing_keys).expect("Failed to parse signature");
