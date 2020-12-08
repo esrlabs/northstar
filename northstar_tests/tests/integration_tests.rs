@@ -69,6 +69,19 @@ test!(memeater, {
     Ok(())
 });
 
+test!(start_unknown_application, {
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+
+    // Expect MissingResource Error
+    match runtime.start("unknown_application").await? {
+        Response::Err(api::Error::ApplicationNotFound) => Ok(()),
+        _ => Err(eyre!("Starting unknown application did not fail")),
+    }?;
+
+    runtime.shutdown().await?;
+    Ok(())
+});
+
 test!(missing_resource_container, {
     let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
 
