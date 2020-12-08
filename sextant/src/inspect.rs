@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use ::npk::manifest::Manifest;
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use npk::npk;
@@ -19,9 +20,42 @@ use std::{
     io::{self, Read},
     path::Path,
     process::Command,
+    str::FromStr,
 };
 
-pub fn inspect(npk: &Path) -> Result<()> {
+pub fn inspect(npk: &Path, short: bool) -> Result<()> {
+    if short {
+        inspect_short(&npk)
+    } else {
+        inspect_long(&npk)
+    }
+}
+
+pub fn inspect_short(npk: &Path) -> Result<()> {
+    let mut manifest_string: String = String::new();
+    npk::open_zipped_npk(&npk)?
+        .by_name(npk::MANIFEST_NAME)
+        .context("Failed to find manifest in NPK")?
+        .read_to_string(&mut manifest_string)
+        .with_context(|| "Failed to read manifest")?;
+    let manifest =
+        Manifest::from_str(&manifest_string).with_context(|| "Failed to parse manifest")?;
+    let name = manifest.name.to_string();
+    let version = manifest.version.to_string();
+    let manifest_version = manifest
+        .manifest_version
+        .map_or("1.0.0".to_string(), |v| v.to_string());
+    let is_resource_container = manifest.init.map_or("no", |_| "yes");
+    let instances = manifest.instances.unwrap_or(1).to_string();
+    println!(
+        "name: {}, version: {}, manifest version: {}, resource container: {}, instances: {}",
+        name, version, manifest_version, is_resource_container, instances
+    );
+
+    Ok(())
+}
+
+pub fn inspect_long(npk: &Path) -> Result<()> {
     let mut zip = npk::open_zipped_npk(&npk)?;
     let mut print_buf: String = String::new();
     println!(
@@ -149,11 +183,13 @@ mounts:
     fn inspect_npk() {
         let npk = create_test_npk(&create_tmp_dir());
         assert!(npk.exists());
-        inspect(&npk).expect("Inspect NPK");
+        inspect(&npk, true).expect("Inspect NPK");
+        inspect(&npk, false).expect("Inspect NPK");
     }
 
     #[test]
     fn inspect_npk_no_file() {
-        inspect(&Path::new("invalid")).expect_err("Invalid NPK");
+        inspect(&Path::new("invalid"), true).expect_err("Invalid NPK");
+        inspect(&Path::new("invalid"), false).expect_err("Invalid NPK");
     }
 }
