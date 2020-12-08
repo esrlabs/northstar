@@ -436,7 +436,7 @@ fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> 
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string = serde_yaml::to_string(&manifest)
-        .map_err(|e| Error::Manifest(format!("Could not serialize manifest: {}", e)))?;
+        .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     let mut zip = zip::ZipWriter::new(&npk);
     || -> Result<(), ZipError> {
         zip.start_file(SIGNATURE_NAME, options)?;
@@ -444,7 +444,7 @@ fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> 
         zip.start_file(MANIFEST_NAME, options)
     }()
     .map_err(|e| Error::Archive {
-        context: "Could not write manifest to archive".to_string(),
+        context: "Failed to write manifest to archive".to_string(),
         error: e,
     })?;
     zip.write_all(manifest_string.as_bytes())
