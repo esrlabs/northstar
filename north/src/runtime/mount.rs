@@ -160,8 +160,10 @@ async fn mount_internal(
         debug!("Mounting NPK with size {}", meta.len());
     }
 
-    let mut archive_reader = ArchiveReader::new(&npk, signing_keys).map_err(Error::Npk)?;
-    let hashes = archive_reader.extract_hashes().map_err(Error::Npk)?;
+    let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
+    let hashes = archive_reader
+        .extract_hashes(&signing_keys)
+        .map_err(Error::Npk)?;
     let manifest = archive_reader.extract_manifest().map_err(Error::Npk)?;
 
     if !is_version_supported(&manifest) {

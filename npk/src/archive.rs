@@ -17,7 +17,6 @@ use ed25519_dalek::ed25519::signature::Signature as _;
 use fmt::Debug;
 use log::trace;
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
@@ -27,6 +26,10 @@ use std::{
     str::FromStr,
 };
 use thiserror::Error;
+
+const MANIFEST: &str = "manifest.yaml";
+const SIGNATURE: &str = "signature.yaml";
+const FS_IMAGE: &str = "fs.img";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -147,12 +150,10 @@ impl TryFrom<SerdeHashes> for Hashes {
             .ok_or_else(|| {
                 Error::MalformedManifest("Missing hash for manifest.yaml".to_string())
             })?;
-
         let fs_hash =
             s.fs.get("hash")
                 .map(ToOwned::to_owned)
                 .ok_or_else(|| Error::MalformedHashes("Missing hash for fs.img".to_string()))?;
-
         let fs_verity_hash = s
             .fs
             .get("verity-hash")
@@ -177,81 +178,50 @@ impl TryFrom<SerdeHashes> for Hashes {
     }
 }
 
-const MANIFEST: &str = "manifest.yaml";
-const SIGNATURE: &str = "signature.yaml";
-const FS_IMAGE: &str = "fs.img";
-
-pub struct ArchiveReader<'a> {
+pub struct ArchiveReader {
     archive: zip::ZipArchive<std::io::BufReader<std::fs::File>>,
-    signing_keys: &'a HashMap<String, ed25519_dalek::PublicKey>,
 }
 
-pub fn read_manifest(
-    npk: &Path,
-    signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
-) -> Result<Manifest, Error> {
-    let mut archive_reader = ArchiveReader::new(&npk, &signing_keys)?;
-    archive_reader.extract_manifest()
-}
-
-impl<'a> ArchiveReader<'a> {
-    pub fn new(
-        npk: &Path,
-        signing_keys: &'a HashMap<String, ed25519_dalek::PublicKey>,
-    ) -> Result<Self, Error> {
+impl ArchiveReader {
+    pub fn new(npk: &Path) -> Result<Self, Error> {
         let file =
             std::fs::File::open(&npk).map_err(|_e| Error::CouldNotOpenFile(PathBuf::from(npk)))?;
-
         let reader: std::io::BufReader<std::fs::File> = std::io::BufReader::new(file);
         let archive: zip::ZipArchive<std::io::BufReader<std::fs::File>> =
             zip::ZipArchive::new(reader).map_err(Error::Zip)?;
-        Ok(Self {
-            archive,
-            signing_keys,
-        })
+        Ok(Self { archive })
     }
 
     pub fn extract_fs_start_and_size(&mut self) -> Result<(u64, u64), Error> {
-        let f = self
+        let zip_file = self
             .archive
             .by_name(FS_IMAGE)
             .map_err(|e| Error::ArchiveError(format!("Failed to find file-system {}", e)))?;
 
-        Ok((f.data_start(), f.size()))
+        Ok((zip_file.data_start(), zip_file.size()))
     }
 
-    pub fn extract_hashes(&mut self) -> Result<Hashes, Error> {
-        let mut signature_file = self
-            .archive
-            .by_name(SIGNATURE)
-            // .with_context(|| "Failed to read signature".to_string())
-            .map_err(Error::Zip)?;
+    pub fn extract_hashes(
+        &mut self,
+        signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
+    ) -> Result<Hashes, Error> {
+        let mut signature_file = self.archive.by_name(SIGNATURE).map_err(Error::Zip)?;
         let mut signature = String::new();
         signature_file
             .read_to_string(&mut signature)
             .map_err(|_e| {
                 Error::SignatureFileInvalid("Failed to read signature file".to_string())
             })?;
-        Hashes::from_str(&signature, &self.signing_keys)
+        Hashes::from_str(&signature, &signing_keys)
     }
 
     pub fn extract_manifest(&mut self) -> Result<Manifest, Error> {
-        let hashes = self.extract_hashes()?;
-        let mut manifest_file = self
-            .archive
-            .by_name(MANIFEST)
-            .map_err(|e| Error::ArchiveError(format!("Failed to read manifest ({})", e)))?;
-
         let mut manifest_string = String::new();
-        manifest_file
+        self.archive
+            .by_name(MANIFEST)
+            .map_err(|e| Error::ArchiveError(format!("Failed to read manifest ({})", e)))?
             .read_to_string(&mut manifest_string)
             .map_err(|e| Error::ArchiveError(format!("Failed to read manifest file: {}", e)))?;
-        let digest = sha2::Sha256::digest(manifest_string.as_bytes());
-        let decoded_manifest_hash = hex::decode(&hashes.manifest_hash)
-            .map_err(|e| Error::ArchiveError(format!("Failed to decode manifest hash: {}", e)))?;
-        if decoded_manifest_hash != digest.as_slice() {
-            return Err(Error::HashInvalid("Invalid manifest hash".to_string()));
-        }
         Manifest::from_str(&manifest_string)
             .map_err(|e| Error::MalformedManifest(format!("Failed to parse manifest file: {}", e)))
     }

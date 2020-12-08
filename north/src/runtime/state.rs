@@ -24,7 +24,7 @@ use crate::api::Notification;
 use ed25519_dalek::*;
 use log::{debug, info, warn};
 use npk::{
-    archive::read_manifest,
+    archive::ArchiveReader,
     manifest::{Manifest, Mount, Name, Version},
 };
 use std::{
@@ -344,7 +344,10 @@ impl State {
 
     /// Install a npk
     pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
-        let manifest = read_manifest(npk, &self.signing_keys).map_err(Error::Npk)?;
+        let manifest = ArchiveReader::new(&npk)
+            .map_err(Error::Npk)?
+            .extract_manifest()
+            .map_err(Error::Npk)?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -377,7 +380,7 @@ impl State {
             return Err(Error::ContainerAlreadyInstalled(manifest.name.clone()));
         }
 
-        // Copy tmpfile into registry
+        // Copy tmp file into registry
         fs::copy(&npk, &package_in_registry)
             .await
             .map_err(|error| Error::Io("Failed to copy npk to registry".to_string(), error))?;
@@ -425,7 +428,9 @@ impl State {
                         e,
                     )
                 })?;
-                let manifest = read_manifest(entry.path().as_path(), &self.signing_keys)
+                let manifest = ArchiveReader::new(entry.path().as_path())
+                    .map_err(Error::Npk)?
+                    .extract_manifest()
                     .map_err(Error::Npk)?;
 
                 if manifest.name == name && manifest.version == *version {

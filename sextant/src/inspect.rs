@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use ::npk::manifest::Manifest;
+use ::npk::archive::ArchiveReader;
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use npk::npk;
@@ -20,7 +20,6 @@ use std::{
     io::{self, Read},
     path::Path,
     process::Command,
-    str::FromStr,
 };
 
 pub fn inspect(npk: &Path, short: bool) -> Result<()> {
@@ -32,20 +31,16 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
 }
 
 pub fn inspect_short(npk: &Path) -> Result<()> {
-    let mut manifest_string: String = String::new();
-    npk::open_zipped_npk(&npk)?
-        .by_name(npk::MANIFEST_NAME)
-        .context("Failed to find manifest in NPK")?
-        .read_to_string(&mut manifest_string)
-        .with_context(|| "Failed to read manifest")?;
-    let manifest =
-        Manifest::from_str(&manifest_string).with_context(|| "Failed to parse manifest")?;
+    let mut reader = ArchiveReader::new(&npk).context("Failed to extract manifest from NPK")?;
+    let manifest = reader
+        .extract_manifest()
+        .context("Failed to find manifest in NPK")?;
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
     let manifest_version = manifest
         .manifest_version
         .map_or("1.0.0".to_string(), |v| v.to_string());
-    let is_resource_container = manifest.init.map_or("no", |_| "yes");
+    let is_resource_container = manifest.init.map_or("yes", |_| "no");
     let instances = manifest.instances.unwrap_or(1).to_string();
     println!(
         "name: {}, version: {}, manifest version: {}, resource container: {}, instances: {}",
