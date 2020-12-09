@@ -38,6 +38,7 @@ enum TestCommands {
     Touch {
         path: PathBuf,
     },
+    Loop,
 }
 
 #[allow(clippy::all)]
@@ -56,6 +57,7 @@ fn main() -> Result<()> {
             TestCommands::Echo { message } => echo(&message),
             TestCommands::Write { message, path } => write(&message, path.as_path())?,
             TestCommands::Touch { path } => touch(&path)?,
+            TestCommands::Loop => loop {},
         };
     }
 
