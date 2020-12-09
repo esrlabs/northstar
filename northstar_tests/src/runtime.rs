@@ -15,7 +15,7 @@
 //! Controls Northstar runtime instances
 
 use color_eyre::eyre::{eyre, Result, WrapErr};
-use north::{api, api::Response, runtime};
+use north::{api, runtime};
 use std::path::Path;
 use tokio::{time, time::timeout};
 
@@ -23,6 +23,33 @@ const TIMEOUT: time::Duration = time::Duration::from_secs(3);
 
 /// A running instance of northstar.
 pub struct Runtime(runtime::Runtime);
+
+#[must_use = "Shoud be checked for expected response"]
+pub struct ApiResponse(api::Response);
+
+impl From<api::Response> for ApiResponse {
+    fn from(response: api::Response) -> Self {
+        ApiResponse(response)
+    }
+}
+
+impl ApiResponse {
+    pub fn expect_ok(self) -> Result<()> {
+        match self.0 {
+            api::Response::Ok(()) => Ok(()),
+            _ => Err(eyre!("Response is not ok")),
+        }
+    }
+
+    pub fn expect_err(self, err: api::Error) -> Result<()> {
+        match self.0 {
+            api::Response::Err(e) if err == e => Ok(()),
+            _ => Err(eyre!("Response is not an error")),
+        }
+    }
+
+    pub fn could_fail(self) {}
+}
 
 impl Runtime {
     /// Launches an instance of north
@@ -34,7 +61,7 @@ impl Runtime {
         Ok(Runtime(runtime))
     }
 
-    pub async fn start(&mut self, name: &str) -> Result<Response> {
+    pub async fn start(&mut self, name: &str) -> Result<ApiResponse> {
         timeout(
             TIMEOUT,
             self.0.request(api::Request::Start(name.to_string())),
@@ -42,6 +69,7 @@ impl Runtime {
         .await
         .wrap_err("Starting container timed out")
         .and_then(|result| result.wrap_err("Failed to start container"))
+        .map(ApiResponse::from)
     }
 
     pub async fn pid(&mut self, name: &str) -> Result<u32> {
@@ -62,7 +90,7 @@ impl Runtime {
         }
     }
 
-    pub async fn stop(&mut self, name: &str) -> Result<Response> {
+    pub async fn stop(&mut self, name: &str) -> Result<ApiResponse> {
         timeout(
             TIMEOUT,
             self.0.request(api::Request::Stop(name.to_string())),
@@ -70,16 +98,18 @@ impl Runtime {
         .await
         .wrap_err("Stopping container timed out")
         .and_then(|result| result.wrap_err("Failed to stop container"))
+        .map(ApiResponse::from)
     }
 
-    pub async fn install(&mut self, npk: &Path) -> Result<Response> {
+    pub async fn install(&mut self, npk: &Path) -> Result<ApiResponse> {
         timeout(TIMEOUT, self.0.install(npk))
             .await
             .wrap_err("Installing container timed out")
             .and_then(|result| result.wrap_err("Failed to install container"))
+            .map(ApiResponse::from)
     }
 
-    pub async fn uninstall(&mut self, name: &str, version: &str) -> Result<Response> {
+    pub async fn uninstall(&mut self, name: &str, version: &str) -> Result<ApiResponse> {
         let uninstall = api::Request::Uninstall {
             name: name.to_string(),
             version: npk::manifest::Version::parse(version)?,
@@ -89,6 +119,7 @@ impl Runtime {
             .await
             .wrap_err("Uninstalling container timed out")
             .and_then(|result| result.wrap_err("Failed to uninstall container"))
+            .map(ApiResponse::from)
     }
 
     pub async fn shutdown(self) -> Result<()> {
