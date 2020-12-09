@@ -144,6 +144,47 @@ test!(data_and_resource_mounts, {
     Ok(())
 });
 
+test!(uninstall_a_running_application, {
+    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+
+    // install test container & resource
+    runtime.install(get_test_resource_npk()).await?;
+    runtime.install(get_test_container_npk()).await?;
+
+    let data_dir = Path::new("target/north/data/test_container-000");
+    fs::create_dir_all(&data_dir).await?;
+
+    let input_file = data_dir.join("input.txt");
+
+    // Write the input to the test_container
+    fs::write(&input_file, b"loop").await?;
+
+    // Start the test_container process
+    runtime.start("test_container-000").await?;
+    let container = runtime
+        .pid("test_container-000")
+        .await
+        .map(ProcessAssert::new)?;
+
+    assert!(container.is_running().await?);
+
+    match runtime.uninstall("test_container", "0.0.1").await? {
+        Response::Err(api::Error::ApplicationRunning(_)) => Ok(()),
+        _ => Err(eyre!("Uninstalling running application did not fail")),
+    }?;
+
+    runtime.stop("test_container-000").await?;
+
+    // Remove the temporary data directory
+    fs::remove_dir_all(&data_dir).await?;
+
+    runtime.uninstall("test_container", "0.0.1").await?;
+    runtime.uninstall("test_resource", "0.0.1").await?;
+
+    runtime.shutdown().await?;
+    Ok(())
+});
+
 test!(crashing_containers, {
     let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
 
