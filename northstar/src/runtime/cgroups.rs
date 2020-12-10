@@ -42,15 +42,9 @@ pub enum Error {
     ControllerNotFound(String),
 }
 
-#[derive(Debug)]
-struct CGroup {
-    cgroup: String,
-    path: PathBuf,
-}
-
 pub async fn init_root_cgroups(config: &config::CGroups) -> Result<(), Error> {
     let mount_point = get_mount_point("cpuset")?;
-    let cpuset_root = mount_point.join(get_cgroup_root("cpuset", config));
+    let cpuset_root = mount_point.join(cgroup_path("cpuset", config)?);
 
     debug!("Creating cpuset hierarchy under {}", cpuset_root.display());
     create_if_not_exists(cpuset_root.as_path()).await?;
@@ -74,38 +68,23 @@ async fn copy_file(name: &str, src_dir: &Path, dst_dir: &Path) -> Result<(), Err
     write(&dst_dir.join(name), &value).await
 }
 
-impl CGroup {
-    async fn new(cgroup: String, path: &Path, config: &manifest::CGroup) -> Result<CGroup, Error> {
-        let path = get_mount_point(&cgroup)?.join(&path);
-        create_if_not_exists(&path).await?;
-
-        for (param, value) in config {
-            let filename = path.join(format!("{}.{}", &cgroup, param));
-            debug!("Setting {} to {}", filename.display(), value);
-            write(&filename, &value).await?;
-        }
-
-        Ok(CGroup { cgroup, path })
-    }
-
-    /// Assign a PID to this cgroup
-    async fn assign(&self, pid: u32) -> Result<(), Error> {
-        debug!("Assigning {} to {}", pid, self.path.display());
-        let tasks = self.path.join(TASKS);
-        write(&tasks, &pid.to_string()).await
-    }
-
-    /// Destroy the cgroup by removing the dir
-    async fn destroy(self) -> Result<(), Error> {
-        debug!("Destroying cgroup {}", self.path.display());
-        fs::remove_dir(&self.path)
-            .await
-            .map_err(|e| Error::Destroy(self.path.to_string_lossy().to_string(), e))
-    }
+#[derive(Debug)]
+pub struct CGroups {
+    cgroup_paths: Vec<PathBuf>,
 }
 
-#[derive(Debug)]
-pub struct CGroups(Vec<CGroup>);
+async fn configure_cgroup(
+    path: &Path,
+    controller: &str,
+    params: &manifest::CGroup,
+) -> Result<(), Error> {
+    for (param, value) in params {
+        let filename = path.join(format!("{}.{}", controller, param));
+        debug!("Settings {} to {}", filename.display(), value);
+        write(&filename, &value).await?;
+    }
+    Ok(())
+}
 
 impl CGroups {
     pub(crate) async fn new(
@@ -114,29 +93,37 @@ impl CGroups {
         cgroups: &manifest::CGroups,
         tx: EventTx,
     ) -> Result<CGroups, Error> {
-        let mut cgroup_list = Vec::new();
+        let mut cgroup_paths = Vec::new();
         for (controller, params) in cgroups {
-            let path = get_cgroup_root(controller, config).join(name);
-            cgroup_list.push(CGroup::new(controller.to_owned(), path.as_path(), params).await?);
+            let path = cgroup_path(controller, config)?.join(name);
+            create_if_not_exists(&path).await?;
+            configure_cgroup(&path, controller, params).await?;
+
+            if controller == "memory" {
+                setup_oom_monitor(name, &path, tx.clone()).await?;
+            }
+
+            cgroup_paths.push(path);
         }
 
-        if let Some(cgroup) = cgroup_list.iter().find(|cg| cg.cgroup == "memory") {
-            setup_oom_monitor(name, cgroup.path.as_path(), tx).await?;
-        }
-
-        Ok(CGroups(cgroup_list))
+        Ok(CGroups { cgroup_paths })
     }
 
     pub async fn assign(&self, pid: u32) -> Result<(), Error> {
-        for cgroup in &self.0 {
-            cgroup.assign(pid).await?;
+        for cgroup_dir in &self.cgroup_paths {
+            let tasks = cgroup_dir.join(TASKS);
+            debug!("Assigning {} to {}", pid, tasks.display());
+            write(&tasks, &pid.to_string()).await?;
         }
         Ok(())
     }
 
     pub async fn destroy(self) -> Result<(), Error> {
-        for cgroup in self.0 {
-            cgroup.destroy().await?;
+        for cgroup_dir in self.cgroup_paths {
+            debug!("Destroying cgroup {}", cgroup_dir.display());
+            fs::remove_dir(&cgroup_dir)
+                .await
+                .map_err(|e| Error::Destroy(cgroup_dir.display().to_string(), e))?;
         }
         Ok(())
     }
@@ -183,10 +170,9 @@ async fn create_if_not_exists(path: &Path) -> Result<(), Error> {
         debug!("Creating {}", path.display());
         fs::create_dir_all(&path)
             .await
-            .map_err(|e| Error::Io(format!("Failed to create directory {}", path.display()), e))
-    } else {
-        Ok(())
+            .map_err(|e| Error::Io(format!("Failed to create directory {}", path.display()), e))?;
     }
+    Ok(())
 }
 
 async fn write(path: &Path, value: &str) -> Result<(), Error> {
@@ -195,11 +181,13 @@ async fn write(path: &Path, value: &str) -> Result<(), Error> {
         .map_err(|e| Error::Io(format!("Failed to write to {}", path.display()), e))
 }
 
-fn get_cgroup_root(controller: &str, config: &config::CGroups) -> PathBuf {
-    config
+fn cgroup_path(controller: &str, config: &config::CGroups) -> Result<PathBuf, Error> {
+    let hierarchy = get_mount_point(controller)?;
+    let cgroup_subdir = config
         .get(controller)
         .cloned()
-        .unwrap_or_else(|| PathBuf::from("north"))
+        .unwrap_or_else(|| PathBuf::from("north"));
+    Ok(hierarchy.join(cgroup_subdir))
 }
 
 /// Get the cgroup v1 controller hierarchy mount point

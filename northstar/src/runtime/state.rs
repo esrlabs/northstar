@@ -320,7 +320,7 @@ impl State {
 
                 if let Some(cgroups) = context.cgroups {
                     debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await.ok();
+                    cgroups.destroy().await?;
                 }
 
                 // Send notification to main loop
