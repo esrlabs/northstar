@@ -19,6 +19,7 @@ use crate::{
 use ed25519_dalek::SignatureError;
 use zip::result::ZipError;
 // use colored::Colorize;
+use crate::manifest;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand::rngs::OsRng;
@@ -166,17 +167,24 @@ pub fn open_zipped_npk(npk: &Path) -> Result<ZipArchive<File>, Error> {
 
 fn read_manifest(src: &Path) -> Result<Manifest, Error> {
     let manifest_path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
-    let manifest = std::fs::File::open(&manifest_path).map_err(|e| Error::Os {
+    let manifest_file = std::fs::File::open(&manifest_path).map_err(|e| Error::Os {
         context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
         error: e,
     })?;
-
-    serde_yaml::from_reader(manifest).map_err(|_e| {
+    let mut manifest = serde_yaml::from_reader(manifest_file).map_err(|_e| {
         Error::Manifest(format!(
             "Failed to parse manifest '{}'",
             &manifest_path.display()
         ))
-    })
+    })?;
+    add_manifest_version_if_missing(&mut manifest);
+    Ok(manifest)
+}
+
+fn add_manifest_version_if_missing(manifest: &mut Manifest) {
+    if manifest.manifest_version.is_none() {
+        manifest.manifest_version = Option::from(manifest::VERSION_1_0_0);
+    }
 }
 
 fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf, Error> {
