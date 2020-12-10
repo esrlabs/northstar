@@ -165,6 +165,15 @@ pub enum Mount {
     Tmpfs { size: u64 },
 }
 
+/// used if a Manifest is missing a 'manifest_version' value
+pub const VERSION_1_0_0: Version = Version(semver::Version {
+    major: 1,
+    minor: 0,
+    patch: 0,
+    pre: vec![],
+    build: vec![],
+});
+
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container

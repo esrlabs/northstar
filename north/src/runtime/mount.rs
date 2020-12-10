@@ -26,7 +26,7 @@ use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use npk::{
     archive::ArchiveReader,
     dm_verity::VerityHeader,
-    manifest::{Manifest, Version},
+    manifest::{Manifest, Version, VERSION_1_0_0},
 };
 use std::{
     collections::HashMap,
@@ -438,16 +438,9 @@ async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(
 }
 
 fn is_version_supported(manifest: &Manifest) -> bool {
-    const V1: Version = Version(semver::Version {
-        major: 1,
-        minor: 0,
-        patch: 0,
-        pre: vec![],
-        build: vec![],
-    });
-    const SUPPORTED_MIN_VERSION: &Version = &V1;
-    const KNOWN_MAX_VERSION: &Version = &V1;
-    const DEFAULT_VERSION: &Version = &V1; // used if manifest has no 'manifest_version' entry
+    const SUPPORTED_MIN_VERSION: &Version = &VERSION_1_0_0;
+    const KNOWN_MAX_VERSION: &Version = &VERSION_1_0_0;
+    const DEFAULT_VERSION: &Version = &VERSION_1_0_0;
     let manifest_version = manifest
         .manifest_version
         .as_ref()
@@ -455,13 +448,12 @@ fn is_version_supported(manifest: &Manifest) -> bool {
 
     // compare major versions
     if manifest_version.0.major < SUPPORTED_MIN_VERSION.0.major {
+        debug!("Unsupported manifest major version {}", manifest_version);
         return false;
     }
     if manifest_version.0.major > KNOWN_MAX_VERSION.0.major {
-        debug!(
-            "Warning: unknown manifest major version {}",
-            manifest_version
-        );
+        debug!("Unknown future manifest major version {}", manifest_version);
+        return false;
     }
     true
 }
