@@ -86,6 +86,7 @@ build_example() {
   echo "${bold}Building ${NAME}${normal} (target: ${PLATFORM})"
 
   local ROOT_DIR="${TMP_DIR}/root"
+  exe rm -rf "${ROOT_DIR}"
   exe mkdir -p "${ROOT_DIR}"
 
   # Copy manifest and root to tmp
