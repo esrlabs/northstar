@@ -1129,6 +1129,7 @@ dependencies = [
  "color-eyre",
  "colored",
  "escargot",
+ "futures",
  "lazy_static",
  "log",
  "nix 0.17.0",
