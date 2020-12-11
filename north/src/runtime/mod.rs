@@ -206,10 +206,11 @@ async fn runtime_task(
 
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to mount the content.
-    for repository in config.repositories.values() {
-        let mounted_containers = mount::mount_npk_dir(
+    for (id, repository) in &config.repositories {
+        let key = state.signing_keys.get(id).unwrap(); // TODO add respositories to state
+        let mounted_containers = mount::mount_npk_repository(
             &config.run_dir,
-            &state.signing_keys,
+            key,
             &config.devices.device_mapper_dev,
             &config.devices.device_mapper,
             &config.devices.loop_control,

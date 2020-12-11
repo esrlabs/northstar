@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::config::Repository;
+use super::config::{Repository, RepositoryId};
 use ed25519_dalek::*;
 use log::{debug, info};
 use std::collections::HashMap;
@@ -29,11 +29,11 @@ pub enum Error {
     Io(String, io::Error),
 }
 
-pub(super) async fn load<'a, I: Iterator<Item = &'a Repository>>(
-    repositories: I,
-) -> Result<HashMap<String, PublicKey>, Error> {
+pub(super) async fn load(
+    repositories: &HashMap<RepositoryId, Repository>,
+) -> Result<HashMap<RepositoryId, PublicKey>, Error> {
     let mut signing_keys = HashMap::new();
-    for repository in repositories {
+    for (id, repository) in repositories {
         let path = &repository.key;
 
         debug!("Loading key {}", path.display());
@@ -44,14 +44,12 @@ pub(super) async fn load<'a, I: Iterator<Item = &'a Repository>>(
             )));
         }
 
-        if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {
-            info!("Loading signing key {}", key_id);
-            let key_bytes = fs::read(&path)
-                .await
-                .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
-            let key = PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)?;
-            signing_keys.insert(key_id, key);
-        }
+        info!("Loading signing key from repository {}", id);
+        let key_bytes = fs::read(&path)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
+        let key = PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)?;
+        signing_keys.insert(id.clone(), key);
     }
     Ok(signing_keys)
 }

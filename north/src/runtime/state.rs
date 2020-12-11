@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use super::{
-    config::Config,
+    config::{Config, RepositoryId},
     error::Error,
     keys,
     mount::{mount_npk, umount_npk},
@@ -38,7 +38,7 @@ use tokio::{fs, stream::StreamExt, time};
 #[derive(Debug)]
 pub struct State {
     events_tx: EventTx,
-    pub signing_keys: HashMap<String, PublicKey>,
+    pub signing_keys: HashMap<RepositoryId, PublicKey>,
     pub applications: HashMap<Name, Application>,
     pub resources: HashMap<(Name, Version), Container>,
     pub config: Config,
@@ -128,9 +128,7 @@ impl State {
     /// Create a new empty State instance
     pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         // Load keys for manifest verification
-        let signing_keys = keys::load(config.repositories.values())
-            .await
-            .map_err(Error::Key)?;
+        let signing_keys = keys::load(&config.repositories).await.map_err(Error::Key)?;
 
         Ok(State {
             events_tx: tx,
@@ -344,7 +342,10 @@ impl State {
 
     /// Install a npk
     pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
-        let manifest = ArchiveReader::new(&npk)
+        // TODO add repositoryId to the signature
+        let key = self.signing_keys.get("examples").unwrap();
+
+        let manifest = ArchiveReader::new(npk)
             .map_err(Error::Npk)?
             .manifest()
             .map_err(Error::Npk)?;
@@ -390,7 +391,7 @@ impl State {
         // Install and mount npk
         let mounted_containers = mount_npk(
             &self.config.run_dir,
-            &self.signing_keys,
+            &key,
             &self.config.devices.device_mapper_dev,
             &self.config.devices.device_mapper,
             &self.config.devices.loop_control,
@@ -430,6 +431,7 @@ impl State {
                         e,
                     )
                 })?;
+
                 let manifest = ArchiveReader::new(entry.path().as_path())
                     .map_err(Error::Npk)?
                     .manifest()
