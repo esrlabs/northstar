@@ -50,8 +50,6 @@ pub enum Error {
     MalformedManifest(String),
     #[error("Hash error: {0}")]
     HashInvalid(String),
-    #[error("Key missing: {0}")]
-    KeyNotFound(String),
     #[error("Problem verifying content with signature ({0})")]
     SignatureVerificationError(String),
     #[error("ZIP error")]
@@ -72,10 +70,7 @@ struct Signature {
 }
 
 impl Hashes {
-    pub fn from_str(
-        file: &str,
-        keys: &HashMap<String, ed25519_dalek::PublicKey>,
-    ) -> Result<Hashes, Error> {
+    pub fn from_str(file: &str, key: &ed25519_dalek::PublicKey) -> Result<Hashes, Error> {
         let mut docs = file.splitn(2, "---");
 
         // Manifest hash and fs.img part
@@ -92,9 +87,6 @@ impl Hashes {
 
         // TODO: extract into own method
         // Check signature
-        let key = keys
-            .get(&signature.key)
-            .ok_or_else(|| Error::KeyNotFound(format!("Key {} not found", &signature.key)))?;
         let signature = ed25519_dalek::Signature::from_bytes(&signature.signature)
             .map_err(|_| Error::MalformedSignature)?;
         key.verify_strict(&hashes.as_bytes(), &signature)
@@ -226,10 +218,7 @@ impl ArchiveReader {
         Ok((zip_file.data_start(), zip_file.size()))
     }
 
-    pub fn extract_hashes(
-        &mut self,
-        signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
-    ) -> Result<Hashes, Error> {
+    pub fn extract_hashes(&mut self, key: &ed25519_dalek::PublicKey) -> Result<Hashes, Error> {
         let mut signature_file = self.archive.by_name(SIGNATURE).map_err(Error::Zip)?;
         let mut signature = String::new();
         signature_file
@@ -237,7 +226,7 @@ impl ArchiveReader {
             .map_err(|_e| {
                 Error::SignatureFileInvalid("Failed to read signature file".to_string())
             })?;
-        Hashes::from_str(&signature, &signing_keys)
+        Hashes::from_str(&signature, key)
     }
 
     pub fn manifest(&mut self) -> Result<Manifest, Error> {
@@ -266,11 +255,9 @@ signature: +lUTeD1YQDAmZTa32Ni1EhztzpaOgN329kNbWEo5NA+hbKRQjIaP6jXffHWSL3x/glZ54
 ";
 
     let key_bytes = base64::decode("DKkTMfhuqOggK4Bx3H8cgDAz3LH1AhiKu9gknCGOsCE=")
-        .expect("Failed to parse base64 key");
-    let key = ed25519_dalek::PublicKey::from_bytes(&key_bytes).expect("Failed to parse public key");
-    let mut signing_keys: HashMap<String, ed25519_dalek::PublicKey> = HashMap::new();
-    signing_keys.insert("north".to_string(), key);
-    let s = Hashes::from_str(signature, &signing_keys).expect("Failed to parse signature");
+        .expect("Cannot parse base64 key");
+    let key = ed25519_dalek::PublicKey::from_bytes(&key_bytes).expect("Cannot parse public key");
+    let s = Hashes::from_str(signature, &key).expect("Failed to parse signature");
 
     assert_eq!(
         s.manifest_hash,

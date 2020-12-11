@@ -25,7 +25,6 @@ pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use npk::{archive::ArchiveReader, dm_verity::VerityHeader, manifest::Manifest};
 use std::{
-    collections::HashMap,
     io,
     io::Cursor,
     path::{Path, PathBuf},
@@ -62,9 +61,9 @@ pub enum Error {
     Os(nix::Error),
 }
 
-pub(super) async fn mount_npk_dir(
+pub(super) async fn mount_npk_repository(
     run_dir: &Path,
-    signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
+    signing_key: &ed25519_dalek::PublicKey,
     device_mapper_dev: &str,
     device_mapper: &Path,
     loop_control: &Path,
@@ -89,7 +88,7 @@ pub(super) async fn mount_npk_dir(
     let mut containers: Vec<Vec<Container>> = vec![];
     while let Some(npk) = npks.next().await {
         containers.push(
-            mount_internal(&run_dir, &signing_keys, &device_mapper_dev, &dm, &lc, &npk).await?,
+            mount_internal(&run_dir, &signing_key, &device_mapper_dev, &dm, &lc, &npk).await?,
         );
     }
     Ok(containers.into_iter().flatten().collect())
@@ -97,7 +96,7 @@ pub(super) async fn mount_npk_dir(
 
 pub(super) async fn mount_npk(
     run_dir: &Path,
-    signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
+    signing_key: &ed25519_dalek::PublicKey,
     device_mapper_dev: &str,
     device_mapper: &Path,
     loop_control: &Path,
@@ -112,7 +111,7 @@ pub(super) async fn mount_npk(
         .map_err(Error::LoopDevice)?;
 
     let mounted_containers =
-        mount_internal(run_dir, signing_keys, device_mapper_dev, &dm, &lc, npk).await?;
+        mount_internal(run_dir, signing_key, device_mapper_dev, &dm, &lc, npk).await?;
 
     Ok(mounted_containers)
 }
@@ -144,7 +143,7 @@ pub async fn umount_npk(container: &Container) -> Result<(), Error> {
 
 async fn mount_internal(
     run_dir: &Path,
-    signing_keys: &HashMap<String, ed25519_dalek::PublicKey>,
+    signing_key: &ed25519_dalek::PublicKey,
     device_mapper_dev: &str,
     dm: &Dm,
     lc: &LoopControl,
@@ -158,7 +157,7 @@ async fn mount_internal(
 
     let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
     let hashes = archive_reader
-        .extract_hashes(&signing_keys)
+        .extract_hashes(&signing_key)
         .map_err(Error::Npk)?;
     let manifest = archive_reader.manifest().map_err(Error::Npk)?;
     let npk_version = archive_reader.npk_version().map_err(Error::Npk)?;

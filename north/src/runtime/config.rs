@@ -1,4 +1,4 @@
-// Copyright (c) 2019 - 2020 ESRLabs
+// Copyright (c) 2019 - 2020 ESRLabs.
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 
-type RepositoryId = String;
+pub type RepositoryId = String;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
@@ -41,7 +41,7 @@ pub struct CGroups {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Devices {
     /// Parent mountpoint of north path. North needs to set private mount propagation
-    /// on the parent mount of the north runtime dir. This mountpoint varies
+    /// on the parent mount of the north runtime dir. This mountpoint varies.
     pub unshare_root: PathBuf,
     /// Filesystem type of the fs mounted on `unshare_root`
     pub unshare_fstype: String,
@@ -57,15 +57,15 @@ pub struct Devices {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
-    /// Print debug logs
+    /// Print debug logs.
     pub debug: bool,
-    /// Console address
+    /// Console address.
     pub console_address: String,
     /// Container UID
     pub container_uid: u32,
     /// Container GID
     pub container_gid: u32,
-    /// Directory with unpacked containers
+    /// Directory with unpacked containers.
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored
     pub data_dir: PathBuf,
