@@ -13,14 +13,16 @@
 //   limitations under the License.
 
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
+
+type RepositoryId = String;
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct Directories {
+pub struct Repository {
     /// Directory containing images in container format
-    pub container_dirs: Vec<PathBuf>,
+    pub dir: PathBuf,
     /// Directory where public signing keys are stored
-    pub key_dir: PathBuf,
+    pub key: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -68,7 +70,7 @@ pub struct Config {
     /// Directory where rw data of container shall be stored
     pub data_dir: PathBuf,
 
-    pub directories: Directories,
+    pub repositories: HashMap<RepositoryId, Repository>,
     pub cgroups: CGroups,
     pub devices: Devices,
 }
