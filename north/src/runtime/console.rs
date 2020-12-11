@@ -139,7 +139,7 @@ impl Console {
                 }
             }
             Request::Install(message, repo, path) => {
-                let payload = match state.install(repo.clone(), &path).await {
+                let payload = match state.install(&repo, &path).await {
                     Ok(_) => api::Response::Ok(()),
                     Err(e) => api::Response::Err(e.into()),
                 };

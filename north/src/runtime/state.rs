@@ -38,6 +38,7 @@ use tokio::{fs, stream::StreamExt, time};
 #[derive(Debug, Clone)]
 struct Repository {
     dir: PathBuf,
+    writable: bool,
     key: PublicKey,
 }
 
@@ -137,7 +138,8 @@ impl State {
         for (id, repository) in &config.repositories {
             let key = keys::load(&repository.key).await.map_err(Error::Key)?;
             let dir = repository.dir.clone();
-            repositories.insert(id.clone(), Repository { key, dir });
+            let writable = repository.writable;
+            repositories.insert(id.clone(), Repository { dir, writable, key });
         }
 
         Ok(State {
@@ -375,13 +377,15 @@ impl State {
     }
 
     /// Install a npk
-    pub async fn install(&mut self, id: RepositoryId, npk: &Path) -> Result<(), Error> {
+    pub async fn install(&mut self, id: &str, npk: &Path) -> Result<(), Error> {
         let repository = self
             .repositories
-            .get(&id)
-            .ok_or_else(|| Error::Repository(format!("Failed to find repository ID: {}", id)))?;
+            .get(id)
+            .ok_or_else(|| Error::RepositoryNotFound(id.to_owned()))?;
 
-        // TODO check if repository is writable
+        if !repository.writable {
+            return Err(Error::RepositoryNotWritable(id.to_owned()));
+        }
 
         let manifest = ArchiveReader::new(npk)
             .map_err(Error::Npk)?
