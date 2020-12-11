@@ -121,9 +121,7 @@ pub(crate) async fn waitpid(
         };
 
         // Send notification to exit handle
-        exit_handle
-            .blocking_send(status.clone())
-            .expect("Internal channel error on exit handle");
+        exit_handle.blocking_send(status.clone()).ok();
 
         // Send notification to main loop
         event_handle
