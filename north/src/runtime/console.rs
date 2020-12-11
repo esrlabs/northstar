@@ -14,7 +14,7 @@
 
 use crate::{
     api,
-    runtime::{state::State, Event, EventTx},
+    runtime::{config::RepositoryId, state::State, Event, EventTx},
 };
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, error, warn};
@@ -38,7 +38,7 @@ use tokio::{
 // Events from message received by clients in deserialized form
 enum ConnectionEvent {
     Request(api::Message),
-    Install(api::Message, PathBuf),
+    Install(api::Message, RepositoryId, PathBuf),
 }
 
 type NotificationRx = broadcast::Receiver<api::Notification>;
@@ -47,7 +47,7 @@ type NotificationRx = broadcast::Receiver<api::Notification>;
 #[derive(Debug)]
 pub(crate) enum Request {
     Message(api::Message),
-    Install(api::Message, PathBuf),
+    Install(api::Message, RepositoryId, PathBuf),
 }
 
 /// A console is responsible for monitoring and serving incoming client connections
@@ -123,7 +123,7 @@ impl Console {
                             state.initiate_shutdown().await;
                             api::Response::Ok(())
                         }
-                        api::Request::Install(_) => unreachable!(),
+                        api::Request::Install(_, _) => unreachable!(),
                     };
 
                     let response_message = api::Message {
@@ -138,8 +138,8 @@ impl Console {
                     warn!("Received message is not a request");
                 }
             }
-            Request::Install(message, path) => {
-                let payload = match state.install(&path).await {
+            Request::Install(message, repo, path) => {
+                let payload = match state.install(repo.clone(), &path).await {
                     Ok(_) => api::Response::Ok(()),
                     Err(e) => api::Response::Err(e.into()),
                 };
@@ -286,11 +286,13 @@ impl Console {
         while let Some(request) = client_in.next().await {
             let request = match request {
                 ConnectionEvent::Request(request) => Request::Message(request),
-                ConnectionEvent::Install(message, npk) => Request::Install(message, npk),
+                ConnectionEvent::Install(message, repo, npk) => {
+                    Request::Install(message, repo, npk)
+                }
             };
 
             let tmp_npk = match &request {
-                Request::Install(_, npk) => Some(npk.to_owned()),
+                Request::Install(_, _, npk) => Some(npk.to_owned()),
                 _ => None,
             };
 
@@ -386,7 +388,7 @@ async fn read<R: AsyncRead + Unpin>(
         .map_err(|_| Error::Protocol("Failed to deserialize message".to_string()))?;
 
     match &message.payload {
-        api::Payload::Request(api::Request::Install(size)) => {
+        api::Payload::Request(api::Request::Install(repo, size)) => {
             debug!("Incoming installation ({} bytes)", size);
 
             // Open a tmpfile
@@ -406,7 +408,11 @@ async fn read<R: AsyncRead + Unpin>(
                 .await
                 .map_err(|e| Error::Io(format!("Failed to receive {} bytes", size), e))?;
             debug!("Received {} bytes. Starting installation", n);
-            Ok(ConnectionEvent::Install(message, file))
+            Ok(ConnectionEvent::Install(
+                message.clone(),
+                repo.to_string(),
+                file,
+            ))
         }
         _ => Ok(ConnectionEvent::Request(message)),
     }

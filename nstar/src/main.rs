@@ -35,11 +35,11 @@ mod codec;
 mod readline;
 
 const HELP: &str = r"containers:                 List installed containers
-shutdown:                   Stop the northstar runtime
-start <name>:               Start application
-stop <name>:                Stop application
-install <file>:             Install/Update npk
-uninstall <name> <version>: Unstall npk";
+shutdown:                     Stop the northstar runtime
+start <name>:                 Start application
+stop <name>:                  Stop application
+install <repository> <file>:  Install/Update npk into repository
+uninstall <name> <version>:   Unstall npk";
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "nstar", about = "Northstar CLI")]
@@ -230,8 +230,8 @@ async fn main() -> Result<()> {
                             };
                         }
                         Some("install") => {
-                            match split.next() {
-                                Some(file) => {
+                            match (split.next(), split.next()) {
+                                (Some(repo), Some(file)) => {
                                     // Get the file and it's len
                                     let file = Path::new(file);
                                     let size = match file.metadata() {
@@ -258,7 +258,7 @@ async fn main() -> Result<()> {
 
                                     // Construct a Message with a installation request
                                     // Place the size of the file on disk in the request
-                                    let message = codec::Message::Message(Message::new_request(Request::Install(size)));
+                                    let message = codec::Message::Message(Message::new_request(Request::Install(repo.to_string(), size)));
                                     if let Err(e) = framed_write.send(message).await {
                                         warn!("Stream error: {}", e);
                                         break 'inner;
@@ -293,7 +293,8 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                 }
-                                None => println!("Missing npk argument"),
+                                (None, _) => println!("Missing repository argument"),
+                                (Some(_), None) => println!("Missing npk argument"),
                             }
                         }
                         Some("uninstall") => {

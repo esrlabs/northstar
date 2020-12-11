@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::runtime::config::RepositoryId;
 use derive_new::new;
 use serde::{Deserialize, Serialize};
 
@@ -74,7 +75,7 @@ pub enum Request {
     Containers,
     Start(Name),
     Stop(Name),
-    Install(u64),
+    Install(RepositoryId, u64),
     Uninstall { name: Name, version: Version },
     Shutdown,
 }
@@ -115,6 +116,7 @@ pub enum Error {
     ApplicationRunning(String),
     MissingResource(String),
     ContainerAlreadyInstalled(String),
+    Repository(String),
 
     Npk(String),
     Process(String),

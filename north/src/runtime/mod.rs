@@ -26,7 +26,7 @@ mod process;
 mod state;
 
 use crate::{api, api::Notification};
-use config::Config;
+use config::{Config, RepositoryId};
 use console::Request;
 use error::Error;
 use log::{debug, info, Level};
@@ -158,14 +158,14 @@ impl Runtime {
     }
 
     /// Installs a container in the repository
-    pub async fn install(&self, npk: &Path) -> Result<api::Response, Error> {
+    pub async fn install(&self, repo: RepositoryId, npk: &Path) -> Result<api::Response, Error> {
         let (response_tx, response_rx) = oneshot::channel::<api::Message>();
 
         // The size does not matter here since the file is not received through the socket
-        let request = api::Message::new_request(api::Request::Install(0u64));
+        let request = api::Message::new_request(api::Request::Install(repo.to_owned(), 0u64));
         self.event_tx
             .send(Event::Console(
-                console::Request::Install(request, npk.to_owned()),
+                console::Request::Install(request, repo.to_string(), npk.to_owned()),
                 response_tx,
             ))
             .await

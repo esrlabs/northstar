@@ -375,9 +375,13 @@ impl State {
     }
 
     /// Install a npk
-    pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
-        // TODO add repositoryId to the signature
-        let repository = self.repositories.get("examples").unwrap();
+    pub async fn install(&mut self, id: RepositoryId, npk: &Path) -> Result<(), Error> {
+        let repository = self
+            .repositories
+            .get(&id)
+            .ok_or_else(|| Error::Repository(format!("Failed to find repository ID: {}", id)))?;
+
+        // TODO check if repository is writable
 
         let manifest = ArchiveReader::new(npk)
             .map_err(Error::Npk)?
@@ -390,22 +394,12 @@ impl State {
             manifest.name
         );
 
-        // TODO: get correct registry from config
-        let registry = self
-            .config
-            .repositories
-            .values()
-            .next()
-            .expect("No registry configured!")
-            .dir
-            .as_path();
-
-        let package_in_registry = registry.join(&package);
+        let package_in_registry = repository.dir.join(&package);
 
         debug!(
             "Trying to install {} to registry {}",
             package,
-            registry.display()
+            repository.dir.display()
         );
 
         if self
