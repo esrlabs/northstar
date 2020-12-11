@@ -36,10 +36,11 @@ use std::{
 use tokio::{fs, stream::StreamExt, time};
 
 #[derive(Debug, Clone)]
-struct Repository {
-    dir: PathBuf,
-    writable: bool,
-    key: PublicKey,
+pub struct Repository {
+    pub id: RepositoryId,
+    pub dir: PathBuf,
+    pub writable: bool,
+    pub key: PublicKey,
 }
 
 #[derive(Debug)]
@@ -56,6 +57,7 @@ pub struct Container {
     pub manifest: Manifest,
     pub root: PathBuf,
     pub dm_dev: PathBuf,
+    pub repository: RepositoryId,
 }
 
 impl Container {
@@ -139,7 +141,15 @@ impl State {
             let key = keys::load(&repository.key).await.map_err(Error::Key)?;
             let dir = repository.dir.clone();
             let writable = repository.writable;
-            repositories.insert(id.clone(), Repository { dir, writable, key });
+            repositories.insert(
+                id.clone(),
+                Repository {
+                    id: id.clone(),
+                    dir,
+                    writable,
+                    key,
+                },
+            );
         }
 
         Ok(State {
@@ -153,17 +163,16 @@ impl State {
 
     /// Mount container repositories
     pub(crate) async fn mount_repositories(&mut self) -> Result<(), Error> {
-        let repositories: Vec<Repository> = self.repositories.values().cloned().collect();
+        let repos: Vec<Repository> = self.repositories.values().cloned().collect();
         // Mount all the containers from each repository
-        for repository in repositories {
+        for repo in &repos {
             let mounted_containers = super::mount::mount_npk_repository(
                 &self.config.run_dir,
-                &repository.key,
                 &self.config.devices.device_mapper_dev,
                 &self.config.devices.device_mapper,
                 &self.config.devices.loop_control,
                 &self.config.devices.loop_dev,
-                &repository.dir,
+                &repo,
             )
             .await
             .map_err(Error::Mount)?;
@@ -429,6 +438,7 @@ impl State {
             &self.config.devices.loop_control,
             &self.config.devices.loop_dev,
             &package_in_registry,
+            id,
         )
         .await
         .map_err(Error::Mount)?;

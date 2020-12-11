@@ -15,6 +15,7 @@
 use crate::runtime::config::RepositoryId;
 use derive_new::new;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use npk::manifest::{Manifest, Version};
 
@@ -84,6 +85,14 @@ pub enum Request {
 pub struct Container {
     pub manifest: Manifest,
     pub process: Option<Process>,
+    pub repository: RepositoryId,
+}
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Repository {
+    pub id: RepositoryId,
+    pub writable: bool,
+    pub dir: PathBuf,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

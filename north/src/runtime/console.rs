@@ -329,6 +329,7 @@ fn list_containers(state: &State) -> Vec<api::Container> {
         .applications()
         .map(|app| api::Container {
             manifest: app.manifest().clone(),
+            repository: app.container().repository.clone(),
             process: app.process_context().map(|f| api::Process {
                 pid: f.process().pid(),
                 uptime: f.uptime().as_nanos() as u64,
@@ -356,6 +357,7 @@ fn list_containers(state: &State) -> Vec<api::Container> {
         .map(|container| api::Container {
             manifest: container.manifest.clone(),
             process: None,
+            repository: container.repository.clone(),
         })
         .collect();
     containers.append(&mut resources);
