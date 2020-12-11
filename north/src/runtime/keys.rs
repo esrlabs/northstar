@@ -12,10 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::config::{Repository, RepositoryId};
 use ed25519_dalek::*;
-use log::{debug, info};
-use std::collections::HashMap;
+use log::debug;
+use std::path::Path;
 use thiserror::Error;
 use tokio::{fs, io};
 
@@ -29,27 +28,18 @@ pub enum Error {
     Io(String, io::Error),
 }
 
-pub(super) async fn load(
-    repositories: &HashMap<RepositoryId, Repository>,
-) -> Result<HashMap<RepositoryId, PublicKey>, Error> {
-    let mut signing_keys = HashMap::new();
-    for (id, repository) in repositories {
-        let path = &repository.key;
-
-        debug!("Loading key {}", path.display());
-        if path.extension().filter(|ext| *ext == "pub").is_none() || !path.is_file() {
-            return Err(Error::KeyFile(format!(
-                "{} not a file or has '.pub' extension",
-                path.display()
-            )));
-        }
-
-        info!("Loading signing key from repository {}", id);
-        let key_bytes = fs::read(&path)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
-        let key = PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)?;
-        signing_keys.insert(id.clone(), key);
+pub(super) async fn load(path: &Path) -> Result<PublicKey, Error> {
+    debug!("Loading key {}", path.display());
+    if path.extension().filter(|ext| *ext == "pub").is_none() || !path.is_file() {
+        return Err(Error::KeyFile(format!(
+            "{} not a file or has '.pub' extension",
+            path.display()
+        )));
     }
-    Ok(signing_keys)
+
+    let key_bytes = fs::read(&path)
+        .await
+        .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
+
+    Ok(PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)?)
 }
