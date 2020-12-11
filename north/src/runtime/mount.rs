@@ -13,9 +13,10 @@
 //   limitations under the License.
 
 use super::{
+    config::RepositoryId,
     device_mapper as dm, device_mapper,
     loopdev::{losetup, LoopControl},
-    state::Container,
+    state::{Container, Repository},
 };
 use bitflags::_core::str::Utf8Error;
 use device_mapper::Dm;
@@ -63,37 +64,42 @@ pub enum Error {
 
 pub(super) async fn mount_npk_repository(
     run_dir: &Path,
-    signing_key: &ed25519_dalek::PublicKey,
     device_mapper_dev: &str,
     device_mapper: &Path,
     loop_control: &Path,
     loop_dev: &str,
-    dir: &Path,
+    repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
-    info!("Mounting containers from {}", dir.display());
+    info!("Mounting containers from {}", repo.dir.display());
 
-    let npks = fs::read_dir(&dir)
+    let npks = fs::read_dir(&repo.dir)
         .await
-        .map_err(|e| Error::Io(format!("Failed to read {}", dir.display()), e))?
+        .map_err(|e| Error::Io(format!("Failed to read {}", &repo.dir.display()), e))?
         .filter_map(move |d| d.ok())
         .map(|d| d.path());
 
-    let dm = Dm::new(&device_mapper).map_err(Error::DeviceMapper)?;
-    let lc = LoopControl::open(loop_control, loop_dev)
-        .await
-        .map_err(Error::LoopDevice)?;
-
+    let mut containers: Vec<Container> = vec![];
     let mut npks = Box::pin(npks);
-
-    let mut containers: Vec<Vec<Container>> = vec![];
     while let Some(npk) = npks.next().await {
-        containers.push(
-            mount_internal(&run_dir, &signing_key, &device_mapper_dev, &dm, &lc, &npk).await?,
+        containers.append(
+            &mut mount_npk(
+                run_dir,
+                &repo.key,
+                device_mapper_dev,
+                device_mapper,
+                loop_control,
+                loop_dev,
+                &npk,
+                repo.id.clone(),
+            )
+            .await?,
         );
     }
-    Ok(containers.into_iter().flatten().collect())
+
+    Ok(containers)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn mount_npk(
     run_dir: &Path,
     signing_key: &ed25519_dalek::PublicKey,
@@ -102,6 +108,7 @@ pub(super) async fn mount_npk(
     loop_control: &Path,
     loop_dev: &str,
     npk: &Path,
+    repo: RepositoryId,
 ) -> Result<Vec<Container>, Error> {
     debug!("Mounting {}", npk.display());
 
@@ -111,7 +118,7 @@ pub(super) async fn mount_npk(
         .map_err(Error::LoopDevice)?;
 
     let mounted_containers =
-        mount_internal(run_dir, signing_key, device_mapper_dev, &dm, &lc, npk).await?;
+        mount_internal(run_dir, signing_key, device_mapper_dev, &dm, &lc, npk, repo).await?;
 
     Ok(mounted_containers)
 }
@@ -148,6 +155,7 @@ async fn mount_internal(
     dm: &Dm,
     lc: &LoopControl,
     npk: &Path,
+    repo: RepositoryId,
 ) -> Result<Vec<Container>, Error> {
     let start = time::Instant::now();
 
@@ -237,6 +245,7 @@ async fn mount_internal(
             root,
             manifest,
             dm_dev,
+            repository: repo.clone(),
         };
 
         let duration = start.elapsed();
