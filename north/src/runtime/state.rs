@@ -35,10 +35,16 @@ use std::{
 };
 use tokio::{fs, stream::StreamExt, time};
 
+#[derive(Debug, Clone)]
+struct Repository {
+    dir: PathBuf,
+    key: PublicKey,
+}
+
 #[derive(Debug)]
 pub struct State {
     events_tx: EventTx,
-    pub signing_keys: HashMap<RepositoryId, PublicKey>,
+    repositories: HashMap<RepositoryId, Repository>,
     pub applications: HashMap<Name, Application>,
     pub resources: HashMap<(Name, Version), Container>,
     pub config: Config,
@@ -127,16 +133,44 @@ impl fmt::Display for Application {
 impl State {
     /// Create a new empty State instance
     pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
-        // Load keys for manifest verification
-        let signing_keys = keys::load(&config.repositories).await.map_err(Error::Key)?;
+        let mut repositories = HashMap::new();
+        for (id, repository) in &config.repositories {
+            let key = keys::load(&repository.key).await.map_err(Error::Key)?;
+            let dir = repository.dir.clone();
+            repositories.insert(id.clone(), Repository { key, dir });
+        }
 
         Ok(State {
             events_tx: tx,
-            signing_keys,
+            repositories,
             applications: HashMap::new(),
             resources: HashMap::new(),
             config: config.clone(),
         })
+    }
+
+    /// Mount container repositories
+    pub(crate) async fn mount_repositories(&mut self) -> Result<(), Error> {
+        let repositories: Vec<Repository> = self.repositories.values().cloned().collect();
+        // Mount all the containers from each repository
+        for repository in repositories {
+            let mounted_containers = super::mount::mount_npk_repository(
+                &self.config.run_dir,
+                &repository.key,
+                &self.config.devices.device_mapper_dev,
+                &self.config.devices.device_mapper,
+                &self.config.devices.loop_control,
+                &self.config.devices.loop_dev,
+                &repository.dir,
+            )
+            .await
+            .map_err(Error::Mount)?;
+
+            for container in mounted_containers {
+                self.add(container)?;
+            }
+        }
+        Ok(())
     }
 
     /// Return an iterator over all known applications
@@ -343,7 +377,7 @@ impl State {
     /// Install a npk
     pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
         // TODO add repositoryId to the signature
-        let key = self.signing_keys.get("examples").unwrap();
+        let repository = self.repositories.get("examples").unwrap();
 
         let manifest = ArchiveReader::new(npk)
             .map_err(Error::Npk)?
@@ -391,7 +425,7 @@ impl State {
         // Install and mount npk
         let mounted_containers = mount_npk(
             &self.config.run_dir,
-            &key,
+            &repository.key,
             &self.config.devices.device_mapper_dev,
             &self.config.devices.device_mapper,
             &self.config.devices.loop_control,

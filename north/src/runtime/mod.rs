@@ -204,26 +204,8 @@ async fn runtime_task(
 ) -> Result<(), Error> {
     let mut state = State::new(&config, event_tx.clone()).await?;
 
-    // Iterate all files in SETTINGS.directories.container_dirs and try
-    // to mount the content.
-    for (id, repository) in &config.repositories {
-        let key = state.signing_keys.get(id).unwrap(); // TODO add respositories to state
-        let mounted_containers = mount::mount_npk_repository(
-            &config.run_dir,
-            key,
-            &config.devices.device_mapper_dev,
-            &config.devices.device_mapper,
-            &config.devices.loop_control,
-            &config.devices.loop_dev,
-            &repository.dir,
-        )
-        .await
-        .map_err(Error::Mount)?;
-
-        for container in mounted_containers {
-            state.add(container)?;
-        }
-    }
+    // mount all the containers from each repository
+    state.mount_repositories().await?;
 
     info!(
         "Mounted {} containers",
