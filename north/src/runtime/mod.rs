@@ -110,8 +110,8 @@ impl Runtime {
             task::spawn(async move {
                 let result = runtime_task(config, event_tx, event_rx, stop_rx).await;
                 match &result {
-                    Err(e) => log::error!("Error in runtime task: {:?}", e),
-                    Ok(()) => log::debug!("Runtime task exited"),
+                    Err(e) => log::error!("Runtime error: {}", e),
+                    Ok(()) => log::debug!("Runtime exited"),
                 };
                 stopped_tx.send(result).ok(); // Ignore error if calle dropped the handle
             });
@@ -206,7 +206,7 @@ async fn runtime_task(
 
     // Iterate all files in SETTINGS.directories.container_dirs and try
     // to mount the content.
-    for registry in &config.directories.container_dirs {
+    for repository in config.repositories.values() {
         let mounted_containers = mount::mount_npk_dir(
             &config.run_dir,
             &state.signing_keys,
@@ -214,7 +214,7 @@ async fn runtime_task(
             &config.devices.device_mapper,
             &config.devices.loop_control,
             &config.devices.loop_dev,
-            &registry,
+            &repository.dir,
         )
         .await
         .map_err(Error::Mount)?;

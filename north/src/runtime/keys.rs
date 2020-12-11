@@ -12,34 +12,36 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::config::Repository;
 use ed25519_dalek::*;
-use log::info;
-use std::{collections::HashMap, path::Path};
+use log::{debug, info};
+use std::collections::HashMap;
 use thiserror::Error;
-use tokio::{fs, io, stream::StreamExt};
+use tokio::{fs, io};
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Invalid key file: {0}")]
+    KeyFile(String),
     #[error("Invalid key signature: {0}")]
     Signature(#[from] SignatureError),
     #[error("IO error: {0}: {1:?}")]
     Io(String, io::Error),
 }
 
-pub(super) async fn load(key_dir: &Path) -> Result<HashMap<String, PublicKey>, Error> {
+pub(super) async fn load<'a, I: Iterator<Item = &'a Repository>>(
+    repositories: I,
+) -> Result<HashMap<String, PublicKey>, Error> {
     let mut signing_keys = HashMap::new();
-    let mut key_dir = fs::read_dir(&key_dir).await.map_err(|e| {
-        Error::Io(
-            format!("Failed to load keys from: {}", key_dir.display()),
-            e,
-        )
-    })?;
-    while let Some(entry) = key_dir.next().await {
-        let path = entry
-            .map_err(|e| Error::Io("Failed to read dir entry".to_string(), e))?
-            .path();
+    for repository in repositories {
+        let path = &repository.key;
+
+        debug!("Loading key {}", path.display());
         if path.extension().filter(|ext| *ext == "pub").is_none() || !path.is_file() {
-            continue;
+            return Err(Error::KeyFile(format!(
+                "{} not a file or has '.pub' extension",
+                path.display()
+            )));
         }
 
         if let Some(key_id) = path.file_stem().map(|s| s.to_string_lossy().to_string()) {

@@ -40,7 +40,7 @@ pub enum Error {
     Cgroups(#[from] super::cgroups::Error),
     #[error("Mount: {0:?}")]
     Mount(super::mount::Error),
-    #[error("Key: {0:?}")]
+    #[error("Key: {0}")]
     Key(super::keys::Error),
 
     #[error("Io: {0}: {1:?}")]

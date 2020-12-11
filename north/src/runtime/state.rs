@@ -128,7 +128,7 @@ impl State {
     /// Create a new empty State instance
     pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         // Load keys for manifest verification
-        let signing_keys = keys::load(&config.directories.key_dir)
+        let signing_keys = keys::load(config.repositories.values())
             .await
             .map_err(Error::Key)?;
 
@@ -358,10 +358,12 @@ impl State {
         // TODO: get correct registry from config
         let registry = self
             .config
-            .directories
-            .container_dirs
-            .first()
-            .expect("No registry configured!");
+            .repositories
+            .values()
+            .next()
+            .expect("No registry configured!")
+            .dir
+            .as_path();
 
         let package_in_registry = registry.join(&package);
 
@@ -417,10 +419,10 @@ impl State {
         name: &str,
         version: &Version,
     ) -> Result<Option<(Manifest, PathBuf)>, Error> {
-        for d in &self.config.directories.container_dirs {
-            let mut dir = fs::read_dir(&d)
-                .await
-                .map_err(|e| Error::Io(format!("Failed to read {}", d.display()), e))?;
+        for repository in self.config.repositories.values() {
+            let mut dir = fs::read_dir(&repository.dir).await.map_err(|e| {
+                Error::Io(format!("Failed to read {}", repository.dir.display()), e)
+            })?;
             while let Some(res) = dir.next().await {
                 let entry = res.map_err(|e| {
                     Error::Io(

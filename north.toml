@@ -5,9 +5,9 @@ container_gid = 1000
 run_dir = "target/north/run"
 data_dir = "target/north/data"
 
-[directories]
-container_dirs = [ "target/north/registry" ]
-key_dir = "examples/keys"
+[repositories.examples]
+dir = "target/north/registry"
+key = "examples/keys/north.pub"
 
 [cgroups]
 memory = "north"
