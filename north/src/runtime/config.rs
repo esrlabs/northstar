@@ -21,6 +21,8 @@ pub type RepositoryId = String;
 pub struct Repository {
     /// Directory containing images in container format
     pub dir: PathBuf,
+    /// Writable
+    pub writable: bool,
     /// Directory where public signing keys are stored
     pub key: PathBuf,
 }

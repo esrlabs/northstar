@@ -116,7 +116,8 @@ pub enum Error {
     ApplicationRunning(String),
     MissingResource(String),
     ContainerAlreadyInstalled(String),
-    Repository(String),
+    RepositoryNotFound(String),
+    RepositoryNotWritable(String),
 
     Npk(String),
     Process(String),
