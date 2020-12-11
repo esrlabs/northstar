@@ -221,8 +221,8 @@ impl State {
         let process = super::minijail::Process::start(
             &app.container,
             self.events_tx.clone(),
-            &self.config.directories.run_dir,
-            &self.config.directories.data_dir,
+            &self.config.run_dir,
+            &self.config.data_dir,
             self.config.container_uid,
             self.config.container_gid,
         )
@@ -387,7 +387,7 @@ impl State {
 
         // Install and mount npk
         let mounted_containers = mount_npk(
-            &self.config.directories.run_dir,
+            &self.config.run_dir,
             &self.signing_keys,
             &self.config.devices.device_mapper_dev,
             &self.config.devices.device_mapper,

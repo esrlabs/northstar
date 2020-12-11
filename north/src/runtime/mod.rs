@@ -98,8 +98,8 @@ impl Runtime {
         let minijail_log_handle = minijail_init().await?;
 
         // Ensure the configured run_dir exists
-        mkdir_p_rw(&config.directories.data_dir).await?;
-        mkdir_p_rw(&config.directories.run_dir).await?;
+        mkdir_p_rw(&config.data_dir).await?;
+        mkdir_p_rw(&config.run_dir).await?;
 
         // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
         let (event_tx, event_rx) = mpsc::channel::<Event>(100);
@@ -208,7 +208,7 @@ async fn runtime_task(
     // to mount the content.
     for registry in &config.directories.container_dirs {
         let mounted_containers = mount::mount_npk_dir(
-            &config.directories.run_dir,
+            &config.run_dir,
             &state.signing_keys,
             &config.devices.device_mapper_dev,
             &config.devices.device_mapper,

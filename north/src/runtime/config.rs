@@ -19,10 +19,6 @@ use std::path::PathBuf;
 pub struct Directories {
     /// Directory containing images in container format
     pub container_dirs: Vec<PathBuf>,
-    /// Directory with unpacked containers
-    pub run_dir: PathBuf,
-    /// Directory where rw data of container shall be stored
-    pub data_dir: PathBuf,
     /// Directory where public signing keys are stored
     pub key_dir: PathBuf,
 }
@@ -67,6 +63,10 @@ pub struct Config {
     pub container_uid: u32,
     /// Container GID
     pub container_gid: u32,
+    /// Directory with unpacked containers
+    pub run_dir: PathBuf,
+    /// Directory where rw data of container shall be stored
+    pub data_dir: PathBuf,
 
     pub directories: Directories,
     pub cgroups: CGroups,

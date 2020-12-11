@@ -2,11 +2,11 @@ debug = true
 console_address = "localhost:4200"
 container_uid = 1000
 container_gid = 1000
+run_dir = "target/north/run"
+data_dir = "target/north/data"
 
 [directories]
 container_dirs = [ "target/north/registry" ]
-run_dir = "target/north/run"
-data_dir = "target/north/data"
 key_dir = "examples/keys"
 
 [cgroups]
