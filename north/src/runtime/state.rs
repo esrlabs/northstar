@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use super::{
-    config::{Config, RepositoryId},
+    config::Config,
     error::Error,
     keys,
     mount::{mount_npk, umount_npk},
@@ -24,7 +24,7 @@ use crate::api::Notification;
 use ed25519_dalek::*;
 use log::{debug, info, warn};
 use npk::{
-    archive::ArchiveReader,
+    archive::{ArchiveReader, RepositoryId},
     manifest::{Manifest, Mount, Name, Version},
 };
 use std::{
@@ -197,6 +197,11 @@ impl State {
     /// Try to find a application with name `name`
     pub fn application(&mut self, name: &str) -> Option<&Application> {
         self.applications.get(name)
+    }
+
+    /// Return the list of repositories
+    pub fn repositories(&self) -> &HashMap<RepositoryId, Repository> {
+        &self.repositories
     }
 
     /// Add a container instance the list of known containers

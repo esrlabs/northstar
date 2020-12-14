@@ -12,15 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::config::RepositoryId;
 use derive_new::new;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-
 use npk::manifest::{Manifest, Version};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, path::PathBuf};
 
 pub type Name = String;
 pub type MessageId = String; // UUID
+pub use npk::archive::RepositoryId;
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -74,6 +73,7 @@ pub enum Notification {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Request {
     Containers,
+    Repositories,
     Start(Name),
     Stop(Name),
     Install(RepositoryId, u64),
@@ -115,6 +115,7 @@ pub struct Memory {
 pub enum Response {
     Ok(()),
     Containers(Vec<Container>),
+    Repositories(HashMap<RepositoryId, Repository>),
     Err(Error),
 }
 

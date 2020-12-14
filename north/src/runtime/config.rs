@@ -12,10 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use npk::archive::RepositoryId;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
-
-pub type RepositoryId = String;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {

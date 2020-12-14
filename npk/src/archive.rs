@@ -34,6 +34,8 @@ const MANIFEST: &str = "manifest.yaml";
 const SIGNATURE: &str = "signature.yaml";
 const FS_IMAGE: &str = "fs.img";
 
+pub type RepositoryId = String;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Archive error: {0}")]
