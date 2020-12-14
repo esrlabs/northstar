@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use super::{
-    config::RepositoryId,
     device_mapper as dm, device_mapper,
     loopdev::{losetup, LoopControl},
     state::{Container, Repository},
@@ -24,7 +23,11 @@ use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
-use npk::{archive::ArchiveReader, dm_verity::VerityHeader, manifest::Manifest};
+use npk::{
+    archive::{ArchiveReader, RepositoryId},
+    dm_verity::VerityHeader,
+    manifest::Manifest,
+};
 use std::{
     io,
     io::Cursor,

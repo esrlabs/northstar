@@ -26,7 +26,7 @@ mod process;
 mod state;
 
 use crate::{api, api::Notification};
-use config::{Config, RepositoryId};
+use config::Config;
 use console::Request;
 use error::Error;
 use log::{debug, info, Level};
@@ -34,7 +34,7 @@ use nix::{
     sys::stat,
     unistd::{self, pipe},
 };
-use npk::manifest::Name;
+use npk::{archive::RepositoryId, manifest::Name};
 use process::ExitStatus;
 use state::State;
 use std::{

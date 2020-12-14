@@ -74,7 +74,7 @@ impl Runtime {
         Ok(())
     }
 
-    pub async fn install(&mut self, repo: runtime::config::RepositoryId, npk: &Path) -> Result<()> {
+    pub async fn install(&mut self, repo: api::RepositoryId, npk: &Path) -> Result<()> {
         let response = timeout(TIMEOUT, self.0.install(repo, npk))
             .await
             .wrap_err("Installing container timed out")

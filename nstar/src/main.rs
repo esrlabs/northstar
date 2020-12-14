@@ -19,7 +19,7 @@ use log::{info, warn};
 use north::api::{self, Container, Message, Notification, Payload, Request, Response};
 use npk::manifest::Version;
 use prettytable::{format, Attr, Cell, Row, Table};
-use std::{env, path::Path, sync::Arc};
+use std::{collections::HashMap, env, path::Path, sync::Arc};
 use structopt::StructOpt;
 use sync::mpsc;
 use tokio::{
@@ -35,6 +35,7 @@ mod codec;
 mod readline;
 
 const HELP: &str = r"containers:                 List installed containers
+repositories:                 List available repositories
 shutdown:                     Stop the northstar runtime
 start <name>:                 Start application
 stop <name>:                  Stop application
@@ -223,6 +224,23 @@ async fn main() -> Result<()> {
                                     }
                                 }
                                 Ok(_) => panic!("Invalid reponse on container request"),
+                                Err(e) => {
+                                    warn!("{:?}" , e);
+                                    break 'inner;
+                                }
+                            };
+                        }
+                        Some("repositories") => {
+                            match request_response(&mut framed_write, &mut response_rx, Request::Repositories).await {
+                                Ok(Some(Response::Repositories(r))) => {
+                                    if opt.json {
+                                        println!("{}", serde_json::to_string_pretty(&r).unwrap());
+
+                                    } else {
+                                        format_repositories(&r);
+                                    }
+                                }
+                                Ok(_) => panic!("Invalid reponse on repositories request"),
                                 Err(e) => {
                                     warn!("{:?}" , e);
                                     break 'inner;
@@ -460,6 +478,26 @@ fn format_containers(containers: &[Container]) {
                     .map(|p| format!("{:?}", time::Duration::from_nanos(p.uptime)))
                     .unwrap_or_default(),
             ),
+        ]));
+    }
+    table.printstd();
+}
+
+fn format_repositories(repositories: &HashMap<api::RepositoryId, api::Repository>) {
+    let mut table = Table::new();
+    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+    table.set_titles(Row::new(vec![
+        Cell::new("Name").with_style(Attr::Bold),
+        Cell::new("Path").with_style(Attr::Bold),
+        Cell::new("Writable").with_style(Attr::Bold),
+    ]));
+    for (id, repo) in repositories.iter().sorted_by_key(|(i, _)| (*i).clone())
+    // Sort by name
+    {
+        table.add_row(Row::new(vec![
+            Cell::new(&id).with_style(Attr::Bold),
+            Cell::new(&repo.dir.display().to_string()),
+            Cell::new(&repo.writable.to_string()),
         ]));
     }
     table.printstd();

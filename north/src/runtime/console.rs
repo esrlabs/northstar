@@ -14,11 +14,13 @@
 
 use crate::{
     api,
-    runtime::{config::RepositoryId, state::State, Event, EventTx},
+    runtime::{state::State, Event, EventTx},
 };
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, error, warn};
+use npk::archive::RepositoryId;
 use std::{
+    collections::HashMap,
     io::ErrorKind,
     path::{Path, PathBuf},
 };
@@ -93,6 +95,10 @@ impl Console {
                         api::Request::Containers => {
                             debug!("Request::Containers received");
                             api::Response::Containers(list_containers(&state))
+                        }
+                        api::Request::Repositories => {
+                            debug!("Request::Repositories received");
+                            api::Response::Repositories(list_repositories(&state))
                         }
                         api::Request::Start(name) => match state.start(&name).await {
                             Ok(_) => api::Response::Ok(()),
@@ -362,6 +368,21 @@ fn list_containers(state: &State) -> Vec<api::Container> {
         .collect();
     containers.append(&mut resources);
     containers
+}
+
+fn list_repositories(state: &State) -> HashMap<api::RepositoryId, api::Repository> {
+    fn from(repo: &crate::runtime::state::Repository) -> api::Repository {
+        api::Repository {
+            id: repo.id.clone(),
+            writable: repo.writable,
+            dir: repo.dir.clone(),
+        }
+    }
+    state
+        .repositories()
+        .iter()
+        .map(|(id, repo)| (id.clone(), from(repo)))
+        .collect()
 }
 
 async fn read<R: AsyncRead + Unpin>(
