@@ -346,7 +346,7 @@ impl State {
     pub async fn install(&mut self, npk: &Path) -> Result<(), Error> {
         let manifest = ArchiveReader::new(&npk)
             .map_err(Error::Npk)?
-            .extract_manifest()
+            .manifest()
             .map_err(Error::Npk)?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
@@ -383,7 +383,7 @@ impl State {
         // Copy tmp file into registry
         fs::copy(&npk, &package_in_registry)
             .await
-            .map_err(|error| Error::Io("Failed to copy npk to registry".to_string(), error))?;
+            .map_err(|error| Error::Io("Failed to copy NPK to registry".to_string(), error))?;
 
         // Install and mount npk
         let mounted_containers = mount_npk(
@@ -430,7 +430,7 @@ impl State {
                 })?;
                 let manifest = ArchiveReader::new(entry.path().as_path())
                     .map_err(Error::Npk)?
-                    .extract_manifest()
+                    .manifest()
                     .map_err(Error::Npk)?;
 
                 if manifest.name == name && manifest.version == *version {

@@ -81,7 +81,6 @@ This is what the manifest of the `ferris_says_hello` container looks like. It re
 ```
 name: ferris_says_hello
 version: 0.0.3
-manifest_version: 1.0.0
 init: /bin/ferris
 # Pass the filename with the hello message
 args:
@@ -89,12 +88,10 @@ args:
 resources:
   - name: ferris
     version: 0.0.2
-    manifest_version: 1.0.0
     dir: /
     mountpoint: /bin
   - name: hello_message
     version: 0.1.2
-    manifest_version: 1.0.0
     dir: /
     mountpoint: /message
 ```

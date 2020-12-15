@@ -1,6 +1,5 @@
 name: cpueater
 version: 0.0.1
-manifest_version: 1.0.0
 init: /cpueater
 env:
   THREADS: 4

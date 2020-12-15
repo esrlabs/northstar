@@ -33,18 +33,18 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
 pub fn inspect_short(npk: &Path) -> Result<()> {
     let mut reader = ArchiveReader::new(&npk).context("Failed to extract manifest from NPK")?;
     let manifest = reader
-        .extract_manifest()
+        .manifest()
         .context("Failed to find manifest in NPK")?;
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
-    let manifest_version = manifest
-        .manifest_version
-        .map_or("1.0.0".to_string(), |v| v.to_string());
+    let npk_version = reader
+        .npk_version()
+        .map_or("unknown".to_string(), |v| v.to_string());
     let is_resource_container = manifest.init.map_or("yes", |_| "no");
     let instances = manifest.instances.unwrap_or(1).to_string();
     println!(
-        "name: {}, version: {}, manifest version: {}, resource container: {}, instances: {}",
-        name, version, manifest_version, is_resource_container, instances
+        "name: {}, version: {}, NPK version: {}, resource container: {}, instances: {}",
+        name, version, npk_version, is_resource_container, instances
     );
 
     Ok(())
@@ -127,7 +127,6 @@ mod test {
     const TEST_KEY_NAME: &str = "test_key";
     const TEST_MANIFEST: &str = "name: hello
 version: 0.0.2
-manifest_version: 1.0.0
 init: /hello
 env:
   HELLO: north
