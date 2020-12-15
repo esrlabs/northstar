@@ -40,7 +40,7 @@ pub struct Repository {
     pub id: RepositoryId,
     pub dir: PathBuf,
     pub writable: bool,
-    pub key: PublicKey,
+    pub key: Option<PublicKey>,
 }
 
 #[derive(Debug)]
@@ -56,7 +56,7 @@ pub struct State {
 pub struct Container {
     pub manifest: Manifest,
     pub root: PathBuf,
-    pub dm_dev: PathBuf,
+    pub device: PathBuf,
     pub repository: RepositoryId,
 }
 
@@ -138,7 +138,13 @@ impl State {
     pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         let mut repositories = HashMap::new();
         for (id, repository) in &config.repositories {
-            let key = keys::load(&repository.key).await.map_err(Error::Key)?;
+            let key = {
+                if let Some(key) = repository.key.as_ref() {
+                    Some(keys::load(&key).await.map_err(Error::Key)?)
+                } else {
+                    None
+                }
+            };
             let dir = repository.dir.clone();
             let writable = repository.writable;
             repositories.insert(
@@ -380,11 +386,25 @@ impl State {
         }
 
         for (_name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
-            umount_npk(container).await.map_err(Error::Mount)?;
+            let wait_for_dm = self
+                .repositories
+                .get(&container.repository)
+                .map(|r| r.key.is_some())
+                .unwrap_or(false);
+            umount_npk(container, wait_for_dm)
+                .await
+                .map_err(Error::Mount)?;
         }
 
         for container in self.resources() {
-            umount_npk(container).await.map_err(Error::Mount)?;
+            let wait_for_dm = self
+                .repositories
+                .get(&container.repository)
+                .map(|r| r.key.is_some())
+                .unwrap_or(false);
+            umount_npk(container, wait_for_dm)
+                .await
+                .map_err(Error::Mount)?;
         }
 
         Ok(())
@@ -437,13 +457,12 @@ impl State {
         // Install and mount npk
         let mounted_containers = mount_npk(
             &self.config.run_dir,
-            &repository.key,
             &self.config.devices.device_mapper_dev,
             &self.config.devices.device_mapper,
             &self.config.devices.loop_control,
             &self.config.devices.loop_dev,
             &package_in_registry,
-            id,
+            &repository,
         )
         .await
         .map_err(Error::Mount)?;
@@ -524,17 +543,18 @@ impl State {
             return Err(Error::ApplicationRunning(name.to_owned()));
         }
 
-        let application_containers = instances
-            .iter()
-            .filter_map(|name| self.applications.get(name).map(|a| a.container()));
-        let resource_containers = instances
-            .iter()
-            .filter_map(|name| self.resources.get(&(name.clone(), version.clone())));
-        let containers = application_containers.chain(resource_containers);
+        let containers = instances.iter().filter_map(|name| {
+            let application = self.applications.get(name).map(|a| a.container());
+            let resource = self.resources.get(&(name.clone(), version.clone()));
+            application.or(resource)
+        });
 
         for container in containers {
+            let repo = self.repositories.get(&container.repository);
             info!("Unmounting {}", &container.manifest.name);
-            umount_npk(container).await.map_err(Error::Mount)?;
+            umount_npk(container, repo.map(|r| r.key.is_some()).unwrap_or(false))
+                .await
+                .map_err(Error::Mount)?;
         }
 
         for instance in instances {

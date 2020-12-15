@@ -113,22 +113,12 @@ impl LoopDevice {
 
     pub fn attach_file(
         &self,
-        bf_path: &Path,
         bf: &mut fs::File,
         offset: u64,
         sizelimit: u64,
         read_only: bool,
         auto_clear: bool,
     ) -> Result<(), Error> {
-        log::debug!(
-            "Attaching {} to loopback device at {}",
-            bf_path
-                .file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_else(|| bf_path.to_string_lossy()),
-            self.path.to_string_lossy()
-        );
-
         let device_fd = self.device.as_raw_fd() as c_int;
         let file_fd = bf.as_raw_fd() as c_int;
 
@@ -258,7 +248,6 @@ impl Default for loop_info64 {
 
 pub(super) async fn losetup(
     lc: &LoopControl,
-    fs_path: &Path,
     fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
@@ -268,7 +257,7 @@ pub(super) async fn losetup(
 
     debug!("Using loop device {:?}", loop_device.path().await);
 
-    loop_device.attach_file(fs_path, fs, fs_offset, lo_size, true, true)?;
+    loop_device.attach_file(fs, fs_offset, lo_size, true, true)?;
 
     if let Err(error) = loop_device.set_direct_io(true) {
         warn!("Failed to enable direct io: {:?}", error);
