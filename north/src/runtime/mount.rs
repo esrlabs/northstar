@@ -23,11 +23,7 @@ use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
-use npk::{
-    archive::{ArchiveReader, RepositoryId},
-    dm_verity::VerityHeader,
-    manifest::Manifest,
-};
+use npk::{archive::ArchiveReader, dm_verity::VerityHeader, manifest::Manifest};
 use std::{
     io,
     io::Cursor,
@@ -54,7 +50,7 @@ pub enum Error {
     #[error("DM Verity error: {0:?}")]
     DmVerity(npk::dm_verity::Error),
     #[error("NPK error: {0:?}")]
-    Npk(npk::archive::Error),
+    Npk(#[from] npk::archive::Error),
     #[error("UTF-8 conversion error: {0:?}")]
     Utf8Conversion(Utf8Error),
     #[error("Inotify timeout error {0}")]
@@ -87,13 +83,12 @@ pub(super) async fn mount_npk_repository(
         containers.append(
             &mut mount_npk(
                 run_dir,
-                &repo.key,
                 device_mapper_dev,
                 device_mapper,
                 loop_control,
                 loop_dev,
                 &npk,
-                repo.id.clone(),
+                repo,
             )
             .await?,
         );
@@ -102,16 +97,14 @@ pub(super) async fn mount_npk_repository(
     Ok(containers)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn mount_npk(
     run_dir: &Path,
-    signing_key: &ed25519_dalek::PublicKey,
     device_mapper_dev: &str,
     device_mapper: &Path,
     loop_control: &Path,
     loop_dev: &str,
     npk: &Path,
-    repo: RepositoryId,
+    repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
     debug!("Mounting {}", npk.display());
 
@@ -120,18 +113,22 @@ pub(super) async fn mount_npk(
         .await
         .map_err(Error::LoopDevice)?;
 
-    let mounted_containers =
-        mount_internal(run_dir, signing_key, device_mapper_dev, &dm, &lc, npk, repo).await?;
+    let mounted_containers = if repo.key.is_some() {
+        mount_internal(run_dir, device_mapper_dev, &dm, &lc, npk, repo).await?
+    } else {
+        mount_internal_without_verity(run_dir, &lc, npk, repo).await?
+    };
 
     Ok(mounted_containers)
 }
 
-pub async fn umount_npk(container: &Container) -> Result<(), Error> {
-    debug!("Unmounting {}", container.root.display());
+pub async fn umount_npk(container: &Container, wait_for_dm: bool) -> Result<(), Error> {
     unmount(&container.root).await?;
 
-    debug!("Waiting for dm device removal");
-    wait_for_file_deleted(&container.dm_dev, std::time::Duration::from_secs(5)).await?;
+    if wait_for_dm {
+        debug!("Waiting for dm device removal");
+        wait_for_file_deleted(&container.device, std::time::Duration::from_secs(5)).await?;
+    }
 
     debug!("Removing mountpoint {}", container.root.display());
     // Root which is the container version
@@ -151,14 +148,77 @@ pub async fn umount_npk(container: &Container) -> Result<(), Error> {
     Ok(())
 }
 
+async fn mount_internal_without_verity(
+    run_dir: &Path,
+    lc: &LoopControl,
+    npk: &Path,
+    repo: &Repository,
+) -> Result<Vec<Container>, Error> {
+    let start = time::Instant::now();
+
+    if let Ok(meta) = metadata(&npk).await {
+        debug!("Mounting NPK with size {}", meta.len());
+    }
+    let mut archive_reader = ArchiveReader::new(&npk)?;
+
+    let manifest = archive_reader.manifest().map_err(Error::Npk)?;
+    debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
+
+    let (fs_offset, fs_size) = archive_reader.extract_fs_start_and_size()?;
+
+    let mut fs = fs::File::open(&npk)
+        .await
+        .map_err(|error| Error::Io(format!("Failed to open {:?}", npk), error))?;
+
+    let instances = manifest.instances.unwrap_or(1);
+
+    let mut mounted_containers = vec![];
+    for instance in 0..instances {
+        let mut manifest = manifest.clone();
+        if instances > 1 {
+            manifest.name.push_str(&format!("-{:03}", instance));
+        }
+        let root = run_dir
+            .join(&manifest.name)
+            .join(&format!("{}", manifest.version));
+
+        if !root.exists() {
+            info!("Creating mountpoint {}", root.display());
+            fs::create_dir_all(&root)
+                .await
+                .map_err(|e| Error::Io(format!("Failed to create mountpoint: {}", e), e))?;
+        }
+
+        let device = setup_and_mount_without_verity(lc, &mut fs, fs_offset, fs_size, &root).await?;
+
+        let container = Container {
+            root,
+            manifest,
+            device,
+            repository: repo.id.clone(),
+        };
+
+        let duration = start.elapsed();
+
+        info!(
+            "Installed {}:{} Mounting: {:.03}s",
+            container.manifest.name,
+            container.manifest.version,
+            duration.as_fractional_secs(),
+        );
+        mounted_containers.push(container);
+    }
+
+    Ok(mounted_containers)
+}
+
 async fn mount_internal(
     run_dir: &Path,
-    signing_key: &ed25519_dalek::PublicKey,
     device_mapper_dev: &str,
     dm: &Dm,
     lc: &LoopControl,
     npk: &Path,
-    repo: RepositoryId,
+    repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
     let start = time::Instant::now();
 
@@ -167,9 +227,8 @@ async fn mount_internal(
     }
 
     let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
-    let hashes = archive_reader
-        .extract_hashes(&signing_key)
-        .map_err(Error::Npk)?;
+    let key = &repo.key.unwrap();
+    let hashes = archive_reader.extract_hashes(&key).map_err(Error::Npk)?;
     let manifest = archive_reader.manifest().map_err(Error::Npk)?;
     let npk_version = archive_reader.npk_version().map_err(Error::Npk)?;
     if npk_version != Manifest::VERSION {
@@ -228,7 +287,7 @@ async fn mount_internal(
             manifest.version
         );
 
-        let dm_dev = setup_and_mount(
+        let device = setup_and_mount(
             dm,
             lc,
             &verity,
@@ -236,7 +295,6 @@ async fn mount_internal(
             device_mapper_dev,
             hashes.fs_verity_offset,
             &hashes.fs_verity_hash,
-            &npk,
             &mut fs,
             fs_offset,
             fs_size,
@@ -247,8 +305,8 @@ async fn mount_internal(
         let container = Container {
             root,
             manifest,
-            dm_dev,
-            repository: repo.clone(),
+            device,
+            repository: repo.id.clone(),
         };
 
         let duration = start.elapsed();
@@ -332,16 +390,8 @@ pub async fn verity_setup(
     Ok(dm_dev)
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn setup_and_mount(
-    dm: &dm::Dm,
+async fn setup_and_mount_without_verity(
     lc: &LoopControl,
-    verity: &VerityHeader,
-    name: &str,
-    dm_dev: &str,
-    dm_device_size: u64,
-    verity_hash: &str,
-    fs_path: &Path,
     fs: &mut fs::File,
     fs_offset: u64,
     lo_size: u64,
@@ -362,7 +412,46 @@ async fn setup_and_mount(
         "ext4"
     };
 
-    let loop_device = losetup(lc, fs_path, fs, fs_offset, lo_size)
+    let loop_device = losetup(lc, fs, fs_offset, lo_size)
+        .await
+        .map_err(Error::LoopDevice)?;
+
+    let device = loop_device.path().await.unwrap();
+    mount(&device, root, fs_type, MountFlags::MS_RDONLY, None).await?;
+
+    Ok(device)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn setup_and_mount(
+    dm: &dm::Dm,
+    lc: &LoopControl,
+    verity: &VerityHeader,
+    name: &str,
+    dm_dev: &str,
+    dm_device_size: u64,
+    verity_hash: &str,
+    fs: &mut fs::File,
+    fs_offset: u64,
+    lo_size: u64,
+    root: &Path,
+) -> Result<PathBuf, Error> {
+    let mut fstype = [0u8; 4];
+    fs.seek(io::SeekFrom::Start(fs_offset))
+        .await
+        .map_err(|e| Error::Io("Failed seek to fs type".into(), e))?;
+    fs.read_exact(&mut fstype)
+        .await
+        .map_err(|e| Error::Io("Failed read fs type".into(), e))?;
+    let fs_type = if &fstype == b"hsqs" {
+        debug!("Detected SquashFS file system");
+        "squashfs"
+    } else {
+        debug!("Defaulting to ext filesystem type");
+        "ext4"
+    };
+
+    let loop_device = losetup(lc, fs, fs_offset, lo_size)
         .await
         .map_err(Error::LoopDevice)?;
 
@@ -396,7 +485,7 @@ async fn setup_and_mount(
 }
 
 async fn unmount(target: &Path) -> Result<(), Error> {
-    debug!("Umounting {}", target.display(),);
+    debug!("Unmounting {}", target.display(),);
     task::block_in_place(|| nix::mount::umount(target).map_err(Error::Os))
 }
 
@@ -424,6 +513,7 @@ async fn mount(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
     let notify_path = path.to_owned();
     let file_removed = task::spawn_blocking(move || {

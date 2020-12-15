@@ -23,7 +23,7 @@ pub struct Repository {
     /// Writable
     pub writable: bool,
     /// Directory where public signing keys are stored
-    pub key: PathBuf,
+    pub key: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
