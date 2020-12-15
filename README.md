@@ -67,7 +67,6 @@ This is what a typical manifest looks like (taken from the examples)
 ```yaml
 name: ferris_says_hello
 version: 0.0.1
-manifest_version: 1.0.0
 init: /bin/ferris
 args:
   - /message/hello

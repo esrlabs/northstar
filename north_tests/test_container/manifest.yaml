@@ -1,6 +1,5 @@
 name: test_container
 version: 0.0.1
-manifest_version: 1.0.0
 init: /test_container
 instances: 5
 mounts:

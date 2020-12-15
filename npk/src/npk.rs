@@ -19,7 +19,7 @@ use crate::{
 use ed25519_dalek::SignatureError;
 use zip::result::ZipError;
 // use colored::Colorize;
-use crate::manifest;
+use crate::manifest::Version;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand::rngs::OsRng;
@@ -36,14 +36,18 @@ use tempfile::TempDir;
 use thiserror::Error;
 use zip::ZipArchive;
 
-const MKSQUASHFS_BIN: &str = "mksquashfs";
+// Binaries
+pub const MKSQUASHFS_BIN: &str = "mksquashfs";
 pub const UNSQUASHFS_BIN: &str = "unsquashfs";
 
-// user and group id for squashfs pseudo directories ('/dev', '/proc', '/tmp' etc.)
+// First half of version string in ZIP comment
+pub const NPK_VERSION_STR: &str = "npk_version:";
+
+// User and group id for squashfs pseudo directories ('/dev', '/proc', '/tmp' etc.)
 const PSEUDO_DIR_UID: u32 = 1000;
 const PSEUDO_DIR_GID: u32 = 1000;
 
-// file name and directory components
+// File name and directory components
 const NPK_EXT: &str = "npk";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
@@ -99,7 +103,7 @@ pub enum Error {
 pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;
 
-    // add manifest and root dir to tmp dir
+    // Add manifest and root dir to tmp dir
     let tmp = tempfile::TempDir::new().map_err(|e| Error::Os {
         context: "Failed to create temporary directory".to_string(),
         error: e,
@@ -107,13 +111,13 @@ pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
     let tmp_root = copy_src_root_to_tmp(&dir, &tmp)?;
     let tmp_manifest = write_manifest(&manifest, &tmp)?;
 
-    // create filesystem image
+    // Create filesystem image
     let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
     create_fs_img(&tmp_root, &manifest, &fsimg)?;
 
-    // create NPK
+    // Create NPK
     let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
-    write_npk(&out, &manifest, &fsimg, &signature)
+    write_npk(&out, &manifest, &Manifest::VERSION, &fsimg, &signature)
 }
 
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
@@ -171,20 +175,13 @@ fn read_manifest(src: &Path) -> Result<Manifest, Error> {
         context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
         error: e,
     })?;
-    let mut manifest = serde_yaml::from_reader(manifest_file).map_err(|_e| {
+    let manifest = serde_yaml::from_reader(manifest_file).map_err(|_e| {
         Error::Manifest(format!(
             "Failed to parse manifest '{}'",
             &manifest_path.display()
         ))
     })?;
-    add_manifest_version_if_missing(&mut manifest);
     Ok(manifest)
-}
-
-fn add_manifest_version_if_missing(manifest: &mut Manifest) {
-    if manifest.manifest_version.is_none() {
-        manifest.manifest_version = Option::from(manifest::VERSION_1_0_0);
-    }
 }
 
 fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf, Error> {
@@ -340,7 +337,7 @@ fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
             ))
         })?;
     } else {
-        // create empty root dir at destination if we have nothing to copy
+        // Create empty root dir at destination if we have nothing to copy
         fs_extra::dir::create(&tmp_root, false).map_err(|_e| {
             Error::FileOperation(format!(
                 "Failed to create directory '{}'",
@@ -428,7 +425,13 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> Result<(), Error> {
+fn write_npk(
+    npk: &Path,
+    manifest: &Manifest,
+    npk_version: &Version,
+    fsimg: &Path,
+    signature: &str,
+) -> Result<(), Error> {
     let npk = npk
         .join(format!(
             "{}-{}.",
@@ -446,6 +449,7 @@ fn write_npk(npk: &Path, manifest: &Manifest, fsimg: &Path, signature: &str) -> 
     let manifest_string = serde_yaml::to_string(&manifest)
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     let mut zip = zip::ZipWriter::new(&npk);
+    zip.set_comment(format!("{} {}", &NPK_VERSION_STR, &npk_version.to_string()));
     || -> Result<(), ZipError> {
         zip.start_file(SIGNATURE_NAME, options)?;
         zip.write_all(signature.as_bytes())?;

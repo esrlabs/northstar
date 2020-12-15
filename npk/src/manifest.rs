@@ -165,24 +165,12 @@ pub enum Mount {
     Tmpfs { size: u64 },
 }
 
-/// used if a Manifest is missing a 'manifest_version' value
-pub const VERSION_1_0_0: Version = Version(semver::Version {
-    major: 1,
-    minor: 0,
-    patch: 0,
-    pre: vec![],
-    build: vec![],
-});
-
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container
     pub name: Name,
     /// Container version
     pub version: Version,
-    /// Manifest version
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub manifest_version: Option<Version>,
     /// Path to init
     #[serde(skip_serializing_if = "Option::is_none")]
     pub init: Option<PathBuf>,
@@ -447,6 +435,15 @@ pub enum ManifestError {
 }
 
 impl Manifest {
+    /// Manifest version supported by the runtime
+    pub const VERSION: Version = Version(semver::Version {
+        major: 0,
+        minor: 0,
+        patch: 1,
+        pre: vec![],
+        build: vec![],
+    });
+
     fn verify(&self) -> Result<(), ManifestError> {
         // TODO: check for none on env, autostart, cgroups, seccomp, instances
         if self.init.is_none() && self.args.is_some() {
@@ -480,7 +477,6 @@ mod tests {
         let manifest = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 args:
   - one
@@ -570,7 +566,6 @@ log:
         let manifest = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 mounts:
   /dev: full 
@@ -586,7 +581,6 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 mounts:
   /a:
@@ -624,7 +618,6 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 mounts:
   /tmp:
@@ -638,7 +631,6 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 mounts:
   /dev:
@@ -652,7 +644,6 @@ mounts:
         let manifest = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 mounts:
   /foo:
@@ -666,7 +657,6 @@ mounts:
         let m = "
 name: hello
 version: 0.0.0
-manifest_version: 1.0.0
 init: /binary
 args:
   - one

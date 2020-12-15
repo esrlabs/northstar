@@ -12,7 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::manifest::Manifest;
+use crate::{
+    manifest::{Manifest, Version},
+    npk,
+};
 use ed25519_dalek::ed25519::signature::Signature as _;
 use fmt::Debug;
 use log::trace;
@@ -87,6 +90,7 @@ impl Hashes {
             .try_into()
             .map_err(|_| Error::MalformedSignature)?;
 
+        // TODO: extract into own method
         // Check signature
         let key = keys
             .get(&signature.key)
@@ -192,6 +196,27 @@ impl ArchiveReader {
         Ok(Self { archive })
     }
 
+    pub fn npk_version(&mut self) -> Result<Version, Error> {
+        let comment = String::from_utf8(self.archive.comment().to_vec())
+            .map_err(|e| Error::ArchiveError(format!("Failed to read NPK version string {}", e)))?;
+        let mut split = comment.split(' ');
+        while let Some(key) = split.next() {
+            if let Some(value) = split.next() {
+                if key == npk::NPK_VERSION_STR {
+                    let version = Version::parse(&value).map_err(|e| {
+                        Error::ArchiveError(format!("Failed to parse NPK version {}", e))
+                    })?;
+                    return Ok(version);
+                }
+            } else {
+                return Err(Error::ArchiveError("Missing NPK version value".to_string()));
+            }
+        }
+        Err(Error::ArchiveError(
+            "Missing NPK version in ZIP comment".to_string(),
+        ))
+    }
+
     pub fn extract_fs_start_and_size(&mut self) -> Result<(u64, u64), Error> {
         let zip_file = self
             .archive
@@ -215,7 +240,7 @@ impl ArchiveReader {
         Hashes::from_str(&signature, &signing_keys)
     }
 
-    pub fn extract_manifest(&mut self) -> Result<Manifest, Error> {
+    pub fn manifest(&mut self) -> Result<Manifest, Error> {
         let mut manifest_string = String::new();
         self.archive
             .by_name(MANIFEST)
