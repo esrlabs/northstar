@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+* The `[directories]` section in the `north.toml` configuration file is replaced
+  by multiple `[repositories.<name>]` sections. Where each corresponds to a
+  directory previously specified in the `container_dirs` parameter. The
+  specified `<name>` corresponds to the __repository identifier__.
+* Each `[repositories.<name>]` section has a `dir`, `writable` and an optional
+  `key` parameter. Where `dir` is the directory containing the `npk` files,
+  `writable` indicates whether cotainers can be installed or uninstalled to this
+  repository and `key` is the path to the public signature file.
+* To install a container, a __repository identifier__ is required to indicate
+  the destination where the container will be installed.
+* If the `key` parameter is unspecified, the containers from the repository are
+  mounted without being verified using `verity`.
 
 ## [0.6.0] - 2020-11-22
 ### Added
