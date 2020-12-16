@@ -148,9 +148,9 @@ The script in `doc/tools/check_conf.sh` can be used to check your running kernel
 Open a terminal, clone the repository and build the solution and start the runtime:
 
     $ git clone https://github.com/esrlabs/northstar.git
-    $ cargo build --release --bin north 
-    $ cargo build --release --bin nstar 
-    $ ./examples/build_examples.sh 
+    $ cargo build --release --bin north
+    $ cargo build --release --bin nstar
+    $ ./examples/build_examples.sh
     $ sudo ./target/release/north
 
 ### Run sample code
@@ -158,23 +158,23 @@ Open a second terminal navigate to the directory where the northstar source is l
 Execute the following commands:
 
 1. `containers` to list all registered containers
-2. `start crashing` to start an example container which will crash within the next 10 seconds 
+2. `start crashing` to start an example container which will crash within the next 10 seconds
 
-[//]: # 
- 
+[//]: #
+
 
     $ ./target/release/nstar
     $ >> containers
-    Name              | Version | Type     | PID | Uptime 
+    Name              | Version | Type     | PID | Uptime
     -------------------+---------+----------+-----+--------
-    cpueater          | 0.0.1   | App      |     |  
-    crashing          | 0.0.1   | App      |     |  
-    datarw            | 0.0.1   | App      |     |  
-    ferris_says_hello | 0.0.3   | App      |     |  
-    hello             | 0.0.2   | App      |     |  
-    memeater          | 0.0.1   | App      |     |  
-    ferris            | 0.0.2   | Resource |     |  
-    hello_message     | 0.1.2   | Resource |     |  
+    cpueater          | 0.0.1   | App      |     |
+    crashing          | 0.0.1   | App      |     |
+    datarw            | 0.0.1   | App      |     |
+    ferris_says_hello | 0.0.3   | App      |     |
+    hello             | 0.0.2   | App      |     |
+    memeater          | 0.0.1   | App      |     |
+    ferris            | 0.0.2   | Resource |     |
+    hello_message     | 0.1.2   | Resource |     |
     >> start crashing
     crashing-0.0.1 was started
     start succeeded
@@ -210,12 +210,14 @@ debug = true
 console_address = "localhost:4200"
 container_uid = 1000
 container_gid = 1000
-
-[directories]
-container_dirs = [ "target/north/registry" ]
 run_dir = "target/north/run"
 data_dir = "target/north/data"
-key_dir = "examples/keys"
+
+[repositories.examples]
+dir = "target/north/registry"
+writable = true
+key = "examples/keys/north.pub"
+
 
 [cgroups]
 memory = "north"
@@ -230,12 +232,16 @@ device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
 ```
 
-The `[directories]` section just tells north what directories to use.
+The `[repositories.examples]` describes a container repository named `examples`.
+Within it, the following options can be specified:
 
-* **`container_dir`** -- list of directories where to find the `*.npk` packages for the correct architecture
-  are to be found
-* **`run_dir`** -- where the container content will be mounted
-* **`data_dir`** -- In data_dir a directory for each container is created if a mount of type data is used in the manifest
+* **`dir`** -- The directory where to find `*.npk` packages for the correct architecture.
+* **`writable`** -- That indicates if containers can be installed/uninstalled
+    from this repository.
+* **`key`** -- The path to the public signing key used to sign the containers.
+
+Multiple `[repositories.<name>]` sections can be specified for separate
+repositories, where `<name>` is the __repository identifier__.
 
 The [`cgroups`] optionally configures northstar applications CGroups settings.
 Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchies.
@@ -248,6 +254,8 @@ Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchie
 * **`loop_dev`** -- Prefix of preconfigured loopback devices. Usually loopback devices are e.g /dev/block0
 * **`device_mapper`** -- Device mapper control file.
 * **`device_mapper_dev`** -- Prefix of device mapper mappings.
+* **`run_dir`** -- where the container content will be mounted
+* **`data_dir`** -- In data_dir a directory for each container is created if a mount of type data is used in the manifest
 
 ## Controlling the runtime
 
