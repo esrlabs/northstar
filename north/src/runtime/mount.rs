@@ -42,15 +42,15 @@ use tokio::{
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Device mapper error: {0:?}")]
-    DeviceMapper(#[from] device_mapper::Error),
+    DeviceMapper(device_mapper::Error),
     #[error("Loop device error: {0:?}")]
-    LoopDevice(#[from] super::loopdev::Error),
+    LoopDevice(super::loopdev::Error),
     #[error("IO error: {0}: {1:?}")]
     Io(String, io::Error),
     #[error("DM Verity error: {0:?}")]
     DmVerity(npk::dm_verity::Error),
     #[error("NPK error: {0:?}")]
-    Npk(#[from] npk::archive::Error),
+    Npk(npk::archive::Error),
     #[error("UTF-8 conversion error: {0:?}")]
     Utf8Conversion(Utf8Error),
     #[error("Inotify timeout error {0}")]
@@ -65,15 +65,15 @@ pub(super) async fn mount_npk_repository(
     config: &Config,
     repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
-    info!("Mounting containers from {}", repo.dir.display());
+    info!("Mounting NPKs from {}", repo.dir.display());
 
     let npks = fs::read_dir(&repo.dir)
         .await
         .map_err(|e| Error::Io(format!("Failed to read {}", &repo.dir.display()), e))?
-        .filter_map(move |d| d.ok())
+        .filter_map(Result::ok)
         .map(|d| d.path());
 
-    let mut containers: Vec<Container> = vec![];
+    let mut containers = Vec::new();
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
         containers.append(&mut mount_npk(&config, &npk, repo).await?);
@@ -89,10 +89,11 @@ pub(super) async fn mount_npk(
 ) -> Result<Vec<Container>, Error> {
     debug!("Mounting {}", npk.display());
 
-    let mounted_containers = if repo.key.is_some() {
-        mount_internal(config, npk, repo).await?
-    } else {
-        mount_internal_without_verity(config, npk, repo).await?
+    let mounted_containers = {
+        match &repo.key {
+            Some(key) => mount_verity(config, npk, &repo.id, key).await?,
+            None => mount_loopback(config, npk, repo).await?,
+        }
     };
 
     Ok(mounted_containers)
@@ -124,7 +125,7 @@ pub async fn umount_npk(container: &Container, wait_for_dm: bool) -> Result<(), 
     Ok(())
 }
 
-async fn mount_internal_without_verity(
+async fn mount_loopback(
     config: &Config,
     npk: &Path,
     repo: &Repository,
@@ -134,12 +135,14 @@ async fn mount_internal_without_verity(
     if let Ok(meta) = metadata(&npk).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
-    let mut archive_reader = ArchiveReader::new(&npk)?;
+    let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
 
     let manifest = archive_reader.manifest().map_err(Error::Npk)?;
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
-    let (fs_offset, fs_size) = archive_reader.extract_fs_start_and_size()?;
+    let (fs_offset, fs_size) = archive_reader
+        .extract_fs_start_and_size()
+        .map_err(Error::Npk)?;
 
     let mut fs = fs::File::open(&npk)
         .await
@@ -165,7 +168,9 @@ async fn mount_internal_without_verity(
                 .map_err(|e| Error::Io(format!("Failed to create mountpoint: {}", e), e))?;
         }
 
-        let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev).await?;
+        let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
+            .await
+            .map_err(Error::LoopDevice)?;
         let device =
             setup_and_mount_without_verity(&lc, &mut fs, fs_offset, fs_size, &root).await?;
 
@@ -190,10 +195,11 @@ async fn mount_internal_without_verity(
     Ok(mounted_containers)
 }
 
-async fn mount_internal(
+async fn mount_verity(
     config: &Config,
     npk: &Path,
-    repo: &Repository,
+    repository: &str,
+    key: &ed25519_dalek::PublicKey,
 ) -> Result<Vec<Container>, Error> {
     let start = time::Instant::now();
 
@@ -202,7 +208,6 @@ async fn mount_internal(
     }
 
     let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
-    let key = &repo.key.unwrap();
     let hashes = archive_reader.extract_hashes(&key).map_err(Error::Npk)?;
     let manifest = archive_reader.manifest().map_err(Error::Npk)?;
     let npk_version = archive_reader.npk_version().map_err(Error::Npk)?;
@@ -280,7 +285,7 @@ async fn mount_internal(
             root,
             manifest,
             device,
-            repository: repo.id.clone(),
+            repository: repository.to_string(),
         };
 
         let duration = start.elapsed();
@@ -308,13 +313,14 @@ pub async fn verity_setup(
     debug!("Creating a read-only verity device (name: {})", &name);
     let start = time::Instant::now();
 
-    let dm = dm::Dm::new(&config.devices.device_mapper)?;
+    let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
     let dm_device = dm
         .device_create(
             &name,
             &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
         )
-        .await?;
+        .await
+        .map_err(Error::DeviceMapper)?;
 
     let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
         .map_err(Error::Utf8Conversion)?;
@@ -427,7 +433,9 @@ async fn setup_and_mount(
         "ext4"
     };
 
-    let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev).await?;
+    let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
+        .await
+        .map_err(Error::LoopDevice)?;
     let loop_device = losetup(&lc, fs, fs_offset, lo_size)
         .await
         .map_err(Error::LoopDevice)?;
@@ -438,7 +446,7 @@ async fn setup_and_mount(
         .map(|(major, minor)| format!("{}:{}", major, minor))
         .map_err(Error::LoopDevice)?;
 
-    let dm = dm::Dm::new(&config.devices.device_mapper)?;
+    let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
 
     let dm_dev = verity_setup(
         &config,

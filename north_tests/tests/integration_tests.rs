@@ -71,11 +71,9 @@ test!(data_and_resource_mounts, {
     let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
 
     // install test container & resource
+    runtime.install("examples", get_test_resource_npk()).await?;
     runtime
-        .install("examples".to_string(), get_test_resource_npk())
-        .await?;
-    runtime
-        .install("examples".to_string(), get_test_container_npk())
+        .install("examples", get_test_container_npk())
         .await?;
 
     let data_dir = Path::new("target/north/data/test_container-000");
@@ -109,11 +107,9 @@ test!(crashing_containers, {
     let data_dir = Path::new("target/north/data/").canonicalize()?;
 
     // install test container
+    runtime.install("examples", get_test_resource_npk()).await?;
     runtime
-        .install("examples".to_string(), get_test_resource_npk())
-        .await?;
-    runtime
-        .install("examples".to_string(), get_test_container_npk())
+        .install("examples", get_test_container_npk())
         .await?;
 
     for i in 0..5 {

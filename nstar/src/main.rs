@@ -17,7 +17,7 @@ use futures::{sink::SinkExt, Sink};
 use itertools::Itertools;
 use log::{info, warn};
 use north::api::{self, Container, Message, Notification, Payload, Request, Response};
-use npk::manifest::Version;
+use npk::{archive::RepositoryId, manifest::Version};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, env, path::Path, sync::Arc};
 use structopt::StructOpt;
@@ -39,7 +39,7 @@ repositories:                 List available repositories
 shutdown:                     Stop the northstar runtime
 start <name>:                 Start application
 stop <name>:                  Stop application
-install <repository> <file>:  Install/Update npk into repository
+install <repository> <file>:  Install npk into repository
 uninstall <name> <version>:   Unstall npk";
 
 #[derive(Debug, StructOpt)]
@@ -443,6 +443,7 @@ fn format_containers(containers: &[Container]) {
     table.set_titles(Row::new(vec![
         Cell::new("Name").with_style(Attr::Bold),
         Cell::new("Version").with_style(Attr::Bold),
+        Cell::new("Repository").with_style(Attr::Bold),
         Cell::new("Type").with_style(Attr::Bold),
         Cell::new("PID").with_style(Attr::Bold),
         Cell::new("Uptime").with_style(Attr::Bold),
@@ -455,6 +456,7 @@ fn format_containers(containers: &[Container]) {
         table.add_row(Row::new(vec![
             Cell::new(&container.manifest.name).with_style(Attr::Bold),
             Cell::new(&container.manifest.version.to_string()),
+            Cell::new(&container.repository),
             Cell::new(
                 container
                     .manifest
@@ -483,7 +485,7 @@ fn format_containers(containers: &[Container]) {
     table.printstd();
 }
 
-fn format_repositories(repositories: &HashMap<api::RepositoryId, api::Repository>) {
+fn format_repositories(repositories: &HashMap<RepositoryId, api::Repository>) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![

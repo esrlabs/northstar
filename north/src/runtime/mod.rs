@@ -34,7 +34,7 @@ use nix::{
     sys::stat,
     unistd::{self, pipe},
 };
-use npk::{archive::RepositoryId, manifest::Name};
+use npk::manifest::Name;
 use process::ExitStatus;
 use state::State;
 use std::{
@@ -158,7 +158,7 @@ impl Runtime {
     }
 
     /// Installs a container in the repository
-    pub async fn install(&self, repo: RepositoryId, npk: &Path) -> Result<api::Response, Error> {
+    pub async fn install(&self, repo: &str, npk: &Path) -> Result<api::Response, Error> {
         let (response_tx, response_rx) = oneshot::channel::<api::Message>();
 
         // The size does not matter here since the file is not received through the socket
@@ -203,9 +203,6 @@ async fn runtime_task(
     stop: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
     let mut state = State::new(&config, event_tx.clone()).await?;
-
-    // mount all the containers from each repository
-    state.mount_repositories().await?;
 
     info!(
         "Mounted {} containers",
