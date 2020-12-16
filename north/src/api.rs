@@ -135,6 +135,7 @@ pub enum Error {
     Cgroups(String),
     Mount(String),
     Key(String),
+    LoopDevice(String),
 
     Io(String),
     Os(String),

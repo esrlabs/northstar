@@ -46,6 +46,8 @@ pub enum Error {
     Mount(super::mount::Error),
     #[error("Key: {0}")]
     Key(super::keys::Error),
+    #[error("Loop devices: {0}")]
+    LoopDevice(#[from] super::loopdev::Error),
 
     #[error("Io: {0}: {1:?}")]
     Io(String, io::Error),
@@ -71,6 +73,7 @@ impl From<Error> for api::Error {
             Error::Cgroups(error) => api::Error::Cgroups(error.to_string()),
             Error::Mount(error) => api::Error::Mount(error.to_string()),
             Error::Key(error) => api::Error::Key(error.to_string()),
+            Error::LoopDevice(error) => api::Error::LoopDevice(error.to_string()),
             Error::Io(cause, error) => api::Error::Io(format!("{}: {}", cause, error)),
             Error::Os(cause, error) => api::Error::Os(format!("{}: {}", cause, error)),
             Error::AsyncRuntime(cause) => api::Error::AsyncRuntime(cause),
