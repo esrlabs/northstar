@@ -24,7 +24,7 @@ use crate::api::Notification;
 use ed25519_dalek::*;
 use log::{debug, info, warn};
 use npk::{
-    archive::{read_manifest, Container},
+    archive::read_manifest,
     manifest::{Manifest, Mount, Name, Version},
 };
 use std::{
@@ -42,6 +42,19 @@ pub struct State {
     pub applications: HashMap<Name, Application>,
     pub resources: HashMap<(Name, Version), Application>,
     pub config: Config,
+}
+
+#[derive(Debug)]
+pub struct Container {
+    pub manifest: Manifest,
+    pub root: PathBuf,
+    pub dm_dev: PathBuf,
+}
+
+impl Container {
+    pub fn is_resource(&self) -> bool {
+        self.manifest.init.is_none()
+    }
 }
 
 #[derive(Debug)]
@@ -147,7 +160,7 @@ impl State {
     pub fn add(&mut self, container: Container) -> Result<(), Error> {
         let name = container.manifest.name.clone();
         let version = container.manifest.version.clone();
-        if container.is_resource_container() {
+        if container.is_resource() {
             if self
                 .resources
                 .get(&(name.clone(), version.clone()))
@@ -189,7 +202,7 @@ impl State {
         }
 
         // Check if app is a resource container that cannot be started
-        if app.container.is_resource_container() {
+        if app.container.is_resource() {
             warn!("Cannot start resource containers ({})", app);
             return Err(Error::ApplicationNotFound);
         }

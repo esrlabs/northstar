@@ -52,20 +52,6 @@ pub enum Error {
     Zip(#[from] zip::result::ZipError),
 }
 
-#[derive(Debug)]
-pub struct Container {
-    pub manifest: Manifest,
-    pub root: PathBuf,
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    pub dm_dev: PathBuf,
-}
-
-impl Container {
-    pub fn is_resource_container(&self) -> bool {
-        self.manifest.init.is_none()
-    }
-}
-
 #[derive(Eq, PartialEq, Debug)]
 pub struct Hashes {
     pub manifest_hash: String,

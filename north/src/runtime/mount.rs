@@ -15,6 +15,7 @@
 use super::{
     device_mapper as dm, device_mapper,
     loopdev::{losetup, LoopControl},
+    state::Container,
 };
 use bitflags::_core::str::Utf8Error;
 use device_mapper::Dm;
@@ -22,10 +23,7 @@ use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
-use npk::{
-    archive::{ArchiveReader, Container},
-    dm_verity::VerityHeader,
-};
+use npk::{archive::ArchiveReader, dm_verity::VerityHeader};
 use std::{
     collections::HashMap,
     io,

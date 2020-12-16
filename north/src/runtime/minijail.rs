@@ -12,8 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::process::{
-    exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
+use super::{
+    process::{
+        exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
+    },
+    state::Container,
 };
 use crate::runtime::{Event, EventTx};
 use itertools::Itertools;
@@ -22,10 +25,7 @@ use nix::{
     sys::{signal, stat::Mode},
     unistd::{self, chown},
 };
-use npk::{
-    archive::Container,
-    manifest::{Dev, Mount, MountFlag},
-};
+use npk::manifest::{Dev, Mount, MountFlag};
 use std::{
     fmt, iter, ops,
     path::{Path, PathBuf},
