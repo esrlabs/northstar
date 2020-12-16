@@ -457,19 +457,28 @@ impl State {
             })
             .unwrap_or_else(|| vec![manifest.name.to_string()]);
 
-        let (running, stopped): (Vec<_>, Vec<_>) = instances
+        let running: Vec<_> = instances
             .iter()
             .filter_map(|name| self.applications.get(name))
-            .partition(|app| app.is_running());
+            .filter(|app| app.is_running())
+            .collect();
 
         if !running.is_empty() {
             warn!("Cannot uninstall while instances are running {:?}", running);
             return Err(Error::ApplicationRunning(name.to_owned()));
         }
 
-        for app in stopped {
-            info!("Unmounting {}", app);
-            umount_npk(app.container()).await.map_err(Error::Mount)?;
+        let application_containers = instances
+            .iter()
+            .filter_map(|name| self.applications.get(name).map(|a| a.container()));
+        let resource_containers = instances
+            .iter()
+            .filter_map(|name| self.resources.get(&(name.clone(), version.clone())));
+        let containers = application_containers.chain(resource_containers);
+
+        for container in containers {
+            info!("Unmounting {}", &container.manifest.name);
+            umount_npk(container).await.map_err(Error::Mount)?;
         }
 
         for instance in instances {
