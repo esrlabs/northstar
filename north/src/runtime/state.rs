@@ -16,7 +16,7 @@ use super::{
     config::Config,
     error::Error,
     keys,
-    mount::{mount_npk, umount_npk},
+    mount::{mount_npk, mount_npk_repository, umount_npk},
     process::{ExitStatus, Process},
     Event, EventTx,
 };
@@ -170,18 +170,12 @@ impl State {
     /// Mount container repositories
     pub(crate) async fn mount_repositories(&mut self) -> Result<(), Error> {
         let repos: Vec<Repository> = self.repositories.values().cloned().collect();
+
         // Mount all the containers from each repository
         for repo in &repos {
-            let mounted_containers = super::mount::mount_npk_repository(
-                &self.config.run_dir,
-                &self.config.devices.device_mapper_dev,
-                &self.config.devices.device_mapper,
-                &self.config.devices.loop_control,
-                &self.config.devices.loop_dev,
-                &repo,
-            )
-            .await
-            .map_err(Error::Mount)?;
+            let mounted_containers = mount_npk_repository(&self.config, &repo)
+                .await
+                .map_err(Error::Mount)?;
 
             for container in mounted_containers {
                 self.add(container)?;
@@ -455,17 +449,9 @@ impl State {
             .map_err(|error| Error::Io("Failed to copy NPK to registry".to_string(), error))?;
 
         // Install and mount npk
-        let mounted_containers = mount_npk(
-            &self.config.run_dir,
-            &self.config.devices.device_mapper_dev,
-            &self.config.devices.device_mapper,
-            &self.config.devices.loop_control,
-            &self.config.devices.loop_dev,
-            &package_in_registry,
-            &repository,
-        )
-        .await
-        .map_err(Error::Mount)?;
+        let mounted_containers = mount_npk(&self.config, &package_in_registry, &repository)
+            .await
+            .map_err(Error::Mount)?;
 
         for container in mounted_containers {
             self.add(container)?;

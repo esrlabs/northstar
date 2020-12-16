@@ -13,12 +13,12 @@
 //   limitations under the License.
 
 use super::{
+    config::Config,
     device_mapper as dm, device_mapper,
     loopdev::{losetup, LoopControl},
     state::{Container, Repository},
 };
 use bitflags::_core::str::Utf8Error;
-use device_mapper::Dm;
 use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
@@ -42,9 +42,9 @@ use tokio::{
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Device mapper error: {0:?}")]
-    DeviceMapper(device_mapper::Error),
+    DeviceMapper(#[from] device_mapper::Error),
     #[error("Loop device error: {0:?}")]
-    LoopDevice(super::loopdev::Error),
+    LoopDevice(#[from] super::loopdev::Error),
     #[error("IO error: {0}: {1:?}")]
     Io(String, io::Error),
     #[error("DM Verity error: {0:?}")]
@@ -62,11 +62,7 @@ pub enum Error {
 }
 
 pub(super) async fn mount_npk_repository(
-    run_dir: &Path,
-    device_mapper_dev: &str,
-    device_mapper: &Path,
-    loop_control: &Path,
-    loop_dev: &str,
+    config: &Config,
     repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
     info!("Mounting containers from {}", repo.dir.display());
@@ -80,43 +76,23 @@ pub(super) async fn mount_npk_repository(
     let mut containers: Vec<Container> = vec![];
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
-        containers.append(
-            &mut mount_npk(
-                run_dir,
-                device_mapper_dev,
-                device_mapper,
-                loop_control,
-                loop_dev,
-                &npk,
-                repo,
-            )
-            .await?,
-        );
+        containers.append(&mut mount_npk(&config, &npk, repo).await?);
     }
 
     Ok(containers)
 }
 
 pub(super) async fn mount_npk(
-    run_dir: &Path,
-    device_mapper_dev: &str,
-    device_mapper: &Path,
-    loop_control: &Path,
-    loop_dev: &str,
+    config: &Config,
     npk: &Path,
     repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
     debug!("Mounting {}", npk.display());
 
-    let dm = dm::Dm::new(&device_mapper).map_err(Error::DeviceMapper)?;
-    let lc = LoopControl::open(loop_control, loop_dev)
-        .await
-        .map_err(Error::LoopDevice)?;
-
     let mounted_containers = if repo.key.is_some() {
-        mount_internal(run_dir, device_mapper_dev, &dm, &lc, npk, repo).await?
+        mount_internal(config, npk, repo).await?
     } else {
-        mount_internal_without_verity(run_dir, &lc, npk, repo).await?
+        mount_internal_without_verity(config, npk, repo).await?
     };
 
     Ok(mounted_containers)
@@ -149,8 +125,7 @@ pub async fn umount_npk(container: &Container, wait_for_dm: bool) -> Result<(), 
 }
 
 async fn mount_internal_without_verity(
-    run_dir: &Path,
-    lc: &LoopControl,
+    config: &Config,
     npk: &Path,
     repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
@@ -178,7 +153,8 @@ async fn mount_internal_without_verity(
         if instances > 1 {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
-        let root = run_dir
+        let root = config
+            .run_dir
             .join(&manifest.name)
             .join(&format!("{}", manifest.version));
 
@@ -189,7 +165,9 @@ async fn mount_internal_without_verity(
                 .map_err(|e| Error::Io(format!("Failed to create mountpoint: {}", e), e))?;
         }
 
-        let device = setup_and_mount_without_verity(lc, &mut fs, fs_offset, fs_size, &root).await?;
+        let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev).await?;
+        let device =
+            setup_and_mount_without_verity(&lc, &mut fs, fs_offset, fs_size, &root).await?;
 
         let container = Container {
             root,
@@ -213,10 +191,7 @@ async fn mount_internal_without_verity(
 }
 
 async fn mount_internal(
-    run_dir: &Path,
-    device_mapper_dev: &str,
-    dm: &Dm,
-    lc: &LoopControl,
+    config: &Config,
     npk: &Path,
     repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
@@ -269,7 +244,8 @@ async fn mount_internal(
         if instances > 1 {
             manifest.name.push_str(&format!("-{:03}", instance));
         }
-        let root = run_dir
+        let root = config
+            .run_dir
             .join(&manifest.name)
             .join(&format!("{}", manifest.version));
 
@@ -288,11 +264,9 @@ async fn mount_internal(
         );
 
         let device = setup_and_mount(
-            dm,
-            lc,
+            &config,
             &verity,
             &name,
-            device_mapper_dev,
             hashes.fs_verity_offset,
             &hashes.fs_verity_hash,
             &mut fs,
@@ -324,8 +298,7 @@ async fn mount_internal(
 }
 
 pub async fn verity_setup(
-    dm: &dm::Dm,
-    dm_dev: &str,
+    config: &Config,
     dev: &str,
     verity: &VerityHeader,
     name: &str,
@@ -334,13 +307,14 @@ pub async fn verity_setup(
 ) -> Result<PathBuf, Error> {
     debug!("Creating a read-only verity device (name: {})", &name);
     let start = time::Instant::now();
+
+    let dm = dm::Dm::new(&config.devices.device_mapper)?;
     let dm_device = dm
         .device_create(
             &name,
             &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
         )
-        .await
-        .map_err(Error::DeviceMapper)?;
+        .await?;
 
     let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
         .map_err(Error::Utf8Conversion)?;
@@ -360,7 +334,11 @@ pub async fn verity_setup(
     );
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
-    let dm_dev = PathBuf::from(format!("{}{}", dm_dev, dm_device.id() & 0xFF));
+    let dm_dev = PathBuf::from(format!(
+        "{}{}",
+        config.devices.device_mapper_dev,
+        dm_device.id() & 0xFF
+    ));
 
     debug!("Verity-device used: {}", dm_dev.to_string_lossy());
     dm.table_load_flags(
@@ -424,11 +402,9 @@ async fn setup_and_mount_without_verity(
 
 #[allow(clippy::too_many_arguments)]
 async fn setup_and_mount(
-    dm: &dm::Dm,
-    lc: &LoopControl,
+    config: &Config,
     verity: &VerityHeader,
     name: &str,
-    dm_dev: &str,
     dm_device_size: u64,
     verity_hash: &str,
     fs: &mut fs::File,
@@ -451,7 +427,8 @@ async fn setup_and_mount(
         "ext4"
     };
 
-    let loop_device = losetup(lc, fs, fs_offset, lo_size)
+    let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev).await?;
+    let loop_device = losetup(&lc, fs, fs_offset, lo_size)
         .await
         .map_err(Error::LoopDevice)?;
 
@@ -461,9 +438,10 @@ async fn setup_and_mount(
         .map(|(major, minor)| format!("{}:{}", major, minor))
         .map_err(Error::LoopDevice)?;
 
+    let dm = dm::Dm::new(&config.devices.device_mapper)?;
+
     let dm_dev = verity_setup(
-        &dm,
-        &dm_dev,
+        &config,
         &loop_device_id,
         &verity,
         name,
