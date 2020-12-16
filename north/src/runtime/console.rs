@@ -323,7 +323,7 @@ impl Console {
 }
 
 fn list_containers(state: &State) -> Vec<api::Container> {
-    let mut app_containers: Vec<api::Container> = state
+    let mut containers: Vec<api::Container> = state
         .applications()
         .map(|app| api::Container {
             manifest: app.manifest().clone(),
@@ -349,15 +349,15 @@ fn list_containers(state: &State) -> Vec<api::Container> {
             }),
         })
         .collect();
-    let mut resource_containers: Vec<api::Container> = state
+    let mut resources = state
         .resources()
-        .map(|app| api::Container {
-            manifest: app.manifest().clone(),
+        .map(|container| api::Container {
+            manifest: container.manifest.clone(),
             process: None,
         })
         .collect();
-    app_containers.append(&mut resource_containers);
-    app_containers
+    containers.append(&mut resources);
+    containers
 }
 
 async fn read<R: AsyncRead + Unpin>(

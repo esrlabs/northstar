@@ -40,7 +40,7 @@ pub struct State {
     events_tx: EventTx,
     pub signing_keys: HashMap<String, PublicKey>,
     pub applications: HashMap<Name, Application>,
-    pub resources: HashMap<(Name, Version), Application>,
+    pub resources: HashMap<(Name, Version), Container>,
     pub config: Config,
 }
 
@@ -147,7 +147,7 @@ impl State {
     }
 
     /// Return an iterator over all known resources
-    pub fn resources(&self) -> impl iter::Iterator<Item = &Application> {
+    pub fn resources(&self) -> impl iter::Iterator<Item = &Container> {
         self.resources.values()
     }
 
@@ -168,8 +168,7 @@ impl State {
             {
                 return Err(Error::ContainerAlreadyInstalled(name));
             }
-            let app = Application::new(container);
-            self.resources.insert((name, version), app);
+            self.resources.insert((name, version), container);
         } else {
             if self.applications.get(&name).is_some() {
                 return Err(Error::ContainerAlreadyInstalled(name));
@@ -185,7 +184,7 @@ impl State {
         let resources = self
             .resources
             .values()
-            .map(|app| app.container.manifest.name.clone())
+            .map(|container| container.manifest.name.clone())
             .collect::<HashSet<Name>>();
 
         // Look for app
@@ -336,7 +335,7 @@ impl State {
             umount_npk(container).await.map_err(Error::Mount)?;
         }
 
-        for (_name, container) in self.resources().map(|a| (a.name(), &a.container)) {
+        for container in self.resources() {
             umount_npk(container).await.map_err(Error::Mount)?;
         }
 
@@ -460,11 +459,7 @@ impl State {
 
         let (running, stopped): (Vec<_>, Vec<_>) = instances
             .iter()
-            .filter_map(|name| {
-                self.applications
-                    .get(name)
-                    .or_else(|| self.resources.get(&(name.to_string(), version.clone())))
-            })
+            .filter_map(|name| self.applications.get(name))
             .partition(|app| app.is_running());
 
         if !running.is_empty() {
