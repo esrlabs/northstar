@@ -13,13 +13,15 @@
 //   limitations under the License.
 
 use derive_new::new;
-use npk::manifest::{Manifest, Version};
+use npk::{
+    archive::RepositoryId,
+    manifest::{Manifest, Version},
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
 pub type Name = String;
 pub type MessageId = String; // UUID
-pub use npk::archive::RepositoryId;
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -90,7 +92,6 @@ pub struct Container {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Repository {
-    pub id: RepositoryId,
     pub writable: bool,
     pub dir: PathBuf,
 }
@@ -135,7 +136,6 @@ pub enum Error {
     Cgroups(String),
     Mount(String),
     Key(String),
-    LoopDevice(String),
 
     Io(String),
     Os(String),

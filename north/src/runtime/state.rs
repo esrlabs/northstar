@@ -158,30 +158,17 @@ impl State {
             );
         }
 
-        Ok(State {
+        let mut state = State {
             events_tx: tx,
             repositories,
             applications: HashMap::new(),
             resources: HashMap::new(),
             config: config.clone(),
-        })
-    }
+        };
 
-    /// Mount container repositories
-    pub(crate) async fn mount_repositories(&mut self) -> Result<(), Error> {
-        let repos: Vec<Repository> = self.repositories.values().cloned().collect();
-
-        // Mount all the containers from each repository
-        for repo in &repos {
-            let mounted_containers = mount_npk_repository(&self.config, &repo)
-                .await
-                .map_err(Error::Mount)?;
-
-            for container in mounted_containers {
-                self.add(container)?;
-            }
-        }
-        Ok(())
+        // mount all the containers from each repository
+        mount_repositories(&mut state).await?;
+        Ok(state)
     }
 
     /// Return an iterator over all known applications
@@ -631,4 +618,23 @@ impl State {
             .await
             .expect("Internal channel error on main");
     }
+}
+
+async fn mount_repositories(state: &mut State) -> Result<(), Error> {
+    let mut mounted_containers = Vec::new();
+
+    // Mount all the containers from each repository
+    for repo in state.repositories.values() {
+        mounted_containers.append(
+            &mut mount_npk_repository(&state.config, &repo)
+                .await
+                .map_err(Error::Mount)?,
+        );
+    }
+
+    for container in mounted_containers {
+        state.add(container)?;
+    }
+
+    Ok(())
 }

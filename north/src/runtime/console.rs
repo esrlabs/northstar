@@ -144,8 +144,8 @@ impl Console {
                     warn!("Received message is not a request");
                 }
             }
-            Request::Install(message, repo, path) => {
-                let payload = match state.install(&repo, &path).await {
+            Request::Install(message, repository, path) => {
+                let payload = match state.install(&repository, &path).await {
                     Ok(_) => api::Response::Ok(()),
                     Err(e) => api::Response::Err(e.into()),
                 };
@@ -292,8 +292,8 @@ impl Console {
         while let Some(request) = client_in.next().await {
             let request = match request {
                 ConnectionEvent::Request(request) => Request::Message(request),
-                ConnectionEvent::Install(message, repo, npk) => {
-                    Request::Install(message, repo, npk)
+                ConnectionEvent::Install(message, repository, npk) => {
+                    Request::Install(message, repository, npk)
                 }
             };
 
@@ -370,18 +370,17 @@ fn list_containers(state: &State) -> Vec<api::Container> {
     containers
 }
 
-fn list_repositories(state: &State) -> HashMap<api::RepositoryId, api::Repository> {
-    fn from(repo: &crate::runtime::state::Repository) -> api::Repository {
+fn list_repositories(state: &State) -> HashMap<RepositoryId, api::Repository> {
+    fn from(repository: &crate::runtime::state::Repository) -> api::Repository {
         api::Repository {
-            id: repo.id.clone(),
-            writable: repo.writable,
-            dir: repo.dir.clone(),
+            writable: repository.writable,
+            dir: repository.dir.clone(),
         }
     }
     state
         .repositories()
         .iter()
-        .map(|(id, repo)| (id.clone(), from(repo)))
+        .map(|(id, repository)| (id.clone(), from(repository)))
         .collect()
 }
 
@@ -411,7 +410,7 @@ async fn read<R: AsyncRead + Unpin>(
         .map_err(|_| Error::Protocol("Failed to deserialize message".to_string()))?;
 
     match &message.payload {
-        api::Payload::Request(api::Request::Install(repo, size)) => {
+        api::Payload::Request(api::Request::Install(repository, size)) => {
             debug!("Incoming installation ({} bytes)", size);
 
             // Open a tmpfile
@@ -433,7 +432,7 @@ async fn read<R: AsyncRead + Unpin>(
             debug!("Received {} bytes. Starting installation", n);
             Ok(ConnectionEvent::Install(
                 message.clone(),
-                repo.to_string(),
+                repository.to_string(),
                 file,
             ))
         }
