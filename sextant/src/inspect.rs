@@ -31,15 +31,11 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
 }
 
 pub fn inspect_short(npk: &Path) -> Result<()> {
-    let mut reader = ArchiveReader::new(&npk).context("Failed to extract manifest from NPK")?;
-    let manifest = reader
-        .manifest()
-        .context("Failed to find manifest in NPK")?;
+    let reader = ArchiveReader::new(&npk, None).context("Failed to extract manifest from NPK")?;
+    let manifest = reader.manifest().clone();
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
-    let npk_version = reader
-        .npk_version()
-        .map_or("unknown".to_string(), |v| v.to_string());
+    let npk_version = reader.npk_version();
     let is_resource_container = manifest.init.map_or("yes", |_| "no");
     let instances = manifest.instances.unwrap_or(1).to_string();
     println!(
