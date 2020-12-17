@@ -402,10 +402,10 @@ impl State {
             return Err(Error::RepositoryNotWritable(id.to_owned()));
         }
 
-        let manifest = ArchiveReader::new(npk)
+        let manifest = ArchiveReader::new(npk, repository.key.as_ref())
             .map_err(Error::Npk)?
             .manifest()
-            .map_err(Error::Npk)?;
+            .clone();
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -471,10 +471,10 @@ impl State {
                     )
                 })?;
 
-                let manifest = ArchiveReader::new(entry.path().as_path())
+                let manifest = ArchiveReader::new(entry.path().as_path(), None)
                     .map_err(Error::Npk)?
                     .manifest()
-                    .map_err(Error::Npk)?;
+                    .clone();
 
                 if manifest.name == name && manifest.version == *version {
                     return Ok(Some((manifest, entry.path())));

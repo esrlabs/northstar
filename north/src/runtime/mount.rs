@@ -26,18 +26,11 @@ use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use npk::{archive::ArchiveReader, dm_verity::VerityHeader, manifest::Manifest};
 use std::{
     io,
-    io::Cursor,
     path::{Path, PathBuf},
     process,
 };
 use thiserror::Error;
-use tokio::{
-    fs,
-    fs::metadata,
-    io::{AsyncReadExt, AsyncSeekExt},
-    stream::StreamExt,
-    task, time,
-};
+use tokio::{fs, fs::metadata, stream::StreamExt, task, time};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -135,18 +128,10 @@ async fn mount_loopback(
     if let Ok(meta) = metadata(&npk).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
-    let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
+    let archive_reader = ArchiveReader::new(&npk, repo.key.as_ref()).map_err(Error::Npk)?;
 
-    let manifest = archive_reader.manifest().map_err(Error::Npk)?;
+    let manifest = archive_reader.manifest();
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
-
-    let (fs_offset, fs_size) = archive_reader
-        .extract_fs_start_and_size()
-        .map_err(Error::Npk)?;
-
-    let mut fs = fs::File::open(&npk)
-        .await
-        .map_err(|error| Error::Io(format!("Failed to open {:?}", npk), error))?;
 
     let instances = manifest.instances.unwrap_or(1);
 
@@ -171,8 +156,7 @@ async fn mount_loopback(
         let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
             .await
             .map_err(Error::LoopDevice)?;
-        let device =
-            setup_and_mount_without_verity(&lc, &mut fs, fs_offset, fs_size, &root).await?;
+        let device = setup_and_mount_without_verity(&lc, &archive_reader, &root).await?;
 
         let container = Container {
             root,
@@ -207,11 +191,10 @@ async fn mount_verity(
         debug!("Mounting NPK with size {}", meta.len());
     }
 
-    let mut archive_reader = ArchiveReader::new(&npk).map_err(Error::Npk)?;
-    let hashes = archive_reader.extract_hashes(&key).map_err(Error::Npk)?;
-    let manifest = archive_reader.manifest().map_err(Error::Npk)?;
-    let npk_version = archive_reader.npk_version().map_err(Error::Npk)?;
-    if npk_version != Manifest::VERSION {
+    let archive_reader = ArchiveReader::new(&npk, Some(key)).map_err(Error::Npk)?;
+    let manifest = archive_reader.manifest();
+    let npk_version = archive_reader.npk_version();
+    if *npk_version != Manifest::VERSION {
         return Err(Error::Npk(npk::archive::Error::MalformedManifest(format!(
             "Invalid NPK version (detected: {}, supported: {})",
             npk_version.to_string(),
@@ -219,27 +202,6 @@ async fn mount_verity(
         ))));
     }
     debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
-
-    let (fs_offset, fs_size) = archive_reader
-        .extract_fs_start_and_size()
-        .map_err(Error::Npk)?;
-
-    let mut fs = fs::File::open(&npk)
-        .await
-        .map_err(|error| Error::Io(format!("Failed to open {:?}", npk), error))?;
-
-    let mut header = [0u8; 512];
-    fs.seek(std::io::SeekFrom::Start(
-        fs_offset + hashes.fs_verity_offset,
-    ))
-    .await
-    .map_err(|e| Error::Io("Failed to seek to verity header".into(), e))?;
-    fs.read_exact(&mut header)
-        .await
-        .map_err(|e| Error::Io("Failed to read verity header".into(), e))?;
-
-    let verity = VerityHeader::from_bytes(&mut Cursor::new(&header)).map_err(Error::DmVerity)?;
-    verity.check().map_err(Error::DmVerity)?;
 
     let instances = manifest.instances.unwrap_or(1);
 
@@ -268,18 +230,7 @@ async fn mount_verity(
             manifest.version
         );
 
-        let device = setup_and_mount(
-            &config,
-            &verity,
-            &name,
-            hashes.fs_verity_offset,
-            &hashes.fs_verity_hash,
-            &mut fs,
-            fs_offset,
-            fs_size,
-            &root,
-        )
-        .await?;
+        let device = setup_and_mount(&config, &name, &archive_reader, &root).await?;
 
         let container = Container {
             root,
@@ -376,27 +327,15 @@ pub async fn verity_setup(
 
 async fn setup_and_mount_without_verity(
     lc: &LoopControl,
-    fs: &mut fs::File,
-    fs_offset: u64,
-    lo_size: u64,
+    npk_reader: &ArchiveReader,
     root: &Path,
 ) -> Result<PathBuf, Error> {
-    let mut fstype = [0u8; 4];
-    fs.seek(io::SeekFrom::Start(fs_offset))
+    let fs_type = npk_reader.fs_type().map_err(Error::Npk)?;
+    let mut fs = fs::File::open(&npk_reader.path)
         .await
-        .map_err(|e| Error::Io("Failed seek to fs type".into(), e))?;
-    fs.read_exact(&mut fstype)
-        .await
-        .map_err(|e| Error::Io("Failed read fs type".into(), e))?;
-    let fs_type = if &fstype == b"hsqs" {
-        debug!("Detected SquashFS file system");
-        "squashfs"
-    } else {
-        debug!("Defaulting to ext filesystem type");
-        "ext4"
-    };
+        .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
 
-    let loop_device = losetup(lc, fs, fs_offset, lo_size)
+    let loop_device = losetup(lc, &mut fs, npk_reader.fs_offset, npk_reader.fs_size)
         .await
         .map_err(Error::LoopDevice)?;
 
@@ -409,34 +348,20 @@ async fn setup_and_mount_without_verity(
 #[allow(clippy::too_many_arguments)]
 async fn setup_and_mount(
     config: &Config,
-    verity: &VerityHeader,
     name: &str,
-    dm_device_size: u64,
-    verity_hash: &str,
-    fs: &mut fs::File,
-    fs_offset: u64,
-    lo_size: u64,
+    npk_reader: &ArchiveReader,
     root: &Path,
 ) -> Result<PathBuf, Error> {
-    let mut fstype = [0u8; 4];
-    fs.seek(io::SeekFrom::Start(fs_offset))
+    let fs_type = npk_reader.fs_type().map_err(Error::Npk)?;
+    let mut fs = fs::File::open(&npk_reader.path)
         .await
-        .map_err(|e| Error::Io("Failed seek to fs type".into(), e))?;
-    fs.read_exact(&mut fstype)
-        .await
-        .map_err(|e| Error::Io("Failed read fs type".into(), e))?;
-    let fs_type = if &fstype == b"hsqs" {
-        debug!("Detected SquashFS file system");
-        "squashfs"
-    } else {
-        debug!("Defaulting to ext filesystem type");
-        "ext4"
-    };
+        .map_err(|e| Error::Io("Failed to open NPK file".to_string(), e))?;
+    let verity = npk_reader.verity_header().map_err(Error::Npk)?;
 
     let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
         .await
         .map_err(Error::LoopDevice)?;
-    let loop_device = losetup(&lc, fs, fs_offset, lo_size)
+    let loop_device = losetup(&lc, &mut fs, npk_reader.fs_offset, npk_reader.fs_size)
         .await
         .map_err(Error::LoopDevice)?;
 
@@ -453,8 +378,8 @@ async fn setup_and_mount(
         &loop_device_id,
         &verity,
         name,
-        verity_hash,
-        dm_device_size,
+        npk_reader.verity_hash(),
+        npk_reader.verity_offset(),
     )
     .await?;
 
