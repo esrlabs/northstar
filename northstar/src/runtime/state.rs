@@ -482,9 +482,45 @@ impl State {
         name: &str,
         version: &Version,
     ) -> result::Result<(), Error> {
-        // TODO check if resource still needed
-        self.resources.remove(&(name.to_owned(), version.clone()));
-        Err(Error::ApplicationNotFound)
+        // check if resource still needed
+        for app in self.applications() {
+            for mount in app.container.manifest.mounts.values() {
+                if let Mount::Resource {
+                    name: res_name,
+                    version: res_version,
+                    ..
+                } = mount
+                {
+                    if res_name == name && res_version == version {
+                        info!(
+                            "Cannot uninstall resource {}.{}, still needed by {}",
+                            name,
+                            version,
+                            app.name()
+                        );
+                        return Err(Error::ResourceStillNeeded(format!("{}.{}", name, version)));
+                    }
+                }
+            }
+        }
+        match self.resources.get(&(name.to_owned(), version.clone())) {
+            Some(resource_container) => {
+                let wait_for_dm = self
+                    .repositories
+                    .get(&resource_container.repository)
+                    .map(|r| r.key.is_some())
+                    .unwrap_or(false);
+                umount_npk(resource_container, wait_for_dm)
+                    .await
+                    .map_err(Error::Mount)?;
+                self.resources.remove(&(name.to_owned(), version.clone()));
+                Ok(())
+            }
+            None => {
+                log::warn!("Trying to uninstall resource container that is not installed");
+                Err(Error::ApplicationNotFound)
+            }
+        }
     }
 
     async fn uninstall_app(&mut self, name: &str) -> result::Result<(), Error> {

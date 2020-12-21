@@ -25,6 +25,8 @@ pub enum Error {
     ApplicationNotRunning,
     #[error("Application {0} is running")]
     ApplicationRunning(String),
+    #[error("Resource {0} is still needed")]
+    ResourceStillNeeded(String),
     #[error("Missing resource {0}")]
     MissingResource(String),
     #[error("Container {0} already installed")]
@@ -59,6 +61,7 @@ impl From<Error> for api::Error {
             Error::ApplicationNotFound => api::Error::ApplicationNotFound,
             Error::ApplicationNotRunning => api::Error::ApplicationNotRunning,
             Error::ApplicationRunning(name) => api::Error::ApplicationRunning(name),
+            Error::ResourceStillNeeded(name) => api::Error::ResourceStillInUse(name),
             Error::MissingResource(resource) => api::Error::MissingResource(resource),
             Error::ContainerAlreadyInstalled(name) => api::Error::ContainerAlreadyInstalled(name),
             Error::RepositoryNotFound(id) => api::Error::RepositoryNotFound(id),
