@@ -109,7 +109,7 @@ test!(data_and_resource_mounts, {
     runtime.install(get_test_resource_npk()).could_fail();
     runtime.install(get_test_container_npk()).could_fail();
 
-    let data_dir = Path::new("target/northstar/data/test_container-000");
+    let data_dir = Path::new("target/northstar/data/test_container");
     fs::create_dir_all(&data_dir).await?;
 
     let input_file = data_dir.join("input.txt");
@@ -118,12 +118,12 @@ test!(data_and_resource_mounts, {
     fs::write(&input_file, b"cat /resource/hello").await?;
 
     // Start the test_container process
-    runtime.start("test_container-000").expect_ok()?;
+    runtime.start("test_container").expect_ok()?;
 
     logger::assume("hello from test resource", Duration::from_secs(5)).await?;
 
     // The container might have finished at this point
-    runtime.stop("test_container-000").could_fail();
+    runtime.stop("test_container").could_fail();
 
     // Remove the temporary data directory
     fs::remove_dir_all(&data_dir).await?;
@@ -182,23 +182,17 @@ test!(crashing_containers, {
     runtime.install(get_test_resource_npk()).could_fail();
     runtime.install(get_test_container_npk()).could_fail();
 
-    for i in 0..5 {
-        let dir = data_dir.join(format!("test_container-{:03}", i));
-        fs::create_dir_all(&dir).await?;
-        fs::write(dir.join("input.txt"), b"crash").await?;
+    let dir = data_dir.join("test_container".to_string());
+    fs::create_dir_all(&dir).await?;
+    fs::write(dir.join("input.txt"), b"crash").await?;
 
-        // Start the test_container process
-        runtime
-            .start(&format!("test_container-{:03}", i))
-            .expect_ok()?;
-    }
+    // Start the test_container process
+    runtime
+        .start(&"test_container".to_string())
+        .expect_ok()?;
 
     // Try to stop the containers before issuing the shutdown
-    for i in 0..5 {
-        runtime
-            .stop(&format!("test_container-{:03}", i))
-            .could_fail();
-    }
+    runtime.stop(&"test_container".to_string()).could_fail();
 
     runtime.uninstall("test_container", "0.0.1").expect_ok()?;
     runtime.uninstall("test_resource", "0.0.1").expect_ok()?;

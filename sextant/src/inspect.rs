@@ -37,10 +37,9 @@ pub fn inspect_short(npk: &Path) -> Result<()> {
     let version = manifest.version.to_string();
     let npk_version = reader.npk_version();
     let is_resource_container = manifest.init.map_or("yes", |_| "no");
-    let instances = manifest.instances.unwrap_or(1).to_string();
     println!(
-        "name: {}, version: {}, NPK version: {}, resource container: {}, instances: {}",
-        name, version, npk_version, is_resource_container, instances
+        "name: {}, version: {}, NPK version: {}, resource container: {}",
+        name, version, npk_version, is_resource_container
     );
 
     Ok(())
@@ -127,7 +126,6 @@ init: /hello
 env:
   HELLO: north
 # autostart: true
-# instances: 20
 mounts:
     /lib:
       host: /lib
