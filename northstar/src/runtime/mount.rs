@@ -69,7 +69,7 @@ pub(super) async fn mount_npk_repository(
     let mut containers = Vec::new();
     let mut npks = Box::pin(npks);
     while let Some(npk) = npks.next().await {
-        containers.append(&mut mount_npk(&config, &npk, repo).await?);
+        containers.push(mount_npk(&config, &npk, repo).await?);
     }
 
     Ok(containers)
@@ -79,17 +79,66 @@ pub(super) async fn mount_npk(
     config: &Config,
     npk: &Path,
     repo: &Repository,
-) -> Result<Vec<Container>, Error> {
+) -> Result<Container, Error> {
     debug!("Mounting {}", npk.display());
+    let use_verity = repo.key.is_some();
 
-    let mounted_containers = {
-        match &repo.key {
-            Some(key) => mount_verity(config, npk, &repo.id, key).await?,
-            None => mount_loopback(config, npk, repo).await?,
-        }
+    let start = time::Instant::now();
+
+    if let Ok(meta) = metadata(&npk).await {
+        debug!("Mounting NPK with size {}", meta.len());
+    }
+
+    let archive_reader = ArchiveReader::new(&npk, repo.key.as_ref()).map_err(Error::Npk)?;
+    let manifest = archive_reader.manifest();
+    let npk_version = archive_reader.npk_version();
+    if *npk_version != Manifest::VERSION {
+        return Err(Error::Npk(npk::archive::Error::MalformedManifest(format!(
+            "Invalid NPK version (detected: {}, supported: {})",
+            npk_version.to_string(),
+            &Manifest::VERSION
+        ))));
+    }
+    debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
+
+    let root = config
+        .run_dir
+        .join(&manifest.name)
+        .join(&format!("{}", manifest.version));
+
+    if !root.exists() {
+        info!("Creating mountpoint {}", root.display());
+        fs::create_dir_all(&root)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to create mountpoint: {}", e), e))?;
+    }
+
+    let name = format!(
+        "north_{}_{}_{}",
+        process::id(),
+        manifest.name,
+        manifest.version
+    );
+
+    let device = setup_and_mount(&config, &name, &archive_reader, &root, use_verity).await?;
+
+    let container = Container {
+        root,
+        manifest: manifest.clone(),
+        device,
+        repository: repo.id.to_string(),
     };
 
-    Ok(mounted_containers)
+    let duration = start.elapsed();
+
+    info!(
+        "Installed {}:{} Mounting: {:.03}s",
+        container.manifest.name,
+        container.manifest.version,
+        duration.as_fractional_secs(),
+    );
+
+    Ok(container)
 }
 
 pub async fn umount_npk(container: &Container, wait_for_dm: bool) -> Result<(), Error> {
@@ -116,141 +165,6 @@ pub async fn umount_npk(container: &Container, wait_for_dm: bool) -> Result<(), 
     .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
 
     Ok(())
-}
-
-async fn mount_loopback(
-    config: &Config,
-    npk: &Path,
-    repo: &Repository,
-) -> Result<Vec<Container>, Error> {
-    let start = time::Instant::now();
-
-    if let Ok(meta) = metadata(&npk).await {
-        debug!("Mounting NPK with size {}", meta.len());
-    }
-    let archive_reader = ArchiveReader::new(&npk, repo.key.as_ref()).map_err(Error::Npk)?;
-
-    let manifest = archive_reader.manifest();
-    debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
-
-    let instances = manifest.instances.unwrap_or(1);
-
-    let mut mounted_containers = vec![];
-    for instance in 0..instances {
-        let mut manifest = manifest.clone();
-        if instances > 1 {
-            manifest.name.push_str(&format!("-{:03}", instance));
-        }
-        let root = config
-            .run_dir
-            .join(&manifest.name)
-            .join(&format!("{}", manifest.version));
-
-        if !root.exists() {
-            info!("Creating mountpoint {}", root.display());
-            fs::create_dir_all(&root)
-                .await
-                .map_err(|e| Error::Io(format!("Failed to create mountpoint: {}", e), e))?;
-        }
-
-        let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
-            .await
-            .map_err(Error::LoopDevice)?;
-        let device = setup_and_mount_without_verity(&lc, &archive_reader, &root).await?;
-
-        let container = Container {
-            root,
-            manifest,
-            device,
-            repository: repo.id.clone(),
-        };
-
-        let duration = start.elapsed();
-
-        info!(
-            "Installed {}:{} Mounting: {:.03}s",
-            container.manifest.name,
-            container.manifest.version,
-            duration.as_fractional_secs(),
-        );
-        mounted_containers.push(container);
-    }
-
-    Ok(mounted_containers)
-}
-
-async fn mount_verity(
-    config: &Config,
-    npk: &Path,
-    repository: &str,
-    key: &ed25519_dalek::PublicKey,
-) -> Result<Vec<Container>, Error> {
-    let start = time::Instant::now();
-
-    if let Ok(meta) = metadata(&npk).await {
-        debug!("Mounting NPK with size {}", meta.len());
-    }
-
-    let archive_reader = ArchiveReader::new(&npk, Some(key)).map_err(Error::Npk)?;
-    let manifest = archive_reader.manifest();
-    let npk_version = archive_reader.npk_version();
-    if *npk_version != Manifest::VERSION {
-        return Err(Error::Npk(npk::archive::Error::MalformedManifest(format!(
-            "Invalid NPK version (detected: {}, supported: {})",
-            npk_version.to_string(),
-            &Manifest::VERSION
-        ))));
-    }
-    debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
-
-    let instances = manifest.instances.unwrap_or(1);
-
-    let mut mounted_containers = vec![];
-    for instance in 0..instances {
-        let mut manifest = manifest.clone();
-        if instances > 1 {
-            manifest.name.push_str(&format!("-{:03}", instance));
-        }
-        let root = config
-            .run_dir
-            .join(&manifest.name)
-            .join(&format!("{}", manifest.version));
-
-        if !root.exists() {
-            info!("Creating mountpoint {}", root.display());
-            fs::create_dir_all(&root)
-                .await
-                .map_err(|e| Error::Io(format!("Failed to create mountpoint: {}", e), e))?;
-        }
-
-        let name = format!(
-            "northstar_{}_{}_{}",
-            process::id(),
-            manifest.name,
-            manifest.version
-        );
-
-        let device = setup_and_mount(&config, &name, &archive_reader, &root).await?;
-
-        let container = Container {
-            root,
-            manifest,
-            device,
-            repository: repository.to_string(),
-        };
-
-        let duration = start.elapsed();
-
-        info!(
-            "Installed {}:{} Mounting: {:.03}s",
-            container.manifest.name,
-            container.manifest.version,
-            duration.as_fractional_secs(),
-        );
-        mounted_containers.push(container);
-    }
-
-    Ok(mounted_containers)
 }
 
 pub async fn verity_setup(
@@ -325,32 +239,13 @@ pub async fn verity_setup(
     Ok(dm_dev)
 }
 
-async fn setup_and_mount_without_verity(
-    lc: &LoopControl,
-    npk_reader: &ArchiveReader,
-    root: &Path,
-) -> Result<PathBuf, Error> {
-    let fs_type = npk_reader.fs_type().map_err(Error::Npk)?;
-    let mut fs = fs::File::open(&npk_reader.path)
-        .await
-        .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
-
-    let loop_device = losetup(lc, &mut fs, npk_reader.fs_offset, npk_reader.fs_size)
-        .await
-        .map_err(Error::LoopDevice)?;
-
-    let device = loop_device.path().await.unwrap();
-    mount(&device, root, fs_type, MountFlags::MS_RDONLY, None).await?;
-
-    Ok(device)
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn setup_and_mount(
     config: &Config,
     name: &str,
     npk_reader: &ArchiveReader,
     root: &Path,
+    use_verity: bool,
 ) -> Result<PathBuf, Error> {
     let fs_type = npk_reader.fs_type().map_err(Error::Npk)?;
     let mut fs = fs::File::open(&npk_reader.path)
@@ -371,28 +266,34 @@ async fn setup_and_mount(
         .map(|(major, minor)| format!("{}:{}", major, minor))
         .map_err(Error::LoopDevice)?;
 
-    let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
+    if !use_verity {
+        let device = loop_device.path().await.unwrap();
+        mount(&device, root, fs_type, MountFlags::MS_RDONLY, None).await?;
+        Ok(device)
+    } else {
+        let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
 
-    let dm_dev = verity_setup(
-        &config,
-        &loop_device_id,
-        &verity,
-        name,
-        npk_reader.verity_hash(),
-        npk_reader.verity_offset(),
-    )
-    .await?;
+        let dm_dev = verity_setup(
+            &config,
+            &loop_device_id,
+            &verity,
+            name,
+            npk_reader.verity_hash(),
+            npk_reader.verity_offset(),
+        )
+        .await?;
 
-    mount(&dm_dev, root, fs_type, MountFlags::MS_RDONLY, None).await?;
+        mount(&dm_dev, root, fs_type, MountFlags::MS_RDONLY, None).await?;
 
-    dm.device_remove(
-        &name.to_string(),
-        &device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
-    )
-    .await
-    .map_err(Error::DeviceMapper)?;
+        dm.device_remove(
+            &name.to_string(),
+            &device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
+        )
+        .await
+        .map_err(Error::DeviceMapper)?;
 
-    Ok(dm_dev)
+        Ok(dm_dev)
+    }
 }
 
 async fn unmount(target: &Path) -> Result<(), Error> {

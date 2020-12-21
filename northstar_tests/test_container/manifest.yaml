@@ -1,14 +1,13 @@
 name: test_container
 version: 0.0.1
 init: /test_container
-instances: 5
 mounts:
-    /data: persist
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /tmpfs:
-      tmpfs: 20480000
-    /resource:
-        resource: test_resource:0.0.1/
+  /data: persist
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /tmpfs:
+    tmpfs: 20480000
+  /resource:
+    resource: test_resource:0.0.1/

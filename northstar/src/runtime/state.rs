@@ -179,7 +179,7 @@ impl State {
     }
 
     /// Try to find a application with name `name`
-    pub fn application(&mut self, name: &str) -> Option<&Application> {
+    pub fn application(&self, name: &str) -> Option<&Application> {
         self.applications.get(name)
     }
 
@@ -429,13 +429,11 @@ impl State {
             .map_err(|error| Error::Io("Failed to copy NPK to repository".to_string(), error))?;
 
         // Install and mount npk
-        let mounted_containers = mount_npk(&self.config, &package_in_repository, &repository)
+        let mounted_container = mount_npk(&self.config, &package_in_repository, &repository)
             .await
             .map_err(Error::Mount)?;
 
-        for container in mounted_containers {
-            self.add(container)?;
-        }
+        self.add(mounted_container)?;
 
         // Send notification about newly install npk
         Self::notification(
@@ -447,6 +445,8 @@ impl State {
         Ok(())
     }
 
+    // finds the npk that contains either an application that matches the id
+    // or a resource container that matches id and version
     async fn find_installed_npk(
         &self,
         name: &str,
@@ -477,62 +477,67 @@ impl State {
         Ok(None)
     }
 
+    async fn uninstall_resource(
+        &mut self,
+        name: &str,
+        version: &Version,
+    ) -> result::Result<(), Error> {
+        // TODO check if resource still needed
+        self.resources.remove(&(name.to_owned(), version.clone()));
+        Err(Error::ApplicationNotFound)
+    }
+
+    async fn uninstall_app(&mut self, name: &str) -> result::Result<(), Error> {
+        println!("try to uninstall {}", name);
+        match self.applications.get(name) {
+            Some(app) => {
+                println!("we have {}", name);
+                if app.is_running() {
+                    println!("app was running");
+                    Err(Error::ApplicationRunning(name.to_owned()))
+                } else {
+                    println!("unmounting");
+                    let container = app.container();
+                    let wait_for_dm = self
+                        .repositories
+                        .get(&container.repository)
+                        .map(|r| r.key.is_some())
+                        .unwrap_or(false);
+                    umount_npk(container, wait_for_dm)
+                        .await
+                        .map_err(Error::Mount)?;
+                    println!("unmounted");
+                    self.applications.remove(name);
+                    Ok(())
+                }
+            }
+            None => Err(Error::ApplicationNotFound),
+        }
+    }
     /// Remove and umount a specific app
     /// app has to be stopped before it can be uninstalled
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> result::Result<(), Error> {
-        let installed_npk = self.find_installed_npk(name, version).await?;
-        if installed_npk.is_none() {
-            return Err(Error::ApplicationNotFound);
-        }
+        let uninstalled_path = match self.find_installed_npk(name, version).await? {
+            None => {
+                return Err(Error::ApplicationNotFound);
+            }
+            Some((manifest, npk_path)) => {
+                if manifest.init.is_some() {
+                    self.uninstall_app(name).await?;
+                } else {
+                    self.uninstall_resource(name, version).await?;
+                }
+                npk_path
+            }
+        };
 
-        let (manifest, path) = installed_npk.unwrap();
-
-        let instances = manifest
-            .instances
-            .filter(|i| *i > 1)
-            .map(|i| {
-                (0..i)
-                    .into_iter()
-                    .map(|i| format!("{}-{:03}", manifest.name, i))
-                    .collect()
-            })
-            .unwrap_or_else(|| vec![manifest.name.to_string()]);
-
-        let running: Vec<_> = instances
-            .iter()
-            .filter_map(|name| self.applications.get(name))
-            .filter(|app| app.is_running())
-            .collect();
-
-        if !running.is_empty() {
-            warn!("Cannot uninstall while instances are running {:?}", running);
-            return Err(Error::ApplicationRunning(name.to_owned()));
-        }
-
-        let containers = instances.iter().filter_map(|name| {
-            let application = self.applications.get(name).map(|a| a.container());
-            let resource = self.resources.get(&(name.clone(), version.clone()));
-            application.or(resource)
-        });
-
-        for container in containers {
-            let repo = self.repositories.get(&container.repository);
-            info!("Unmounting {}", &container.manifest.name);
-            umount_npk(container, repo.map(|r| r.key.is_some()).unwrap_or(false))
-                .await
-                .map_err(Error::Mount)?;
-        }
-
-        for instance in instances {
-            let key = (instance, version.clone());
-            self.applications.remove(&key.0);
-            self.resources.remove(&key);
-        }
-
-        info!("Removing NPK {} from repository", path.display());
-        fs::remove_file(&path)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to remove {}", path.display()), e))?;
+        info!("Removing NPK {} from registry", uninstalled_path.display());
+        fs::remove_file(&uninstalled_path).await.map_err(|e| {
+            Error::Io(
+                format!("Failed to remove {}", uninstalled_path.display()),
+                e,
+            )
+        })?;
 
         Self::notification(
             &self.events_tx,
@@ -631,3 +636,70 @@ async fn mount_repositories(state: &mut State) -> Result<(), Error> {
 
     Ok(())
 }
+
+// #[cfg(test)]
+// mod tests {
+
+//     use super::{Config, Container, State};
+//     use anyhow::{Context, Result};
+//     use npk::manifest::*;
+//     use std::path::PathBuf;
+//     use tokio::sync::mpsc;
+
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn uninstall_application() -> Result<()> {
+//         let config_str = r#"
+// debug = true
+// console_address = "localhost:4200"
+// container_uid = 1000
+// container_gid = 1000
+
+// [directories]
+// container_dirs = [ "target/north/registry" ]
+// run_dir = "target/north/run"
+// data_dir = "target/north/data"
+// key_dir = "../examples/keys"
+
+// [cgroups]
+// memory = "north"
+// cpu = "north"
+
+// [devices]
+// unshare_root = "/"
+// unshare_fstype = "ext4"
+// loop_control = "/dev/loop-control"
+// loop_dev = "/dev/loop"
+// device_mapper = "/dev/mapper/control"
+// device_mapper_dev = "/dev/dm-"
+// "#;
+
+//         let config: Config = toml::from_str(&config_str)
+//             .with_context(|| format!("Failed to read configuration file {}", config_str))?;
+//         let (event_tx, _event_rx) = mpsc::channel(1);
+//         let mut state = State::new(&config, event_tx).await?;
+
+//         use std::str::FromStr;
+//         let test_manifest = r#"name: hello
+// version: 0.0.2
+// init: /hello
+// env:
+//     HELLO: north"#;
+//         let manifest = Manifest::from_str(test_manifest)?;
+//         let container = Container {
+//             manifest,
+//             root: PathBuf::from("test"),
+//             device: PathBuf::from("test"),
+//             repository: "repoA".to_owned(),
+//         };
+
+//         let name = container.manifest.name.clone();
+//         state.add(container)?;
+//         assert!(state.applications().last().is_some());
+//         assert!(state.applications().last().is_some());
+//         assert_eq!(1, state.applications().count());
+//         assert_eq!(1, state.applications().count());
+//         state.uninstall_app(&name).await?;
+//         assert_eq!(0, state.applications().count());
+//         Ok(())
+//     }
+// }

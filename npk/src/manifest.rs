@@ -192,10 +192,6 @@ pub struct Manifest {
     /// Seccomp configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seccomp: Option<HashMap<String, String>>,
-    /// Number of instances to mount of this container
-    /// The name gets extended with the instance id.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub instances: Option<u32>,
     /// List of bind mounts and resources
     #[serde(
         with = "MountsSerialization",
@@ -452,7 +448,7 @@ impl Manifest {
     });
 
     fn verify(&self) -> Result<(), ManifestError> {
-        // TODO: check for none on env, autostart, cgroups, seccomp, instances
+        // TODO: check for none on env, autostart, cgroups, seccomp
         if self.init.is_none() && self.args.is_some() {
             return Err(ManifestError::Invalid(
                 "Arguments not allowed in resource container".to_string(),
@@ -591,8 +587,8 @@ name: hello
 version: 0.0.0
 init: /binary
 mounts:
-  /dev: full 
-  /dev: full 
+  /dev: full
+  /dev: full
 ";
         assert!(Manifest::from_str(manifest).is_err());
 
