@@ -1,10 +1,8 @@
 name: hello
-version: 0.0.2
+version: 0.0.1
 init: /hello
 env:
   HELLO: north
-# autostart: true
-# instances: 20
 mounts:
     /lib:
       host: /lib
@@ -12,32 +10,3 @@ mounts:
       host: /lib64
     /system:
       host: /system
-seccomp:
-  clone: 1
-  mmap: arg2 in ~PROT_EXEC || arg2 in ~PROT_WRITE
-  prctl: 1
-  munmap: 1
-  mprotect: arg2 in ~PROT_EXEC || arg2 in ~PROT_WRITE
-  futex: 1
-  openat: 1
-  close: 1
-  newfstatat: 1
-  fstat: 1
-  wait4: 1
-  rt_sigaction: 1
-  readlinkat: 1
-  fstatfs: 1
-  pread64: 1
-  faccessat: 1
-  write: 1
-  nanosleep: 1
-  getrandom: 1
-  read: 1
-  execve: 1
-  set_tid_address: 1
-  sched_getscheduler: 1
-  sigaltstack: 1
-  restart_syscall: 1
-  exit: 1
-  exit_group: 1
-  rt_sigreturn: 1
