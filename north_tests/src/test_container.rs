@@ -30,7 +30,7 @@ lazy_static! {
             .manifest_path("north_tests/test_container/Cargo.toml")
             .target_dir(build_dir.path())
             .run()
-            .wrap_err("Could not build test_container")
+            .wrap_err("Failed to build the test_container")
             .unwrap()
             .path()
             .to_owned();

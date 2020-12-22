@@ -16,8 +16,8 @@
 
 use crate::process_assert::ProcessAssert;
 use color_eyre::eyre::{eyre, Error, Result, WrapErr};
-use north::{api, runtime};
-use std::path::Path;
+use north::{api, runtime, runtime::config::Config};
+use std::{fs, path::Path};
 use tokio::{time, time::timeout};
 
 const TIMEOUT: time::Duration = time::Duration::from_secs(3);
@@ -27,7 +27,19 @@ pub struct Runtime(runtime::Runtime);
 
 impl Runtime {
     /// Launches an instance of north
-    pub async fn launch(config: runtime::config::Config) -> Result<Runtime, Error> {
+    pub async fn launch() -> Result<Runtime, Error> {
+        let config = toml::from_str::<Config>(
+            &fs::read_to_string("north.toml").wrap_err("Failed to read north.toml")?,
+        )
+        .wrap_err("Failed to parse north.toml")?;
+        let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
+            .await
+            .wrap_err("Launching north timed out")
+            .and_then(|result| result.wrap_err("Failed to instantiate north runtime"))?;
+        Ok(Runtime(runtime))
+    }
+
+    pub async fn launch_with_config(config: runtime::config::Config) -> Result<Runtime, Error> {
         let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
             .wrap_err("Launching north timed out")

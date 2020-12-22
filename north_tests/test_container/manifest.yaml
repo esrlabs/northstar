@@ -8,8 +8,6 @@ mounts:
       host: /lib
     /lib64:
       host: /lib64
-    /system:
-      host: /system
     /tmpfs:
       tmpfs: 20480000
     /resource:

@@ -14,8 +14,7 @@
 
 use color_eyre::eyre::{eyre, Result};
 use north_tests::{
-    config::default_config,
-    logger::wait_for_log_pattern,
+    logger,
     runtime::Runtime,
     test,
     test_container::{get_test_container_npk, get_test_resource_npk},
@@ -24,7 +23,7 @@ use std::{path::Path, time::Duration};
 use tokio::fs;
 
 test!(hello, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await.unwrap();
     let hello = runtime.start("hello").await?;
     let hello = hello.ok_or_else(|| eyre!("Failed to get hello's PID"))?;
 
@@ -37,7 +36,7 @@ test!(hello, {
 });
 
 test!(cpueater, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await.unwrap();
     let cpueater = runtime.start("cpueater").await?;
     let cpueater = cpueater.ok_or_else(|| eyre!("Failed to get cpueater's PID"))?;
 
@@ -50,7 +49,7 @@ test!(cpueater, {
 });
 
 test!(memeater, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await.unwrap();
     let memeater = runtime.start("memeater").await?;
     let memeater = memeater.ok_or_else(|| eyre!("Failed to get memeater's PID"))?;
 
@@ -68,7 +67,7 @@ test!(memeater, {
 });
 
 test!(data_and_resource_mounts, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await.unwrap();
 
     // install test container & resource
     runtime.install("examples", get_test_resource_npk()).await?;
@@ -87,7 +86,7 @@ test!(data_and_resource_mounts, {
     // // Start the test_container process
     runtime.start("test_container-000").await.map(drop)?;
 
-    wait_for_log_pattern("hello from test resource", Duration::from_secs(5)).await?;
+    logger::assume("hello from test resource", Duration::from_secs(5)).await?;
 
     runtime.stop("test_container-000").await?;
 
@@ -102,7 +101,7 @@ test!(data_and_resource_mounts, {
 });
 
 test!(crashing_containers, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await.unwrap();
 
     let data_dir = Path::new("target/north/data/").canonicalize()?;
 
