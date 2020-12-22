@@ -37,9 +37,9 @@ assert_is_toplevel_dir() {
 # work correct, the scope must be global
 TMP_DIR=""
 cleanup_tmpdir() {
-	if [[ ! -z ${TMP_DIR} ]] ; then
-		rm -rf $TMP_DIR
-	fi
+  if [[ ! -z ${TMP_DIR} ]] ; then
+    rm -rf $TMP_DIR
+  fi
 }
 
 create_temp_dir() {
@@ -112,6 +112,7 @@ main() {
     "./examples/container/resource/ferris"
     "./examples/container/resource/ferris_says_hello"
     "./examples/container/resource/hello_message"
+    "./examples/container/seccomp"
   )
 
   local OUTPUT_DIR="./target/north/registry"
