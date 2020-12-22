@@ -69,11 +69,9 @@ test!(memeater, {
 test!(data_and_resource_mounts, {
     let mut runtime = Runtime::launch().await.unwrap();
 
-    // install test container & resource
-    runtime.install("examples", get_test_resource_npk()).await?;
-    runtime
-        .install("examples", get_test_container_npk())
-        .await?;
+    // Install test container & resource
+    runtime.install("default", get_test_resource_npk()).await?;
+    runtime.install("default", get_test_container_npk()).await?;
 
     let data_dir = Path::new("target/northstar/data/test_container-000");
     fs::create_dir_all(&data_dir).await?;
@@ -106,10 +104,8 @@ test!(crashing_containers, {
     let data_dir = Path::new("target/northstar/data/").canonicalize()?;
 
     // install test container
-    runtime.install("examples", get_test_resource_npk()).await?;
-    runtime
-        .install("examples", get_test_container_npk())
-        .await?;
+    runtime.install("default", get_test_resource_npk()).await?;
+    runtime.install("default", get_test_container_npk()).await?;
 
     for i in 0..5 {
         let dir = data_dir.join(format!("test_container-{:03}", i));
