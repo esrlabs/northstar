@@ -206,10 +206,10 @@ pub struct Manifest {
     /// String containing capability names to give to
     /// new container
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capability_str: Option<String>,
+    pub capabilities: Option<Vec<String>>,
     /// String containing group names to give to new container
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub supplgroups_str: Option<String>,
+    pub suppl_groups: Option<Vec<String>>,
 }
 
 /// Configuration for the persist mounts
@@ -490,6 +490,13 @@ args:
   - two
 env:
   LD_LIBRARY_PATH: /lib
+suppl_groups:
+  - inet
+  - log
+capabilities:
+  - cap_net_raw
+  - cap_mknod
+  - cap_sys_time
 mounts:
   /tmp:
     tmpfs: 42
@@ -508,14 +515,8 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-    fork: 1
-    waitpid: 1
-log:
-    tag: test
-    buffer:
-        custom: 8
-capability_str: cap_net_raw cap_mknod cap_sys_time
-supplgroups_str: inet log
+  fork: 1
+  waitpid: 1
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -567,10 +568,17 @@ supplgroups_str: inet log
         assert_eq!(manifest.seccomp, Some(seccomp));
 
         assert_eq!(
-            manifest.capability_str,
-            Some(String::from("cap_net_raw cap_mknod cap_sys_time"))
+            manifest.capabilities,
+            Some(vec!(
+                "cap_net_raw".to_string(),
+                "cap_mknod".to_string(),
+                "cap_sys_time".to_string()
+            ))
         );
-        assert_eq!(manifest.supplgroups_str, Some(String::from("inet log")));
+        assert_eq!(
+            manifest.suppl_groups,
+            Some(vec!("inet".to_string(), "log".to_string()))
+        );
 
         Ok(())
     }

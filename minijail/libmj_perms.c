@@ -76,7 +76,7 @@ int minijail_parse_caps(char *capstr, uint64_t *capval)
 		cp = strtok(NULL, " ");
 	}
 
-	info("cap vector %lx", caps);
+	info("Capability vector is 0x%lx", caps);
 	*capval = caps;
 out:
 	if (str)
@@ -102,7 +102,7 @@ int minijail_parse_groups(char *grpstr, int *gidcnt, gid_t **bufp)
 	}
 
 	count = fixup_args(str);
-	info("groups %s count %d", grpstr, count);
+	info("Groups %s with count %d", grpstr, count);
 
 	gidbuf = malloc(count * sizeof(gid_t));
 	if (gidbuf == NULL) {

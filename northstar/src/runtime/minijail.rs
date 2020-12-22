@@ -200,13 +200,16 @@ impl Process {
         jail.change_gid(gid);
 
         // Update the capability mask if specified
-        if let Some(caps) = &manifest.capability_str {
-            jail.update_caps(caps).map_err(Error::Minijail)?;
+        if let Some(capabilities) = &manifest.capabilities {
+            // TODO: the capabilities should be passed as an array
+            jail.update_caps(&capabilities.join(" "))
+                .map_err(Error::Minijail)?;
         }
 
         // Update the supplementary group list if specified
-        if let Some(suppl_groups) = &manifest.supplgroups_str {
-            jail.update_suppl_groups(suppl_groups)
+        if let Some(suppl_groups) = &manifest.suppl_groups {
+            // TODO: the groups should be passed an array
+            jail.update_suppl_groups(&suppl_groups.join(" "))
                 .map_err(Error::Minijail)?;
         }
 

@@ -1,6 +1,10 @@
 name: capabilities
 version: 0.0.1
 init: /capabilities
+capabilities:
+  - cap_net_raw
+suppl_groups:
+  - inet
 mounts:
     /lib:
       host: /lib
@@ -8,5 +12,3 @@ mounts:
       host: /lib64
     /system:
       host: /system
-capability_str: cap_net_raw
-supplgroups_str: inet
