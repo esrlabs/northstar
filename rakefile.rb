@@ -1,6 +1,8 @@
 REPOSITORY = `pwd`.strip + '/target/northstar/repository'
 KEY = `pwd`.strip + '/examples/keys/northstar.key'
 
+directory REPOSITORY
+
 def cross_targets
   %w[
     aarch64-linux-android
@@ -55,12 +57,27 @@ task :setup do
   'cargo install --version 0.2.1 cross' unless which('cross')
 end
 
+namespace :examples do
+  desc 'Build example containers'
+  task :build => REPOSITORY do
+    sh './examples/build_examples.sh'
+  end
+
+  desc 'Clean examples'
+  task :clean do
+    rm_rf Dir.glob("#{REPOSITORY}/*.npk")
+  end
+
+  desc 'list examples repository'
+  task :list do
+    Dir.glob("#{REPOSITORY}/*.npk").each do |npk|
+      system "cargo run -q --bin sextant -- inspect --short #{npk}"
+    end
+  end
+end
+
 namespace :test do
-  desc 'Prepare integration test run'
-  task :prepare do
-    require 'tmpdir'
-    mkdir_p REPOSITORY unless Dir.exist?(REPOSITORY)
-    `./examples/build_examples.sh`
+  task :prepare => :examples do
     `cargo build -p northstar`
     `cargo build -p nstar`
     `cargo build --release -p test_container`
