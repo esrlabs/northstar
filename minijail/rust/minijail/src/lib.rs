@@ -841,7 +841,7 @@ impl Minijail {
                 str: strarg.to_owned(),
             });
         }
-        return Ok(());
+        Ok(())
     }
 
     pub fn update_suppl_groups(&mut self, strarg: &str) -> Result<()> {
@@ -858,7 +858,7 @@ impl Minijail {
                 str: strarg.to_owned(),
             });
         }
-        return Ok(());
+        Ok(())
     }
 }
 
