@@ -1,0 +1,10 @@
+name: resource_hello
+version: 0.0.1
+init: /resource_hello
+mounts:
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /message:
+    resource: hello_message:0.0.1/

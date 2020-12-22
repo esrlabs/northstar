@@ -498,7 +498,12 @@ impl State {
                             version,
                             app.name()
                         );
-                        return Err(Error::ResourceStillNeeded(format!("{}.{}", name, version)));
+                        return Err(Error::ResourceBusy(format!(
+                            "{}.{} needed by {}",
+                            name,
+                            version,
+                            app.name()
+                        )));
                     }
                 }
             }
@@ -524,15 +529,11 @@ impl State {
     }
 
     async fn uninstall_app(&mut self, name: &str) -> result::Result<(), Error> {
-        println!("try to uninstall {}", name);
         match self.applications.get(name) {
             Some(app) => {
-                println!("we have {}", name);
                 if app.is_running() {
-                    println!("app was running");
                     Err(Error::ApplicationRunning(name.to_owned()))
                 } else {
-                    println!("unmounting");
                     let container = app.container();
                     let wait_for_dm = self
                         .repositories
@@ -542,7 +543,6 @@ impl State {
                     umount_npk(container, wait_for_dm)
                         .await
                         .map_err(Error::Mount)?;
-                    println!("unmounted");
                     self.applications.remove(name);
                     Ok(())
                 }

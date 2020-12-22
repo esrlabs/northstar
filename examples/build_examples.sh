@@ -110,6 +110,7 @@ main() {
     "./examples/container/hello"
     "./examples/container/memeater"
     "./examples/container/capabilities"
+    "./examples/container/resource/resource_hello"
     "./examples/container/resource/ferris"
     "./examples/container/resource/ferris_says_hello"
     "./examples/container/resource/hello_message"
