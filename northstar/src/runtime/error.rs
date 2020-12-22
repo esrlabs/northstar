@@ -31,8 +31,6 @@ pub enum Error {
     ContainerAlreadyInstalled(String),
     #[error("Failed to find repository with id {0}")]
     RepositoryNotFound(String),
-    #[error("Repository {0} is not writable")]
-    RepositoryNotWritable(String),
 
     #[error("Npk: {0:?}")]
     Npk(archive::Error),
@@ -64,7 +62,6 @@ impl From<Error> for api::Error {
             Error::MissingResource(resource) => api::Error::MissingResource(resource),
             Error::ContainerAlreadyInstalled(name) => api::Error::ContainerAlreadyInstalled(name),
             Error::RepositoryNotFound(id) => api::Error::RepositoryNotFound(id),
-            Error::RepositoryNotWritable(id) => api::Error::RepositoryNotWritable(id),
             Error::Npk(error) => api::Error::Npk(error.to_string()),
             Error::Process(error) => api::Error::Process(error.to_string()),
             Error::Console(error) => api::Error::Console(error.to_string()),

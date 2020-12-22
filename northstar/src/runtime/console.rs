@@ -373,7 +373,6 @@ fn list_containers(state: &State) -> Vec<api::Container> {
 fn list_repositories(state: &State) -> HashMap<RepositoryId, api::Repository> {
     fn from(repository: &crate::runtime::state::Repository) -> api::Repository {
         api::Repository {
-            writable: repository.writable,
             dir: repository.dir.clone(),
         }
     }

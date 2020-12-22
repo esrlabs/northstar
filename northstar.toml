@@ -5,9 +5,8 @@ container_gid = 1000
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 
-[repositories.examples]
+[repositories.default]
 dir = "target/northstar/repository"
-writable = true
 key = "examples/keys/northstar.pub"
 
 [cgroups]

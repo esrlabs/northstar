@@ -235,7 +235,6 @@ async fn main() -> Result<()> {
                                 Ok(Some(Response::Repositories(r))) => {
                                     if opt.json {
                                         println!("{}", serde_json::to_string_pretty(&r).unwrap());
-
                                     } else {
                                         format_repositories(&r);
                                     }
@@ -491,7 +490,6 @@ fn format_repositories(repositories: &HashMap<RepositoryId, api::Repository>) {
     table.set_titles(Row::new(vec![
         Cell::new("Name").with_style(Attr::Bold),
         Cell::new("Path").with_style(Attr::Bold),
-        Cell::new("Writable").with_style(Attr::Bold),
     ]));
     for (id, repo) in repositories.iter().sorted_by_key(|(i, _)| (*i).clone())
     // Sort by name
@@ -499,7 +497,6 @@ fn format_repositories(repositories: &HashMap<RepositoryId, api::Repository>) {
         table.add_row(Row::new(vec![
             Cell::new(&id).with_style(Attr::Bold),
             Cell::new(&repo.dir.display().to_string()),
-            Cell::new(&repo.writable.to_string()),
         ]));
     }
     table.printstd();

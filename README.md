@@ -213,7 +213,7 @@ container_gid = 1000
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 
-[repositories.examples]
+[repositories.default]
 dir = "target/northstar/repository"
 writable = true
 key = "examples/keys/northstar.pub"
@@ -232,12 +232,10 @@ device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
 ```
 
-The `[repositories.examples]` describes a container repository named `examples`.
+The `[repositories.default]` sections describes a container repository named `default`.
 Within it, the following options can be specified:
 
 * **`dir`** -- The directory where to find `*.npk` packages for the correct architecture.
-* **`writable`** -- That indicates if containers can be installed/uninstalled
-    from this repository.
 * **`key`** -- The path to the public signing key used to sign the containers.
 
 Multiple `[repositories.<name>]` sections can be specified for separate

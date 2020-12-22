@@ -92,7 +92,6 @@ pub struct Container {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Repository {
-    pub writable: bool,
     pub dir: PathBuf,
 }
 
@@ -128,7 +127,6 @@ pub enum Error {
     MissingResource(String),
     ContainerAlreadyInstalled(String),
     RepositoryNotFound(String),
-    RepositoryNotWritable(String),
 
     Npk(String),
     Process(String),

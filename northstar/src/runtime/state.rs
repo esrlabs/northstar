@@ -39,7 +39,6 @@ use tokio::{fs, stream::StreamExt, time};
 pub struct Repository {
     pub id: RepositoryId,
     pub dir: PathBuf,
-    pub writable: bool,
     pub key: Option<PublicKey>,
 }
 
@@ -146,13 +145,11 @@ impl State {
                 }
             };
             let dir = repository.dir.clone();
-            let writable = repository.writable;
             repositories.insert(
                 id.clone(),
                 Repository {
                     id: id.clone(),
                     dir,
-                    writable,
                     key,
                 },
             );
@@ -397,10 +394,6 @@ impl State {
             .repositories
             .get(id)
             .ok_or_else(|| Error::RepositoryNotFound(id.to_owned()))?;
-
-        if !repository.writable {
-            return Err(Error::RepositoryNotWritable(id.to_owned()));
-        }
 
         let manifest = ArchiveReader::new(npk, repository.key.as_ref())
             .map_err(Error::Npk)?
