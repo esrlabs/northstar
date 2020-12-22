@@ -7,6 +7,7 @@ members = [
     "examples/container/datarw",
     "examples/container/hello",
     "examples/container/memeater",
+    "examples/container/resource/resource_hello",
     "examples/container/resource/ferris",
     "examples/container/seccomp",
     "libcap-sys",

@@ -124,7 +124,7 @@ pub enum Error {
     ApplicationNotFound,
     ApplicationNotRunning,
     ApplicationRunning(String),
-    ResourceStillInUse(String),
+    ResourceBusy(String),
     MissingResource(String),
     ContainerAlreadyInstalled(String),
     RepositoryNotFound(String),
