@@ -10,14 +10,15 @@
 
 #include <stdbool.h>
 #include <string.h>
-#if MUSL_C
-#include <linux/capability.h>
-#else
-#include <sys/capability.h>
-#endif
-
 #include <sys/prctl.h>
 #include <sys/types.h>
+
+/*
+ * To avoid issues with Android and the MUSL toolchain,
+ * we compile the functions we need from the capability
+ * library directly
+ */
+#include "libcap/include/sys/capability.h"
 
 #ifdef __cplusplus
 extern "C" {
