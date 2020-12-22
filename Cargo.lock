@@ -1090,7 +1090,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf51a729ecf40266a2368ad335a5fdde43471f545a967109cd62146ecf8b66ff"
 
 [[package]]
-name = "north"
+name = "northstar"
 version = "0.6.0"
 dependencies = [
  "anyhow",
@@ -1131,7 +1131,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "north_tests"
+name = "northstar_tests"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
@@ -1140,7 +1140,7 @@ dependencies = [
  "lazy_static",
  "log",
  "nix 0.17.0",
- "north",
+ "northstar",
  "npk",
  "regex",
  "tempfile",
@@ -1186,7 +1186,7 @@ dependencies = [
  "futures",
  "itertools",
  "log",
- "north",
+ "northstar",
  "npk",
  "pretty_env_logger",
  "prettytable-rs",
@@ -1756,7 +1756,7 @@ dependencies = [
  "ed25519-dalek",
  "env_logger 0.8.2",
  "log",
- "north",
+ "northstar",
  "npk",
  "structopt",
  "tempfile",

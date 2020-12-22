@@ -53,7 +53,7 @@ macro_rules! test {
         #[ignore]
         #[test]
         fn $name() -> Result<()> {
-            ::north_tests::macros::init();
+            ::northstar_tests::macros::init();
             let tokio = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_name("$name")

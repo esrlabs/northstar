@@ -16,7 +16,7 @@ use anyhow::{anyhow, Context, Result};
 use futures::{sink::SinkExt, Sink};
 use itertools::Itertools;
 use log::{info, warn};
-use north::api::{self, Container, Message, Notification, Payload, Request, Response};
+use northstar::api::{self, Container, Message, Notification, Payload, Request, Response};
 use npk::{archive::RepositoryId, manifest::Version};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, env, path::Path, sync::Arc};
@@ -45,7 +45,7 @@ uninstall <name> <version>:   Unstall npk";
 #[derive(Debug, StructOpt)]
 #[structopt(name = "nstar", about = "Northstar CLI")]
 struct Opt {
-    /// File that contains the north configuration
+    /// File that contains the northstar configuration
     #[structopt(short, long, default_value = "localhost:4200")]
     host: String,
 

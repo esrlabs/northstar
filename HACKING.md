@@ -1,6 +1,6 @@
 ## Rust environment
 
-Developing with north requires some tooling. The first starting point is to install `Rust` via `https://rustup.rs`.
+Developing with northstar requires some tooling. The first starting point is to install `Rust` via `https://rustup.rs`.
 
 ### Install Rust nightly toolchain
 
@@ -50,7 +50,7 @@ rake coverage
 Integration tests can be run on `Linux` targets:
 
 ```shell
-cargo build --bin north
+cargo build --bin northstar
 cargo build --bin nstar
-cargo test -p tests -- --test-threads 1 --ignored
+cargo test -p northstar_tests -- --test-threads 1 --ignored
 ```

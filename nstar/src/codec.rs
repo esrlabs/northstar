@@ -14,7 +14,7 @@
 
 use anyhow::Error;
 use bytes::{Buf, BufMut, Bytes};
-use north::api::{self};
+use northstar::api::{self};
 use tokio_util::codec;
 
 pub(crate) enum Message {
@@ -22,7 +22,7 @@ pub(crate) enum Message {
     Raw(Bytes),
 }
 
-/// A tokio_util Codec for the north api protocol
+/// A tokio_util Codec for the northstar api protocol
 #[derive(Default)]
 pub(crate) struct Codec {
     len: Option<usize>,

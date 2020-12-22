@@ -30,19 +30,19 @@ pub struct Repository {
 pub struct CGroups {
     /// CGroups Memory dir. This is the subdir added to the root memory cgroup.
     /// The directory is created if it does not exist.
-    /// This groups acts as the toplevel north memory cgroup.
+    /// This groups acts as the toplevel northstar memory cgroup.
     pub memory: PathBuf,
 
     /// CGroups CPU dir. This is the subdir added to the root cpu cgroup.
     /// The directory is created if it does not exist.
-    /// This groups acts as the toplevel north cpu cgroup.
+    /// This groups acts as the toplevel northstar cpu cgroup.
     pub cpu: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Devices {
-    /// Parent mountpoint of north path. North needs to set private mount propagation
-    /// on the parent mount of the north runtime dir. This mountpoint varies.
+    /// Parent mountpoint of northstar path. Northstar needs to set private mount propagation
+    /// on the parent mount of the northstar runtime dir. This mountpoint varies.
     pub unshare_root: PathBuf,
     /// Filesystem type of the fs mounted on `unshare_root`
     pub unshare_fstype: String,

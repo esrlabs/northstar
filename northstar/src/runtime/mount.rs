@@ -224,7 +224,7 @@ async fn mount_verity(
         }
 
         let name = format!(
-            "north_{}_{}_{}",
+            "northstar_{}_{}_{}",
             process::id(),
             manifest.name,
             manifest.version

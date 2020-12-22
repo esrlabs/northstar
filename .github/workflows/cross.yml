@@ -20,7 +20,7 @@ jobs:
           - hello
           - memeater
           - minijail
-          - north
+          - northstar
           - test_container
     steps:
       - name: Cache

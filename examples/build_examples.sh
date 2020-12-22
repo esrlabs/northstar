@@ -97,7 +97,7 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/north.key"
+  exe cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key"
 }
 
 main() {
@@ -115,7 +115,7 @@ main() {
     "./examples/container/seccomp"
   )
 
-  local OUTPUT_DIR="./target/north/registry"
+  local OUTPUT_DIR="./target/northstar/registry"
 
   echo "${bold}Creating ${OUTPUT_DIR}${normal}"
   exe mkdir -p "${OUTPUT_DIR}"

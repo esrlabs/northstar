@@ -16,17 +16,17 @@
 
 use anyhow::{Context, Error};
 use log::{info, warn};
-use north::runtime;
+use northstar::runtime;
 use runtime::config::Config;
 use std::{env, fs::read_to_string, path::PathBuf, process::exit};
 use structopt::StructOpt;
 use tokio::{select, signal::unix::SignalKind};
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "north", about = "Northstar")]
+#[structopt(name = "northstar", about = "Northstar")]
 struct Opt {
-    /// File that contains the north configuration
-    #[structopt(short, long, default_value = "north.toml")]
+    /// File that contains the northstar configuration
+    #[structopt(short, long, default_value = "northstar.toml")]
     pub config: PathBuf,
 
     #[structopt(short, long)]
@@ -42,19 +42,19 @@ fn main() -> Result<(), Error> {
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
 
     let log_filter = if opt.debug || config.debug {
-        "north=debug"
+        "northstar=debug"
     } else {
-        "north=info"
+        "northstar=info"
     };
     {
         logd_logger::builder()
             .parse_filters(log_filter)
-            .tag("north")
+            .tag("northstar")
             .init();
     }
 
     info!(
-        "North v{} ({})",
+        "Northstar v{} ({})",
         env!("VERGEN_SEMVER"),
         env!("VERGEN_SHA_SHORT")
     );

@@ -1,5 +1,5 @@
-REGISTRY = `pwd`.strip + '/target/north/registry'
-KEY = `pwd`.strip + '/examples/keys/north.key'
+REGISTRY = `pwd`.strip + '/target/northstar/registry'
+KEY = `pwd`.strip + '/examples/keys/northstar.key'
 
 def cross_targets
   %w[
@@ -61,14 +61,14 @@ namespace :test do
     require 'tmpdir'
     mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
     `./examples/build_examples.sh`
-    `cargo build -p north`
+    `cargo build -p northstar`
     `cargo build -p nstar`
     `cargo build --release -p test_container`
   end
 
   desc 'Run integration tests'
   task :run => :prepare do
-    puts `cargo test -p north_tests -- --test-threads 1 --ignored`
+    puts `cargo test -p northstar_tests -- --test-threads 1 --ignored`
   end
 
   desc 'Test coverage'
@@ -85,8 +85,8 @@ namespace :test do
     sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly test', verbose: false)
     cov_dir = 'target/debug/coverage'
     sh "mkdir #{cov_dir}"
-    sh "grcov ./target/debug/ -s north/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/north"
-    info "Code coverage report for north in: ./#{cov_dir}/north/index.html"
+    sh "grcov ./target/debug/ -s northstar/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/northstar"
+    info "Code coverage report for northstar in: ./#{cov_dir}/northstar/index.html"
   end
 end
 

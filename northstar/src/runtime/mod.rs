@@ -62,7 +62,7 @@ pub(crate) enum Event {
     Exit(Name, ExitStatus),
     /// Out of memory event occured
     Oom(Name),
-    /// North shall shut down
+    /// Northstar shall shut down
     Shutdown,
     /// Stdout and stderr of child processes
     ChildOutput { name: Name, fd: i32, line: String },

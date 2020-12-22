@@ -27,7 +27,7 @@ lazy_static! {
         let root = package_dir.path().join("root");
 
         let binary_path = CargoBuild::new()
-            .manifest_path("north_tests/test_container/Cargo.toml")
+            .manifest_path("northstar_tests/test_container/Cargo.toml")
             .target_dir(build_dir.path())
             .run()
             .wrap_err("Failed to build the test_container")
@@ -46,23 +46,23 @@ lazy_static! {
 
         copy_file(&binary_path, &root);
         copy_file(
-            Path::new("north_tests/test_container/manifest.yaml"),
+            Path::new("northstar_tests/test_container/manifest.yaml"),
             package_dir.path(),
         );
 
         npk::pack(
             package_dir.path(),
             REPOSITORIES_DIR.path(),
-            Path::new("examples/keys/north.key"),
+            Path::new("examples/keys/northstar.key"),
         )
         .unwrap();
         REPOSITORIES_DIR.path().join("test_container-0.0.1.npk")
     };
     static ref TEST_RESOURCE_NPK: PathBuf = {
         npk::pack(
-            Path::new("north_tests/test_resource"),
+            Path::new("northstar_tests/test_resource"),
             REPOSITORIES_DIR.path(),
-            Path::new("examples/keys/north.key"),
+            Path::new("examples/keys/northstar.key"),
         )
         .unwrap();
         REPOSITORIES_DIR.path().join("test_resource-0.0.1.npk")

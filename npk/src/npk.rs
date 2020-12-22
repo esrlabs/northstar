@@ -88,7 +88,7 @@ pub enum Error {
     },
 }
 
-/// Create an NPK for the north runtime.
+/// Create an NPK for the northstar runtime.
 /// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
 /// and packs the results into a zipped NPK file.
 ///
@@ -98,8 +98,8 @@ pub enum Error {
 ///
 /// sextant pack \
 /// --dir examples/container/hello \
-/// --out target/north/registry \
-/// --key examples/keys/north.key \
+/// --out target/northstar/registry \
+/// --key examples/keys/northstar.key \
 pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;
 
@@ -316,7 +316,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
 fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     let signature = key_pair.sign(hashes_yaml.as_bytes());
     let signature_base64 = base64::encode(signature);
-    let key_id = "north";
+    let key_id = "northstar";
     let signature_yaml = format!(
         "{}---\nkey: {}\nsignature: {}",
         &hashes_yaml, &key_id, &signature_base64

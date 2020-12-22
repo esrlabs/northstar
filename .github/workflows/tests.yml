@@ -30,6 +30,6 @@ jobs:
         run: |
             ./examples/build_examples.sh
       - name: Integration Tests
-        run: cargo test -p north_tests -- --test-threads 1 --ignored --color always
+        run: cargo test -p northstar_tests -- --test-threads 1 --ignored --color always
         env:
             CLICOLOR_FORCE: yes

@@ -180,7 +180,7 @@ pub struct Manifest {
     /// Environment passed to container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
-    /// Autostart this container upon north startup
+    /// Autostart this container upon northstar startup
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
     /// Action on application exit

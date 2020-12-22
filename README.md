@@ -188,10 +188,10 @@ Execute the following commands:
 The Northstar runtime is an executable and usually run as a daemon started by your system manager of choice. It can be started with a config file.
 
 ```shell
-North
+Northstar
 
 USAGE:
-    north [FLAGS] [OPTIONS]
+    northstar [FLAGS] [OPTIONS]
 
 FLAGS:
     -d, --debug      Print debug logs
@@ -199,7 +199,7 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-    -c, --config <config>    File that contains the north configuration [default: north.toml]
+    -c, --config <config>    File that contains the northstar configuration [default: northstar.toml]
 ```
 
 The configuration of the runtime is done with a `*.toml` configuration file.
@@ -210,18 +210,18 @@ debug = true
 console_address = "localhost:4200"
 container_uid = 1000
 container_gid = 1000
-run_dir = "target/north/run"
-data_dir = "target/north/data"
+run_dir = "target/northstar/run"
+data_dir = "target/northstar/data"
 
 [repositories.examples]
-dir = "target/north/registry"
+dir = "target/northstar/registry"
 writable = true
-key = "examples/keys/north.pub"
+key = "examples/keys/northstar.pub"
 
 
 [cgroups]
-memory = "north"
-cpu = "north"
+memory = "northstar"
+cpu = "northstar"
 
 [devices]
 unshare_root = "/"

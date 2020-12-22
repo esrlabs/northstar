@@ -1,17 +1,17 @@
 [package]
-name = "north"
+name = "northstar"
 version = "0.6.0"
 authors = ["ESRLabs"]
 edition = "2018"
 build = "build.rs"
-default-run = "north"
+default-run = "northstar"
 license-file = "LICENSE.md"
 
 [[bin]]
-name = "north"
+name = "northstar"
 
 [lib]
-name = "north"
+name = "northstar"
 
 [dependencies]
 anyhow = "1.0.34"

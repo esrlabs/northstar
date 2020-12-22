@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use color_eyre::eyre::{eyre, Result};
-use north_tests::{
+use northstar_tests::{
     logger,
     runtime::Runtime,
     test,
@@ -75,7 +75,7 @@ test!(data_and_resource_mounts, {
         .install("examples", get_test_container_npk())
         .await?;
 
-    let data_dir = Path::new("target/north/data/test_container-000");
+    let data_dir = Path::new("target/northstar/data/test_container-000");
     fs::create_dir_all(&data_dir).await?;
 
     let input_file = data_dir.join("input.txt");
@@ -103,7 +103,7 @@ test!(data_and_resource_mounts, {
 test!(crashing_containers, {
     let mut runtime = Runtime::launch().await.unwrap();
 
-    let data_dir = Path::new("target/north/data/").canonicalize()?;
+    let data_dir = Path::new("target/northstar/data/").canonicalize()?;
 
     // install test container
     runtime.install("examples", get_test_resource_npk()).await?;

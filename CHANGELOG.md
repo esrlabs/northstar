@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+* Rename the default configuration file from north.toml to northstar.toml
 * The `[directories]` section in the `north.toml` configuration file is replaced
   by multiple `[repositories.<name>]` sections. Where each corresponds to a
   directory previously specified in the `container_dirs` parameter. The
@@ -42,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 * Installation of packages:
-  When a package is installed, it is now streamed to the north daemon
+  When a package is installed, it is now streamed to the northstar daemon
 * Dedicated error types instead of generic anyhow errors
 * Resource-Containers: now multiple versions are possible
 * nstar is now implemented with tokio

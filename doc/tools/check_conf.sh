@@ -30,7 +30,7 @@ else
 	tmpdir=/tmp
 fi
 
-# this appears as 'device_mapper' in north.toml
+# this appears as 'device_mapper' in northstar.toml
 #
 # Note that the /dev/mapper/control entry can exist without
 # BLK_DEV_DM being configured. This is the case with stock
@@ -47,7 +47,7 @@ mapper_check() {
 	fi
 }
 
-# this appears as 'loop_control' in north.toml
+# this appears as 'loop_control' in northstar.toml
 #
 # Check for loop devices. The number is dependent on how many containers
 # will be created. For testing the initial config, we check for 8

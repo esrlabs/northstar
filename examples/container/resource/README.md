@@ -48,7 +48,7 @@ Installing ferris_says_hello-x86_64-unknown-linux-gnu-0.0.3.npk
 -> Attaching ferris_says_hello-x86_64-unknown-linux-gnu-0.0.3.npk to loopback device at /dev/loop10
 -> Creating verity device (name: north_ferris_says_hello_0.0.3)
 -> Verity-device used: /dev/dm-1
--> Mount read-only squashfs filesystem on device /dev/dm-1 to this location:target/north/run/ferris_says_hello/0.0.3
+-> Mount read-only squashfs filesystem on device /dev/dm-1 to this location:target/northstar/run/ferris_says_hello/0.0.3
 ```
 
 ### Installation of the `ferris` image
@@ -59,7 +59,7 @@ Created loop device /dev/loop11
 Attaching ferris-x86_64-unknown-linux-gnu-0.0.2.npk to loopback device at /dev/loop11
 Creating verity device (name: north_ferris_0.0.2)
 Verity-device used: /dev/dm-2
-Mount read-only squashfs filesystem on device /dev/dm-2 to this location:target/north/run/ferris/0.0.2
+Mount read-only squashfs filesystem on device /dev/dm-2 to this location:target/northstar/run/ferris/0.0.2
 ```
 
 ### Installation of the `hello_message` image
@@ -70,7 +70,7 @@ Created loop device /dev/loop16
 Attaching hello_message-x86_64-unknown-linux-gnu-0.1.2.npk to loopback device at /dev/loop16
 Creating verity device (name: north_hello_message_0.1.2)
 Verity-device used: /dev/dm-7
-Mount read-only squashfs filesystem on device /dev/dm-7 to this location:target/north/run/hello_message/0.1.2
+Mount read-only squashfs filesystem on device /dev/dm-7 to this location:target/northstar/run/hello_message/0.1.2
 ```
 
 
@@ -98,8 +98,8 @@ resources:
 
 ### Mounts created at container startup
 
-- Mounting from src_dir target/north/run/ferris/0.0.2/ to target "/bin"
-- Mounting from src_dir target/north/run/hello_message/0.1.2/ to target "/message"
+- Mounting from src_dir target/northstar/run/ferris/0.0.2/ to target "/bin"
+- Mounting from src_dir target/northstar/run/hello_message/0.1.2/ to target "/message"
 
 From now on, the resources are accessible at the predfined mountpoints.
 In the manifest we defined the executable from the `ferris` container as init, so this executable will be started. As argument we will use a file from the second resource container (`hello_message`).
