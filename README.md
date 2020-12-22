@@ -54,7 +54,7 @@ So far we tested Northstar on
 
 ### Northstar Packages (NPK)
 
-Similar as in the docker world, a Northstar **image** is the unit that gets deployed into a system. Once the runtime starts, all images in the registry will be loaded into **containers**. Containers are the entities that are managed by the Northstar runtime.
+Similar as in the docker world, a Northstar **image** is the unit that gets deployed into a system. Once the runtime starts, all images in the repositiry will be loaded into **containers**. Containers are the entities that are managed by the Northstar runtime.
 
 Images are packaged as **Northstar Packages** or **NPK**s. At it's outer layer, such an NPK is just a plain zip-archive. The content looks like this:
 
@@ -123,7 +123,7 @@ SUBCOMMANDS:
 In order to create your own northstar packages, you will also need to generate a keypair that
 subsequently will be used to generate and verify the signatures of your images.
 
-Once the packages are created, they are stored in a registry directory. This registry needs to be configured later when starting the northstar runtime.
+Once the packages are created, they are stored in a repository directory. This repository needs to be configured later when starting the northstar runtime.
 
 ## Configuring and Running Northstar
 
@@ -214,7 +214,7 @@ run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 
 [repositories.examples]
-dir = "target/northstar/registry"
+dir = "target/northstar/repository"
 writable = true
 key = "examples/keys/northstar.pub"
 

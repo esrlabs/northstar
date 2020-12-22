@@ -6,7 +6,7 @@ run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 
 [repositories.examples]
-dir = "target/northstar/registry"
+dir = "target/northstar/repository"
 writable = true
 key = "examples/keys/northstar.pub"
 

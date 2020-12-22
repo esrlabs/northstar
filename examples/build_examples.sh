@@ -117,7 +117,7 @@ main() {
     "./examples/container/seccomp"
   )
 
-  local OUTPUT_DIR="./target/northstar/registry"
+  local OUTPUT_DIR="./target/northstar/repository"
 
   echo "${bold}Creating ${OUTPUT_DIR}${normal}"
   exe mkdir -p "${OUTPUT_DIR}"

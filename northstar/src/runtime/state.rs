@@ -413,10 +413,10 @@ impl State {
             manifest.name
         );
 
-        let package_in_registry = repository.dir.join(&package);
+        let package_in_repository = repository.dir.join(&package);
 
         debug!(
-            "Trying to install {} to registry {}",
+            "Trying to install {} to repository {}",
             package,
             repository.dir.display()
         );
@@ -430,13 +430,13 @@ impl State {
             return Err(Error::ContainerAlreadyInstalled(manifest.name.clone()));
         }
 
-        // Copy tmp file into registry
-        fs::copy(&npk, &package_in_registry)
+        // Copy tmp file into repository
+        fs::copy(&npk, &package_in_repository)
             .await
-            .map_err(|error| Error::Io("Failed to copy NPK to registry".to_string(), error))?;
+            .map_err(|error| Error::Io("Failed to copy NPK to repository".to_string(), error))?;
 
         // Install and mount npk
-        let mounted_containers = mount_npk(&self.config, &package_in_registry, &repository)
+        let mounted_containers = mount_npk(&self.config, &package_in_repository, &repository)
             .await
             .map_err(Error::Mount)?;
 
@@ -536,7 +536,7 @@ impl State {
             self.resources.remove(&key);
         }
 
-        info!("Removing NPK {} from registry", path.display());
+        info!("Removing NPK {} from repository", path.display());
         fs::remove_file(&path)
             .await
             .map_err(|e| Error::Io(format!("Failed to remove {}", path.display()), e))?;

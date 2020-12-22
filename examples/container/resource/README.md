@@ -25,7 +25,7 @@ The hello message is mounted to `/message`.
 
 ## Container get installed by the runtime
 
-When northstar starts up, the images in the registry will get installed.
+When northstar starts up, the images in the repository will get installed.
 In our example we use 3 containers:
 - `ferris_says_hello`
 - `ferris`

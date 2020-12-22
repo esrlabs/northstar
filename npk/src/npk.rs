@@ -98,7 +98,7 @@ pub enum Error {
 ///
 /// sextant pack \
 /// --dir examples/container/hello \
-/// --out target/northstar/registry \
+/// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;

@@ -1,4 +1,4 @@
-REGISTRY = `pwd`.strip + '/target/northstar/registry'
+REPOSITORY = `pwd`.strip + '/target/northstar/repository'
 KEY = `pwd`.strip + '/examples/keys/northstar.key'
 
 def cross_targets
@@ -59,7 +59,7 @@ namespace :test do
   desc 'Prepare integration test run'
   task :prepare do
     require 'tmpdir'
-    mkdir_p REGISTRY unless Dir.exist?(REGISTRY)
+    mkdir_p REPOSITORY unless Dir.exist?(REPOSITORY)
     `./examples/build_examples.sh`
     `cargo build -p northstar`
     `cargo build -p nstar`
