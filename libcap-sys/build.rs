@@ -20,10 +20,7 @@ fn main() {
 
     let mut build = cc::Build::new();
 
-    build
-        .flag("-Ilibcap/include")
-        .files(sources)
-        .compile("cap");
+    build.flag("-Ilibcap/include").files(sources).compile("cap");
 
     sources
         .iter()
