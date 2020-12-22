@@ -1,20 +1,21 @@
 [workspace]
 
 members = [
-    "minijail/rust/minijail",
-    "minijail/rust/minijail-sys",
-    "north",
-    "npk",
-    "nstar",
-    "sextant",
-    "north_tests",
-    "north_tests/test_container",
     "examples/container/cpueater",
     "examples/container/crashing",
     "examples/container/datarw",
     "examples/container/hello",
     "examples/container/memeater",
     "examples/container/resource/ferris",
+    "libcap-sys",
+    "minijail/rust/minijail",
+    "minijail/rust/minijail-sys",
+    "north",
+    "north_tests",
+    "north_tests/test_container",
+    "npk",
+    "nstar",
+    "sextant",
 ]
 
 [profile.dev]

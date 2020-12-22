@@ -37,6 +37,10 @@
 //
 // Enum variants in rust are customarily camel case, but bindgen will leave the original names
 // intact.
+
+// Explicitly link libcap
+extern crate libcap_sys;
+
 #[allow(non_camel_case_types)]
 mod libminijail;
 pub use crate::libminijail::*;
