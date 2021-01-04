@@ -15,8 +15,7 @@
 use color_eyre::eyre::Result;
 use northstar::api;
 use northstar_tests::{
-    config::default_config,
-    logger::wait_for_log_pattern,
+    logger,
     process_assert::ProcessAssert,
     runtime::Runtime,
     test,
@@ -26,46 +25,42 @@ use std::{path::Path, time::Duration};
 use tokio::fs;
 
 test!(stop_application_not_running, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await?;
 
     runtime
         .stop("hello")
-        .await?
         .expect_err(api::Error::ApplicationNotRunning)?;
 
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.shutdown()
 });
 
 test!(hello, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
-    runtime.start("hello").await?.expect_ok()?;
+    let mut runtime = Runtime::launch().await?;
+    runtime.start("hello").expect_ok()?;
     let hello = runtime.pid("hello").await.map(ProcessAssert::new)?;
 
     // Here goes some kind of health check for the spawned process
     assert!(hello.is_running().await?);
 
-    runtime.stop("hello").await?.expect_ok()?;
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.stop("hello").expect_ok()?;
+    runtime.shutdown()
 });
 
 test!(cpueater, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
-    runtime.start("cpueater").await?.expect_ok()?;
+    let mut runtime = Runtime::launch().await?;
+    runtime.start("cpueater").expect_ok()?;
     let cpueater = runtime.pid("cpueater").await.map(ProcessAssert::new)?;
 
     assert!(cpueater.is_running().await?);
     assert_eq!(cpueater.get_cpu_shares().await?, 100);
 
-    runtime.stop("cpueater").await?.expect_ok()?;
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.stop("cpueater").expect_ok()?;
+    runtime.shutdown()
 });
 
 test!(memeater, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
-    runtime.start("memeater").await?.expect_ok()?;
+    let mut runtime = Runtime::launch().await?;
+    runtime.start("memeater").expect_ok()?;
     let memeater = runtime.pid("memeater").await.map(ProcessAssert::new)?;
 
     assert!(memeater.is_running().await?);
@@ -76,57 +71,43 @@ test!(memeater, {
     // here that the limit assigned is greater than zero.
     assert!(memeater.get_limit_in_bytes().await? > 0);
 
-    runtime.stop("memeater").await?.expect_ok()?;
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.stop("memeater").expect_ok()?;
+    runtime.shutdown()
 });
 
 test!(start_unknown_application, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await?;
 
     // Expect MissingResource Error
     runtime
         .start("unknown_application")
-        .await?
         .expect_err(api::Error::ApplicationNotFound)?;
 
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.shutdown()
 });
 
 test!(missing_resource_container, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await?;
 
     // install test container without resource
-    runtime
-        .install(get_test_container_npk())
-        .await?
-        .could_fail();
+    runtime.install(get_test_container_npk()).could_fail();
 
     // Expect MissingResource Error
     runtime
         .start("test_container-000")
-        .await?
         .expect_err(api::Error::MissingResource("test_resource".to_owned()))?;
 
-    runtime
-        .uninstall("test_container", "0.0.1")
-        .await?
-        .expect_ok()?;
+    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
 
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.shutdown()
 });
 
 test!(data_and_resource_mounts, {
-    let mut runtime = Runtime::launch().await.unwrap();
+    let mut runtime = Runtime::launch().await?;
 
     // install test container & resource
-    runtime.install(get_test_resource_npk()).await?.could_fail();
-    runtime
-        .install(get_test_container_npk())
-        .await?
-        .could_fail();
+    runtime.install(get_test_resource_npk()).could_fail();
+    runtime.install(get_test_container_npk()).could_fail();
 
     let data_dir = Path::new("target/northstar/data/test_container-000");
     fs::create_dir_all(&data_dir).await?;
@@ -137,38 +118,28 @@ test!(data_and_resource_mounts, {
     fs::write(&input_file, b"cat /resource/hello").await?;
 
     // Start the test_container process
-    runtime.start("test_container-000").await?.expect_ok()?;
+    runtime.start("test_container-000").expect_ok()?;
 
     logger::assume("hello from test resource", Duration::from_secs(5)).await?;
 
     // The container might have finished at this point
-    runtime.stop("test_container-000").await?.could_fail();
+    runtime.stop("test_container-000").could_fail();
 
     // Remove the temporary data directory
     fs::remove_dir_all(&data_dir).await?;
 
-    runtime
-        .uninstall("test_container", "0.0.1")
-        .await?
-        .expect_ok()?;
-    runtime
-        .uninstall("test_resource", "0.0.1")
-        .await?
-        .expect_ok()?;
+    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
+    runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
 
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.shutdown()
 });
 
 test!(uninstall_a_running_application, {
-    let mut runtime = Runtime::launch(default_config().clone()).await.unwrap();
+    let mut runtime = Runtime::launch().await?;
 
     // install test container & resource.
-    runtime.install(get_test_resource_npk()).await?.could_fail();
-    runtime
-        .install(get_test_container_npk())
-        .await?
-        .could_fail();
+    runtime.install(get_test_resource_npk()).could_fail();
+    runtime.install(get_test_container_npk()).could_fail();
 
     let data_dir = Path::new("target/north/data/test_container-000");
     fs::create_dir_all(&data_dir).await?;
@@ -179,7 +150,7 @@ test!(uninstall_a_running_application, {
     fs::write(&input_file, b"loop").await?;
 
     // Start the test_container process
-    runtime.start("test_container-000").await?.expect_ok()?;
+    runtime.start("test_container-000").expect_ok()?;
     let container = runtime
         .pid("test_container-000")
         .await
@@ -189,38 +160,27 @@ test!(uninstall_a_running_application, {
 
     runtime
         .uninstall("test_container", "0.0.1")
-        .await?
         .expect_err(api::Error::ApplicationRunning("test_container".to_owned()))?;
 
-    runtime.stop("test_container-000").await?.expect_ok()?;
+    runtime.stop("test_container-000").expect_ok()?;
 
     // Remove the temporary data directory
     fs::remove_dir_all(&data_dir).await?;
 
-    runtime
-        .uninstall("test_container", "0.0.1")
-        .await?
-        .expect_ok()?;
-    runtime
-        .uninstall("test_resource", "0.0.1")
-        .await?
-        .expect_ok()?;
+    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
+    runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
 
-    runtime.shutdown().await?;
-    Ok(())
+    runtime.shutdown()
 });
 
 test!(crashing_containers, {
-    let mut runtime = Runtime::launch().await.unwrap();
+    let mut runtime = Runtime::launch().await?;
 
     let data_dir = Path::new("target/northstar/data/").canonicalize()?;
 
     // install test container
-    runtime.install(get_test_resource_npk()).await?.could_fail();
-    runtime
-        .install(get_test_container_npk())
-        .await?
-        .could_fail();
+    runtime.install(get_test_resource_npk()).could_fail();
+    runtime.install(get_test_container_npk()).could_fail();
 
     for i in 0..5 {
         let dir = data_dir.join(format!("test_container-{:03}", i));
@@ -230,7 +190,6 @@ test!(crashing_containers, {
         // Start the test_container process
         runtime
             .start(&format!("test_container-{:03}", i))
-            .await?
             .expect_ok()?;
     }
 
@@ -238,18 +197,11 @@ test!(crashing_containers, {
     for i in 0..5 {
         runtime
             .stop(&format!("test_container-{:03}", i))
-            .await?
             .could_fail();
     }
 
-    runtime
-        .uninstall("test_container", "0.0.1")
-        .await?
-        .expect_ok()?;
-    runtime
-        .uninstall("test_resource", "0.0.1")
-        .await?
-        .expect_ok()?;
+    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
+    runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
 
-    runtime.shutdown().await
+    runtime.shutdown()
 });
