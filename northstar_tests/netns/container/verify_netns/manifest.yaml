@@ -1,0 +1,23 @@
+name: verify_netns
+version: 0.1.1
+init: /startup.sh
+mounts:
+    /bin:
+      host: /system/bin
+    /lib:
+      host: /lib
+    /system:
+      host: /system
+    /dev: full
+    /sys:
+      host: /sys
+netconf:
+  enable_namespace: true
+  namespace_uniq_subnet: 42
+use_vm: false
+capabilities: 
+  - cap_net_raw 
+  - cap_mknod
+suppl_groups: 
+  - inet 
+  - adb
