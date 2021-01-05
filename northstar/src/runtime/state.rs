@@ -247,6 +247,14 @@ impl State {
             }
         }
 
+        // If bridges are enabled, then use the IP address
+        // specified in the toml file as the base network
+        // for the bridge
+        let mut ipstr = "";
+        if self.config.bridge.enabled {
+            ipstr = &self.config.bridge.ipv4_slash16;
+        }
+
         // Spawn process
         info!("Starting {}", app);
 
@@ -257,6 +265,7 @@ impl State {
             &self.config.data_dir,
             self.config.container_uid,
             self.config.container_gid,
+            ipstr,
         )
         .await
         .map_err(Error::Process)?;

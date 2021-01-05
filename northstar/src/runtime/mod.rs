@@ -78,11 +78,8 @@ pub struct Runtime {
     /// Channel receive a stop signal for the runtime
     /// Drop the tx part to gracefully shutdown the mail loop.
     stop: Option<oneshot::Sender<()>>,
-    // Channel to signal the runtime exit status to the caller of `start`
-    // When the runtime is shut down the result of shutdown is sent to this
-    // channel. If a error happens during normal operation the error is also
-    // sent to this channel.
-    stopped: oneshot::Receiver<RuntimeResult>,
+    // Join handle of the runtime task
+    runtime: task::JoinHandle<Result<(), Error>>,
     event_tx: mpsc::Sender<Event>,
     // Closes the pipe on drop, terminating the spawned task that reads the minijail log.
     #[allow(dead_code)]
@@ -92,10 +89,14 @@ pub struct Runtime {
 impl Runtime {
     pub async fn start(config: Config) -> Result<Runtime, Error> {
         let (stop_tx, stop_rx) = oneshot::channel();
-        let (stopped_tx, stopped_rx) = oneshot::channel();
 
         // Initialize minijails static functionality
         let minijail_log_handle = minijail_init().await?;
+
+        // Create the network bridge if enabled
+        if config.bridge.enabled {
+            minijail_create_net_bridge(&config.bridge.ipv4_slash16).await?;
+        }
 
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.data_dir).await?;
@@ -105,21 +106,23 @@ impl Runtime {
         let (event_tx, event_rx) = mpsc::channel::<Event>(100);
 
         // Start a task that drives the main loop and wait for shutdown results
-        {
+        let runtime = {
             let event_tx = event_tx.clone();
-            task::spawn(async move {
+            let runtime = async move {
                 let result = runtime_task(config, event_tx, event_rx, stop_rx).await;
                 match &result {
                     Err(e) => log::error!("Runtime error: {}", e),
                     Ok(()) => log::debug!("Runtime exited"),
                 };
-                stopped_tx.send(result).ok(); // Ignore error if calle dropped the handle
-            });
-        }
+                minijail_shutdown().await?;
+                result
+            };
+            task::spawn(runtime)
+        };
 
         Ok(Runtime {
             stop: Some(stop_tx),
-            stopped: stopped_rx,
+            runtime,
             event_tx,
             minijail_log_handle,
         })
@@ -185,7 +188,7 @@ impl Future for Runtime {
     type Output = RuntimeResult;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.stopped).poll(cx) {
+        match Pin::new(&mut self.runtime).poll(cx) {
             Poll::Ready(r) => match r {
                 Ok(r) => Poll::Ready(r),
                 // Channel error -> tx side dropped
@@ -391,4 +394,13 @@ async fn minijail_init() -> Result<Option<MinijailLogHandle>, Error> {
     });
 
     handle.map_or(Ok(None), |r| r.map(Some))
+}
+
+pub async fn minijail_create_net_bridge(ip_addr: &str) -> Result<(), Error> {
+    let _fixme = ::minijail::Minijail::create_net_bridge(ip_addr);
+    Ok(())
+}
+pub async fn minijail_shutdown() -> Result<(), Error> {
+    let _fixme = ::minijail::Minijail::remove_net_bridge();
+    Ok(())
 }

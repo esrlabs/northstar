@@ -20,3 +20,7 @@ loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
+
+[bridge]
+enabled = false
+ipv4_slash16 = "172.30.0.0"

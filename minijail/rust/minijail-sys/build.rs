@@ -107,6 +107,7 @@ fn main() -> io::Result<()> {
     let sources = &[
         "../../bpf.c",
         "../../libminijail.c",
+        "../../libmj_netns.c",
         "../../libmj_perms.c",
         "../../signal_handler.c",
         "../../syscall_filter.c",

@@ -90,6 +90,20 @@ pub enum Error {
     UpdateCaps { error: i32, str: String },
     /// Update of supplementary group list failed
     UpdateSupplGroups { error: i32, str: String },
+    /// Network namespace setup failed
+    SetupNetNamespace {
+        error: i32,
+        str: String,
+        subnet: i32,
+    },
+    /// Initialize network bridge failed
+    InitUnlinkNetNamespace { error: i32 },
+    /// Network bridge remove failed
+    RemoveNetBridge { error: i32 },
+    /// Network bridge create failed
+    CreateNetBridge { error: i32, str: String },
+    /// Setup of vtap device failed
+    SetupVtap { error: i32 },
 }
 
 impl Display for Error {
@@ -188,6 +202,35 @@ impl Display for Error {
                 f,
                 "failed to update supplementary group list to {}: {}",
                 str,
+                io::Error::from_raw_os_error(*error),
+            ),
+
+            SetupNetNamespace { error, str, subnet } => write!(
+                f,
+                "failed to setup network namespace using ip {} subnet {}: {}",
+                str,
+                subnet,
+                io::Error::from_raw_os_error(*error),
+            ),
+            InitUnlinkNetNamespace { error } => write!(
+                f,
+                "failed to initialize network namespace {}",
+                io::Error::from_raw_os_error(*error),
+            ),
+            RemoveNetBridge { error } => write!(
+                f,
+                "failed to remove network bridge at {}",
+                io::Error::from_raw_os_error(*error),
+            ),
+            CreateNetBridge { error, str } => write!(
+                f,
+                "failed to create network bridge at {}: {}",
+                str,
+                io::Error::from_raw_os_error(*error),
+            ),
+            SetupVtap { error } => write!(
+                f,
+                "failed to setup vtap device {}",
                 io::Error::from_raw_os_error(*error),
             ),
         }
@@ -859,6 +902,75 @@ impl Minijail {
             });
         }
         Ok(())
+    }
+
+    pub fn setup_net_namespace(&mut self, strarg: &str, subnet: libc::c_int) -> Result<()> {
+        let ret: libc::c_int;
+
+        let libc_strarg =
+            CString::new(strarg).map_err(|_| Error::StrToCString(strarg.to_owned()))?;
+        unsafe { ret = minijail_setup_net_namespace(self.jail, libc_strarg.as_ptr(), subnet) }
+        if ret != 0 {
+            return Err(Error::SetupNetNamespace {
+                error: ret,
+                str: strarg.to_owned(),
+                subnet: subnet,
+            });
+        }
+        return Ok(());
+    }
+
+    pub fn init_unlink_net_namespace(&mut self) -> Result<()> {
+        let ret: libc::c_int;
+
+        unsafe {
+            ret = minijail_init_unlink_net_namespace(self.jail);
+        }
+        if ret != 0 {
+            return Err(Error::InitUnlinkNetNamespace { error: ret });
+        }
+        return Ok(());
+    }
+
+    pub fn setup_vtap(&mut self) -> Result<()> {
+        let ret: libc::c_int;
+
+        unsafe {
+            ret = minijail_setup_vtap(self.jail);
+        }
+        if ret != 0 {
+            return Err(Error::SetupVtap { error: ret });
+        }
+        return Ok(());
+    }
+
+    pub fn create_net_bridge(strarg: &str) -> Result<()> {
+        let ret: libc::c_int;
+        let libc_strarg =
+            CString::new(strarg).map_err(|_| Error::StrToCString(strarg.to_owned()))?;
+
+        unsafe {
+            ret = minijail_create_net_bridge(libc_strarg.as_ptr());
+        }
+        if ret != 0 {
+            return Err(Error::CreateNetBridge {
+                error: ret,
+                str: strarg.to_owned(),
+            });
+        }
+        return Ok(());
+    }
+
+    pub fn remove_net_bridge() -> Result<()> {
+        let ret: libc::c_int;
+
+        unsafe {
+            ret = minijail_remove_net_bridge();
+        }
+        if ret != 0 {
+            return Err(Error::RemoveNetBridge { error: ret });
+        }
+        return Ok(());
     }
 }
 

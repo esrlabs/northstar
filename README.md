@@ -230,6 +230,10 @@ loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
+
+[bridge]
+enabled = true;
+ipv4_slash16 = "172.30.0.0"
 ```
 
 The `[repositories.default]` sections describes a container repository named `default`.
@@ -254,6 +258,11 @@ Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchie
 * **`device_mapper_dev`** -- Prefix of device mapper mappings.
 * **`run_dir`** -- where the container content will be mounted
 * **`data_dir`** -- In data_dir a directory for each container is created if a mount of type data is used in the manifest
+
+
+The `[bridge]`-section is required if any container uses network namespaces or a VM.
+* **`enabled`** -- create a bridge in the root namespace using the specified /16 IPv4 address.
+* **`ipv4_slash16`** -- Set to the base class B IPv4 address to use for the bridge for network namespaces. This must be a /16 address such as 172.30.0.0. The bridge will be assigned an IP address of x.x.0.1 . Each namespace will have it's own separate subnet, and have a specific address of x.x.<subnet>.10 . A VM in the namespace will have a specific address of x.x.<subnet>.20. See [network_namespaces](doc/network.txt)
 
 ## Controlling the runtime
 

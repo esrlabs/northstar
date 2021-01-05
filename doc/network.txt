@@ -1,0 +1,60 @@
+Each container can run in its own network namespace. This isolates the container
+from the networking of the host, and is a requirement when running a Virtual Machine.
+
+The network bridge and class B IPv4 address must be specified in the north.toml file.
+Each network namespace is assigned to subnet address range; the network namespace
+itself is given an a fixed address within that subnet, as is the VM.
+
+The bridge is created when the north runtime starts, and is torn down
+when the runtime exits.
+
+For example, if the north.toml file specified:
+  [bridge]
+  enabled = true
+  ipv4_slash16 = "172.30.0.0"
+then a bridge would be created in the root namespace with the name 'nstar0' with
+an IPv4 address of 172.30.0.1 . The bridge is given a unique MAC address.
+This bridge IP address is used as the default gateway for all namespaces
+(and VMs, if configured).
+
+The root namespace will have iptables rules added to enable masquerading
+of all addresses within the 'ipv4_slash16' address range. For example, the
+rule would be
+  iptables -t nat -A POSTROUTING -s 172.30.0.0/16 ! -o nstar0 -j MASQUERADE
+The bridge and masquerade rules are created when the north runtime starts.
+When the north runtime exits, the bridge is removed.
+
+To enable network namespaces, the container manifest must contain a 'netconf'
+section:
+  netconf:
+     enable_namespace: true
+     namespace_uniq_subnet: 4
+
+The uniq subnet must be unique among all containers; it is the responsibility of
+the system integrator to ensure that there are no duplicates. If a duplicate
+subnet ID exists in the registry, then the container will fail to launch.
+
+Using the above example, this would result in a container namespace with an
+address of 172.30.4.10 . If a VM is configured, it will have the address of
+172.30.4.20 . The gateway will be 172.30.0.1 . The namespace will have the
+name of 'ns<subnet>'; in the above example the namespace would be named 
+'ns4'. The namespace will have a unique MAC address.
+
+Namespaces are created dynamically when the container is launched; once the
+container is launched, all references to the namespace are removed so that
+when the container exits, the namespace is automatically removed.
+
+On Android, if DNS is required in the namespace, then the entire dev
+directory tree must be bind mounted into the container. This is controlled
+by the following in the manifest:
+mounts:
+  /dev: full
+The reason is that Android uses /dev/socket/dnsproxyd for DNS resolution; if
+a skeleton /dev exists, then DNS queries will fail because no socket connection
+is available to the resolver.
+
+WIP:
+To access the network stack in a container, certain permissions are required. For
+Android, the process must be in the inet group (3003). Without group permissions,
+the container must have the CAP_NET_RAW capability to do a ping.
+

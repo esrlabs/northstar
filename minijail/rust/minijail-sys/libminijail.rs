@@ -399,3 +399,22 @@ extern "C" {
         str: *const ::std::os::raw::c_char,
     ) -> ::std::os::raw::c_int;
 }
+extern "C" {
+    pub fn minijail_remove_net_bridge() -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn minijail_create_net_bridge(str: *const ::std::os::raw::c_char) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn minijail_setup_net_namespace(
+        j: *mut minijail,
+        str: *const ::std::os::raw::c_char,
+        subnet: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn minijail_init_unlink_net_namespace(j: *mut minijail) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn minijail_setup_vtap(j: *mut minijail) -> ::std::os::raw::c_int;
+}

@@ -169,6 +169,8 @@ struct minijail {
 		int new_session_keyring : 1;
 		int forward_signals : 1;
 		int setsid : 1;
+		int join_unlinked_netns : 1;
+		int create_vtap : 1;
 	} flags;
 	uid_t uid;
 	gid_t gid;
@@ -204,6 +206,10 @@ struct minijail {
 	struct hook *hooks_tail;
 	struct preserved_fd preserved_fds[MAX_PRESERVED_FDS];
 	size_t preserved_fd_count;
+	int  net_subnet;
+	char *net_braddr;
+	char *net_tapdev;
+	int netns_unlinked_fd;
 };
 
 static void run_hooks_or_die(const struct minijail *j,
@@ -600,6 +606,25 @@ void API minijail_namespace_enter_net(struct minijail *j, const char *ns_path)
 void API minijail_namespace_cgroups(struct minijail *j)
 {
 	j->flags.ns_cgroups = 1;
+}
+
+/*
+ * Executed in context of the child.
+ *
+ * Join a namespace that the parent has unlinked. This is
+ * so that it will go away when we exit
+ */
+static int minijail_join_unlinked_netns(const struct minijail *j)
+{
+	return join_unlinked_netns(j->net_subnet, j->netns_unlinked_fd);
+}
+
+/*
+ * Executed in the child in the context of the new namespace
+ */
+static int minijail_create_net_vtap(const struct minijail *j)
+{
+	return create_net_vtap(j->net_subnet, j->net_tapdev);
 }
 
 void API minijail_close_open_fds(struct minijail *j)
@@ -2243,7 +2268,14 @@ void API minijail_enter(const struct minijail *j)
 		if (unshare(CLONE_NEWNET))
 			pdie("unshare(CLONE_NEWNET) failed");
 		config_net_loopback();
-	}
+	} else if (j->flags.join_unlinked_netns) {
+		if (minijail_join_unlinked_netns(j))
+			die("Can not join unlinked namespace");
+		if (j->flags.create_vtap) {
+			if (minijail_create_net_vtap(j))
+				die("Can not create vtap device");
+		}
+        }
 
 	if (j->flags.ns_cgroups && unshare(CLONE_NEWCGROUP))
 		pdie("unshare(CLONE_NEWCGROUP) failed");
@@ -2920,6 +2952,9 @@ static int minijail_run_internal(struct minijail *j,
 		if (j->flags.enter_net)
 			close(j->netns_fd);
 
+		if (j->flags.join_unlinked_netns)
+			close(j->netns_unlinked_fd);
+
 		if (sync_child)
 			parent_setup_complete(state_out->child_sync_pipe_fds);
 
@@ -3026,6 +3061,8 @@ static int minijail_run_internal(struct minijail *j,
 			minijail_preserve_fd(j, j->mountns_fd, j->mountns_fd);
 		if (j->flags.enter_net)
 			minijail_preserve_fd(j, j->netns_fd, j->netns_fd);
+		if (j->flags.join_unlinked_netns)
+			minijail_preserve_fd(j, j->netns_unlinked_fd, j->netns_unlinked_fd);
 
 		for (size_t i = 0; i < j->preserved_fd_count; i++) {
 			/*
@@ -3278,6 +3315,12 @@ void API minijail_destroy(struct minijail *j)
 		free(j->alt_syscall_table);
 	for (i = 0; i < j->cgroup_count; ++i)
 		free(j->cgroups[i]);
+	if (j->net_braddr)
+		free(j->net_braddr);
+	if (j->net_tapdev) {
+		(void)unlink(j->net_tapdev);
+		free(j->net_tapdev);
+	}
 	free(j);
 }
 
@@ -3331,3 +3374,82 @@ int API minijail_update_suppl_groups(struct minijail *j, char *groups)
 
 	return error;
 }
+
+/*
+ * Called in thread context when setting up the jail for the process
+ */
+int API minijail_setup_net_namespace(struct minijail *j, const char *user_ipaddr,
+				     const int subnet)
+{
+	int error;
+
+	info("setup namespace base addr %s subnet %d", user_ipaddr, subnet);
+
+	/*
+	 * Save the address used for the bridge. This should not
+	 * fail, as the IP addr was validated when the runtime
+	 * started.
+	 */
+	error = setup_bridge_addr(user_ipaddr, &j->net_braddr);
+	if (error == 0)
+		j->net_subnet = subnet;
+
+	info("setup namespace base addr %s subnet %d return error %d",
+	     user_ipaddr, subnet, error);
+
+	return error;
+}
+
+/*
+ * Called in thread context when launching a VM
+ */
+int API minijail_setup_vtap(struct minijail *j)
+{
+	int error = 0;
+
+	/*
+	 * We save the tapdev name so that it can be unlinked
+	 * by the parent when everything exits
+	 */
+	error = setup_vtap_name(j->net_subnet, &j->net_tapdev);
+	if (error == 0)
+		j->flags.create_vtap = 1;
+
+	info("setup_vtap subnet %d device %s return error %d",
+		j->net_subnet, (error) ? "" : j->net_tapdev, error);
+
+	return error;
+}
+
+/*
+ * Create a namespace and then unlink it so that when the process
+ * that joins it goes away, the namespace is released
+ */
+int API minijail_init_unlink_net_namespace(struct minijail *j)
+{
+	int error = 0, fd;
+
+	error = create_unlink_netns(j->net_braddr, j->net_subnet, &fd);
+	if (error == 0) {
+		j->flags.join_unlinked_netns = 1;
+		j->netns_unlinked_fd = fd;
+	}
+	return error;
+}
+
+/*
+ * Called when shutting down
+ */
+int API minijail_remove_net_bridge(void)
+{
+	return remove_net_bridge();
+}
+
+/*
+ * Called at init time
+ */
+int API minijail_create_net_bridge(const char *user_ipaddr)
+{
+	return create_net_bridge(user_ipaddr);
+}
+

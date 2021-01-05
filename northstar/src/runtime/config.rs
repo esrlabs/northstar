@@ -47,6 +47,17 @@ pub struct Devices {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct Bridge {
+    /// If any container uses network namespaces, the IPv4 address of
+    /// the bridge must be specified.
+    pub enabled: bool,
+    /// IPv4 address must be a /16 address; each namespace is assigned
+    /// a fixed addr within the subnet specified in the manifest
+    /// along with a separate addr for a VM within the subnet
+    pub ipv4_slash16: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Print debug logs.
     pub debug: bool,
@@ -64,4 +75,5 @@ pub struct Config {
     pub repositories: HashMap<RepositoryId, Repository>,
     pub cgroups: CGroups,
     pub devices: Devices,
+    pub bridge: Bridge,
 }

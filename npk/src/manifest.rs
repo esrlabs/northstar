@@ -148,6 +148,14 @@ pub enum Mount {
 pub type CGroup = HashMap<String, String>;
 pub type CGroups = HashMap<String, CGroup>;
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Netconf {
+    /// Enable network namespaces for this container
+    pub enable_namespace: bool,
+    /// Unique subnet for a namespace, 0-254
+    pub namespace_uniq_subnet: i32,
+}
+
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     /// Name of container
@@ -189,6 +197,12 @@ pub struct Manifest {
     /// String containing group names to give to new container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suppl_groups: Option<Vec<String>>,
+    /// Subnet for optional namespace
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub netconf: Option<Netconf>,
+    /// Run container in virtual machine
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_vm: Option<bool>,
 }
 
 /// Configuration for the persist mounts
@@ -496,6 +510,10 @@ cgroups:
 seccomp:
   fork: 1
   waitpid: 1
+netconf:
+    enable_namespace: true
+    namespace_uniq_subnet: 4
+use_vm: true
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -561,6 +579,12 @@ seccomp:
             manifest.suppl_groups,
             Some(vec!("inet".to_string(), "log".to_string()))
         );
+
+        if let Some(netconf) = manifest.netconf {
+            assert!(netconf.enable_namespace);
+            assert_eq!(netconf.namespace_uniq_subnet, 4);
+        }
+        assert!(manifest.use_vm.unwrap());
 
         Ok(())
     }

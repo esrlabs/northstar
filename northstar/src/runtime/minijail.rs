@@ -153,6 +153,7 @@ impl Process {
         data_dir: &Path,
         uid: u32,
         gid: u32,
+        bridge_ipaddr: &str,
     ) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
@@ -196,6 +197,29 @@ impl Process {
         jail.change_uid(uid);
         // Configure PID
         jail.change_gid(gid);
+
+        // If a network configuration exists in the manifest and
+        // network namespaces are enabled, then configure the namespace
+        // then join it. The required bridge was started at init time
+        if let Some(netconf) = &manifest.netconf {
+            if netconf.enable_namespace {
+                // Params that will be used to create the namespace.
+                jail.setup_net_namespace(bridge_ipaddr, netconf.namespace_uniq_subnet)
+                    .map_err(Error::Minijail)?;
+
+                // If running a VM in the namespace, enable the
+                // tap device creation
+                if container.manifest.use_vm.unwrap_or(false) {
+                    jail.setup_vtap().map_err(Error::Minijail)?;
+                }
+
+                // Initialize a network namespace that is then unlinked. It
+                // is kept open by an FD reference; the target child process
+                // will then join the namespace via FD so that when it exits,
+                // the namespace is automatically cleaned up.
+                jail.init_unlink_net_namespace().map_err(Error::Minijail)?;
+            }
+        }
 
         // Update the capability mask if specified
         if let Some(capabilities) = &manifest.capabilities {
