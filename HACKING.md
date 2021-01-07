@@ -50,6 +50,7 @@ rake coverage
 Integration tests can be run on `Linux` targets:
 
 ```shell
+./examples/build_examples.sh
 cargo test -p northstar_tests -- --test-threads 1 --ignored
 ```
 
