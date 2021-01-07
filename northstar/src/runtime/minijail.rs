@@ -17,24 +17,67 @@ use super::{
         exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
     },
     state::Container,
+    OutputStream,
 };
 use crate::runtime::{Event, EventTx};
+use futures::channel::oneshot;
 use itertools::Itertools;
-use log::{debug, warn};
+use log::{debug, error, info, trace, warn, Level};
 use nix::{
-    sys::{signal, stat::Mode},
-    unistd::{self, chown},
+    fcntl::{self, fcntl, OFlag},
+    sys::signal,
+    unistd::{self, chown, pipe},
 };
 use npk::manifest::{Dev, Mount, MountFlag};
 use std::{
     fmt, iter, ops,
+    os::unix::prelude::RawFd,
     path::{Path, PathBuf},
+    pin::Pin,
+    task::{Context, Poll},
 };
 use tokio::{
     fs,
-    io::{self, AsyncBufReadExt, AsyncWriteExt},
+    io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, AsyncWriteExt, ReadBuf},
     select, task, time,
 };
+
+/// Initialize the minijail
+pub async fn init() -> Result<(), Error> {
+    let pipe = AsyncPipe::new()?;
+
+    let minijail_log_level = match log::max_level().to_level().unwrap_or(Level::Warn) {
+        Level::Error => 3,
+        Level::Warn => 4,
+        Level::Info => 6,
+        Level::Debug => 7,
+        Level::Trace => i32::MAX,
+    };
+    ::minijail::Minijail::log_to_fd(pipe.writefd(), minijail_log_level as i32);
+
+    let mut lines = io::BufReader::new(pipe).lines();
+
+    // Spawn a task that forwards logs from minijail to the rust logger.
+    task::spawn(async move {
+        while let Ok(Some(line)) = lines.next_line().await {
+            let l = line.split_whitespace().skip(2).collect::<String>();
+            match line.chars().next() {
+                Some('D') => debug!("{}", l),
+                Some('I') => info!("{}", l),
+                Some('W') => warn!("{}", l),
+                Some('E') => error!("{}", l),
+                _ => trace!("{}", line),
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Shutdown minijail
+pub async fn shutdown() -> Result<(), Error> {
+    Ok(())
+}
 
 // We need a Send + Sync version of Minijail
 struct Minijail(::minijail::Minijail);
@@ -55,70 +98,46 @@ impl ops::DerefMut for Minijail {
     }
 }
 
-// Capture output of a child process. Create a fifo and spawn a task that forwards each line to
+// Capture output of a child process. Create a pipe and spawn a task that forwards each line to
 // the main loop. When this struct is dropped the internal spawned tasks are stopped.
 #[derive(Debug)]
-struct CaptureOutput {
-    // Fd
-    fd: i32,
-    // File instance to the write part. The raw fd of File is passed to minijail
-    // and File must be kept in scope to avoid that it is closed.
-    write: std::fs::File,
-}
+struct CaptureOutput(i32, oneshot::Sender<()>);
 
 impl CaptureOutput {
     pub async fn new(
-        tmpdir: &Path,
-        fd: i32,
+        stream: OutputStream,
         tag: &str,
         event_tx: EventTx,
     ) -> Result<CaptureOutput, Error> {
-        let fifo = tmpdir.join(fd.to_string());
-        unistd::mkfifo(&fifo, Mode::S_IRUSR | Mode::S_IWUSR)
-            .map_err(|e| Error::Os("Failed to mkfifo".to_string(), e))?;
-
-        // Open the writing part in blocking mode
-        let write = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&fifo)
-            .map_err(|e| Error::Io(format!("Failed to open fifo {}", fifo.display()), e))?;
-
-        let read = fs::OpenOptions::new()
-            .read(true)
-            .write(false)
-            .open(&fifo)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to open fifo {}", fifo.display()), e))?;
-
-        let mut lines = io::BufReader::new(read).lines();
-
+        let pipe = AsyncPipe::new()?;
+        let writefd = pipe.writefd();
+        let mut lines = io::BufReader::new(pipe).lines();
         let tag = tag.to_string();
+        let (tx, mut rx) = oneshot::channel();
+
+        debug!("Starting stream capture of {} on {:?}", tag, stream);
         task::spawn(async move {
-            // The removal of tmpdir lines return a None and the loop breaks
-            while let Ok(Some(line)) = lines.next_line().await {
-                event_tx
-                    .send(Event::ChildOutput {
-                        name: tag.clone(),
-                        fd,
-                        line,
-                    })
-                    .await
-                    .ok();
+            loop {
+                select! {
+                    _ = &mut rx => break,
+                    line = lines.next_line() => {
+                        if let Ok(Some(line)) = line {
+                            let event = Event::ChildOutput {
+                                    name: tag.clone(),
+                                    stream: stream.clone(),
+                                    line,
+                                };
+                            event_tx.send(event).await.ok();
+                        } else {
+                            break;
+                        }
+                    }
+                }
             }
-            debug!("Stopping process capture of {} on fd {}", tag, fd);
+            debug!("Stopped stream capture of {} on {:?}", tag, stream);
         });
 
-        Ok(CaptureOutput { fd, write })
-    }
-
-    pub fn read_fd(&self) -> i32 {
-        self.fd
-    }
-
-    pub fn write_fd(&self) -> i32 {
-        use std::os::unix::io::AsRawFd;
-        self.write.as_raw_fd()
+        Ok(CaptureOutput(writefd, tx))
     }
 }
 
@@ -166,9 +185,6 @@ impl Process {
         let tmpdir = tempfile::TempDir::new()
             .map_err(|e| Error::Io(format!("Failed to create tmpdir for {}", manifest.name), e))?;
         let tmpdir_path = tmpdir.path();
-
-        let stdout = CaptureOutput::new(tmpdir_path, 1, &manifest.name, event_tx.clone()).await?;
-        let stderr = CaptureOutput::new(tmpdir_path, 2, &manifest.name, event_tx.clone()).await?;
 
         // Dump seccomp config to process tmpdir. This is a subject to be changed since
         // minijail provides a API to configure seccomp without writing to a file.
@@ -252,12 +268,14 @@ impl Process {
             argv.iter().skip(1).join(" ")
         );
 
+        let stdout =
+            CaptureOutput::new(OutputStream::Stdout, &manifest.name, event_tx.clone()).await?;
+        let stderr =
+            CaptureOutput::new(OutputStream::Stderr, &manifest.name, event_tx.clone()).await?;
+
         let pid = jail.run_remap_env_preload(
             &init.as_path(),
-            &[
-                (stderr.write_fd(), stderr.read_fd()),
-                (stdout.write_fd(), stdout.read_fd()),
-            ],
+            &[(stdout.0, 1), (stderr.0, 2)],
             &argv,
             &env,
             false,
@@ -423,5 +441,53 @@ impl super::process::Process for Process {
                 ExitStatus::Signaled(signal::Signal::SIGKILL)
             }
         })
+    }
+}
+
+struct AsyncPipe {
+    inner: AsyncFd<std::fs::File>,
+    writefd: i32,
+}
+
+impl AsyncPipe {
+    fn new() -> Result<AsyncPipe, Error> {
+        let (readfd, writefd) =
+            pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
+
+        let mut flags = OFlag::from_bits(fcntl(readfd, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
+
+        flags.set(OFlag::O_NONBLOCK, true);
+        fcntl(readfd, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
+
+        let pipe =
+            unsafe { <std::fs::File as std::os::unix::prelude::FromRawFd>::from_raw_fd(readfd) };
+        let inner = AsyncFd::new(pipe).map_err(|e| Error::Io("Async fd".to_string(), e))?;
+        Ok(AsyncPipe { inner, writefd })
+    }
+
+    fn writefd(&self) -> RawFd {
+        self.writefd
+    }
+}
+
+impl AsyncRead for AsyncPipe {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        loop {
+            let mut guard = futures::ready!(self.inner.poll_read_ready(cx))?;
+            match guard
+                .try_io(|inner| std::io::Read::read(&mut inner.get_ref(), buf.initialized_mut()))
+            {
+                Ok(Ok(n)) => {
+                    buf.advance(n);
+                    break Poll::Ready(Ok(()));
+                }
+                Ok(Err(e)) => break Poll::Ready(Err(e)),
+                Err(_would_block) => continue,
+            }
+        }
     }
 }

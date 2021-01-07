@@ -1092,6 +1092,7 @@ dependencies = [
  "derive-new",
  "ed25519-dalek",
  "floating-duration",
+ "futures",
  "hex",
  "itertools",
  "lazy_static",

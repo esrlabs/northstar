@@ -29,29 +29,31 @@ use crate::{api, api::Notification};
 use config::Config;
 use console::Request;
 use error::Error;
-use log::{debug, info, Level};
-use nix::{
-    sys::stat,
-    unistd::{self, pipe},
-};
+use log::{debug, info};
+use nix::{sys::stat, unistd};
 use npk::manifest::Name;
 use process::ExitStatus;
 use state::State;
 use std::{
     future::Future,
-    io,
     path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
 use sync::mpsc;
 use tokio::{
-    fs,
+    fs, io,
     sync::{self, oneshot},
     task,
 };
 
 pub(crate) type EventTx = mpsc::Sender<Event>;
+
+#[derive(Clone, Debug)]
+pub enum OutputStream {
+    Stdout,
+    Stderr,
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -65,7 +67,11 @@ pub(crate) enum Event {
     /// Northstar shall shut down
     Shutdown,
     /// Stdout and stderr of child processes
-    ChildOutput { name: Name, fd: i32, line: String },
+    ChildOutput {
+        name: Name,
+        stream: OutputStream,
+        line: String,
+    },
     /// Notification events
     Notification(Notification),
 }
@@ -84,18 +90,12 @@ pub struct Runtime {
     // sent to this channel.
     stopped: oneshot::Receiver<RuntimeResult>,
     event_tx: mpsc::Sender<Event>,
-    // Closes the pipe on drop, terminating the spawned task that reads the minijail log.
-    #[allow(dead_code)]
-    minijail_log_handle: Option<MinijailLogHandle>,
 }
 
 impl Runtime {
     pub async fn start(config: Config) -> Result<Runtime, Error> {
         let (stop_tx, stop_rx) = oneshot::channel();
         let (stopped_tx, stopped_rx) = oneshot::channel();
-
-        // Initialize minijails static functionality
-        let minijail_log_handle = minijail_init().await?;
 
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.data_dir).await?;
@@ -108,12 +108,13 @@ impl Runtime {
         {
             let event_tx = event_tx.clone();
             task::spawn(async move {
-                let result = runtime_task(config, event_tx, event_rx, stop_rx).await;
-                match &result {
-                    Err(e) => log::error!("Runtime error: {}", e),
-                    Ok(()) => log::debug!("Runtime exited"),
+                match runtime_task(config, event_tx, event_rx, stop_rx).await {
+                    Err(e) => {
+                        log::error!("Runtime error: {}", e);
+                        stopped_tx.send(Err(e)).ok();
+                    }
+                    Ok(_) => drop(stopped_tx.send(Ok(()))),
                 };
-                stopped_tx.send(result).ok(); // Ignore error if calle dropped the handle
             });
         }
 
@@ -121,7 +122,6 @@ impl Runtime {
             stop: Some(stop_tx),
             stopped: stopped_rx,
             event_tx,
-            minijail_log_handle,
         })
     }
 
@@ -204,6 +204,8 @@ async fn runtime_task(
 ) -> Result<(), Error> {
     let mut state = State::new(&config, event_tx.clone()).await?;
 
+    minijail::init().await.map_err(Error::Process)?;
+
     info!(
         "Mounted {} containers",
         state.applications.len() + state.resources.len()
@@ -235,10 +237,10 @@ async fn runtime_task(
     });
 
     // Enter main loop
-    loop {
+    let result = loop {
         let result = match event_rx.recv().await.unwrap() {
-            Event::ChildOutput { name, fd, line } => {
-                on_child_output(&mut state, &name, fd, &line).await;
+            Event::ChildOutput { name, stream, line } => {
+                on_child_output(&mut state, &name, stream, &line).await;
                 Ok(())
             }
             // Debug console commands are handled via the main loop in order to get access
@@ -268,14 +270,18 @@ async fn runtime_task(
         if result.is_err() {
             break result;
         }
-    }
+    };
+
+    minijail::shutdown().await.map_err(Error::Process)?;
+
+    result
 }
 
 // TODO: Where to send this?
-async fn on_child_output(state: &mut State, name: &str, fd: i32, line: &str) {
+async fn on_child_output(state: &mut State, name: &str, stream: OutputStream, line: &str) {
     if let Some(p) = state.application(name) {
         if let Some(p) = p.process_context() {
-            debug!("[{}] {}: {}: {}", p.process().pid(), name, fd, line);
+            debug!("[{}] {}: {:?}: {}", p.process().pid(), name, stream, line);
         }
     }
 }
@@ -319,76 +325,4 @@ fn is_rw(path: &Path) -> bool {
         }
         Err(_) => false,
     }
-}
-
-use std::os::unix::io::{FromRawFd, RawFd};
-
-struct MinijailLogHandle(RawFd);
-
-// Closes the pipe on drop, causing the spawned task that forwards the minijail log to terminate.
-impl Drop for MinijailLogHandle {
-    fn drop(&mut self) {
-        let _ = nix::unistd::close(self.0);
-    }
-}
-
-/// Initialize minijail logging
-async fn minijail_init() -> Result<Option<MinijailLogHandle>, Error> {
-    use std::io::BufRead;
-
-    #[allow(non_camel_case_types)]
-    #[allow(dead_code)]
-    #[repr(i32)]
-    enum SyslogLevel {
-        LOG_EMERG = 0,
-        LOG_ALERT = 1,
-        LOG_CRIT = 2,
-        LOG_ERR = 3,
-        LOG_WARNING = 4,
-        LOG_NOTICE = 5,
-        LOG_INFO = 6,
-        LOG_DEBUG = 7,
-        MAX = i32::MAX,
-    }
-
-    let handle = log::max_level().to_level().map(|level| {
-        let minijail_log_level = match level {
-            Level::Error => SyslogLevel::LOG_ERR,
-            Level::Warn => SyslogLevel::LOG_WARNING,
-            Level::Info => SyslogLevel::LOG_INFO,
-            Level::Debug => SyslogLevel::LOG_DEBUG,
-            Level::Trace => SyslogLevel::MAX,
-        };
-
-        let (readfd, writefd) =
-            pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
-        ::minijail::Minijail::log_to_fd(writefd, minijail_log_level as i32);
-
-        let pipe = unsafe { std::fs::File::from_raw_fd(readfd) };
-        let mut lines = std::io::BufReader::new(pipe).lines();
-        task::spawn_blocking(move || {
-            let prefix_re = regex::Regex::new(r"libminijail\[\d+\]: ").expect("Invalid regex");
-            while let Some(Ok(line)) = lines.next() {
-                let mut parts = prefix_re.split(&line);
-                let level = parts.next().unwrap_or_default();
-                let msg = parts.next().unwrap_or_default();
-
-                if level.starts_with("INFO") {
-                    log::info!("{}", msg);
-                } else if level.starts_with("WARN") {
-                    log::warn!("{}", msg);
-                } else if level.starts_with("DEBUG") {
-                    log::debug!("{}", msg);
-                } else if level.starts_with("ERR") {
-                    log::error!("{}", msg);
-                } else {
-                    log::trace!("{}", msg);
-                }
-            }
-        });
-
-        Ok(MinijailLogHandle(writefd))
-    });
-
-    handle.map_or(Ok(None), |r| r.map(Some))
 }
