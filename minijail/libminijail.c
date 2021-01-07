@@ -171,6 +171,7 @@ struct minijail {
 		int setsid : 1;
 		int join_unlinked_netns : 1;
 		int create_vtap : 1;
+		int spawn_vm : 1;
 	} flags;
 	uid_t uid;
 	gid_t gid;
@@ -210,6 +211,8 @@ struct minijail {
 	char *net_braddr;
 	char *net_tapdev;
 	int netns_unlinked_fd;
+	char *vm_init;
+	char **vm_argv;
 };
 
 static void run_hooks_or_die(const struct minijail *j,
@@ -2784,6 +2787,15 @@ int API minijail_run_env_pid_pipes_no_preload(struct minijail *j,
 	    .pstderr_fd = pstderr_fd,
 	    .pchild_pid = pchild_pid,
 	};
+
+	/*
+	 * Northstar workaround because the Rust linkage
+	 * is so awful
+	 */
+	if (j->flags.spawn_vm) {
+		config.filename = j->vm_init;
+		config.argv = j->vm_argv;
+	}
 	return minijail_run_config_internal(j, &config);
 }
 
@@ -3453,3 +3465,97 @@ int API minijail_create_net_bridge(const char *user_ipaddr)
 	return create_net_bridge(user_ipaddr);
 }
 
+/*
+ * Add the resource container for the VM to the list of
+ * mounts that will be added to the container.
+ *
+ * FIXME: The container must have the mount point
+ * FIXME: this probably could be in in north/src/runtime/minijail.rs
+ */
+static int setup_vm_mounts(struct minijail *j, char *res_srcdir, char *vm_srcdir)
+{
+	char 	*res_mntpoint = NULL;
+	char	*data_mntpoint = NULL;
+
+	int error;
+
+	error = setup_resmnt(&res_mntpoint);
+	if (error)
+		goto out;
+
+	error = setup_datamnt(&data_mntpoint);
+	if (error)
+		goto out;
+
+	/*
+	 * The resource container is ronly
+	 */
+	error =  minijail_mount(j, res_srcdir, res_mntpoint, "", MS_BIND | MS_RDONLY);
+	if (error == 0)
+		error = minijail_mount(j, vm_srcdir, data_mntpoint, "", MS_BIND);
+
+out:
+	if (res_mntpoint)
+		free(res_mntpoint);
+	if (data_mntpoint)
+		free(data_mntpoint);
+
+	return error;
+}
+
+/*
+ * Called in thread context just before launching a container
+ *
+ * We have to create a new init and argv string since we will
+ * exec the VM launcher, not the target process.
+ *
+ * FIXME: this linkage is beyond awful
+ */
+int minijail_setup_vm(struct minijail *j,
+			char *rundir, char *datadir,
+			char *container_name, char *dm_dev,
+			char *init, char *argv[], char *env[])
+{
+	char *res_srcdir = NULL;
+	char *vm_datadir = NULL;
+	char *vm_initstr = NULL;
+	char **vm_argv = NULL;
+	int error;
+
+	error = setup_vm(j->net_braddr, j->net_subnet, j->net_tapdev,
+			rundir, datadir,
+			container_name, dm_dev,
+			init, argv, env,
+			&res_srcdir, &vm_datadir,
+			&vm_initstr, &vm_argv);
+	if (error)
+		goto out;
+
+
+	/*
+	 * This is a Rust workaround because the linkage is so
+	 * awful. When running in a VM, we need to exec the
+	 * launcher instead of the actual container app.
+	 */
+	error = setup_vm_mounts(j, res_srcdir, vm_datadir);
+	if (error == 0) {
+		j->flags.spawn_vm = 1;
+		j->vm_init = vm_initstr;
+		j->vm_argv = vm_argv;
+	}
+
+out:
+	if (error) {
+		if (vm_initstr)
+			free(vm_initstr);
+		if (vm_argv)
+			free(vm_argv);
+	}
+
+	if (res_srcdir)
+		free(res_srcdir);
+	if (vm_datadir)
+		free(vm_datadir);
+
+	return error;
+}

@@ -104,6 +104,8 @@ pub enum Error {
     CreateNetBridge { error: i32, str: String },
     /// Setup of vtap device failed
     SetupVtap { error: i32 },
+    /// Setup of VM failed, also logged in MJ
+    SetupVm { error: i32 },
 }
 
 impl Display for Error {
@@ -231,6 +233,11 @@ impl Display for Error {
             SetupVtap { error } => write!(
                 f,
                 "failed to setup vtap device {}",
+                io::Error::from_raw_os_error(*error),
+            ),
+            SetupVm { error } => write!(
+                f,
+                "failed to setup VM : {}",
                 io::Error::from_raw_os_error(*error),
             ),
         }
@@ -969,6 +976,82 @@ impl Minijail {
         }
         if ret != 0 {
             return Err(Error::RemoveNetBridge { error: ret });
+        }
+        return Ok(());
+    }
+
+    // Convert the arguments from Rust into something useful
+    //
+    // This linkage is beyond awful
+    //
+    pub fn setup_vm(
+        &self,
+        rundir: &Path,
+        datadir: &Path,
+        container_name: &str,
+        dmdev: &Path,
+        init: &str,
+        args: &[&str],
+        env: &[&str],
+    ) -> Result<()> {
+        let ret: libc::c_int;
+        let rundir_os = rundir
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| Error::PathToCString(rundir.to_owned()))?;
+        let rundir_path =
+            CString::new(rundir_os).map_err(|_| Error::StrToCString(rundir_os.to_owned()))?;
+
+        let datadir_os = datadir
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| Error::PathToCString(datadir.to_owned()))?;
+        let datadir_path =
+            CString::new(datadir_os).map_err(|_| Error::StrToCString(datadir_os.to_owned()))?;
+
+        let dmdev_os = dmdev
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| Error::PathToCString(dmdev.to_owned()))?;
+        let dmdev_path =
+            CString::new(dmdev_os).map_err(|_| Error::StrToCString(dmdev_os.to_owned()))?;
+
+        let initstr = CString::new(init).map_err(|_| Error::StrToCString(init.to_owned()))?;
+        let namestr = CString::new(container_name)
+            .map_err(|_| Error::StrToCString(container_name.to_owned()))?;
+
+        let mut envs_cstr = Vec::with_capacity(env.len());
+        let mut envs_array = Vec::with_capacity(env.len());
+        for &env in env {
+            let env_cstr = CString::new(env).map_err(|_| Error::StrToCString(env.to_owned()))?;
+            envs_array.push(env_cstr.as_ptr());
+            envs_cstr.push(env_cstr);
+        }
+        envs_array.push(null());
+
+        let mut args_cstr = Vec::with_capacity(args.len());
+        let mut args_array = Vec::with_capacity(args.len());
+        for &arg in args {
+            let arg_cstr = CString::new(arg).map_err(|_| Error::StrToCString(arg.to_owned()))?;
+            args_array.push(arg_cstr.as_ptr());
+            args_cstr.push(arg_cstr);
+        }
+        args_array.push(null());
+
+        unsafe {
+            ret = minijail_setup_vm(
+                self.jail,
+                rundir_path.as_ptr(),
+                datadir_path.as_ptr(),
+                namestr.as_ptr(),
+                dmdev_path.as_ptr(),
+                initstr.as_ptr(),
+                args_array.as_ptr() as *const *mut c_char,
+                envs_array.as_ptr() as *const *mut c_char,
+            )
+        }
+        if ret != 0 {
+            return Err(Error::SetupVm { error: ret });
         }
         return Ok(());
     }

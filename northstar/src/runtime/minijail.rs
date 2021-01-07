@@ -269,6 +269,17 @@ impl Process {
             .collect::<Vec<String>>();
         let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
 
+        if container.manifest.use_vm.unwrap_or(false) {
+            jail.setup_vm(
+                &run_dir,
+                &data_dir,
+                &container.manifest.name.to_string(),
+                &container.device,
+                &init_str,
+                &argv,
+                &env,
+            )?;
+        }
         debug!(
             "Executing \"{}{}{}\"",
             init.display(),

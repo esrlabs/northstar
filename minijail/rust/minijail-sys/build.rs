@@ -109,6 +109,7 @@ fn main() -> io::Result<()> {
         "../../libminijail.c",
         "../../libmj_netns.c",
         "../../libmj_perms.c",
+        "../../libmj_vm.c",
         "../../signal_handler.c",
         "../../syscall_filter.c",
         "../../syscall_wrapper.c",

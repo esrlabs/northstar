@@ -418,3 +418,15 @@ extern "C" {
 extern "C" {
     pub fn minijail_setup_vtap(j: *mut minijail) -> ::std::os::raw::c_int;
 }
+extern "C" {
+    pub fn minijail_setup_vm(
+        j: *mut minijail,
+        rundir: *const ::std::os::raw::c_char,
+        datadir: *const ::std::os::raw::c_char,
+        name: *const ::std::os::raw::c_char,
+        dm_dev: *const ::std::os::raw::c_char,
+        init: *const ::std::os::raw::c_char,
+        argv: *const *mut ::std::os::raw::c_char,
+        envp: *const *mut ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
+}
