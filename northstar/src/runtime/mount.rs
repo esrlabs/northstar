@@ -64,7 +64,7 @@ pub(super) async fn mount_npk_repository(
         .map_err(|e| Error::Io("Failed to read repository".to_string(), e))?;
     let mut containers = Vec::new();
     while let Ok(Some(entry)) = dir.next_entry().await {
-        containers.append(&mut mount_npk(&config, &entry.path(), repo).await?);
+        containers.push(mount_npk(&config, &entry.path(), repo).await?);
     }
 
     Ok(containers)

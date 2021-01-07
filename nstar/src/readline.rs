@@ -23,7 +23,7 @@ use rustyline::{
     highlight::{Highlighter, MatchingBracketHighlighter},
     hint::{Hinter, HistoryHinter},
     validate::{self, MatchingBracketValidator, Validator},
-    Cmd, CompletionType, Config, EditMode, Editor, KeyPress,
+    Cmd, CompletionType, Config, EditMode, Editor, KeyEvent, Modifiers,
 };
 use rustyline_derive::Helper;
 use std::borrow::Cow::{Borrowed, Owned};
@@ -55,6 +55,8 @@ impl Completer for ReadlineHelper {
 }
 
 impl Hinter for ReadlineHelper {
+    type Hint = String;
+
     fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<String> {
         self.hinter.hint(line, pos, ctx)
     }
@@ -119,10 +121,16 @@ pub(crate) async fn readline(
     };
     let mut rl = Editor::with_config(config);
     rl.set_helper(Some(h));
-    rl.bind_sequence(KeyPress::Tab, Cmd::CompleteHint);
-    rl.bind_sequence(KeyPress::Ctrl('L'), Cmd::ClearScreen);
-    rl.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
-    rl.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
+    rl.bind_sequence(KeyEvent::new('\t', Modifiers::empty()), Cmd::CompleteHint);
+    rl.bind_sequence(KeyEvent::new('l', Modifiers::CTRL), Cmd::ClearScreen);
+    rl.bind_sequence(
+        KeyEvent::new('n', Modifiers::ALT),
+        Cmd::HistorySearchForward,
+    );
+    rl.bind_sequence(
+        KeyEvent::new('p', Modifiers::ALT),
+        Cmd::HistorySearchBackward,
+    );
 
     let history = match directories::ProjectDirs::from("com", "esrlabs", "nstar")
         .map(|d| d.config_dir().join("history"))

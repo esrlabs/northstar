@@ -8,4 +8,4 @@ build = "build.rs"
 path = "lib.rs"
 
 [build-dependencies]
-cc = "1.0.65"
+cc = "1.0.66"
