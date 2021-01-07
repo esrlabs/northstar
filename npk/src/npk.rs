@@ -14,13 +14,9 @@
 
 use crate::{
     dm_verity::{append_dm_verity_block, Error as VerityError, BLOCK_SIZE},
-    manifest::{Manifest, Mount, MountFlag},
+    manifest::{Manifest, Mount, MountFlag, Version},
 };
-use ed25519_dalek::SignatureError;
-use zip::result::ZipError;
-// use colored::Colorize;
-use crate::manifest::Version;
-use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
+use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
@@ -34,7 +30,7 @@ use std::{
 };
 use tempfile::TempDir;
 use thiserror::Error;
-use zip::ZipArchive;
+use zip::{result::ZipError, ZipArchive};
 
 // Binaries
 pub const MKSQUASHFS_BIN: &str = "mksquashfs";
