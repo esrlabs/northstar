@@ -32,7 +32,6 @@ use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
     select,
-    stream::StreamExt,
     sync::{self, broadcast, oneshot},
     task,
 };
@@ -166,23 +165,21 @@ impl Console {
     pub(crate) async fn listen(&self) -> Result<(), Error> {
         debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
-        let mut listener = TcpListener::bind(&self.address)
+        let listener = TcpListener::bind(&self.address)
             .await
             .map_err(|e| Error::Io(format!("Failed to open listener on {}", self.address), e))?;
 
         let notification_tx = self.notification_tx.clone();
         task::spawn(async move {
             // Spawn a task for each incoming connection.
-            while let Some(stream) = listener.next().await {
-                if let Ok(stream) = stream {
-                    let event_tx = event_tx.clone();
-                    let notification_rx = notification_tx.subscribe();
-                    task::spawn(async move {
-                        if let Err(e) = Self::connection(stream, event_tx, notification_rx).await {
-                            warn!("Error servicing connection: {}", e);
-                        }
-                    });
-                }
+            while let Ok(stream) = listener.accept().await {
+                let event_tx = event_tx.clone();
+                let notification_rx = notification_tx.subscribe();
+                task::spawn(async move {
+                    if let Err(e) = Self::connection(stream.0, event_tx, notification_rx).await {
+                        warn!("Error servicing connection: {}", e);
+                    }
+                });
             }
         });
         Ok(())
@@ -289,7 +286,7 @@ impl Console {
             tx
         };
 
-        while let Some(request) = client_in.next().await {
+        while let Some(request) = client_in.recv().await {
             let request = match request {
                 ConnectionEvent::Request(request) => Request::Message(request),
                 ConnectionEvent::Install(message, repository, npk) => {

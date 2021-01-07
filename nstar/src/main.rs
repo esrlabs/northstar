@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use anyhow::{anyhow, Context, Result};
-use futures::{sink::SinkExt, Sink};
+use futures::{sink::SinkExt, Sink, StreamExt};
 use itertools::Itertools;
 use log::{info, warn};
 use northstar::api::{self, Container, Message, Notification, Payload, Request, Response};
@@ -26,7 +26,6 @@ use tokio::{
     fs::File,
     net::TcpStream,
     select,
-    stream::{Stream, StreamExt},
     sync::{self, oneshot},
     task, time,
 };
@@ -150,7 +149,7 @@ async fn main() -> Result<()> {
 
         'inner: loop {
             select! {
-                input = input_rx.next() => {
+                input = input_rx.recv() => {
                     let (_done, input) = match input {
                         Some((done, input)) => (done, input),
                         None => break 'outer,
@@ -302,7 +301,7 @@ async fn main() -> Result<()> {
                                     }
 
                                     // Wait for the installation response
-                                    match response_rx.next().await {
+                                    match response_rx.recv().await {
                                         Some(r) => println!("{:?}", r),
                                         None => {
                                             warn!("Stream error");
@@ -363,7 +362,7 @@ async fn main() -> Result<()> {
                         None => (),
                     }
                 }
-                notification = notification_rx.next() => {
+                notification = notification_rx.recv() => {
                     if let Some(notification) = notification {
                         // Print notifications only if not in command mode
                         if opt.cmd.is_empty() {
@@ -383,14 +382,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn request_response<S, R>(
+async fn request_response<S>(
     mut sink: S,
-    mut stream: R,
+    reposonse: &mut mpsc::Receiver<Response>,
     request: Request,
 ) -> Result<Option<Response>>
 where
     S: Unpin + Sink<codec::Message>,
-    R: Unpin + Stream<Item = Response>,
 {
     sink.send(codec::Message::Message(Message::new_request(
         request.clone(),
@@ -398,8 +396,8 @@ where
     .await
     .map_err(|_| anyhow!("Sink error"))?;
     if request != Request::Shutdown {
-        stream
-            .next()
+        reposonse
+            .recv()
             .await
             .context("Stream error")
             .map(Option::Some)

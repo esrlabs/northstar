@@ -33,9 +33,7 @@ use std::{
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt, AsyncWriteExt},
-    select,
-    stream::StreamExt,
-    task, time,
+    select, task, time,
 };
 
 // We need a Send + Sync version of Minijail
@@ -98,7 +96,7 @@ impl CaptureOutput {
         let tag = tag.to_string();
         task::spawn(async move {
             // The removal of tmpdir lines return a None and the loop breaks
-            while let Some(Ok(line)) = lines.next().await {
+            while let Ok(Some(line)) = lines.next_line().await {
                 event_tx
                     .send(Event::ChildOutput {
                         name: tag.clone(),
@@ -412,7 +410,7 @@ impl super::process::Process for Process {
             .map_err(|e| Error::Os(format!("Failed to SIGTERM {}", self.pid), e))?;
 
         let timeout = Box::pin(time::sleep(timeout));
-        let exited = Box::pin(self.exit_handle_wait.next());
+        let exited = Box::pin(self.exit_handle_wait.recv());
 
         let pid = self.pid;
         Ok(select! {

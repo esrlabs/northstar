@@ -22,7 +22,12 @@ use std::{
 };
 use sync::mpsc;
 use thiserror::Error;
-use tokio::{fs, fs::OpenOptions, io, prelude::*, select, sync, task, time};
+use tokio::{
+    fs,
+    fs::OpenOptions,
+    io::{self, AsyncWriteExt},
+    select, sync, task, time,
+};
 
 use super::{config, Event, EventTx};
 
