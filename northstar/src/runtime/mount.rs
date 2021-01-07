@@ -30,7 +30,7 @@ use std::{
     process,
 };
 use thiserror::Error;
-use tokio::{fs, fs::metadata, stream::StreamExt, task, time};
+use tokio::{fs, fs::metadata, task, time};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -59,17 +59,12 @@ pub(super) async fn mount_npk_repository(
     repo: &Repository,
 ) -> Result<Vec<Container>, Error> {
     info!("Mounting NPKs from {}", repo.dir.display());
-
-    let npks = fs::read_dir(&repo.dir)
+    let mut dir = fs::read_dir(&repo.dir)
         .await
-        .map_err(|e| Error::Io(format!("Failed to read {}", &repo.dir.display()), e))?
-        .filter_map(Result::ok)
-        .map(|d| d.path());
-
+        .map_err(|e| Error::Io("Failed to read repository".to_string(), e))?;
     let mut containers = Vec::new();
-    let mut npks = Box::pin(npks);
-    while let Some(npk) = npks.next().await {
-        containers.push(mount_npk(&config, &npk, repo).await?);
+    while let Ok(Some(entry)) = dir.next_entry().await {
+        containers.append(&mut mount_npk(&config, &entry.path(), repo).await?);
     }
 
     Ok(containers)

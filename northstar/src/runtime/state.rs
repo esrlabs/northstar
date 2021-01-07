@@ -33,7 +33,7 @@ use std::{
     path::{Path, PathBuf},
     result,
 };
-use tokio::{fs, stream::StreamExt, time};
+use tokio::{fs, time};
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -456,15 +456,8 @@ impl State {
             let mut dir = fs::read_dir(&repository.dir).await.map_err(|e| {
                 Error::Io(format!("Failed to read {}", repository.dir.display()), e)
             })?;
-            while let Some(res) = dir.next().await {
-                let entry = res.map_err(|e| {
-                    Error::Io(
-                        "Could not read directory".to_string(), // TODO: Which directory?
-                        e,
-                    )
-                })?;
-
-                let manifest = ArchiveReader::new(entry.path().as_path(), None)
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                let manifest = ArchiveReader::new(&entry.path().as_path(), None)
                     .map_err(Error::Npk)?
                     .manifest()
                     .clone();
