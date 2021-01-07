@@ -21,7 +21,7 @@ def cross_packages
     hello
     memeater
     minijail
-    north
+    northstar
     test_container
   ]
 end
@@ -77,10 +77,8 @@ namespace :examples do
 end
 
 namespace :test do
-  task :prepare => :examples do
+  task :prepare => 'examples:build' do
     `cargo build -p northstar`
-    `cargo build -p nstar`
-    `cargo build --release -p test_container`
   end
 
   desc 'Run integration tests'
