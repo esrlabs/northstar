@@ -94,7 +94,7 @@ test!(missing_resource_container, {
 
     // Expect MissingResource Error
     runtime
-        .start("test_container-000")
+        .start("test_container")
         .expect_err(api::Error::MissingResource("test_resource".to_owned()))?;
 
     runtime.uninstall("test_container", "0.0.1").expect_ok()?;
@@ -141,7 +141,7 @@ test!(uninstall_a_running_application, {
     runtime.install(get_test_resource_npk()).could_fail();
     runtime.install(get_test_container_npk()).could_fail();
 
-    let data_dir = Path::new("target/north/data/test_container-000");
+    let data_dir = Path::new("target/northstar/data/test_container");
     fs::create_dir_all(&data_dir).await?;
 
     let input_file = data_dir.join("input.txt");
@@ -150,9 +150,9 @@ test!(uninstall_a_running_application, {
     fs::write(&input_file, b"loop").await?;
 
     // Start the test_container process
-    runtime.start("test_container-000").expect_ok()?;
+    runtime.start("test_container").expect_ok()?;
     let container = runtime
-        .pid("test_container-000")
+        .pid("test_container")
         .await
         .map(ProcessAssert::new)?;
 
@@ -162,7 +162,7 @@ test!(uninstall_a_running_application, {
         .uninstall("test_container", "0.0.1")
         .expect_err(api::Error::ApplicationRunning("test_container".to_owned()))?;
 
-    runtime.stop("test_container-000").expect_ok()?;
+    runtime.stop("test_container").expect_ok()?;
 
     // Remove the temporary data directory
     fs::remove_dir_all(&data_dir).await?;
@@ -187,9 +187,7 @@ test!(crashing_containers, {
     fs::write(dir.join("input.txt"), b"crash").await?;
 
     // Start the test_container process
-    runtime
-        .start(&"test_container".to_string())
-        .expect_ok()?;
+    runtime.start(&"test_container".to_string()).expect_ok()?;
 
     // Try to stop the containers before issuing the shutdown
     runtime.stop(&"test_container".to_string()).could_fail();
