@@ -23,6 +23,7 @@ bytesize = { version = "1.0.1", optional = true }
 derive-new = { version = "0.5.8", optional = true }
 ed25519-dalek = { version = "1.0.1", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
+futures = { version = "0.3.8", optional = true }
 hex = "0.4.2"
 itertools = { version = "0.10.0", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
@@ -65,6 +66,7 @@ runtime = [
     "bytesize",
     "ed25519-dalek",
     "floating-duration",
+    "futures",
     "itertools",
     "lazy_static",
     "libc",
@@ -72,7 +74,6 @@ runtime = [
     "nix",
     "proc-mounts",
     "procinfo",
-    "regex",
     "serde",
     "serde_json",
     "serde_yaml",
