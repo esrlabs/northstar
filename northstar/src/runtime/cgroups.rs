@@ -42,32 +42,6 @@ pub enum Error {
     ControllerNotFound(String),
 }
 
-pub async fn init_root_cgroups(config: &config::CGroups) -> Result<(), Error> {
-    let mount_point = get_mount_point("cpuset")?;
-    let cpuset_root = mount_point.join(cgroup_path("cpuset", config)?);
-
-    debug!("Creating cpuset hierarchy under {}", cpuset_root.display());
-    create_if_not_exists(cpuset_root.as_path()).await?;
-
-    tokio::try_join!(
-        copy_file("cpuset.cpus", &mount_point, &cpuset_root),
-        copy_file("cpuset.mems", &mount_point, &cpuset_root),
-    )?;
-    Ok(())
-}
-
-async fn copy_file(name: &str, src_dir: &Path, dst_dir: &Path) -> Result<(), Error> {
-    let file_path = src_dir.join(name);
-    // NOTE For some reason using fs::copy here does not work
-    let value = fs::read_to_string(&file_path).await.map_err(|e| {
-        Error::Io(
-            format!("Could not read content of {}", file_path.display(),),
-            e,
-        )
-    })?;
-    write(&dst_dir.join(name), &value).await
-}
-
 #[derive(Debug)]
 pub struct CGroups {
     cgroup_paths: Vec<PathBuf>,
