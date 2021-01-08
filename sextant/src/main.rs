@@ -65,7 +65,7 @@ fn main() -> Result<()> {
     env_logger::init();
 
     match Opt::from_args() {
-        Opt::Pack { dir, out, key } => npk::npk::pack(&dir, &out, &key)?,
+        Opt::Pack { dir, out, key } => npk::npk::pack(&dir, &out, Option::from(key.as_path()))?,
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
         Opt::Inspect { npk, short } => inspect::inspect(&npk, short)?,
         Opt::GenKey { name, out } => npk::npk::gen_key(&name, &out)?,

@@ -12,13 +12,20 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+pub use crate::npk;
 use crate::{
-    dm_verity::{append_dm_verity_block, Error as VerityError, BLOCK_SIZE},
+    dm_verity,
+    dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Manifest, Mount, MountFlag, Version},
 };
-use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
+use anyhow::Result;
+use ed25519_dalek::{
+    ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
+    SECRET_KEY_LENGTH,
+};
 use itertools::Itertools;
 use rand::rngs::OsRng;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -27,6 +34,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
+    str::FromStr,
 };
 use tempfile::TempDir;
 use thiserror::Error;
@@ -56,14 +64,14 @@ const ROOT_DIR_NAME: &str = "root";
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Manifest format error: {0}")]
+    #[error("Manifest error: {0}")]
     Manifest(String),
     #[error("File operation error: {0}")]
     FileOperation(String),
     #[error("Squashfs error: {0}")]
     Squashfs(String),
     #[error("Archive error: {context}")]
-    Archive {
+    Zip {
         context: String,
         #[source]
         error: ZipError,
@@ -82,6 +90,219 @@ pub enum Error {
         #[source]
         error: SignatureError,
     },
+    #[error("Hashes malformed: {0}")]
+    MalformedHashes(String),
+    #[error("Signature malformed: {0}")]
+    MalformedSignature(String),
+    #[error("Manifest malformed: {0}")]
+    MalformedManifest(String),
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(String),
+}
+
+#[derive(Eq, PartialEq, Debug)]
+pub struct Hashes {
+    pub manifest_hash: String,
+    pub fs_hash: String,
+    pub fs_verity_hash: String,
+    pub fs_verity_offset: u64,
+}
+
+impl FromStr for Hashes {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct ManifestHash {
+            hash: String,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct FsHashes {
+            hash: String,
+            verity_hash: String,
+            verity_offset: u64,
+        }
+
+        #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct SerdeHashes {
+            #[serde(rename = "manifest.yaml")]
+            manifest: ManifestHash,
+            #[serde(rename = "fs.img")]
+            fs: FsHashes,
+        }
+
+        let hashes = serde_yaml::from_str::<SerdeHashes>(s)
+            .map_err(|e| Error::MalformedHashes(format!("Problem deserializing hashes: {}", e)))?;
+
+        Ok(Hashes {
+            manifest_hash: hashes.manifest.hash,
+            fs_hash: hashes.fs.hash,
+            fs_verity_hash: hashes.fs.verity_hash,
+            fs_verity_offset: hashes.fs.verity_offset,
+        })
+    }
+}
+
+pub struct Npk<R: io::Read + io::Seek> {
+    inner: zip::ZipArchive<R>,
+}
+
+impl<R: io::Read + io::Seek> Npk<R> {
+    pub fn new(npk: R) -> Result<Self, Error> {
+        let zip = zip::ZipArchive::new(npk).map_err(|e| Error::Zip {
+            context: "Failed to parse ZIP format of NPK".to_string(),
+            error: e,
+        })?;
+        Ok(Self { inner: zip })
+    }
+
+    pub fn manifest(&mut self) -> Result<Manifest, Error> {
+        if let Ok(mut file) = self.inner.by_name(&MANIFEST_NAME) {
+            let mut content = String::new();
+            file.read_to_string(&mut content).map_err(|e| Error::Os {
+                context: "Failed to read manifest from file".to_string(),
+                error: e,
+            })?;
+            Manifest::from_str(&content)
+                .map_err(|e| Error::Manifest(format!("Failed to parse manifest file: {}", e)))
+        } else {
+            Err(Error::FileOperation(format!(
+                "Failed to locate {} in ZIP file",
+                &MANIFEST_NAME
+            )))
+        }
+    }
+
+    /// contains the hashes and the key/signature pair
+    fn signature_yaml(&mut self) -> Result<String, Error> {
+        if let Ok(mut file) = self.inner.by_name(&SIGNATURE_NAME) {
+            let mut content = String::new();
+            file.read_to_string(&mut content).map_err(|e| Error::Os {
+                context: "Failed to read signature from file".to_string(),
+                error: e,
+            })?;
+            Ok(content)
+        } else {
+            Err(Error::FileOperation(format!(
+                "Failed to locate {} in ZIP file",
+                &SIGNATURE_NAME
+            )))
+        }
+    }
+
+    pub fn hashes(&mut self) -> Result<Hashes, Error> {
+        let sign_yaml = self.signature_yaml()?;
+        let hashes_string = sign_yaml.split("---").next().unwrap_or_default();
+        Hashes::from_str(hashes_string).map_err(|_e| {
+            Error::MalformedHashes("Failed to read hashes from YAML file".to_string())
+        })
+    }
+
+    pub fn signature(&mut self) -> Result<ed25519_dalek::Signature, Error> {
+        #[derive(Debug, Deserialize)]
+        struct SerdeSignature {
+            key: String,
+            signature: String,
+        }
+
+        let yaml = self.signature_yaml()?;
+        let sign_string = yaml.split("---").nth(1).unwrap_or_default();
+        || -> Result<ed25519_dalek::Signature> {
+            let sign_serde = serde_yaml::from_str::<SerdeSignature>(sign_string)?;
+            let sign_bytes = base64::decode(sign_serde.signature)?;
+            Ok(ed25519_dalek::Signature::from_bytes(&sign_bytes)?)
+        }()
+        .map_err(|e| {
+            Error::MalformedSignature(format!("Failed to read signature from YAML file: {}", e))
+        })
+    }
+
+    pub fn verify(&mut self, key: &ed25519_dalek::PublicKey) -> Result<(), Error> {
+        let sign_yaml = self.signature_yaml()?;
+        let hashes_string = sign_yaml.split("---").next().unwrap_or_default();
+        let signature = self.signature()?;
+        key.verify_strict(hashes_string.as_bytes(), &signature)
+            .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))
+    }
+
+    pub fn version(&self) -> Result<Version, Error> {
+        let comment = String::from_utf8(self.inner.comment().to_vec())
+            .map_err(|e| Error::Manifest(format!("Failed to read NPK version string {}", e)))?;
+        let mut split = comment.split(' ');
+        while let Some(key) = split.next() {
+            if let Some(value) = split.next() {
+                if key == npk::NPK_VERSION_STR {
+                    let version = Version::parse(&value).map_err(|e| {
+                        Error::Manifest(format!("Failed to parse NPK version {}", e))
+                    })?;
+                    return Ok(version);
+                }
+            } else {
+                return Err(Error::Manifest("Missing NPK version value".to_string()));
+            }
+        }
+        Err(Error::Manifest(
+            "Missing NPK version in ZIP comment".to_string(),
+        ))
+    }
+
+    pub fn fsimg_offset(&mut self) -> Result<u64, Error> {
+        if let Ok(fsimg) = self.inner.by_name(&FS_IMG_NAME) {
+            Ok(fsimg.data_start())
+        } else {
+            Err(Error::FileOperation(format!(
+                "Failed to locate {} in ZIP file",
+                &FS_IMG_NAME
+            )))
+        }
+    }
+
+    pub fn fsimg_size(&mut self) -> Result<u64, Error> {
+        if let Ok(fsimg) = self.inner.by_name(&FS_IMG_NAME) {
+            Ok(fsimg.size())
+        } else {
+            Err(Error::FileOperation(format!(
+                "Failed to locate {} in ZIP file",
+                &FS_IMG_NAME
+            )))
+        }
+    }
+
+    pub fn verity_header(&mut self) -> Result<dm_verity::VerityHeader, Error> {
+        let verity_offset = self.hashes()?.fs_verity_offset;
+        if let Ok(mut fsimg) = self.inner.by_name(&FS_IMG_NAME) {
+            io::copy(&mut fsimg.by_ref().take(verity_offset), &mut io::sink()).map_err(|e| {
+                Error::Os {
+                    context: format!("{} too small to extract verity header", &FS_IMG_NAME),
+                    error: e,
+                }
+            })?;
+            Ok(VerityHeader::from_bytes(fsimg.by_ref()).map_err(Error::Verity)?)
+        } else {
+            Err(Error::FileOperation(format!(
+                "Failed to locate {} in ZIP file",
+                &FS_IMG_NAME
+            )))
+        }
+    }
+
+    pub fn file(&mut self, file: &Path) -> Result<impl std::io::Read + '_, Error> {
+        if let Ok(zip_file) = self.inner.by_name(file.display().to_string().as_str()) {
+            Ok(zip_file)
+        } else {
+            Err(Error::FileOperation(format!(
+                "Failed to locate {} in ZIP file",
+                &file.display()
+            )))
+        }
+    }
+
+    pub fn into_inner(self) -> ZipArchive<R> {
+        self.inner
+    }
 }
 
 /// Create an NPK for the northstar runtime.
@@ -96,7 +317,7 @@ pub enum Error {
 /// --dir examples/container/hello \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
+pub fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;
 
     // Add manifest and root dir to tmp dir
@@ -112,13 +333,17 @@ pub fn pack(dir: &Path, out: &Path, key: &Path) -> Result<(), Error> {
     create_fs_img(&tmp_root, &manifest, &fsimg)?;
 
     // Create NPK
-    let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
-    write_npk(&out, &manifest, &Manifest::VERSION, &fsimg, &signature)
+    if let Some(key) = key {
+        let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
+        write_npk(&out, &manifest, &fsimg, Some(&signature))
+    } else {
+        write_npk(&out, &manifest, &fsimg, None)
+    }
 }
 
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
     let mut zip = open_zipped_npk(&npk)?;
-    zip.extract(&out).map_err(|e| Error::Archive {
+    zip.extract(&out).map_err(|e| Error::Zip {
         context: format!("Failed to extract NPK to '{}'", &out.display()),
         error: e,
     })?;
@@ -157,7 +382,7 @@ pub fn open_zipped_npk(npk: &Path) -> Result<ZipArchive<File>, Error> {
         context: format!("Failed to open NPK at '{}'", &npk.display()),
         error: e,
     })?)
-    .map_err(|e| Error::Archive {
+    .map_err(|e| Error::Zip {
         context: format!("Failed to parse ZIP format of NPK at '{}'", &npk.display()),
         error: e,
     })?;
@@ -171,10 +396,11 @@ fn read_manifest(src: &Path) -> Result<Manifest, Error> {
         context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
         error: e,
     })?;
-    let manifest = serde_yaml::from_reader(manifest_file).map_err(|_e| {
+    let manifest = serde_yaml::from_reader(manifest_file).map_err(|e| {
         Error::Manifest(format!(
-            "Failed to parse manifest '{}'",
-            &manifest_path.display()
+            "Failed to parse YAML format of manifest at '{}: {}'",
+            &manifest_path.display(),
+            e
         ))
     })?;
     Ok(manifest)
@@ -190,7 +416,7 @@ fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf, Error> 
         error: e,
     })?;
     serde_yaml::to_writer(&tmp_manifest, &manifest)
-        .map_err(|_e| Error::Manifest("Failed to serialize manifest".to_string()))?;
+        .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     Ok(tmp_manifest_path)
 }
 
@@ -325,19 +551,21 @@ fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     let tmp_root = tmp.path().join(&ROOT_DIR_NAME);
     let options = fs_extra::dir::CopyOptions::new();
     if src_root.exists() {
-        fs_extra::dir::copy(&src_root, &tmp, &options).map_err(|_e| {
+        fs_extra::dir::copy(&src_root, &tmp, &options).map_err(|e| {
             Error::FileOperation(format!(
-                "Failed to copy from '{}' to '{}'",
+                "Failed to copy from '{}' to '{}': {}",
                 &src_root.display(),
-                &tmp.path().display()
+                &tmp.path().display(),
+                e
             ))
         })?;
     } else {
         // Create empty root dir at destination if we have nothing to copy
-        fs_extra::dir::create(&tmp_root, false).map_err(|_e| {
+        fs_extra::dir::create(&tmp_root, false).map_err(|e| {
             Error::FileOperation(format!(
-                "Failed to create directory '{}'",
-                &tmp_root.display()
+                "Failed to create directory '{}': {}",
+                &tmp_root.display(),
+                e
             ))
         })?;
     }
@@ -386,7 +614,7 @@ fn create_squashfs(out: &Path, src: &Path, pseudo_dirs: &[(String, u32)]) -> Res
         ));
     }
     cmd.output()
-        .map_err(|_e| Error::Squashfs(format!("Failed to execute '{}'", &MKSQUASHFS_BIN)))?;
+        .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS_BIN, e)))?;
 
     if !src.exists() {
         Err(Error::Squashfs(format!(
@@ -417,16 +645,20 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
         .arg(&squashfs_root.display().to_string())
         .arg(&image.display().to_string())
         .output()
-        .map_err(|_e| Error::Squashfs(format!("Error while executing '{}'", &UNSQUASHFS_BIN)))?;
+        .map_err(|e| {
+            Error::Squashfs(format!(
+                "Error while executing '{}': {}",
+                &UNSQUASHFS_BIN, e
+            ))
+        })?;
     Ok(())
 }
 
 fn write_npk(
     npk: &Path,
     manifest: &Manifest,
-    npk_version: &Version,
     fsimg: &Path,
-    signature: &str,
+    signature: Option<&str>,
 ) -> Result<(), Error> {
     let npk = npk
         .join(format!(
@@ -445,19 +677,30 @@ fn write_npk(
     let manifest_string = serde_yaml::to_string(&manifest)
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     let mut zip = zip::ZipWriter::new(&npk);
-    zip.set_comment(format!("{} {}", &NPK_VERSION_STR, &npk_version.to_string()));
-    || -> Result<(), ZipError> {
-        zip.start_file(SIGNATURE_NAME, options)?;
-        zip.write_all(signature.as_bytes())?;
-        zip.start_file(MANIFEST_NAME, options)
-    }()
-    .map_err(|e| Error::Archive {
-        context: "Failed to write manifest to archive".to_string(),
-        error: e,
-    })?;
+    zip.set_comment(format!(
+        "{} {}",
+        &NPK_VERSION_STR,
+        &Manifest::VERSION.to_string()
+    ));
+    if let Some(signature) = signature {
+        || -> Result<(), std::io::Error> {
+            zip.start_file(SIGNATURE_NAME, options)?;
+            zip.write_all(signature.as_bytes())
+        }()
+        .map_err(|e| Error::Os {
+            context: "Failed to write signature to NPK".to_string(),
+            error: e,
+        })?;
+    }
+
+    zip.start_file(MANIFEST_NAME, options)
+        .map_err(|e| Error::Zip {
+            context: "Failed to write manifest to NPK".to_string(),
+            error: e,
+        })?;
     zip.write_all(manifest_string.as_bytes())
         .map_err(|e| Error::Os {
-            context: "Failed to convert manifest to bytes".to_string(),
+            context: "Failed to convert manifest to NPK".to_string(),
             error: e,
         })?;
 
@@ -466,7 +709,7 @@ fn write_npk(
      * See chapter 4.3.6 of APPNOTE.TXT
      * (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) */
     zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
-        .map_err(|e| Error::Archive {
+        .map_err(|e| Error::Zip {
             context: "Could create aligned zip-file".to_string(),
             error: e,
         })?;

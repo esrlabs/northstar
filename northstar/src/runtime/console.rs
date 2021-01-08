@@ -14,11 +14,11 @@
 
 use crate::{
     api,
+    api::RepositoryId,
     runtime::{state::State, Event, EventTx},
 };
 use byteorder::{BigEndian, ByteOrder};
 use log::{debug, error, warn};
-use npk::archive::RepositoryId;
 use std::{
     collections::HashMap,
     io::ErrorKind,

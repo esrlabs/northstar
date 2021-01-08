@@ -20,16 +20,18 @@ use super::{
     process::{ExitStatus, Process},
     Event, EventTx,
 };
-use crate::api::Notification;
+use crate::api::{Notification, RepositoryId};
 use ed25519_dalek::*;
 use log::{debug, info, warn};
 use npk::{
-    archive::{ArchiveReader, RepositoryId},
     manifest::{Manifest, Mount, Name, Version},
+    npk::Npk,
 };
 use std::{
     collections::{HashMap, HashSet},
-    fmt, iter,
+    fmt,
+    fs::File,
+    iter,
     path::{Path, PathBuf},
     result,
 };
@@ -387,17 +389,17 @@ impl State {
         Ok(())
     }
 
-    /// Install a npk
-    pub async fn install(&mut self, id: &str, npk: &Path) -> Result<(), Error> {
+    /// Install an NPK
+    pub async fn install(&mut self, id: &str, npk_path: &Path) -> Result<(), Error> {
         let repository = self
             .repositories
             .get(id)
             .ok_or_else(|| Error::RepositoryNotFound(id.to_owned()))?;
 
-        let manifest = ArchiveReader::new(npk, repository.key.as_ref())
-            .map_err(Error::Npk)?
-            .manifest()
-            .clone();
+        let file = std::fs::File::open(&npk_path)
+            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk_path.display()), e))?;
+        let mut npk = Npk::new(file).map_err(Error::Npk)?;
+        let manifest = npk.manifest().map_err(Error::Npk)?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -423,7 +425,7 @@ impl State {
         }
 
         // Copy tmp file into repository
-        fs::copy(&npk, &package_in_repository)
+        fs::copy(&npk_path, &package_in_repository)
             .await
             .map_err(|error| Error::Io("Failed to copy NPK to repository".to_string(), error))?;
 
@@ -456,10 +458,13 @@ impl State {
                 Error::Io(format!("Failed to read {}", repository.dir.display()), e)
             })?;
             while let Ok(Some(entry)) = dir.next_entry().await {
-                let manifest = ArchiveReader::new(&entry.path().as_path(), None)
-                    .map_err(Error::Npk)?
-                    .manifest()
-                    .clone();
+                let manifest = tokio::task::block_in_place(|| {
+                    let file = File::open(entry.path().as_path()).map_err(|e| {
+                        npk::npk::Error::FileOperation(format!("Failed to open NPK: {}", e))
+                    })?;
+                    Npk::new(file)?.manifest()
+                })
+                .map_err(Error::Npk)?;
 
                 if manifest.name == name && manifest.version == *version {
                     return Ok(Some((manifest, entry.path())));
