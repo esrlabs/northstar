@@ -14,21 +14,12 @@
 
 use anyhow::Result;
 use futures::{future::ready, stream::once, Stream, StreamExt};
-use itertools::Itertools;
-use northstar::{api::{
-    self,
-    client::Client,
-    model::{Container, Notification, Repository},
-}, runtime::RepositoryId};
-use prettytable::{format, Attr, Cell, Row, Table};
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    io::{self, Write},
-};
+use northstar::api::{self, client::Client};
+use std::{fmt::Debug, io::Write};
 use structopt::StructOpt;
 use tokio::{select, time};
 
+mod pretty;
 mod terminal;
 
 /// Input type for commands
@@ -90,107 +81,22 @@ impl Command {
     }
 }
 
-fn format_notification<W: io::Write>(mut w: W, notification: &Notification) {
-    let msg = format!("--> {:?}", notification);
-    writeln!(w, "{}", msg).ok();
-}
-
-fn format_containers<W: io::Write>(mut w: W, containers: &[Container]) -> Result<()> {
-    let mut table = Table::new();
-    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    table.set_titles(Row::new(vec![
-        Cell::new("Name").with_style(Attr::Bold),
-        Cell::new("Version").with_style(Attr::Bold),
-        Cell::new("Repository").with_style(Attr::Bold),
-        Cell::new("Type").with_style(Attr::Bold),
-        Cell::new("PID").with_style(Attr::Bold),
-        Cell::new("Uptime").with_style(Attr::Bold),
-    ]));
-    for container in containers
-        .iter()
-        .sorted_by_key(|c| &c.manifest.name) // Sort by name
-        .sorted_by_key(|c| c.manifest.init.is_none())
-    {
-        table.add_row(Row::new(vec![
-            Cell::new(&container.manifest.name).with_style(Attr::Bold),
-            Cell::new(&container.manifest.version.to_string()),
-            Cell::new(&container.repository),
-            Cell::new(
-                container
-                    .manifest
-                    .init
-                    .as_ref()
-                    .map(|_| "App")
-                    .unwrap_or("Resource"),
-            ),
-            Cell::new(
-                &container
-                    .process
-                    .as_ref()
-                    .map(|p| p.pid.to_string())
-                    .unwrap_or_default(),
-            )
-            .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
-            Cell::new(
-                &container
-                    .process
-                    .as_ref()
-                    .map(|p| format!("{:?}", time::Duration::from_nanos(p.uptime)))
-                    .unwrap_or_default(),
-            ),
-        ]));
-    }
-
-    print_table(&mut w, &table)?;
-    w.flush()?;
-    Ok(())
-}
-
-fn format_repositories<W: io::Write>(
-    mut w: W,
-    repositories: &HashMap<RepositoryId, Repository>,
-) -> Result<()> {
-    let mut table = Table::new();
-    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    table.set_titles(Row::new(vec![
-        Cell::new("Name").with_style(Attr::Bold),
-        Cell::new("Path").with_style(Attr::Bold),
-    ]));
-    for (id, repo) in repositories.iter().sorted_by_key(|(i, _)| (*i).clone())
-    // Sort by name
-    {
-        table.add_row(Row::new(vec![
-            Cell::new(&id).with_style(Attr::Bold),
-            Cell::new(&repo.dir.display().to_string()),
-        ]));
-    }
-
-    print_table(&mut w, &table)?;
-    w.flush()?;
-    Ok(())
-}
-
-fn print_table<W: std::io::Write>(mut w: W, table: &Table) -> Result<()> {
-    w.write_all(table.to_string().as_bytes())?;
-    w.write_all(b"\n")?;
-    Ok(())
-}
-
 async fn process<W: std::io::Write>(
     client: &mut Client,
     terminal: &mut W,
     input: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let mut split = input.split_whitespace();
     if let Some(cmd) = split.next() {
         match cmd {
+            "exit" | "quit" => return Ok(false),
             "containers" | "ls" => {
                 let containers = client.containers().await?;
-                format_containers(terminal, &containers)?;
+                pretty::containers(terminal, &containers)?;
             }
             "repositories" => {
                 let repositories = client.repositories().await?;
-                format_repositories(terminal, &repositories)?;
+                pretty::repositories(terminal, &repositories)?;
             }
             "start" => {
                 let mut containers = client.containers().await?;
@@ -245,7 +151,7 @@ async fn process<W: std::io::Write>(
             _ => (),
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 #[tokio::main]
@@ -276,13 +182,21 @@ async fn main() -> Result<()> {
             Ok(Ok(client)) => client,
             Ok(Err(e)) => {
                 writeln!(terminal, "Failed to connect: {:?}", e)?;
-                time::sleep(time::Duration::from_secs(1)).await;
-                continue 'outer;
+                if interactive {
+                    time::sleep(time::Duration::from_secs(1)).await;
+                    continue 'outer;
+                } else {
+                    break;
+                }
             }
             Err(_) => {
-                writeln!(terminal, "Failed to connect: timeout")?;
-                time::sleep(time::Duration::from_secs(1)).await;
-                continue 'outer;
+                if interactive {
+                    writeln!(terminal, "Failed to connect: timeout")?;
+                    time::sleep(time::Duration::from_secs(1)).await;
+                    continue 'outer;
+                } else {
+                    break;
+                }
             }
         };
 
@@ -293,7 +207,7 @@ async fn main() -> Result<()> {
                 notification = client.next() => {
                     if interactive {
                         if let Some(Ok(n)) = notification {
-                            format_notification(&mut terminal, &n);
+                            pretty::notification(&mut terminal, &n);
                         } else {
                             break;
                         }
@@ -301,9 +215,15 @@ async fn main() -> Result<()> {
                 }
                 input = input.next() => {
                     if let Some(input) = input {
-                        if let Err(e) = process(&mut client, &mut terminal, &input).await {
-                            writeln!(&mut terminal, "Error: {:?}", e)?;
-                            break;
+                        match process(&mut client, &mut terminal, &input).await {
+                            Ok(n) => if !n {
+                                break 'outer;
+                            }
+                            Err(e) => {
+                                writeln!(&mut terminal, "Error: {:?}", e)?;
+                                break;
+                            }
+
                         }
                     } else {
                         break 'outer;
