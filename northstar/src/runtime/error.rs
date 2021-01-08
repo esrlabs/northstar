@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::api;
-use npk::archive;
 use std::io;
 use thiserror::Error;
 
@@ -34,8 +33,8 @@ pub enum Error {
     #[error("Failed to find repository with id {0}")]
     RepositoryNotFound(String),
 
-    #[error("Npk: {0:?}")]
-    Npk(archive::Error),
+    #[error("NPK error: {0:?}")]
+    Npk(npk::npk::Error),
     #[error("Process: {0:?}")]
     Process(super::process::Error),
     #[error("Console: {0:?}")]

@@ -146,15 +146,14 @@ impl VerityHeader {
 
     pub fn check(&self) -> Result<(), Error> {
         if !self.header.starts_with(VerityHeader::HEADER) {
-            return Err(Error::InvalidHeader);
+            Err(Error::InvalidHeader)
+        } else if self.version != VerityHeader::VERITY_VERSION {
+            Err(Error::UnsupportedVersion(self.version))
+        } else if !self.algorithm.starts_with(VerityHeader::ALGORITHM) {
+            Err(Error::UnsupportedAlgorithm())
+        } else {
+            Ok(())
         }
-        if self.version != VerityHeader::VERITY_VERSION {
-            return Err(Error::UnsupportedVersion(self.version));
-        }
-        if !self.algorithm.starts_with(VerityHeader::ALGORITHM) {
-            return Err(Error::UnsupportedAlgorithm());
-        }
-        Ok(())
     }
 }
 

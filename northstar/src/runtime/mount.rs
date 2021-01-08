@@ -23,14 +23,21 @@ use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
-use npk::{archive::ArchiveReader, dm_verity::VerityHeader, manifest::Manifest};
+use npk::{
+    dm_verity::VerityHeader,
+    manifest::Manifest,
+    npk::{Error::MalformedManifest, Npk},
+};
 use std::{
+    fs::File,
     io,
     path::{Path, PathBuf},
     process,
 };
 use thiserror::Error;
 use tokio::{fs, fs::metadata, task, time};
+
+const FS_TYPE: &str = "squashfs";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -43,7 +50,7 @@ pub enum Error {
     #[error("DM Verity error: {0:?}")]
     DmVerity(npk::dm_verity::Error),
     #[error("NPK error: {0:?}")]
-    Npk(npk::archive::Error),
+    Npk(npk::npk::Error),
     #[error("UTF-8 conversion error: {0:?}")]
     Utf8Conversion(Utf8Error),
     #[error("Inotify timeout error {0}")]
@@ -52,6 +59,8 @@ pub enum Error {
     JoinError(tokio::task::JoinError),
     #[error("Os error: {0:?}")]
     Os(nix::Error),
+    #[error("Repository error: {0:?}")]
+    Repository(String),
 }
 
 pub(super) async fn mount_npk_repository(
@@ -72,23 +81,36 @@ pub(super) async fn mount_npk_repository(
 
 pub(super) async fn mount_npk(
     config: &Config,
-    npk: &Path,
+    npk_path: &Path,
     repo: &Repository,
 ) -> Result<Container, Error> {
-    debug!("Mounting {}", npk.display());
+    debug!("Mounting {}", npk_path.display());
     let use_verity = repo.key.is_some();
 
     let start = time::Instant::now();
 
-    if let Ok(meta) = metadata(&npk).await {
+    if let Ok(meta) = metadata(&npk_path).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
 
-    let archive_reader = ArchiveReader::new(&npk, repo.key.as_ref()).map_err(Error::Npk)?;
-    let manifest = archive_reader.manifest();
-    let npk_version = archive_reader.npk_version();
-    if *npk_version != Manifest::VERSION {
-        return Err(Error::Npk(npk::archive::Error::MalformedManifest(format!(
+    let file = std::fs::File::open(&npk_path)
+        .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk_path.display()), e))?;
+    let mut npk = Npk::new(file).map_err(Error::Npk)?;
+
+    // verify signature
+    if let Some(pub_key) = repo.key {
+        npk.verify(&pub_key).map_err(Error::Npk)?;
+    } else {
+        return Err(Error::Repository(
+            "No public key in repository to verify NPK signature".to_string(),
+        ));
+    }
+
+    let manifest = npk.manifest().map_err(Error::Npk)?;
+    let npk_version = npk.version().map_err(Error::Npk)?;
+
+    if npk_version != Manifest::VERSION {
+        return Err(Error::Npk(MalformedManifest(format!(
             "Invalid NPK version (detected: {}, supported: {})",
             npk_version.to_string(),
             &Manifest::VERSION
@@ -115,7 +137,7 @@ pub(super) async fn mount_npk(
         manifest.version
     );
 
-    let device = setup_and_mount(&config, &name, &archive_reader, &root, use_verity).await?;
+    let device = setup_and_mount(&config, &name, &npk_path, &root, use_verity).await?;
 
     let container = Container {
         root,
@@ -238,23 +260,33 @@ pub async fn verity_setup(
 async fn setup_and_mount(
     config: &Config,
     name: &str,
-    npk_reader: &ArchiveReader,
+    npk_path: &Path,
     root: &Path,
     use_verity: bool,
 ) -> Result<PathBuf, Error> {
-    let fs_type = npk_reader.fs_type().map_err(Error::Npk)?;
-    let mut fs = fs::File::open(&npk_reader.path)
-        .await
-        .map_err(|e| Error::Io("Failed to open NPK file".to_string(), e))?;
-    let verity = npk_reader.verity_header().map_err(Error::Npk)?;
+    // open NPK synchronously
+    let (verity, hashes, fsimg_offset, fsimg_size) = tokio::task::block_in_place(|| {
+        let file = File::open(npk_path)
+            .map_err(|e| npk::npk::Error::FileOperation(format!("Failed to open NPK: {}", e)))?;
+        let mut npk = Npk::new(file)?;
+        Ok((
+            npk.verity_header()?,
+            npk.hashes()?,
+            npk.fsimg_offset()?,
+            npk.fsimg_size()?,
+        ))
+    })
+    .map_err(Error::Npk)?;
 
+    let mut fs = fs::File::open(npk_path)
+        .await
+        .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
     let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
         .await
         .map_err(Error::LoopDevice)?;
-    let loop_device = losetup(&lc, &mut fs, npk_reader.fs_offset, npk_reader.fs_size)
+    let loop_device = losetup(&lc, &mut fs, fsimg_offset, fsimg_size)
         .await
         .map_err(Error::LoopDevice)?;
-
     let loop_device_id = loop_device
         .dev_id()
         .await
@@ -263,7 +295,7 @@ async fn setup_and_mount(
 
     if !use_verity {
         let device = loop_device.path().await.unwrap();
-        mount(&device, root, fs_type, MountFlags::MS_RDONLY, None).await?;
+        mount(&device, root, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;
         Ok(device)
     } else {
         let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
@@ -273,12 +305,12 @@ async fn setup_and_mount(
             &loop_device_id,
             &verity,
             name,
-            npk_reader.verity_hash(),
-            npk_reader.verity_offset(),
+            hashes.fs_verity_hash.as_str(),
+            hashes.fs_verity_offset,
         )
         .await?;
 
-        mount(&dm_dev, root, fs_type, MountFlags::MS_RDONLY, None).await?;
+        mount(&dm_dev, root, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;
 
         dm.device_remove(
             &name.to_string(),

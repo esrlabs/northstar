@@ -53,7 +53,7 @@ lazy_static! {
         npk::pack(
             package_dir.path(),
             REPOSITORIES_DIR.path(),
-            Path::new("examples/keys/northstar.key"),
+            Option::from(Path::new("examples/keys/northstar.key")),
         )
         .unwrap();
         REPOSITORIES_DIR.path().join("test_container-0.0.1.npk")
@@ -62,7 +62,7 @@ lazy_static! {
         npk::pack(
             Path::new("northstar_tests/test_resource"),
             REPOSITORIES_DIR.path(),
-            Path::new("examples/keys/northstar.key"),
+            Option::from(Path::new("examples/keys/northstar.key")),
         )
         .unwrap();
         REPOSITORIES_DIR.path().join("test_resource-0.0.1.npk")

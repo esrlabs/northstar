@@ -13,15 +13,13 @@
 //   limitations under the License.
 
 use derive_new::new;
-use npk::{
-    archive::RepositoryId,
-    manifest::{Manifest, Version},
-};
+use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
 pub type Name = String;
 pub type MessageId = String; // UUID
+pub type RepositoryId = String;
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Message {

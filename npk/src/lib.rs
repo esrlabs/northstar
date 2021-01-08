@@ -14,7 +14,6 @@
 
 extern crate structure;
 
-pub mod archive;
 pub mod dm_verity;
 pub mod manifest;
 pub mod npk;

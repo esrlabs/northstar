@@ -12,11 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use ::npk::archive::ArchiveReader;
+use ::npk::npk::Npk;
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use npk::npk;
 use std::{
+    fs::File,
     io::{self, Read},
     path::Path,
     process::Command,
@@ -30,12 +31,15 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
     }
 }
 
-pub fn inspect_short(npk: &Path) -> Result<()> {
-    let reader = ArchiveReader::new(&npk, None).context("Failed to extract manifest from NPK")?;
-    let manifest = reader.manifest().clone();
+pub fn inspect_short(npk_path: &Path) -> Result<()> {
+    let mut npk = Npk::new(
+        File::open(&npk_path)
+            .context(format!("Failed to open NPK at '{}'", &npk_path.display()))?,
+    )?;
+    let manifest = npk.manifest()?;
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
-    let npk_version = reader.npk_version();
+    let npk_version = npk.version()?;
     let is_resource_container = manifest.init.map_or("yes", |_| "no");
     println!(
         "name: {}, version: {}, NPK version: {}, resource container: {}",
@@ -139,7 +143,7 @@ mounts:
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&src, &dest, &prv_key).expect("Pack NPK");
+        pack(&src, &dest, Option::from(prv_key.as_path())).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
