@@ -25,9 +25,8 @@ mod mount;
 mod process;
 mod state;
 
-use crate::{api, api::Notification};
+use crate::{api, api::model::Notification};
 use config::Config;
-use console::Request;
 use error::Error;
 use log::{debug, info};
 use nix::{sys::stat, unistd};
@@ -48,6 +47,7 @@ use tokio::{
 };
 
 pub(crate) type EventTx = mpsc::Sender<Event>;
+pub type RepositoryId = String;
 
 #[derive(Clone, Debug)]
 pub enum OutputStream {
@@ -59,7 +59,7 @@ pub enum OutputStream {
 #[derive(Debug)]
 pub(crate) enum Event {
     /// Incomming command
-    Console(Request, oneshot::Sender<api::Message>),
+    Console(console::Request, oneshot::Sender<api::model::Message>),
     /// A instance exited with return code
     Exit(Name, ExitStatus),
     /// Out of memory event occured
@@ -138,10 +138,13 @@ impl Runtime {
     }
 
     /// Send a request to the runtime directly
-    pub async fn request(&self, request: api::Request) -> Result<api::Response, Error> {
-        let (response_tx, response_rx) = oneshot::channel::<api::Message>();
+    pub async fn request(
+        &self,
+        request: api::model::Request,
+    ) -> Result<api::model::Response, Error> {
+        let (response_tx, response_rx) = oneshot::channel::<api::model::Message>();
 
-        let request = api::Message::new_request(request);
+        let request = api::model::Message::new_request(request);
         self.event_tx
             .send(Event::Console(
                 console::Request::Message(request),
@@ -151,28 +154,30 @@ impl Runtime {
             .ok();
 
         match response_rx.await.ok().map(|message| message.payload) {
-            Some(api::Payload::Response(response)) => Ok(response),
+            Some(api::model::Payload::Response(response)) => Ok(response),
             Some(_) => unreachable!(),
             None => panic!("Internal channel error"),
         }
     }
 
     /// Installs a container in the repository
-    pub async fn install(&self, repo: &str, npk: &Path) -> Result<api::Response, Error> {
-        let (response_tx, response_rx) = oneshot::channel::<api::Message>();
+    pub async fn install(
+        &self,
+        repository: &str,
+        npk: &Path,
+    ) -> Result<api::model::Response, Error> {
+        let (response_tx, response_rx) = oneshot::channel::<api::model::Message>();
 
-        // The size does not matter here since the file is not received through the socket
-        let request = api::Message::new_request(api::Request::Install(repo.to_owned(), 0u64));
         self.event_tx
             .send(Event::Console(
-                console::Request::Install(request, repo.to_string(), npk.to_owned()),
+                console::Request::Install(repository.to_string(), npk.to_owned()),
                 response_tx,
             ))
             .await
             .ok();
 
         match response_rx.await.ok().map(|message| message.payload) {
-            Some(api::Payload::Response(response)) => Ok(response),
+            Some(api::model::Payload::Response(response)) => Ok(response),
             Some(_) => unreachable!(),
             None => Err(Error::AsyncRuntime(
                 "Failed to receive response".to_string(),

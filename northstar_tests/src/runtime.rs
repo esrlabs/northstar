@@ -28,19 +28,19 @@ const TIMEOUT: time::Duration = time::Duration::from_secs(3);
 pub struct Runtime(runtime::Runtime);
 
 #[must_use = "Shoud be checked for expected response"]
-pub struct ApiResponse(Result<api::Response>);
+pub struct ApiResponse(Result<api::model::Response>);
 
 impl ApiResponse {
     pub fn expect_ok(self) -> Result<()> {
         match self.0 {
-            Ok(api::Response::Ok(())) => Ok(()),
+            Ok(api::model::Response::Ok(())) => Ok(()),
             _ => Err(eyre!("Response is not ok")),
         }
     }
 
-    pub fn expect_err(self, err: api::Error) -> Result<()> {
+    pub fn expect_err(self, err: api::model::Error) -> Result<()> {
         match self.0 {
-            Ok(api::Response::Err(e)) if err == e => Ok(()),
+            Ok(api::model::Response::Err(e)) if err == e => Ok(()),
             _ => Err(eyre!("Response is not an error")),
         }
     }
@@ -69,31 +69,31 @@ impl Runtime {
     }
 
     pub fn start(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(self.0.request(api::Request::Start(name.to_string())))
+        let response = timeout_on(self.0.request(api::model::Request::Start(name.to_string())))
             .and_then(|result| result.wrap_err("Failed to start container"));
         ApiResponse(response)
     }
 
     pub async fn pid(&mut self, name: &str) -> Result<u32> {
-        let response = timeout(TIMEOUT, self.0.request(api::Request::Containers))
+        let response = timeout(TIMEOUT, self.0.request(api::model::Request::Containers))
             .await
             .wrap_err("Getting containers status timed out")
             .and_then(|result| result.wrap_err("Failed to get container status"))?;
 
         match response {
-            api::Response::Containers(containers) => containers
+            api::model::Response::Containers(containers) => containers
                 .into_iter()
                 .filter(|c| c.manifest.name == name)
                 .filter_map(|c| c.process.map(|p| p.pid))
                 .next()
                 .ok_or_else(|| eyre!("Failed to find PID")),
-            api::Response::Err(e) => Err(eyre!("Failed to request containers: {:?}", e)),
+            api::model::Response::Err(e) => Err(eyre!("Failed to request containers: {:?}", e)),
             _ => unreachable!(),
         }
     }
 
     pub fn stop(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(self.0.request(api::Request::Stop(name.to_string())))
+        let response = timeout_on(self.0.request(api::model::Request::Stop(name.to_string())))
             .and_then(|result| result.wrap_err("Failed to stop container"));
         ApiResponse(response)
     }
@@ -105,7 +105,7 @@ impl Runtime {
     }
 
     pub fn uninstall(&mut self, name: &str, version: &str) -> ApiResponse {
-        let uninstall = api::Request::Uninstall {
+        let uninstall = api::model::Request::Uninstall {
             name: name.to_string(),
             version: npk::manifest::Version::parse(version).expect("Failed to parse version"),
         };

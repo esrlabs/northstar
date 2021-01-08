@@ -12,15 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    config::Config,
-    error::Error,
-    keys,
-    mount::{mount_npk, mount_npk_repository, umount_npk},
-    process::{ExitStatus, Process},
-    Event, EventTx,
-};
-use crate::api::{Notification, RepositoryId};
+use super::{Event, EventTx, RepositoryId, config::Config, error::Error, keys, mount::{mount_npk, mount_npk_repository, umount_npk}, process::{ExitStatus, Process}};
+use crate::api::model::Notification;
 use ed25519_dalek::*;
 use log::{debug, info, warn};
 use npk::{

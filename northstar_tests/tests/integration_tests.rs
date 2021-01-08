@@ -29,7 +29,7 @@ test!(stop_application_not_running, {
 
     runtime
         .stop("hello")
-        .expect_err(api::Error::ApplicationNotRunning)?;
+        .expect_err(api::model::Error::ApplicationNotRunning)?;
 
     runtime.shutdown()
 });
@@ -81,7 +81,7 @@ test!(start_unknown_application, {
     // Expect MissingResource Error
     runtime
         .start("unknown_application")
-        .expect_err(api::Error::ApplicationNotFound)?;
+        .expect_err(api::model::Error::ApplicationNotFound)?;
 
     runtime.shutdown()
 });
@@ -95,7 +95,9 @@ test!(missing_resource_container, {
     // Expect MissingResource Error
     runtime
         .start("test_container")
-        .expect_err(api::Error::MissingResource("test_resource".to_owned()))?;
+        .expect_err(api::model::Error::MissingResource(
+            "test_resource".to_owned(),
+        ))?;
 
     runtime.uninstall("test_container", "0.0.1").expect_ok()?;
 
@@ -158,9 +160,9 @@ test!(uninstall_a_running_application, {
 
     assert!(container.is_running().await?);
 
-    runtime
-        .uninstall("test_container", "0.0.1")
-        .expect_err(api::Error::ApplicationRunning("test_container".to_owned()))?;
+    runtime.uninstall("test_container", "0.0.1").expect_err(
+        api::model::Error::ApplicationRunning("test_container".to_owned()),
+    )?;
 
     runtime.stop("test_container").expect_ok()?;
 
