@@ -102,8 +102,17 @@ pub struct Repository {
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Process {
+    /// Process id
     pub pid: u32,
+    /// Process uptime in nanoseconds
     pub uptime: u64,
+    /// Resources used and allocated by this process
+    pub resources: Resources,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Resources {
+    /// Memory resources used by process
     pub memory: Option<Memory>,
 }
 

@@ -288,21 +288,23 @@ fn list_containers(state: &State) -> Vec<api::model::Container> {
             process: app.process_context().map(|f| api::model::Process {
                 pid: f.process().pid(),
                 uptime: f.uptime().as_nanos() as u64,
-                memory: {
-                    {
-                        const PAGE_SIZE: usize = 4096;
-                        let pid = f.process().pid();
+                resources: api::model::Resources {
+                    memory: {
+                        {
+                            let page_size = page_size::get();
+                            let pid = f.process().pid();
 
-                        procinfo::pid::statm(pid as i32)
-                            .ok()
-                            .map(|statm| api::model::Memory {
-                                size: (statm.size * PAGE_SIZE) as u64,
-                                resident: (statm.resident * PAGE_SIZE) as u64,
-                                shared: (statm.share * PAGE_SIZE) as u64,
-                                text: (statm.text * PAGE_SIZE) as u64,
-                                data: (statm.data * PAGE_SIZE) as u64,
-                            })
-                    }
+                            procinfo::pid::statm(pid as i32)
+                                .ok()
+                                .map(|statm| api::model::Memory {
+                                    size: (statm.size * page_size) as u64,
+                                    resident: (statm.resident * page_size) as u64,
+                                    shared: (statm.share * page_size) as u64,
+                                    text: (statm.text * page_size) as u64,
+                                    data: (statm.data * page_size) as u64,
+                                })
+                        }
+                    },
                 },
             }),
         })

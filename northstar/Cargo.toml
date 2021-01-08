@@ -34,6 +34,7 @@ logd-logger = { git = "https://github.com/flxo/logd-logger.git" }
 minijail = { path = "../minijail/rust/minijail", optional = true }
 nix = { version = "0.19.1", optional = true }
 npk = { path = "../npk" }
+page_size = { version = "0.4.2", optional = true }
 proc-mounts = { version = "0.2.4", optional = true }
 procinfo = { version = "0.4.2", optional = true }
 regex = { version = "1.4.2", optional = true }
@@ -73,6 +74,7 @@ runtime = [
     "libc",
     "minijail",
     "nix",
+    "page_size",
     "proc-mounts",
     "procinfo",
     "serde",
