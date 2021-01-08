@@ -1227,6 +1227,7 @@ dependencies = [
  "minijail",
  "nix 0.19.1",
  "npk",
+ "page_size",
  "proc-mounts",
  "procinfo",
  "regex",
@@ -1379,6 +1380,16 @@ name = "owo-colors"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13370dae44474229701bb69b90b4f4dca6404cb0357a2d50d635f1171dc3aa7b"
+
+[[package]]
+name = "page_size"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebde548fbbf1ea81a99b128872779c437752fb99f217c45245e1a61dcd9edcd"
+dependencies = [
+ "libc",
+ "winapi",
+]
 
 [[package]]
 name = "parking_lot"
