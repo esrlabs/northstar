@@ -37,11 +37,10 @@ use tokio::{sync::mpsc, task};
 
 pub struct Terminal {
     rx: mpsc::Receiver<String>,
-    stdout: Box<dyn Write>,
 }
 
 impl Terminal {
-    pub fn new() -> Result<Terminal> {
+    pub fn new() -> Result<(impl Write, Terminal)> {
         let config = Config::builder()
             .history_ignore_space(true)
             .auto_add_history(true)
@@ -103,17 +102,7 @@ impl Terminal {
                 .ok();
         });
 
-        Ok(Terminal { rx, stdout })
-    }
-}
-
-impl Write for Terminal {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.stdout.write(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.stdout.flush()
+        Ok((stdout, Terminal { rx }))
     }
 }
 

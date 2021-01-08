@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use anyhow::Result;
-use futures::StreamExt;
+use futures::{future::ready, stream::once, Stream, StreamExt};
 use itertools::Itertools;
 use northstar::{api::{
     self,
@@ -31,6 +31,11 @@ use tokio::{select, time};
 
 mod terminal;
 
+/// Input type for commands
+type Input = Box<dyn Stream<Item = String> + Unpin>;
+/// Output
+type Output = Box<dyn std::io::Write>;
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "nstar", about = "Northstar CLI")]
 struct Opt {
@@ -38,8 +43,51 @@ struct Opt {
     #[structopt(short, long, default_value = "localhost:4200")]
     host: String,
 
-    /// Run command and exit
-    cmd: Vec<String>,
+    /// Optional single command to run and exit
+    #[structopt(subcommand)]
+    cmd: Option<Command>,
+}
+
+#[derive(Debug, StructOpt)]
+enum Command {
+    /// List containers
+    Containers,
+    /// List containers
+    Ls,
+    /// List repositories
+    Repositories,
+    /// Try to start a container with name `name`
+    Start { name: Option<String> },
+    /// Try to stop a container with name `name`
+    Stop { name: Option<String> },
+    /// Shutdown the runtime
+    Shutdown,
+}
+
+impl Command {
+    /// Convert a subcommand into an nstar internal processable string
+    fn to_command(&self) -> String {
+        match self {
+            Command::Containers => "containers".to_string(),
+            Command::Ls => "ls".to_string(),
+            Command::Repositories => "repositories".to_string(),
+            Command::Start { name } => {
+                if let Some(name) = name {
+                    format!("start {}", name)
+                } else {
+                    "start".to_string()
+                }
+            }
+            Command::Stop { name } => {
+                if let Some(name) = name {
+                    format!("stop {}", name)
+                } else {
+                    "stop".to_string()
+                }
+            }
+            Command::Shutdown => "shutdown".to_string(),
+        }
+    }
 }
 
 fn format_notification<W: io::Write>(mut w: W, notification: &Notification) {
@@ -128,9 +176,9 @@ fn print_table<W: std::io::Write>(mut w: W, table: &Table) -> Result<()> {
     Ok(())
 }
 
-async fn process(
+async fn process<W: std::io::Write>(
     client: &mut Client,
-    terminal: &mut terminal::Terminal,
+    terminal: &mut W,
     input: &str,
 ) -> Result<()> {
     let mut split = input.split_whitespace();
@@ -203,8 +251,18 @@ async fn process(
 #[tokio::main]
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let interactive = opt.cmd.is_empty();
-    let mut terminal = terminal::Terminal::new()?;
+
+    let (mut terminal, mut input, interactive): (Output, Input, bool) = match opt.cmd {
+        Some(cmd) => (
+            Box::new(std::io::stdout()) as Output,
+            Box::new(once(ready(cmd.to_command()))) as Input,
+            false,
+        ),
+        _ => {
+            let (output, input) = terminal::Terminal::new()?;
+            (Box::new(output), Box::new(input) as Input, true)
+        }
+    };
 
     'outer: loop {
         writeln!(terminal, "Connecting to {}", opt.host)?;
@@ -233,13 +291,15 @@ async fn main() -> Result<()> {
         loop {
             select! {
                 notification = client.next() => {
-                    if let Some(Ok(n)) = notification {
-                        format_notification(&mut terminal, &n);
-                    } else {
-                        break;
+                    if interactive {
+                        if let Some(Ok(n)) = notification {
+                            format_notification(&mut terminal, &n);
+                        } else {
+                            break;
+                        }
                     }
                 }
-                input = terminal.next() => {
+                input = input.next() => {
                     if let Some(input) = input {
                         if let Err(e) = process(&mut client, &mut terminal, &input).await {
                             writeln!(&mut terminal, "Error: {:?}", e)?;
