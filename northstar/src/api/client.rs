@@ -14,10 +14,16 @@
 
 use futures::{SinkExt, Stream, StreamExt};
 use log::info;
-use std::{collections::HashMap, pin::Pin, task::Poll};
+use npk::{manifest::Version};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    pin::Pin,
+    task::Poll,
+};
 use thiserror::Error;
 use tokio::{
-    io,
+    fs, io,
     net::TcpStream,
     select,
     sync::{mpsc, oneshot},
@@ -33,7 +39,7 @@ use super::{
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("IO error")]
+    #[error("IO error: {0:?}")]
     Io(#[from] io::Error),
     #[error("Timeout")]
     Timeout,
@@ -43,7 +49,7 @@ pub enum Error {
     Protocol,
     #[error("Pending request")]
     PendingRequest,
-    #[error("Api error")]
+    #[error("Api error: {0:?}")]
     Api(super::model::Error),
 }
 
@@ -64,7 +70,12 @@ pub enum Error {
 /// ```
 pub struct Client {
     notification_rx: mpsc::Receiver<Result<Notification, Error>>,
-    request_tx: mpsc::Sender<(Request, oneshot::Sender<Result<Response, Error>>)>,
+    request_tx: mpsc::Sender<(ClientRequest, oneshot::Sender<Result<Response, Error>>)>,
+}
+
+enum ClientRequest {
+    Request(Request),
+    Install(PathBuf, String),
 }
 
 impl Client {
@@ -73,7 +84,7 @@ impl Client {
         let host = host.to_string();
         let (notification_tx, notification_rx) = mpsc::channel(10);
         let (request_tx, mut request_rx) =
-            mpsc::channel::<(Request, oneshot::Sender<Result<Response, Error>>)>(10);
+            mpsc::channel::<(ClientRequest, oneshot::Sender<Result<Response, Error>>)>(10);
         let mut response_tx = Option::<oneshot::Sender<Result<Response, Error>>>::None;
         let mut connection =
             match time::timeout(time::Duration::from_secs(2), TcpStream::connect(host)).await {
@@ -109,9 +120,23 @@ impl Client {
                             if response_tx.is_some() {
                                 r_tx.send(Err(Error::PendingRequest)).ok();
                             } else {
-                                match connection.send(Message::new_request(request)).await {
-                                    Ok(_) => response_tx = Some(r_tx), // Store the reponse tx part
-                                    Err(e) => drop(r_tx.send(Err(Error::Io(e)))),
+                                match request {
+                                    ClientRequest::Request(request) => {
+                                        match connection.send(Message::new_request(request)).await {
+                                            Ok(_) => response_tx = Some(r_tx), // Store the reponse tx part
+                                            Err(e) => drop(r_tx.send(Err(Error::Io(e)))),
+                                        }
+                                    }
+                                    ClientRequest::Install(npk, repository) => {
+                                        let mut file = fs::File::open(npk).await.expect("Failed to open"); // TODO
+                                        let size = file.metadata().await.unwrap().len();
+                                        let request = Request::Install(repository, size);
+                                        match connection.send(Message::new_request(request)).await {
+                                            Ok(_) => response_tx = Some(r_tx), // Store the reponse tx part
+                                            Err(e) => drop(r_tx.send(Err(Error::Io(e)))),
+                                        }
+                                        io::copy(&mut file, &mut connection).await?;
+                                    }
                                 }
                             }
                         } else {
@@ -145,7 +170,7 @@ impl Client {
     pub async fn request(&self, request: Request) -> Result<Response, Error> {
         let (tx, rx) = oneshot::channel::<Result<Response, Error>>();
         self.request_tx
-            .send((request, tx))
+            .send((ClientRequest::Request(request), tx))
             .await
             .map_err(|_| Error::Stopped)?;
         rx.await.map_err(|_| Error::Stopped)?
@@ -234,6 +259,64 @@ impl Client {
     /// ```
     pub async fn stop(&self, name: &str) -> Result<(), Error> {
         match self.request(Request::Stop(name.to_string())).await? {
+            Response::Ok(()) => Ok(()),
+            Response::Containers(_) => Err(Error::Protocol),
+            Response::Err(e) => Err(Error::Api(e)),
+            Response::Repositories(_) => Err(Error::Protocol),
+        }
+    }
+
+    /// Install a npk
+    ///
+    /// ```no_run
+    /// # use northstar::api::client::Client;
+    /// # use std::path::Path;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #   let mut client = Client::new("localhost:4200").await.unwrap();
+    /// let npk = Path::new("test.npk");
+    /// client.install(&npk, "default").await.expect("Failed to install \"test.npk\" into repository \"default\"");
+    /// # }
+    /// ```
+    pub async fn install(&self, npk: &Path, repository: &str) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel::<Result<Response, Error>>();
+        self.request_tx
+            .send((
+                ClientRequest::Install(npk.to_owned(), repository.to_owned()),
+                tx,
+            ))
+            .await
+            .map_err(|_| Error::Stopped)?;
+        match rx.await.map_err(|_| Error::Stopped)?? {
+            Response::Ok(()) => Ok(()),
+            Response::Containers(_) => Err(Error::Protocol),
+            Response::Err(e) => Err(Error::Api(e)),
+            Response::Repositories(_) => Err(Error::Protocol),
+        }
+    }
+
+    /// Uninstall a npk
+    ///
+    /// ```no_run
+    /// # use northstar::api::client::Client;
+    /// # use futures::StreamExt;
+    /// # use std::path::Path;
+    /// # use npk::manifest::Version;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #   let mut client = Client::new("localhost:4200").await.unwrap();
+    /// client.uninstall("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to uninstal \"hello\"");
+    /// // Print stop notification
+    /// println!("{:#?}", client.next().await);
+    /// # }
+    /// ```
+    pub async fn uninstall(&self, name: &str, version: &Version) -> Result<(), Error> {
+        match self
+            .request(Request::Uninstall(name.to_string(), version.clone()))
+            .await?
+        {
             Response::Ok(()) => Ok(()),
             Response::Containers(_) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),

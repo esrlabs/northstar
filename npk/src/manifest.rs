@@ -39,6 +39,14 @@ impl Version {
     }
 }
 
+impl FromStr for Version {
+    type Err = semver::SemVerError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
 impl Default for Version {
     fn default() -> Version {
         Version(semver::Version::new(0, 0, 0))

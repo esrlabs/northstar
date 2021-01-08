@@ -99,7 +99,7 @@ impl Console {
                                 }
                             }
                         }
-                        api::model::Request::Uninstall { name, version } => {
+                        api::model::Request::Uninstall(name, version) => {
                             match state.uninstall(name, version).await {
                                 Ok(_) => api::model::Response::Ok(()),
                                 Err(e) => {
@@ -213,8 +213,11 @@ impl Console {
                         break;
                     };
 
+                    let mut keep_file = None;
+
                     let request = if let api::model::Payload::Request(api::model::Request::Install(repository, size)) = message.payload {
                         info!("{}: Received installation request with size {}", peer, bytesize::ByteSize::b(size));
+                        info!("{}: Using repository \"{}\"", peer, repository);
                         // Get a tmpfile name
                         let tmpfile = match tempfile::NamedTempFile::new() {
                             Ok(f) => f,
@@ -244,11 +247,13 @@ impl Console {
                                 break;
                             }
                         }
-                        Request::Install(repository, tmpfile.path().to_owned())
+
+                        let tmpfile_path = tmpfile.path().to_owned();
+                        keep_file = Some(tmpfile);
+                        Request::Install(repository, tmpfile_path)
                     } else {
                         Request::Message(message)
                     };
-
 
                     // Create a oneshot channel for the runtimes reply
                     let (reply_tx, reply_rx) = oneshot::channel();
@@ -263,6 +268,8 @@ impl Console {
                     let reply = reply_rx
                         .await
                         .expect("Internal channel error on client reply");
+
+                    keep_file.take();
 
                     // Report result to client
                     if let Err(e) = stream.send(reply).await {

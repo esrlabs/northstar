@@ -19,12 +19,13 @@ use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, io};
 use tokio::time;
 
-pub fn notification<W: io::Write>(mut w: W, notification: &Notification) {
-    let msg = format!("--> {:?}", notification);
+pub(crate) fn notification<W: io::Write>(mut w: W, notification: &Notification) {
+    // TODO
+    let msg = format!("📣  {:?}", notification);
     writeln!(w, "{}", msg).ok();
 }
 
-pub fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Result<()> {
+pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Result<()> {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -70,12 +71,10 @@ pub fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Result<()
         ]));
     }
 
-    print_table(&mut w, &table)?;
-    w.flush()?;
-    Ok(())
+    print_table(&mut w, &table)
 }
 
-pub fn repositories<W: io::Write>(
+pub(crate) fn repositories<W: io::Write>(
     mut w: W,
     repositories: &HashMap<RepositoryId, Repository>,
 ) -> Result<()> {
@@ -94,13 +93,13 @@ pub fn repositories<W: io::Write>(
         ]));
     }
 
-    print_table(&mut w, &table)?;
-    w.flush()?;
-    Ok(())
+    print_table(&mut w, &table)
 }
 
 fn print_table<W: std::io::Write>(mut w: W, table: &Table) -> Result<()> {
-    w.write_all(table.to_string().as_bytes())?;
-    w.write_all(b"\n")?;
+    for line in table.to_string().lines() {
+        writeln!(w, "  {}", line)?;
+    }
+    w.flush()?;
     Ok(())
 }

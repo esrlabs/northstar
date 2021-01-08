@@ -84,7 +84,7 @@ pub enum Request {
     Start(Name),
     Stop(Name),
     Install(RepositoryId, u64),
-    Uninstall { name: Name, version: Version },
+    Uninstall(Name, Version),
     Shutdown,
 }
 
