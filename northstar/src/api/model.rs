@@ -17,9 +17,16 @@ use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
+use crate::runtime::RepositoryId;
+
 pub type Name = String;
 pub type MessageId = String; // UUID
-pub type RepositoryId = String;
+
+const VERSION: &str = "0.0.1";
+
+pub fn version() -> Version {
+    Version::parse(VERSION).unwrap()
+}
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -119,6 +126,7 @@ pub enum Response {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
+    VersionMismatch(Version),
     ApplicationNotFound,
     ApplicationNotRunning,
     ApplicationRunning(String),
@@ -128,6 +136,7 @@ pub enum Error {
     RepositoryNotFound(String),
 
     Npk(String),
+    NpkArchive(String),
     Process(String),
     Console(String),
     Cgroups(String),

@@ -12,9 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::api::RepositoryId;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
+
+use super::RepositoryId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {

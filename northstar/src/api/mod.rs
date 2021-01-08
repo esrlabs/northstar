@@ -1,4 +1,4 @@
-// Copyright (c) 2019 - 2020 ESRLabs
+// Copyright (c) 2020 ESRLabs
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -12,16 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#![deny(clippy::all)]
-
-#[cfg(all(feature = "runtime"))]
-extern crate structure;
-
-#[cfg(feature = "api")]
-/// Northstar remote API. Control start and stop of applications and
-/// receive updates about container states.
-pub mod api;
-
-#[cfg(feature = "runtime")]
-/// The Northstar runtime core.
-pub mod runtime;
+/// Client to interact with a runtime instance
+pub mod client;
+/// API protocol codec
+pub mod codec;
+/// API model
+pub mod model;

@@ -12,36 +12,24 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{anyhow, Context, Result};
-use futures::{sink::SinkExt, Sink, StreamExt};
+use anyhow::Result;
+use futures::StreamExt;
 use itertools::Itertools;
-use log::{info, warn};
-use northstar::api::{
-    self, Container, Message, Notification, Payload, RepositoryId, Request, Response,
-};
-use npk::manifest::Version;
+use northstar::{api::{
+    self,
+    client::Client,
+    model::{Container, Notification, Repository},
+}, runtime::RepositoryId};
 use prettytable::{format, Attr, Cell, Row, Table};
-use std::{collections::HashMap, env, path::Path, sync::Arc};
-use structopt::StructOpt;
-use sync::mpsc;
-use tokio::{
-    fs::File,
-    net::TcpStream,
-    select,
-    sync::{self, oneshot},
-    task, time,
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    io::{self, Write},
 };
+use structopt::StructOpt;
+use tokio::{select, time};
 
-mod codec;
-mod readline;
-
-const HELP: &str = r"containers:                 List installed containers
-repositories:                 List available repositories
-shutdown:                     Stop the northstar runtime
-start <name>:                 Start application
-stop <name>:                  Stop application
-install <repository> <file>:  Install npk into repository
-uninstall <name> <version>:   Unstall npk";
+mod terminal;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "nstar", about = "Northstar CLI")]
@@ -50,393 +38,16 @@ struct Opt {
     #[structopt(short, long, default_value = "localhost:4200")]
     host: String,
 
-    /// Output json
-    #[structopt(short, long)]
-    json: bool,
-
     /// Run command and exit
     cmd: Vec<String>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Do not overwrite RUST_LOG set from somewhere else ;-)
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "nstar=info");
-    }
-    pretty_env_logger::init();
-
-    let opt = Opt::from_args();
-
-    // Sync barrier to start the user input after a connection to the runtime
-    // is established.
-    let barrier = Arc::new(sync::Barrier::new(if opt.cmd.is_empty() { 2 } else { 1 }));
-
-    // User supplied input from the command line
-    let (input_tx, mut input_rx) = mpsc::channel(10);
-
-    if opt.cmd.is_empty() {
-        // If there's no command supplied via cmd line spawn a task that readlines
-        task::spawn(readline::readline(barrier.clone(), input_tx));
-    } else {
-        // Send the supplied command to the main loop
-        let (tx, _rx) = oneshot::channel::<()>();
-        input_tx.send((tx, opt.cmd.join(" "))).await.ok();
-        drop(input_tx);
-    }
-
-    let mut barrier = Some(barrier);
-
-    // Main loop
-    'outer: loop {
-        // Establish a TCP connection
-        info!("Connecting to {}", opt.host);
-        let stream = match TcpStream::connect(&opt.host).await {
-            Ok(s) => s,
-            Err(e) => {
-                // If there's a command supplied immediatelly exit with the connection error
-                // otherwise we're in interactive mode and retry to connect
-                if opt.cmd.is_empty() {
-                    info!("Connection failed: {}. Reconnecting in 1s", e);
-                    time::sleep(time::Duration::from_secs(1)).await;
-                    continue;
-                } else {
-                    return Err(e).context("Failed to connect");
-                }
-            }
-        };
-        info!("Connected to {}", opt.host);
-        let (read, write) = stream.into_split();
-        let mut framed_read = tokio_util::codec::FramedRead::new(read, codec::Codec::default());
-        let mut framed_write = tokio_util::codec::FramedWrite::new(write, codec::Codec::default());
-
-        // Wait until readline is ready on the first start
-        if let Some(barrier) = barrier.take() {
-            barrier.wait().await;
-        }
-
-        let (notification_tx, mut notification_rx) = mpsc::channel::<Notification>(10);
-        let (response_tx, mut response_rx) = mpsc::channel::<Response>(10);
-
-        // Spawn a task that reads on the connection and forwards results to the according channel.
-        // If this tasks breaks the main loop will get a None on notification_rx or request_tx and
-        // break as well.
-        task::spawn(async move {
-            loop {
-                match framed_read.next().await {
-                    Some(Ok(message)) => match message.payload {
-                        Payload::Request(_) => unreachable!(),
-                        Payload::Response(r) => {
-                            if response_tx.send(r).await.is_err() {
-                                break;
-                            }
-                        }
-                        Payload::Notification(n) => {
-                            if notification_tx.send(n).await.is_err() {
-                                break;
-                            }
-                        }
-                    },
-                    Some(Err(e)) => {
-                        warn!("Connection closed: {}", e);
-                        break;
-                    }
-                    None => {
-                        info!("Connection closed");
-                        break;
-                    }
-                }
-            }
-        });
-
-        'inner: loop {
-            select! {
-                input = input_rx.recv() => {
-                    let (_done, input) = match input {
-                        Some((done, input)) => (done, input),
-                        None => break 'outer,
-                    };
-
-                    let mut split = input.trim().split_whitespace();
-                    match split.next() {
-                        Some("help") => println!("{}",  HELP),
-                        Some("start") | Some("stop") => {
-                            // Request the container list
-                            match request_response(&mut framed_write, &mut response_rx, Request::Containers).await {
-                                Ok(Some(Response::Containers(c))) => {
-                                    match regex::Regex::new(input.split_whitespace().nth(1).unwrap_or(".*")) {
-                                        Ok(r) => {
-                                            let start = input.starts_with("start");
-                                            for name in c.iter()
-                                                .filter(|c| c.manifest.init.is_some()) // Filter resource containers
-                                                .filter(|c| if start { c.process.is_none() } else { c.process.is_some() }) // Filter running containers
-                                                .filter(|c| r.is_match(&c.manifest.name)) // Match argument
-                                                .map(|c| c.manifest.name.clone()) {
-                                                    if start {
-                                                        println!("Starting {}", name);
-                                                        match request_response(&mut framed_write, &mut response_rx, Request::Start(name)).await {
-                                                            Ok(r) => {
-                                                                if opt.json {
-                                                                    println!("{}", serde_json::to_string_pretty(&r).unwrap());
-                                                                } else {
-                                                                    println!("{:?}", r); // TODO
-                                                                }
-                                                            }
-                                                            Err(_) => break 'inner, // Error on connection. Reconnect or exit
-                                                        }
-                                                    } else {
-                                                        println!("Stopping {}", name);
-                                                        match request_response(&mut framed_write, &mut response_rx, Request::Stop(name)).await {
-                                                            Ok(r) => {
-                                                                if opt.json {
-                                                                    println!("{}", serde_json::to_string_pretty(&r).unwrap());
-                                                                } else {
-                                                                    println!("{:?}", r); // TODO
-                                                                }
-                                                            }
-                                                            Err(_) => break 'inner, // Error on connection. Reconnect or exit
-                                                        }
-                                                    }
-                                                }
-                                        }
-                                        Err(e) => {
-                                            warn!("Invalid regex: {:?}", e);
-                                        }
-                                    }
-                                }
-                                Ok(r) => {
-                                    warn!("Invalid response {:?}. This is runtime internal bug.", r);
-                                    break 'inner;
-                                }
-                                Err(e) => {
-                                    warn!("{:?}" , e);
-                                    break 'inner;
-                                }
-                            }
-                        }
-                        Some("containers") | Some("ls") | Some("list") => {
-                            match request_response(&mut framed_write, &mut response_rx, Request::Containers).await {
-                                Ok(Some(Response::Containers(c))) => {
-                                    if opt.json {
-                                        println!("{}", serde_json::to_string_pretty(&c).unwrap());
-
-                                    } else {
-                                        format_containers(&c);
-                                    }
-                                }
-                                Ok(_) => panic!("Invalid reponse on container request"),
-                                Err(e) => {
-                                    warn!("{:?}" , e);
-                                    break 'inner;
-                                }
-                            };
-                        }
-                        Some("repositories") => {
-                            match request_response(&mut framed_write, &mut response_rx, Request::Repositories).await {
-                                Ok(Some(Response::Repositories(r))) => {
-                                    if opt.json {
-                                        println!("{}", serde_json::to_string_pretty(&r).unwrap());
-                                    } else {
-                                        format_repositories(&r);
-                                    }
-                                }
-                                Ok(_) => panic!("Invalid reponse on repositories request"),
-                                Err(e) => {
-                                    warn!("{:?}" , e);
-                                    break 'inner;
-                                }
-                            };
-                        }
-                        Some("install") => {
-                            match (split.next(), split.next()) {
-                                (Some(repo), Some(file)) => {
-                                    // Get the file and it's len
-                                    let file = Path::new(file);
-                                    let size = match file.metadata() {
-                                        Ok(m) => m.len(),
-                                        Err(_) => {
-                                            println!("Failed to read metadata from {}", file.display());
-                                            continue;
-                                        }
-                                    };
-
-                                    // Check if npk exists and open
-                                    let npk = if !file.exists() {
-                                        println!("Failed to find {}", file.display());
-                                        continue;
-                                    } else {
-                                        match File::open(file).await {
-                                            Ok(f) => f,
-                                            Err(e) => {
-                                                println!("Failed to open {}: {}", file.display(), e);
-                                                continue;
-                                            }
-                                        }
-                                    };
-
-                                    // Construct a Message with a installation request
-                                    // Place the size of the file on disk in the request
-                                    let message = codec::Message::Message(Message::new_request(Request::Install(repo.to_string(), size)));
-                                    if let Err(e) = framed_write.send(message).await {
-                                        warn!("Stream error: {}", e);
-                                        break 'inner;
-                                    }
-                                    framed_write.flush().await?;
-
-                                    // Read the npk via a ReaderStream that chunks the content
-                                    let mut npk = tokio_util::io::ReaderStream::new(npk);
-                                    while let Some(r) = npk.next().await {
-                                        match r {
-                                            // Send the chunk to the stream
-                                            Ok(b) => match framed_write.send(codec::Message::Raw(b)).await {
-                                                Ok(_) => (),
-                                                Err(e) => {
-                                                    warn!("Stream error: {}", e);
-                                                    break 'inner;
-                                                }
-                                            }
-                                            Err(e) => {
-                                                warn!("Failed to read from {}: {}", file.display(), e);
-                                                break 'inner;
-                                            }
-                                        }
-                                    }
-
-                                    // Wait for the installation response
-                                    match response_rx.recv().await {
-                                        Some(r) => println!("{:?}", r),
-                                        None => {
-                                            warn!("Stream error");
-                                            break 'inner;
-                                        }
-                                    }
-                                }
-                                (None, _) => println!("Missing repository argument"),
-                                (Some(_), None) => println!("Missing npk argument"),
-                            }
-                        }
-                        Some("uninstall") => {
-                            // Get the name: first word after the command
-                            let name = match split.next() {
-                                Some(name) => name.to_string(),
-                                None => {
-                                    println!("Missing npk name");
-                                    continue;
-                                }
-                            };
-                            // Get the name: second word after the command
-                            let version = match split.next() {
-                                Some(version) => match Version::parse(version) {
-                                    Ok(v) => v,
-                                    Err(e) => {
-                                        println!("Invalid version {}: {}", version, e);
-                                        continue;
-                                    }
-                                }
-                                None => {
-                                    println!("Missing npk version");
-                                    continue;
-                                }
-                            };
-                            // Request the uninstallation
-                            let request = Request::Uninstall { name, version };
-                            let response = match request_response(&mut framed_write, &mut response_rx, request).await {
-                                Ok(r) => r,
-                                Err(e) => {
-                                    warn!("{:?}" , e);
-                                    break 'inner;
-                                }
-                            };
-                            if opt.json {
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
-                            } else {
-                                println!("{:?}", response);
-                            }
-                        }
-                        Some("shutdown") => {
-                            if let Err(e) = request_response(&mut framed_write, &mut response_rx, Request::Shutdown).await {
-                                warn!("Failed to send shutdown request: {:?}" , e);
-                            }
-                            // No need to break: If the shutdown was a single command the input_rx channel is closed
-                            // and the loop will break
-                        }
-                        Some(c) => println!("Unknown command {}", c),
-                        None => (),
-                    }
-                }
-                notification = notification_rx.recv() => {
-                    if let Some(notification) = notification {
-                        // Print notifications only if not in command mode
-                        if opt.cmd.is_empty() {
-                            format_notification(&notification, opt.json);
-                        }
-                    } else {
-                        break 'inner;
-                    }
-                }
-            }
-        }
-
-        info!("Reconnecting in 1s");
-        time::sleep(time::Duration::from_secs(1)).await;
-    }
-
-    Ok(())
+fn format_notification<W: io::Write>(mut w: W, notification: &Notification) {
+    let msg = format!("--> {:?}", notification);
+    writeln!(w, "{}", msg).ok();
 }
 
-async fn request_response<S>(
-    mut sink: S,
-    reposonse: &mut mpsc::Receiver<Response>,
-    request: Request,
-) -> Result<Option<Response>>
-where
-    S: Unpin + Sink<codec::Message>,
-{
-    sink.send(codec::Message::Message(Message::new_request(
-        request.clone(),
-    )))
-    .await
-    .map_err(|_| anyhow!("Sink error"))?;
-    if request != Request::Shutdown {
-        reposonse
-            .recv()
-            .await
-            .context("Stream error")
-            .map(Option::Some)
-    } else {
-        Ok(None)
-    }
-}
-
-fn format_notification(notification: &Notification, json: bool) {
-    if json {
-        println!("{}", serde_json::to_string_pretty(&notification).unwrap());
-    } else {
-        match notification {
-            api::Notification::OutOfMemory(name) => println!("{} is out of memory", name),
-            api::Notification::ApplicationExited {
-                id,
-                version,
-                exit_info,
-            } => {
-                println!("Application {}-{} exited with {}", id, version, exit_info);
-            }
-            api::Notification::Install(name, version) => println!("Installed {}-{}", name, version),
-            api::Notification::Uninstalled(name, version) => {
-                println!("Uninstallation {}-{}", name, version)
-            }
-            api::Notification::ApplicationStarted(name, version) => {
-                println!("Started {}-{}", name, version)
-            }
-            api::Notification::ApplicationStopped(name, version) => {
-                println!("Stopped {}-{}", name, version)
-            }
-            api::Notification::Shutdown => println!("Shutdown"),
-        }
-    }
-}
-
-fn format_containers(containers: &[Container]) {
+fn format_containers<W: io::Write>(mut w: W, containers: &[Container]) -> Result<()> {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -481,10 +92,16 @@ fn format_containers(containers: &[Container]) {
             ),
         ]));
     }
-    table.printstd();
+
+    print_table(&mut w, &table)?;
+    w.flush()?;
+    Ok(())
 }
 
-fn format_repositories(repositories: &HashMap<RepositoryId, api::Repository>) {
+fn format_repositories<W: io::Write>(
+    mut w: W,
+    repositories: &HashMap<RepositoryId, Repository>,
+) -> Result<()> {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -499,5 +116,148 @@ fn format_repositories(repositories: &HashMap<RepositoryId, api::Repository>) {
             Cell::new(&repo.dir.display().to_string()),
         ]));
     }
-    table.printstd();
+
+    print_table(&mut w, &table)?;
+    w.flush()?;
+    Ok(())
+}
+
+fn print_table<W: std::io::Write>(mut w: W, table: &Table) -> Result<()> {
+    w.write_all(table.to_string().as_bytes())?;
+    w.write_all(b"\n")?;
+    Ok(())
+}
+
+async fn process(
+    client: &mut Client,
+    terminal: &mut terminal::Terminal,
+    input: &str,
+) -> Result<()> {
+    let mut split = input.split_whitespace();
+    if let Some(cmd) = split.next() {
+        match cmd {
+            "containers" | "ls" => {
+                let containers = client.containers().await?;
+                format_containers(terminal, &containers)?;
+            }
+            "repositories" => {
+                let repositories = client.repositories().await?;
+                format_repositories(terminal, &repositories)?;
+            }
+            "start" => {
+                let mut containers = client.containers().await?;
+                let containers = containers
+                    .drain(..)
+                    .filter(|c| c.manifest.init.is_some()) // Filter resource containers
+                    .filter(|c| c.process.is_none()) // Filter started containers
+                    .map(|c| c.manifest.name)
+                    .collect::<Vec<_>>();
+                if let Some(n) = split.next() {
+                    // Exact match
+                    if containers.iter().any(|c| c == n) {
+                        client.start(n).await?;
+                    } else {
+                        let re = regex::Regex::new(n)?;
+                        for name in containers.iter().filter(|c| re.is_match(&c)) {
+                            client.start(&name).await?;
+                        }
+                    }
+                } else {
+                    // No argument - stop all running containers
+                    for name in &containers {
+                        client.start(&name).await?;
+                    }
+                }
+            }
+            "stop" => {
+                let mut containers = client.containers().await?;
+                let containers = containers
+                    .drain(..)
+                    .filter(|c| c.manifest.init.is_some()) // Filter resource containers
+                    .filter(|c| c.process.is_some()) // Filter stopped containers
+                    .map(|c| c.manifest.name)
+                    .collect::<Vec<_>>();
+                if let Some(n) = split.next() {
+                    // Exact match
+                    if containers.iter().any(|c| c == n) {
+                        client.stop(n).await?;
+                    } else {
+                        let re = regex::Regex::new(n)?;
+                        for name in containers.iter().filter(|c| re.is_match(&c)) {
+                            client.stop(&name).await?;
+                        }
+                    }
+                } else {
+                    // No argument - stop all running containers
+                    for name in &containers {
+                        client.stop(&name).await?;
+                    }
+                }
+            }
+            _ => (),
+        }
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let opt = Opt::from_args();
+    let interactive = opt.cmd.is_empty();
+    let mut terminal = terminal::Terminal::new()?;
+
+    'outer: loop {
+        writeln!(terminal, "Connecting to {}", opt.host)?;
+
+        let mut client = match time::timeout(
+            time::Duration::from_secs(2),
+            api::client::Client::new(&opt.host),
+        )
+        .await
+        {
+            Ok(Ok(client)) => client,
+            Ok(Err(e)) => {
+                writeln!(terminal, "Failed to connect: {:?}", e)?;
+                time::sleep(time::Duration::from_secs(1)).await;
+                continue 'outer;
+            }
+            Err(_) => {
+                writeln!(terminal, "Failed to connect: timeout")?;
+                time::sleep(time::Duration::from_secs(1)).await;
+                continue 'outer;
+            }
+        };
+
+        writeln!(terminal, "Connected to {}", opt.host)?;
+
+        loop {
+            select! {
+                notification = client.next() => {
+                    if let Some(Ok(n)) = notification {
+                        format_notification(&mut terminal, &n);
+                    } else {
+                        break;
+                    }
+                }
+                input = terminal.next() => {
+                    if let Some(input) = input {
+                        if let Err(e) = process(&mut client, &mut terminal, &input).await {
+                            writeln!(&mut terminal, "Error: {:?}", e)?;
+                            break;
+                        }
+                    } else {
+                        break 'outer;
+                    };
+                }
+            }
+        }
+
+        if interactive {
+            writeln!(terminal, "Disconnected")?;
+            time::sleep(time::Duration::from_secs(1)).await;
+        } else {
+            break;
+        }
+    }
+    Ok(())
 }
