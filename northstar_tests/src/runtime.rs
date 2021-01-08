@@ -105,10 +105,10 @@ impl Runtime {
     }
 
     pub fn uninstall(&mut self, name: &str, version: &str) -> ApiResponse {
-        let uninstall = api::model::Request::Uninstall {
-            name: name.to_string(),
-            version: npk::manifest::Version::parse(version).expect("Failed to parse version"),
-        };
+        let uninstall = api::model::Request::Uninstall(
+            name.to_string(),
+            npk::manifest::Version::parse(version).expect("Failed to parse version"),
+        );
 
         let response = timeout_on(self.0.request(uninstall))
             .and_then(|result| result.wrap_err("Failed to uninstall container"));

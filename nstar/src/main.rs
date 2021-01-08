@@ -15,7 +15,12 @@
 use anyhow::Result;
 use futures::{future::ready, stream::once, Stream, StreamExt};
 use northstar::api::{self, client::Client};
-use std::{fmt::Debug, io::Write};
+use npk::manifest::Version;
+use std::{
+    fmt::Debug,
+    io::Write,
+    path::{Path, PathBuf},
+};
 use structopt::StructOpt;
 use tokio::{select, time};
 
@@ -51,6 +56,10 @@ enum Command {
     Start { name: Option<String> },
     /// Try to stop a container with name `name`
     Stop { name: Option<String> },
+    /// Try to stop a container with name `name`
+    Install { npk: PathBuf, repository: String },
+    /// Try to stop a container with name `name`
+    Uninstall { name: String, version: Version },
     /// Shutdown the runtime
     Shutdown,
 }
@@ -77,26 +86,29 @@ impl Command {
                 }
             }
             Command::Shutdown => "shutdown".to_string(),
+            Command::Install { npk, repository } => {
+                format!("install {} {}", npk.display(), repository)
+            }
+            Command::Uninstall { name, version } => format!("uninstall {} {}", name, version),
         }
     }
 }
 
 async fn process<W: std::io::Write>(
     client: &mut Client,
-    terminal: &mut W,
+    output: &mut W,
     input: &str,
-) -> Result<bool> {
+) -> Result<Option<String>> {
     let mut split = input.split_whitespace();
     if let Some(cmd) = split.next() {
         match cmd {
-            "exit" | "quit" => return Ok(false),
             "containers" | "ls" => {
                 let containers = client.containers().await?;
-                pretty::containers(terminal, &containers)?;
+                pretty::containers(output, &containers)?;
             }
             "repositories" => {
                 let repositories = client.repositories().await?;
-                pretty::repositories(terminal, &repositories)?;
+                pretty::repositories(output, &repositories)?;
             }
             "start" => {
                 let mut containers = client.containers().await?;
@@ -148,10 +160,44 @@ async fn process<W: std::io::Write>(
                     }
                 }
             }
-            _ => (),
+            "install" => {
+                let npk = if let Some(npk) = split.next() {
+                    Path::new(npk)
+                } else {
+                    return Ok(Some("Invalid npk".into()));
+                };
+                if !npk.exists() {
+                    return Ok(Some("No such file or directory".into()));
+                }
+
+                let repository = if let Some(repository) = split.next() {
+                    repository
+                } else {
+                    return Ok(Some("Missing repository argument".into()));
+                };
+
+                client.install(npk, repository).await?;
+            }
+            "uninstall" => {
+                let name = if let Some(name) = split.next() {
+                    name
+                } else {
+                    return Ok(Some("Missing container name".into()));
+                };
+                let version = if let Some(version) = split.next() {
+                    match Version::parse(version) {
+                        Ok(version) => version,
+                        Err(e) => return Ok(Some(format!("Invalid version: {}", e))),
+                    }
+                } else {
+                    return Ok(Some("Missing version".into()));
+                };
+                client.uninstall(name, &version).await?;
+            }
+            c => return Ok(Some(format!("Unimplemented command \"{}\"", c))),
         }
     }
-    Ok(true)
+    Ok(None)
 }
 
 #[tokio::main]
@@ -214,20 +260,21 @@ async fn main() -> Result<()> {
                     }
                 }
                 input = input.next() => {
-                    if let Some(input) = input {
-                        match process(&mut client, &mut terminal, &input).await {
-                            Ok(n) => if !n {
-                                break 'outer;
-                            }
-                            Err(e) => {
-                                writeln!(&mut terminal, "Error: {:?}", e)?;
-                                break;
-                            }
+                    match input.as_deref() {
+                        Some("quit") | Some("exit") => break 'outer,
+                        Some(ref input) => {
+                            match process(&mut client, &mut terminal, &input).await {
+                                Ok(Some(msg)) => writeln!(&mut terminal, "⚠ {}", msg)?,
+                                Ok(None) => writeln!(&mut terminal, "✓ {}", input)?,
+                                Err(e) => {
+                                    writeln!(&mut terminal, "⚠ {:?}", e)?;
+                                    break;
+                                }
 
+                            }
                         }
-                    } else {
-                        break 'outer;
-                    };
+                        None => break 'outer,
+                    }
                 }
             }
         }

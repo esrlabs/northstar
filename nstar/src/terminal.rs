@@ -76,7 +76,7 @@ impl Terminal {
         let stdout = rl.create_external_printer()?;
         let stdout: Box<dyn std::io::Write> = Box::new(stdout);
 
-        let prompt = ">> ";
+        let prompt = "➜ ";
         rl.helper_mut().expect("No helper").colored_prompt = format!("\x1b[1;32m{}\x1b[0m", prompt);
 
         let (tx, rx) = mpsc::channel(10);

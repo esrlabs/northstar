@@ -9,18 +9,12 @@ anyhow = "1.0.34"
 directories = "3.0.1"
 futures = "0.3.8"
 itertools = "0.10.0"
-log = "0.4.11"
 northstar = { path = "../northstar", features = ["api"], default-features = false }
 npk = { path = "../npk" }
 prettytable-rs = "0.8.0"
 regex = "1.4.2"
 rustyline = { git = "https://github.com/gwenn/rustyline.git", branch = "external-print", features = ["with-fuzzy"] }
 rustyline-derive = "0.4.0"
-serde = { version = "1.0.118", features = ["derive"] }
-serde_json = "1.0.61"
-strsim = "0.10.0"
 structopt = "0.3.21"
-thiserror = "1.0.23"
 tokio = { version = "1.0.1", features = ["full"] }
 tokio-util = { version = "0.6.0", features = ["io", "codec"] }
-uuid = { version = "0.8.1", features = ["v4"] }
