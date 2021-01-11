@@ -21,8 +21,8 @@ use rustyline::{
     error::ReadlineError,
     highlight::{Highlighter, MatchingBracketHighlighter},
     hint::{Hinter, HistoryHinter},
-    validate::{self, MatchingBracketValidator, Validator},
-    Cmd, CompletionType, Config, Context, EditMode, KeyEvent, Modifiers,
+    validate::{self, Validator},
+    Cmd, CompletionType, Config, Context, EditMode, ExternalPrinter, KeyEvent, Modifiers,
 };
 use rustyline_derive::Helper;
 use std::{
@@ -34,6 +34,16 @@ use std::{
     pin,
 };
 use tokio::{sync::mpsc, task};
+
+const COMMANDS: &[&str] = &[
+    "start",
+    "stop",
+    "containers",
+    "ls",
+    "repositories",
+    "install",
+    "uninstall",
+];
 
 pub struct Terminal {
     rx: mpsc::Receiver<String>,
@@ -53,7 +63,6 @@ impl Terminal {
             highlighter: MatchingBracketHighlighter::new(),
             hinter: HistoryHinter {},
             colored_prompt: "".to_owned(),
-            validator: MatchingBracketValidator::new(),
         };
         let mut rl = rustyline::Editor::<NstarHelper>::with_config(config);
         rl.set_helper(Some(h));
@@ -73,8 +82,11 @@ impl Terminal {
             return Err(anyhow::anyhow!("Failed to load history"));
         }
 
-        let stdout = rl.create_external_printer()?;
-        let stdout: Box<dyn std::io::Write> = Box::new(stdout);
+        //let stdout: Box<dyn std::io::Write> = Box::new(stdout);
+        let stdout = Stdout {
+            inner: rl.create_external_printer()?,
+            buffer: Vec::new(),
+        };
 
         let prompt = "➜ ";
         rl.helper_mut().expect("No helper").colored_prompt = format!("\x1b[1;32m{}\x1b[0m", prompt);
@@ -122,7 +134,6 @@ impl<'a> Stream for Terminal {
 struct NstarHelper {
     completer: FilenameCompleter,
     highlighter: MatchingBracketHighlighter,
-    validator: MatchingBracketValidator,
     hinter: HistoryHinter,
     colored_prompt: String,
 }
@@ -179,10 +190,43 @@ impl Validator for NstarHelper {
         &self,
         ctx: &mut validate::ValidationContext,
     ) -> rustyline::Result<validate::ValidationResult> {
-        self.validator.validate(ctx)
+        if COMMANDS.iter().any(|c| ctx.input().starts_with(c)) {
+            Ok(validate::ValidationResult::Valid(None))
+        } else {
+            Ok(validate::ValidationResult::Invalid(Some(format!(
+                " Unknown command \"{}\"",
+                ctx.input()
+            ))))
+        }
     }
 
     fn validate_while_typing(&self) -> bool {
-        self.validator.validate_while_typing()
+        false
+    }
+}
+
+struct Stdout<T: ExternalPrinter> {
+    inner: T,
+    buffer: Vec<u8>,
+}
+
+impl<T: ExternalPrinter> std::io::Write for Stdout<T> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for c in buf {
+            if *c == b'\n' {
+                let msg = String::from_utf8_lossy(&self.buffer).to_string();
+                self.inner
+                    .print(msg)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                self.buffer.clear();
+            } else {
+                self.buffer.push(*c);
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
