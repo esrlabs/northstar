@@ -12,17 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::{config, Event, EventTx};
 use log::{debug, warn};
 use npk::manifest;
 use proc_mounts::MountIter;
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::{fs, io, select, task, time};
-
-use super::{config, Event, EventTx};
 
 const OOM_CONTROL: &str = "memory.oom_control";
 const UNDER_OOM: &str = "under_oom 1";
@@ -32,59 +28,63 @@ const TASKS: &str = "tasks";
 pub enum Error {
     #[error("Failed to destroy: {0}: {1:?}")]
     Destroy(String, io::Error),
-    #[error("Mount error: {0}: {1:?}")]
-    Mount(String, io::Error),
     #[error("Io error: {0}: {1:?}")]
     Io(String, io::Error),
-    #[error("Cannot access mount points: {0}")]
-    MountPointsNotAccessible(#[source] io::Error),
-    #[error("No mount point for cgroup controller {0}")]
-    ControllerNotFound(String),
+    #[error("Failed to read mount info: {0:?}")]
+    MountInfo(#[source] io::Error),
+    #[error("Unknown cgroup controller {0}")]
+    UnknownController(String),
 }
 
 #[derive(Debug)]
 pub struct CGroups {
-    cgroup_paths: Vec<PathBuf>,
-}
-
-async fn configure_cgroup(
-    path: &Path,
-    controller: &str,
-    params: &manifest::CGroup,
-) -> Result<(), Error> {
-    for (param, value) in params {
-        let filename = path.join(format!("{}.{}", controller, param));
-        debug!("Settings {} to {}", filename.display(), value);
-        write(&filename, &value).await?;
-    }
-    Ok(())
+    groups: Vec<PathBuf>,
 }
 
 impl CGroups {
     pub(crate) async fn new(
-        config: &config::CGroups,
+        configuration: &config::CGroups,
         name: &str,
         cgroups: &manifest::CGroups,
         tx: EventTx,
     ) -> Result<CGroups, Error> {
-        let mut cgroup_paths = Vec::new();
-        for (controller, params) in cgroups {
-            let path = cgroup_path(controller, config)?.join(name);
-            create_if_not_exists(&path).await?;
-            configure_cgroup(&path, controller, params).await?;
+        let mut groups = Vec::new();
 
-            if controller == "memory" {
-                setup_oom_monitor(name, &path, tx.clone()).await?;
+        for (controller, params) in cgroups {
+            let mount_point = mount_point(controller)?;
+            let subdir = configuration
+                .get(controller)
+                .ok_or_else(|| Error::UnknownController(controller.into()))?;
+            let path = mount_point.join(subdir).join(name);
+
+            // Create cgroup
+            if !path.exists() {
+                debug!("Creating {}", path.display());
+                fs::create_dir_all(&path)
+                    .await
+                    .map_err(|e| Error::Io(format!("Failed to create {}", path.display()), e))?;
             }
 
-            cgroup_paths.push(path);
+            // Apply settings from manifest for this group
+            for (param, value) in params {
+                let filename = path.join(format!("{}.{}", controller, param));
+                debug!("Setting {} to {}", filename.display(), value);
+                write(&filename, &value).await?;
+            }
+
+            // Start a monitor for the memory controller
+            if controller == "memory" {
+                memory_monitor(name, &path, tx.clone()).await?;
+            }
+
+            groups.push(path);
         }
 
-        Ok(CGroups { cgroup_paths })
+        Ok(CGroups { groups })
     }
 
     pub async fn assign(&self, pid: u32) -> Result<(), Error> {
-        for cgroup_dir in &self.cgroup_paths {
+        for cgroup_dir in &self.groups {
             let tasks = cgroup_dir.join(TASKS);
             debug!("Assigning {} to {}", pid, tasks.display());
             write(&tasks, &pid.to_string()).await?;
@@ -93,8 +93,8 @@ impl CGroups {
     }
 
     pub async fn destroy(self) -> Result<(), Error> {
-        for cgroup_dir in self.cgroup_paths {
-            debug!("Destroying cgroup {}", cgroup_dir.display());
+        for cgroup_dir in self.groups {
+            debug!("Destroying CGroup {}", cgroup_dir.display());
             fs::remove_dir(&cgroup_dir)
                 .await
                 .map_err(|e| Error::Destroy(cgroup_dir.display().to_string(), e))?;
@@ -103,7 +103,9 @@ impl CGroups {
     }
 }
 
-async fn setup_oom_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), Error> {
+/// Monitor the oom_control file from memory cgroups and report
+/// a oom condition in case.
+async fn memory_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), Error> {
     let name = name.to_string();
 
     // Configure oom
@@ -112,6 +114,9 @@ async fn setup_oom_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), E
 
     // This task stops when the main loop receiver closes
     task::spawn(async move {
+        let mut interval = time::interval(time::Duration::from_millis(500));
+        // TODO: Stop this loop when doing a destroy. With this implementation it's not
+        // possible to distinguish between a read error and a intentional shutdown
         loop {
             select! {
                 result = fs::read_to_string(&oom_control) => {
@@ -124,28 +129,18 @@ async fn setup_oom_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), E
                                 break;
                             }
                         }
-                        Err(e) => {
-                            debug!("Stopping oom {}: {}", oom_control.display(), e);
+                        Err(_) => {
+                            debug!("Stopping oom monitor of {}", name);
                             break;
                         }
                     };
                 },
-                _ = tx.closed() => { break; }
+                _ = tx.closed() => break,
             };
-            time::sleep(Duration::from_millis(500)).await;
+            interval.tick().await;
         }
     });
 
-    Ok(())
-}
-
-async fn create_if_not_exists(path: &Path) -> Result<(), Error> {
-    if !path.exists() {
-        debug!("Creating {}", path.display());
-        fs::create_dir_all(&path)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to create directory {}", path.display()), e))?;
-    }
     Ok(())
 }
 
@@ -155,22 +150,13 @@ async fn write(path: &Path, value: &str) -> Result<(), Error> {
         .map_err(|e| Error::Io(format!("Failed to write to {}", path.display()), e))
 }
 
-fn cgroup_path(controller: &str, config: &config::CGroups) -> Result<PathBuf, Error> {
-    let hierarchy = get_mount_point(controller)?;
-    let cgroup_subdir = config
-        .get(controller)
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("north"));
-    Ok(hierarchy.join(cgroup_subdir))
-}
-
 /// Get the cgroup v1 controller hierarchy mount point
-fn get_mount_point(controller: &str) -> Result<PathBuf, Error> {
+fn mount_point(controller: &str) -> Result<PathBuf, Error> {
     let controller = controller.to_owned();
     MountIter::new()
-        .map_err(Error::MountPointsNotAccessible)?
+        .map_err(Error::MountInfo)?
         .filter_map(Result::ok)
         .find(|m| m.fstype == "cgroup" && m.options.contains(&controller))
         .map(|m| m.dest)
-        .ok_or(Error::ControllerNotFound(controller))
+        .ok_or(Error::UnknownController(controller))
 }

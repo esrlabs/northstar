@@ -265,7 +265,7 @@ impl State {
 
         // CGroups
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
-            debug!("Creating cgroup configuration for {}", app);
+            debug!("Configuring CGroups of {}", app);
             let cgroups = super::cgroups::CGroups::new(
                 &self.config.cgroups,
                 app.name(),
@@ -275,7 +275,6 @@ impl State {
             .await
             .map_err(Error::Cgroups)?;
 
-            debug!("Assigning {} to cgroup {}", process.pid(), app);
             cgroups
                 .assign(process.pid())
                 .await
