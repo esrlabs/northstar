@@ -97,6 +97,8 @@ pub enum Error {
     MalformedSignature(String),
     #[error("Invalid signature: {0}")]
     InvalidSignature(String),
+    #[error("Invalid comperssion algorithm")]
+    InvalidCompressionAlgorithm,
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -309,6 +311,7 @@ struct Builder {
     root: PathBuf,
     manifest: Manifest,
     key: Option<PathBuf>,
+    squashfs_opts: SquashfsOpts,
 }
 
 impl Builder {
@@ -317,11 +320,17 @@ impl Builder {
             root: PathBuf::from(root),
             manifest,
             key: Option::None,
+            squashfs_opts: SquashfsOpts::default(),
         }
     }
 
     fn key(mut self, key: &Path) -> Builder {
         self.key = Some(key.to_path_buf());
+        self
+    }
+
+    fn squashfs_opts(mut self, opts: SquashfsOpts) -> Builder {
+        self.squashfs_opts = opts;
         self
     }
 
@@ -338,7 +347,7 @@ impl Builder {
 
         // Create filesystem image
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-        create_fs_img(&tmp_root, &self.manifest, &fsimg)?;
+        create_squashfs_img(&tmp_root, &self.manifest, &fsimg, &self.squashfs_opts)?;
 
         // Create NPK
         if let Some(key) = &self.key {
@@ -350,9 +359,63 @@ impl Builder {
     }
 }
 
+#[derive(Debug)]
+pub enum CompAlg {
+    Gzip,
+    Lzma,
+    Lzo,
+    Xz,
+}
+
+impl std::fmt::Display for CompAlg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompAlg::Gzip => write!(f, "gzip"),
+            CompAlg::Lzma => write!(f, "lzma"),
+            CompAlg::Lzo => write!(f, "lzo"),
+            CompAlg::Xz => write!(f, "xz"),
+        }
+    }
+}
+
+impl FromStr for CompAlg {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "gzip" => Ok(CompAlg::Gzip),
+            "lzma" => Ok(CompAlg::Lzma),
+            "lzo" => Ok(CompAlg::Lzo),
+            "xz" => Ok(CompAlg::Xz),
+            _ => Err(Error::InvalidCompressionAlgorithm),
+        }
+    }
+}
+
+/// Squashfs Options
+pub struct SquashfsOpts {
+    /// The compression algorithm used (default gzip)
+    pub comp: CompAlg,
+    /// Size of the blocks of data compressed separately
+    pub block_size: u32,
+}
+
+impl Default for SquashfsOpts {
+    fn default() -> Self {
+        SquashfsOpts {
+            comp: CompAlg::Gzip,
+            block_size: 131072,
+        }
+    }
+}
+
 /// Create an NPK for the northstar runtime.
 /// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
 /// and packs the results into a zipped NPK file.
+///
+/// # Arguments
+/// * `dir` - Directory containing the container's root and manifest
+/// * `out` - Directory where the resulting NPK will be put
+/// * `key` - Path to the key used to sign the package
 ///
 /// # Example
 ///
@@ -363,6 +426,35 @@ impl Builder {
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 pub fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
+    pack_with(dir, out, key, SquashfsOpts::default())
+}
+
+/// Create an NPK with special `squashfs` options
+/// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
+/// and packs the results into a zipped NPK file.
+///
+/// # Arguments
+/// * `dir` - Directory containing the container's root and manifest
+/// * `out` - Directory where the resulting NPK will be put
+/// * `key` - Path to the key used to sign the package
+/// * `squashfs_opts` - Options for `mksquashfs`
+///
+/// # Example
+///
+/// To build the 'hello' example container:
+///
+/// sextant pack \
+/// --dir examples/container/hello \
+/// --out target/northstar/repository \
+/// --key examples/keys/northstar.key \
+/// --comp xz \
+/// --block-size 65536 \
+pub fn pack_with(
+    dir: &Path,
+    out: &Path,
+    key: Option<&Path>,
+    squashfs_opts: SquashfsOpts,
+) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;
     let name = manifest.name.clone();
     let version = manifest.version.clone();
@@ -370,6 +462,8 @@ pub fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
     if let Some(key) = key {
         builder = builder.key(key);
     }
+    builder = builder.squashfs_opts(squashfs_opts);
+
     let npk_dest = out
         .join(format!("{}-{}.", &name, &version.to_string()))
         .with_extension(&NPK_EXT);
@@ -612,16 +706,13 @@ fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     Ok(tmp_root)
 }
 
-fn create_fs_img(tmp_root: &Path, manifest: &Manifest, fsimg: &Path) -> Result<(), Error> {
-    let pseudo_files = gen_pseudo_files(&manifest);
-    create_squashfs(&tmp_root, &fsimg, &pseudo_files)
-}
-
-fn create_squashfs(out: &Path, src: &Path, pseudo_dirs: &[(String, u32)]) -> Result<(), Error> {
-    #[cfg(target_os = "linux")]
-    let compression_alg = "gzip";
-    #[cfg(not(target_os = "linux"))]
-    let compression_alg = "zstd";
+fn create_squashfs_img(
+    dst: &Path,
+    manifest: &Manifest,
+    src: &Path,
+    squashfs_opts: &SquashfsOpts,
+) -> Result<(), Error> {
+    let pseudo_dirs = gen_pseudo_files(&manifest);
 
     if which::which(&MKSQUASHFS_BIN).is_err() {
         return Err(Error::Squashfs(format!(
@@ -629,20 +720,24 @@ fn create_squashfs(out: &Path, src: &Path, pseudo_dirs: &[(String, u32)]) -> Res
             &MKSQUASHFS_BIN
         )));
     }
-    if !out.exists() {
+
+    if !dst.exists() {
         return Err(Error::Squashfs(format!(
             "Output directory '{}' does not exist",
-            &out.display()
+            &dst.display()
         )));
     }
+
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
-    cmd.arg(&out.display().to_string())
+    cmd.arg(&dst.display().to_string())
         .arg(&src.display().to_string())
         .arg("-all-root")
         .arg("-comp")
-        .arg(compression_alg)
+        .arg(squashfs_opts.comp.to_string())
         .arg("-no-progress")
-        .arg("-info");
+        .arg("-info")
+        .arg("-b")
+        .arg(format!("{}", squashfs_opts.block_size));
     for dir in pseudo_dirs {
         cmd.arg("-p");
         cmd.arg(format!(

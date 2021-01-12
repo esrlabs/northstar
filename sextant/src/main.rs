@@ -34,6 +34,12 @@ enum Opt {
         /// Output directory
         #[structopt(short, long)]
         out: PathBuf,
+        /// Compression algorithm to use in squashfs (default gzip)
+        #[structopt(short, long)]
+        comp: Option<npk::npk::CompAlg>,
+        /// Block size used by squashfs (default 128 KiB)
+        #[structopt(short, long)]
+        block_size: Option<u32>,
     },
     /// Unpack Northstar containers
     Unpack {
@@ -65,7 +71,22 @@ fn main() -> Result<()> {
     env_logger::init();
 
     match Opt::from_args() {
-        Opt::Pack { dir, out, key } => npk::npk::pack(&dir, &out, Some(key.as_path()))?,
+        Opt::Pack {
+            dir,
+            out,
+            key,
+            comp,
+            block_size,
+        } => {
+            let mut squashfs_opts = npk::npk::SquashfsOpts::default();
+            if let Some(compression_alg) = comp {
+                squashfs_opts.comp = compression_alg;
+            }
+            if let Some(size) = block_size {
+                squashfs_opts.block_size = size;
+            }
+            npk::npk::pack_with(&dir, &out, Some(key.as_path()), squashfs_opts)?
+        }
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
         Opt::Inspect { npk, short } => inspect::inspect(&npk, short)?,
         Opt::GenKey { name, out } => npk::npk::gen_key(&name, &out)?,
