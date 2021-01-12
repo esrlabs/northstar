@@ -17,6 +17,13 @@ else
   PLATFORM=${1}
 fi
 
+if [ -z ${2+x} ]
+then
+  COMPRESSION_ALGORITHM="gzip"
+else
+  COMPRESSION_ALGORITHM=${2}
+fi
+
 exe() { echo " + $*" ; $* ; }
 
 log_err() {
@@ -97,7 +104,7 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key"
+  exe cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key" --comp "${COMPRESSION_ALGORITHM}"
 }
 
 main() {
