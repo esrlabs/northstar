@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use anyhow::Result;
 use lazy_static::lazy_static;
 use serde::{
     de::{Deserializer, Visitor},
@@ -411,11 +412,11 @@ impl MountsSerialization {
 }
 
 #[derive(Error, Debug)]
-pub enum ManifestError {
-    #[error("Invalid manifest ({0})")]
+pub enum Error {
+    #[error("Invalid manifest: {0}")]
     Invalid(String),
-    #[error("Failed to parse: {0}")]
-    Parse(#[from] serde_yaml::Error),
+    #[error("Failed to parse YAML format: {0}")]
+    SerdeYaml(#[from] serde_yaml::Error),
     #[error("IO: {0}")]
     Io(#[from] io::Error),
 }
@@ -430,10 +431,18 @@ impl Manifest {
         build: vec![],
     });
 
-    fn verify(&self) -> Result<(), ManifestError> {
+    pub fn from_yaml<R: io::Read>(reader: R) -> Result<Self, Error> {
+        serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)
+    }
+
+    pub fn to_yaml<W: io::Write>(&self, writer: W) -> Result<(), Error> {
+        serde_yaml::to_writer(writer, self).map_err(Error::SerdeYaml)
+    }
+
+    fn verify(&self) -> Result<(), Error> {
         // TODO: check for none on env, autostart, cgroups, seccomp
         if self.init.is_none() && self.args.is_some() {
-            return Err(ManifestError::Invalid(
+            return Err(Error::Invalid(
                 "Arguments not allowed in resource container".to_string(),
             ));
         }
@@ -442,10 +451,9 @@ impl Manifest {
 }
 
 impl FromStr for Manifest {
-    type Err = ManifestError;
-    fn from_str(s: &str) -> Result<Manifest, ManifestError> {
-        let parse_res: Result<Manifest, ManifestError> =
-            serde_yaml::from_str(s).map_err(ManifestError::Parse);
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Manifest, Error> {
+        let parse_res: Result<Manifest, Error> = serde_yaml::from_str(s).map_err(Error::SerdeYaml);
         if let Ok(manifest) = &parse_res {
             manifest.verify()?;
         }
