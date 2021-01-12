@@ -31,7 +31,7 @@ use std::{
     fs,
     fs::File,
     io,
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
@@ -305,6 +305,51 @@ impl<R: io::Read + io::Seek> Npk<R> {
     }
 }
 
+struct Builder {
+    root: PathBuf,
+    manifest: Manifest,
+    key: Option<PathBuf>,
+}
+
+impl Builder {
+    fn new(root: &Path, manifest: Manifest) -> Builder {
+        Builder {
+            root: PathBuf::from(root),
+            manifest,
+            key: Option::None,
+        }
+    }
+
+    fn key(mut self, key: &Path) -> Builder {
+        self.key = Option::from(key.to_path_buf());
+        self
+    }
+
+    // TODO: If needed: add append method to include additional files to the npk
+
+    fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
+        // Add manifest and root dir to tmp dir
+        let tmp = tempfile::TempDir::new().map_err(|e| Error::Os {
+            context: "Failed to create temporary directory".to_string(),
+            error: e,
+        })?;
+        let tmp_root = copy_src_root_to_tmp(&self.root, &tmp)?;
+        let tmp_manifest = write_manifest(&self.manifest, &tmp)?;
+
+        // Create filesystem image
+        let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
+        create_fs_img(&tmp_root, &self.manifest, &fsimg)?;
+
+        // Create NPK
+        if let Some(key) = &self.key {
+            let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
+            write_npk(writer, &self.manifest, &fsimg, Some(&signature))
+        } else {
+            write_npk(writer, &self.manifest, &fsimg, None)
+        }
+    }
+}
+
 /// Create an NPK for the northstar runtime.
 /// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
 /// and packs the results into a zipped NPK file.
@@ -319,26 +364,20 @@ impl<R: io::Read + io::Seek> Npk<R> {
 /// --key examples/keys/northstar.key \
 pub fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
     let manifest = read_manifest(dir)?;
-
-    // Add manifest and root dir to tmp dir
-    let tmp = tempfile::TempDir::new().map_err(|e| Error::Os {
-        context: "Failed to create temporary directory".to_string(),
+    let name = manifest.name.clone();
+    let version = manifest.version.clone();
+    let mut builder = Builder::new(dir, manifest);
+    if let Some(key) = key {
+        builder = builder.key(key);
+    }
+    let npk_dest = out
+        .join(format!("{}-{}.", &name, &version.to_string()))
+        .with_extension(&NPK_EXT);
+    let npk = File::create(&npk_dest).map_err(|e| Error::Os {
+        context: format!("Failed to create NPK at '{}'", &npk_dest.display()),
         error: e,
     })?;
-    let tmp_root = copy_src_root_to_tmp(&dir, &tmp)?;
-    let tmp_manifest = write_manifest(&manifest, &tmp)?;
-
-    // Create filesystem image
-    let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-    create_fs_img(&tmp_root, &manifest, &fsimg)?;
-
-    // Create NPK
-    if let Some(key) = key {
-        let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
-        write_npk(&out, &manifest, &fsimg, Some(&signature))
-    } else {
-        write_npk(&out, &manifest, &fsimg, None)
-    }
+    builder.build(&npk)
 }
 
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
@@ -396,9 +435,9 @@ fn read_manifest(src: &Path) -> Result<Manifest, Error> {
         context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
         error: e,
     })?;
-    let manifest = serde_yaml::from_reader(manifest_file).map_err(|e| {
+    let manifest = Manifest::from_yaml(&manifest_file).map_err(|e| {
         Error::Manifest(format!(
-            "Failed to parse YAML format of manifest at '{}: {}'",
+            "Failed to parse '{}': {}",
             &manifest_path.display(),
             e
         ))
@@ -406,8 +445,8 @@ fn read_manifest(src: &Path) -> Result<Manifest, Error> {
     Ok(manifest)
 }
 
-fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf, Error> {
-    let tmp_manifest_path = tmp
+fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBuf, Error> {
+    let tmp_manifest_path = tmp_dir
         .path()
         .join(&MANIFEST_BASE)
         .with_extension(&MANIFEST_EXT);
@@ -415,7 +454,8 @@ fn write_manifest(manifest: &Manifest, tmp: &TempDir) -> Result<PathBuf, Error> 
         context: format!("Failed to create '{}'", &tmp_manifest_path.display()),
         error: e,
     })?;
-    serde_yaml::to_writer(&tmp_manifest, &manifest)
+    manifest
+        .to_yaml(tmp_manifest)
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     Ok(tmp_manifest_path)
 }
@@ -654,29 +694,17 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn write_npk(
-    npk: &Path,
+fn write_npk<W: Write + Seek>(
+    npk: W,
     manifest: &Manifest,
     fsimg: &Path,
     signature: Option<&str>,
 ) -> Result<(), Error> {
-    let npk = npk
-        .join(format!(
-            "{}-{}.",
-            &manifest.name,
-            &manifest.version.to_string()
-        ))
-        .with_extension(&NPK_EXT);
-    let npk = File::create(&npk).map_err(|e| Error::Os {
-        context: format!("Failed to create NPK at '{}'", &npk.display()),
-        error: e,
-    })?;
-
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string = serde_yaml::to_string(&manifest)
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
-    let mut zip = zip::ZipWriter::new(&npk);
+    let mut zip = zip::ZipWriter::new(npk);
     zip.set_comment(format!(
         "{} {}",
         &NPK_VERSION_STR,
