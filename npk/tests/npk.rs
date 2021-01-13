@@ -39,7 +39,7 @@ env:
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&src, &dest, Option::from(prv_key.as_path())).expect("Pack NPK");
+        pack(&src, &dest, Some(prv_key.as_path())).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
@@ -79,7 +79,7 @@ env:
         pack(
             Path::new("invalid"),
             &create_tmp_dir(),
-            Option::from(prv_key.as_path()),
+            Some(prv_key.as_path()),
         )
         .expect_err("Invalid manifest");
     }
@@ -90,7 +90,7 @@ env:
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&src, &Path::new("invalid"), Option::from(prv_key.as_path()))
+        pack(&src, &Path::new("invalid"), Some(prv_key.as_path()))
             .expect_err("Invalid destination dir");
     }
 
@@ -98,8 +98,7 @@ env:
     fn pack_npk_no_keys() {
         let src = create_tmp_dir();
         create_test_manifest(&src);
-        pack(&src, &create_tmp_dir(), Option::from(Path::new("invalid")))
-            .expect_err("Invalid key dir");
+        pack(&src, &create_tmp_dir(), Some(Path::new("invalid"))).expect_err("Invalid key dir");
     }
 
     #[test]

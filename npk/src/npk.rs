@@ -18,7 +18,6 @@ use crate::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Manifest, Mount, MountFlag, Version},
 };
-use anyhow::Result;
 use ed25519_dalek::{
     ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
     SECRET_KEY_LENGTH,
@@ -67,7 +66,7 @@ pub enum Error {
     #[error("Manifest error: {0}")]
     Manifest(String),
     #[error("File operation error: {0}")]
-    FileOperation(String),
+    Io(String),
     #[error("Squashfs error: {0}")]
     Squashfs(String),
     #[error("Archive error: {context}")]
@@ -90,12 +89,12 @@ pub enum Error {
         #[source]
         error: SignatureError,
     },
+    #[error("Manifest malformed: {0}")]
+    MalformedManifest(String),
     #[error("Hashes malformed: {0}")]
     MalformedHashes(String),
     #[error("Signature malformed: {0}")]
     MalformedSignature(String),
-    #[error("Manifest malformed: {0}")]
-    MalformedManifest(String),
     #[error("Invalid signature: {0}")]
     InvalidSignature(String),
 }
@@ -169,7 +168,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
             Manifest::from_str(&content)
                 .map_err(|e| Error::Manifest(format!("Failed to parse manifest file: {}", e)))
         } else {
-            Err(Error::FileOperation(format!(
+            Err(Error::Io(format!(
                 "Failed to locate {} in ZIP file",
                 &MANIFEST_NAME
             )))
@@ -186,7 +185,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
             })?;
             Ok(content)
         } else {
-            Err(Error::FileOperation(format!(
+            Err(Error::Io(format!(
                 "Failed to locate {} in ZIP file",
                 &SIGNATURE_NAME
             )))
@@ -210,13 +209,14 @@ impl<R: io::Read + io::Seek> Npk<R> {
 
         let yaml = self.signature_yaml()?;
         let sign_string = yaml.split("---").nth(1).unwrap_or_default();
-        || -> Result<ed25519_dalek::Signature> {
-            let sign_serde = serde_yaml::from_str::<SerdeSignature>(sign_string)?;
-            let sign_bytes = base64::decode(sign_serde.signature)?;
-            Ok(ed25519_dalek::Signature::from_bytes(&sign_bytes)?)
-        }()
-        .map_err(|e| {
-            Error::MalformedSignature(format!("Failed to read signature from YAML file: {}", e))
+        let sign_serde = serde_yaml::from_str::<SerdeSignature>(sign_string).map_err(|e| {
+            Error::MalformedSignature(format!("Failed to parse signature YAML format: {}", e))
+        })?;
+        let sign_bytes = base64::decode(sign_serde.signature).map_err(|e| {
+            Error::MalformedSignature(format!("Failed to decode signature base 64 format: {}", e))
+        })?;
+        ed25519_dalek::Signature::from_bytes(&sign_bytes).map_err(|e| {
+            Error::MalformedSignature(format!("Failed to parse signature ed25519 format: {}", e))
         })
     }
 
@@ -253,7 +253,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         if let Ok(fsimg) = self.inner.by_name(&FS_IMG_NAME) {
             Ok(fsimg.data_start())
         } else {
-            Err(Error::FileOperation(format!(
+            Err(Error::Io(format!(
                 "Failed to locate {} in ZIP file",
                 &FS_IMG_NAME
             )))
@@ -264,7 +264,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         if let Ok(fsimg) = self.inner.by_name(&FS_IMG_NAME) {
             Ok(fsimg.size())
         } else {
-            Err(Error::FileOperation(format!(
+            Err(Error::Io(format!(
                 "Failed to locate {} in ZIP file",
                 &FS_IMG_NAME
             )))
@@ -282,7 +282,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
             })?;
             Ok(VerityHeader::from_bytes(fsimg.by_ref()).map_err(Error::Verity)?)
         } else {
-            Err(Error::FileOperation(format!(
+            Err(Error::Io(format!(
                 "Failed to locate {} in ZIP file",
                 &FS_IMG_NAME
             )))
@@ -293,7 +293,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         if let Ok(zip_file) = self.inner.by_name(file.display().to_string().as_str()) {
             Ok(zip_file)
         } else {
-            Err(Error::FileOperation(format!(
+            Err(Error::Io(format!(
                 "Failed to locate {} in ZIP file",
                 &file.display()
             )))
@@ -321,7 +321,7 @@ impl Builder {
     }
 
     fn key(mut self, key: &Path) -> Builder {
-        self.key = Option::from(key.to_path_buf());
+        self.key = Some(key.to_path_buf());
         self
     }
 
@@ -435,7 +435,7 @@ fn read_manifest(src: &Path) -> Result<Manifest, Error> {
         context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
         error: e,
     })?;
-    let manifest = Manifest::from_yaml(&manifest_file).map_err(|e| {
+    let manifest = Manifest::from_reader(&manifest_file).map_err(|e| {
         Error::Manifest(format!(
             "Failed to parse '{}': {}",
             &manifest_path.display(),
@@ -455,7 +455,7 @@ fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBuf, Err
         error: e,
     })?;
     manifest
-        .to_yaml(tmp_manifest)
+        .to_writer(tmp_manifest)
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     Ok(tmp_manifest_path)
 }
@@ -592,7 +592,7 @@ fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     let options = fs_extra::dir::CopyOptions::new();
     if src_root.exists() {
         fs_extra::dir::copy(&src_root, &tmp, &options).map_err(|e| {
-            Error::FileOperation(format!(
+            Error::Io(format!(
                 "Failed to copy from '{}' to '{}': {}",
                 &src_root.display(),
                 &tmp.path().display(),
@@ -602,7 +602,7 @@ fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     } else {
         // Create empty root dir at destination if we have nothing to copy
         fs_extra::dir::create(&tmp_root, false).map_err(|e| {
-            Error::FileOperation(format!(
+            Error::Io(format!(
                 "Failed to create directory '{}': {}",
                 &tmp_root.display(),
                 e
@@ -767,7 +767,7 @@ fn path_trail(path: &Path) -> Vec<&Path> {
 
 fn assume_non_existing(path: &Path) -> Result<(), Error> {
     if path.exists() {
-        Err(Error::FileOperation(format!(
+        Err(Error::Io(format!(
             "File '{}' already exists",
             &path.display()
         )))

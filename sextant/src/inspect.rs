@@ -31,11 +31,9 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
     }
 }
 
-pub fn inspect_short(npk_path: &Path) -> Result<()> {
-    let mut npk = Npk::new(
-        File::open(&npk_path)
-            .context(format!("Failed to open NPK at '{}'", &npk_path.display()))?,
-    )?;
+pub fn inspect_short(npk: &Path) -> Result<()> {
+    let mut npk =
+        Npk::new(File::open(&npk).context(format!("Failed to open NPK at '{}'", &npk.display()))?)?;
     let manifest = npk.manifest()?;
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
@@ -143,7 +141,7 @@ mounts:
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&src, &dest, Option::from(prv_key.as_path())).expect("Pack NPK");
+        pack(&src, &dest, Some(prv_key.as_path())).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
