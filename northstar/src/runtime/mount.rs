@@ -60,7 +60,7 @@ pub enum Error {
     #[error("Os error: {0:?}")]
     Os(nix::Error),
     #[error("Repository error: {0:?}")]
-    Repository(String),
+    MissingKey(String),
 }
 
 pub(super) async fn mount_npk_repository(
@@ -81,33 +81,35 @@ pub(super) async fn mount_npk_repository(
 
 pub(super) async fn mount_npk(
     config: &Config,
-    npk_path: &Path,
+    npk: &Path,
     repo: &Repository,
 ) -> Result<Container, Error> {
-    debug!("Mounting {}", npk_path.display());
+    debug!("Mounting {}", npk.display());
     let use_verity = repo.key.is_some();
 
     let start = time::Instant::now();
 
-    if let Ok(meta) = metadata(&npk_path).await {
+    if let Ok(meta) = metadata(&npk).await {
         debug!("Mounting NPK with size {}", meta.len());
     }
 
-    let file = std::fs::File::open(&npk_path)
-        .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk_path.display()), e))?;
-    let mut npk = Npk::new(file).map_err(Error::Npk)?;
+    let (manifest, npk_version) = tokio::task::block_in_place(|| {
+        let file = std::fs::File::open(&npk)
+            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
+        let mut npk_archive = Npk::new(file).map_err(Error::Npk)?;
 
-    // verify signature
-    if let Some(pub_key) = repo.key {
-        npk.verify(&pub_key).map_err(Error::Npk)?;
-    } else {
-        return Err(Error::Repository(
-            "No public key in repository to verify NPK signature".to_string(),
-        ));
-    }
+        // verify signature
+        if let Some(pub_key) = repo.key {
+            npk_archive.verify(&pub_key).map_err(Error::Npk)?;
+        } else {
+            return Err(Error::MissingKey(
+                "No public key in repository to verify NPK signature".to_string(),
+            ));
+        }
 
-    let manifest = npk.manifest().map_err(Error::Npk)?;
-    let npk_version = npk.version().map_err(Error::Npk)?;
+        let npk_version = npk_archive.version().map_err(Error::Npk)?;
+        Ok((npk_archive.manifest().map_err(Error::Npk)?, npk_version))
+    })?;
 
     if npk_version != Manifest::VERSION {
         return Err(Error::Npk(MalformedManifest(format!(
@@ -137,7 +139,7 @@ pub(super) async fn mount_npk(
         manifest.version
     );
 
-    let device = setup_and_mount(&config, &name, &npk_path, &root, use_verity).await?;
+    let device = setup_and_mount(&config, &name, &npk, &root, use_verity).await?;
 
     let container = Container {
         root,
@@ -260,14 +262,14 @@ pub async fn verity_setup(
 async fn setup_and_mount(
     config: &Config,
     name: &str,
-    npk_path: &Path,
+    npk: &Path,
     root: &Path,
     use_verity: bool,
 ) -> Result<PathBuf, Error> {
     // open NPK synchronously
     let (verity, hashes, fsimg_offset, fsimg_size) = tokio::task::block_in_place(|| {
-        let file = File::open(npk_path)
-            .map_err(|e| npk::npk::Error::FileOperation(format!("Failed to open NPK: {}", e)))?;
+        let file = File::open(npk)
+            .map_err(|e| npk::npk::Error::Io(format!("Failed to open NPK: {}", e)))?;
         let mut npk = Npk::new(file)?;
         Ok((
             npk.verity_header()?,
@@ -278,13 +280,13 @@ async fn setup_and_mount(
     })
     .map_err(Error::Npk)?;
 
-    let mut fs = fs::File::open(npk_path)
+    let mut npk_file = fs::File::open(npk)
         .await
         .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
     let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
         .await
         .map_err(Error::LoopDevice)?;
-    let loop_device = losetup(&lc, &mut fs, fsimg_offset, fsimg_size)
+    let loop_device = losetup(&lc, &mut npk_file, fsimg_offset, fsimg_size)
         .await
         .map_err(Error::LoopDevice)?;
     let loop_device_id = loop_device

@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::Result;
 use lazy_static::lazy_static;
 use serde::{
     de::{Deserializer, Visitor},
@@ -431,11 +430,11 @@ impl Manifest {
         build: vec![],
     });
 
-    pub fn from_yaml<R: io::Read>(reader: R) -> Result<Self, Error> {
+    pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
         serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)
     }
 
-    pub fn to_yaml<W: io::Write>(&self, writer: W) -> Result<(), Error> {
+    pub fn to_writer<W: io::Write>(&self, writer: W) -> Result<(), Error> {
         serde_yaml::to_writer(writer, self).map_err(Error::SerdeYaml)
     }
 

@@ -35,7 +35,7 @@ use std::{
     path::{Path, PathBuf},
     result,
 };
-use tokio::{fs, time};
+use tokio::{fs, task, time};
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -390,16 +390,20 @@ impl State {
     }
 
     /// Install an NPK
-    pub async fn install(&mut self, id: &str, npk_path: &Path) -> Result<(), Error> {
+    pub async fn install(&mut self, id: &str, npk: &Path) -> Result<(), Error> {
         let repository = self
             .repositories
             .get(id)
             .ok_or_else(|| Error::RepositoryNotFound(id.to_owned()))?;
 
-        let file = std::fs::File::open(&npk_path)
-            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk_path.display()), e))?;
-        let mut npk = Npk::new(file).map_err(Error::Npk)?;
-        let manifest = npk.manifest().map_err(Error::Npk)?;
+        let manifest = task::block_in_place(|| {
+            let file = std::fs::File::open(&npk)
+                .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
+            Npk::new(file)
+                .map_err(Error::Npk)?
+                .manifest()
+                .map_err(Error::Npk)
+        })?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -425,7 +429,7 @@ impl State {
         }
 
         // Copy tmp file into repository
-        fs::copy(&npk_path, &package_in_repository)
+        fs::copy(&npk, &package_in_repository)
             .await
             .map_err(|error| Error::Io("Failed to copy NPK to repository".to_string(), error))?;
 
@@ -459,9 +463,8 @@ impl State {
             })?;
             while let Ok(Some(entry)) = dir.next_entry().await {
                 let manifest = tokio::task::block_in_place(|| {
-                    let file = File::open(entry.path().as_path()).map_err(|e| {
-                        npk::npk::Error::FileOperation(format!("Failed to open NPK: {}", e))
-                    })?;
+                    let file = File::open(entry.path().as_path())
+                        .map_err(|e| npk::npk::Error::Io(format!("Failed to open NPK: {}", e)))?;
                     Npk::new(file)?.manifest()
                 })
                 .map_err(Error::Npk)?;
@@ -554,13 +557,13 @@ impl State {
             None => {
                 return Err(Error::ApplicationNotFound);
             }
-            Some((manifest, npk_path)) => {
+            Some((manifest, npk)) => {
                 if manifest.init.is_some() {
                     self.uninstall_app(name).await?;
                 } else {
                     self.uninstall_resource(name, version).await?;
                 }
-                npk_path
+                npk
             }
         };
 
