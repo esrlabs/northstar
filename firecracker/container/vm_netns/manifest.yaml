@@ -1,0 +1,30 @@
+name: vm_netns
+version: 0.1.1
+init: /startup.sh
+args:
+  - "first_arg"
+  - "second_arg"
+env:
+  var1: vm_netns
+  var2: /some/path
+  var3: some_variable
+mounts:
+    /bin:
+      host: /system/bin
+    /lib:
+      host: /lib
+    /system:
+      host: /system
+    /dev: full
+    /sys:
+      host: /sys
+netconf:
+  enable_namespace: true
+  namespace_uniq_subnet: 42
+use_vm: true
+capabilities: 
+  - cap_net_raw 
+  - cap_mknod
+suppl_groups: 
+  - inet 
+  - adb
