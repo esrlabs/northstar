@@ -1,0 +1,105 @@
+#!/bin/bash
+#
+# Script to create a sample Alpine based initrd for firecracker
+# Should be invoked from the top level directory
+#
+if [[ $# -ne 1 ]] ; then
+	echo "Usage: $0 <initrd>"
+	exit 1
+fi
+initrd=$1
+
+mkalpine=$PWD/firecracker/tools/bin/fc_mkalpine
+tools_src=$PWD/firecracker/tools/src
+
+checkdirs() {
+
+	if [[ ! -e $mkalpine ]] ; then
+		echo "Can not find $mkalpine. Are you in the top level dir?"
+		exit 1
+	fi
+
+	if [[ ! -e $tools_src/nc-vsock/nc-vsock ]] ; then
+		echo "Can not find executable for nc-vsock"
+		echo "Check $tools_src/nc-vsock/nc-vsock "
+		exit 1
+	fi
+	if [[ ! -e $tools_src/cttyhack/cttyhack ]] ; then
+		echo "Can not find executable for cttyhack".
+		echo "Check $tools_src/cttyhack/cttyhack"
+		exit 1
+	fi
+	return 0
+}
+
+mkimage() {
+	local initrd=$1 status
+
+	(
+		set -o errexit
+		set -o pipefail
+
+		# To get rid of odd alignment
+		dd if=/dev/zero of=$initrd bs=1 count=1 seek=32M
+		truncate -s 32M $initrd
+
+		mkfs -t ext4 $initrd
+		exit 0
+	)
+	status=$?
+	if [[ $status -ne 0 ]] ; then
+		echo "Can not create image"
+		exit $status
+	fi
+	return 0
+}
+
+populate() {
+	local initrd=$1 status mntpoint
+
+	mntpoint=/tmp/mnt_$$
+	mkdir $mntpoint
+	if [[ $? -ne 0 ]] ; then
+		echo "Can not mkdir $mntpoint"
+		exit 1
+	fi
+	
+	sudo mount $initrd $mntpoint
+	if [[ $? -ne 0 ]] ; then
+		echo "Can not mount $mntpoint"
+		exit 1
+	fi
+
+	(
+		set -o errexit
+		set -o pipefail
+
+		docker run --rm \
+			-v $mntpoint:/foo -v $mkalpine:/mkalpine \
+			arm64v8/alpine /mkalpine
+
+		# Add external (non-Alpine) files
+		echo "Adding tools"
+		sudo cp $tools_src/nc-vsock/nc-vsock $mntpoint/bin
+		sudo cp $tools_src/cttyhack/cttyhack $mntpoint/bin
+		sudo cp $tools_src/scripts/init $mntpoint
+		sudo cp $tools_src/scripts/config_vm.sh $mntpoint/bin
+		sudo cp $tools_src/scripts/appwrap.sh $mntpoint/bin
+		echo "$initrd created successfully"
+
+		exit 0
+	)
+	status=$?
+	sudo umount $mntpoint
+	rmdir $mntpoint
+	if [[ $status -ne 0 ]] ; then
+		echo "Can not create initrd"
+		exit 1
+	fi
+
+	return 0
+}
+
+checkdirs
+mkimage $initrd
+populate $initrd

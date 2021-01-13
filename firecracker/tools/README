@@ -1,0 +1,100 @@
+Before a VM can be launched, verify that /dev/kvm is readable by
+the northstar process. Usually, the following will suffice:
+	chmod 0666 /dev/kvm
+
+Steps to launch a VM
+	setup phase: create config files
+	launch phase: invoke firecracker
+	exec phase: config VM, launch real application
+
+
+Launch Phase: files in container
+===============================
+Instead of launching the real application, northstar
+will execute 'launchvm' . This is currently a simple
+shell script that performs two important functions:
+	* starts socat processes for VM communication
+	* start firecracker to launch VM
+
+The kernel is a minimal kernel, configured as per
+	firecracker/config/guest_minconfig
+
+The socat binaries come from:
+	git://repo.or.cz/socat.git
+
+The firecracker binary comes from
+	git@github.com:firecracker-microvm/firecracker.git
+with the following patches applied:
+	Add prototype support for macvtap interfaces
+    	Revert "aarch64: setup cache topology"
+The patches are necessary because upstream has not yet (jan 2021) 
+decided if they want to support the ability to specify a complete path
+for the macvtap interface.
+
+To build firecracker, run
+	tools/devtools build --release
+*ON THE TARGET ARCHITECTURE* . 
+
+The configuration file templates for both the vm and firecracker are in
+	firecracker/config
+
+Execution Phase: files in VM
+=============================
+By default, the first executable in the initrd is /init.
+
+The default init is very simplistic, and mounts the bare minimum filesystems
+(/proc, /sys, and /tmp). It then configures the VM using the parameters
+received from the host, and spawns the application.
+
+The /init and configuration utilities are simple shell scripts; the
+only additional binaries are:
+	nc-vsock: as recommended by firecracker
+		git@github.com:stefanha/nc-vsock.git
+
+	cttyhack: busybox controlling terminal workaround
+		firecracker/tools/src/cttyhack
+
+Debug
+=====
+On the target, the log files from both firecracker and the VM
+are placed on the host in the <data> directory (as specified in
+northstar.toml) with a suffix of the subnet ID to identify the VM.
+
+For example, if the manifest file specified a subnet index of 42
+as follows:
+  netconf:
+    enable_namespace: true
+    namespace_uniq_subnet: 42
+  use_vm: true
+then the under the <data> directory as specified in the northstar.toml
+file would appear:
+	vm_42/run/fclog
+	vm_42/run/fcvsock.sock
+	vm_42/run/vmstatus
+	vm_42/run/vmlog
+	vm_42/run/fcsock
+	vm_42/run/fcvsock.sock_1
+	vm_42/run/fcmetrics
+	vm_42/conf/vmconf.json
+	vm_42/conf/fcconf.json
+	vm_42/datafs.img
+
+The log and status files are as follows:
+	vm_42/run/fclog
+		Firecracker log file
+	vm_42/run/vmstatus
+		Exit status of VM
+	vm_42/run/vmlog
+		Out from application in VM
+	vm_42/run/fcmetrics
+		Firecracker metrics
+	vm_42/conf/vmconf.json
+		Config file for VM
+	vm_42/conf/fcconf.json
+		Config file for Firecracker to launch VM
+	vm_42/datafs.img
+		Writable /data filesystem image for VM
+
+When something goes wrong, first look in the system log file (logcat -d on Android)
+then in Firecracker log file.
+

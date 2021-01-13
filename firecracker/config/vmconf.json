@@ -1,0 +1,29 @@
+{
+  "netconf": {
+        "ipaddr": "IPADDR",
+        "gateway": "GATEWAY",
+        "cidr": "CIDR"
+  },
+  "mounts": [
+    {
+        "dev":  "/dev/vda",
+        "mountpoint": "/",
+	"flags": "-r"
+    },
+    {
+        "dev":  "/dev/vdb",
+        "mountpoint": "/data",
+	"flags":  ""
+    },
+    {
+        "dev":  "/dev/vdc",
+        "mountpoint": "/app",
+	"flags":  "-r"
+    }
+  ],
+  "app" : {
+        "init": "INIT",
+	"args": "ARGS",
+        "env": "ENV"
+    }
+}

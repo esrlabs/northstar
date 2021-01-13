@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+
+/bin/mount -t proc none /proc
+if [ $? -ne 0 ] ; then
+	echo "Can not mount /proc"
+	exit 1
+fi
+/bin/mount -t sysfs none /sys
+if [ $? -ne 0 ] ; then
+	echo "Can not mount /sys"
+	exit 1
+fi
+/bin/mount -t tmpfs none /tmp
+if [ $? -ne 0 ] ; then
+	echo "Can not mount /tmpfs"
+	exit 1
+fi
+
+# We don't have job control; configuration must be launched
+# in blocking mode.
+/bin/config_vm.sh /tmp/vmconfig.json
+if [ $? -ne 0 ] ; then
+	echo "Can not configure VM"
+	/sbin/reboot -f
+fi
+
+/bin/appwrap.sh /tmp/vmconfig.json
+if [ $? -ne 0 ] ; then
+	echo "Application error"
+	# The setsid and cttyhack are for busybox to give us job control
+	setsid /bin/cttyhack /bin/sh 
+fi
+
+/sbin/reboot -f

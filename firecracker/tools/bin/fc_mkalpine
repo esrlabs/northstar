@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+# Script to be run to populate an Alpine image
+
+set -o errexit
+set -o pipefail
+
+apk add util-linux
+apk add jq
+apk add mosquitto-clients
+for d in bin etc lib root sbin usr; do tar c "/$d" | tar x -C /foo; done
+for dir in dev proc run sys var; do mkdir /foo/${dir}; done
+mkdir /foo/data
+mkdir /foo/tmp
+mkdir /foo/app
+chmod 777 /foo/tmp
+exit 0

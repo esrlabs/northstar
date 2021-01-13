@@ -1,0 +1,6 @@
+Source:
+	git://repo.or.cz/socat.git 
+
+Build:
+	make
+

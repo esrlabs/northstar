@@ -1,0 +1,135 @@
+From 80c75a4a69410acb47ab8a0bdb06005eeeb92e11 Mon Sep 17 00:00:00 2001
+From: Ametros <github@ametros.net>
+Date: Sat, 24 Oct 2020 14:59:50 +0100
+Subject: [PATCH 3/4] Add prototype support for macvtap interfaces
+
+Firecracker network interfaces use /dev/net/tun to create tap interfaces.
+On the host these are typically bridged, using the standard Linux bridge
+implementation.
+
+Linux macvtap interfaces are similar to bridges but simpler: the kernel
+doesn't snoop frames to maintain a FIB to map MAC addresses to interfaces,
+because the full topology is known to the kernel.
+
+However, macvtap interfaces are exposed to userland as /dev/tap%d device
+nodes, which Firecracker doesn't support. This commit adds support by
+checking whether the `host_dev_name` looks like a path name, and opening
+the device node if it does.
+
+Tested thus:
+
+    # Create a dummy interface to host the macvtap interfaces, plus two
+    # macvtap interfaces in bridge mode
+    sudo ip link add dummy0 type dummy
+    sudo ip link add link dummy0 name vtap0 type macvtap mode bridge
+    sudo ip link add link dummy0 name vtap1 type macvtap mode bridge
+    sudo ip link set dummy0 up
+    sudo ip link set vtap0 up
+    sudo ip link set vtap1 up
+    sudo chmod 666 /dev/tap*   # For proof-of-concept purposes only
+
+    # Configure two VMs thus; use ip link to get tap d
+    {
+        ...
+        {
+            "network-interfaces" [
+                {
+                    ...
+                    "host_dev_name: "/dev/tapX",
+                    "guest_mac": "<see ip link output>",
+                }
+            ]
+        }
+        ...
+    }
+
+You must use the correct MAC address in the VM, i.e. the MAC address that the
+host kernel has assigned to the tap interface.
+---
+ src/devices/src/virtio/net/tap.rs | 48 ++++++++++++++++++++++++++++++-
+ 1 file changed, 47 insertions(+), 1 deletion(-)
+
+diff --git a/src/devices/src/virtio/net/tap.rs b/src/devices/src/virtio/net/tap.rs
+index a924af17..76c8f3e6 100644
+--- a/src/devices/src/virtio/net/tap.rs
++++ b/src/devices/src/virtio/net/tap.rs
+@@ -6,10 +6,13 @@
+ // found in the THIRD-PARTY file.
+ 
+ use net_gen::ifreq;
+-use std::fs::File;
++use std::fs::{File, OpenOptions};
+ use std::io::{Error as IoError, Read, Result as IoResult, Write};
+ use std::os::raw::*;
++use std::os::unix::ffi::OsStrExt;
++use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
+ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
++use std::path;
+ use utils::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
+ use utils::{ioctl_expr, ioctl_ioc_nr, ioctl_iow_nr};
+ 
+@@ -20,6 +23,12 @@ const IFACE_NAME_MAX_LEN: usize = 16;
+ /// List of errors the tap implementation can throw.
+ #[derive(Debug)]
+ pub enum Error {
++    /// Unable to open tap interface device.
++    OpenTapDev(IoError),
++    /// Unable to stat tap interface device.
++    StatTapDev(IoError),
++    /// Tap interface device is not a character device
++    InvalidTapDevType,
+     /// Unable to create tap interface.
+     CreateTap(IoError),
+     /// Invalid interface name.
+@@ -100,11 +109,48 @@ impl IfReqBuilder {
+ }
+ 
+ impl Tap {
++    /// Open a TUN/TAP device given a device node
++    /// # Arguments
++    ///
++    /// * `path` - path of the device node.
++    pub fn open_tap_dev(path: &path::Path) -> Result<Tap> {
++        let mut opts = OpenOptions::new();
++        let file = opts
++            .read(true)
++            .write(true)
++            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
++            .open(path).map_err(|x| Error::OpenTapDev(x))?;
++
++        // Must be a char device
++        let md = file.metadata().map_err(|x| Error::StatTapDev(x))?;
++        if !md.file_type().is_char_device() {
++            return Err(Error::InvalidTapDevType);
++        }
++
++        let name_bytes = path.as_os_str().as_bytes();
++        if name_bytes.len() >= IFACE_NAME_MAX_LEN {
++            return Err(Error::InvalidIfname);
++        }
++
++        let mut ret = Tap {
++            tap_file: file,
++            if_name: [0; IFACE_NAME_MAX_LEN],
++        };
++
++        ret.if_name[..name_bytes.len()].copy_from_slice(name_bytes);
++        Ok(ret)
++    }
++
+     /// Create a TUN/TAP device given the interface name.
+     /// # Arguments
+     ///
+     /// * `if_name` - the name of the interface.
+     pub fn open_named(if_name: &str) -> Result<Tap> {
++        let path = path::Path::new(if_name);
++        if path.is_absolute() {
++            return Self::open_tap_dev(path);
++        }
++
+         let terminated_if_name = build_terminated_if_name(if_name)?;
+ 
+         let fd = unsafe {
+-- 
+2.17.1
+

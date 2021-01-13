@@ -1,0 +1,48 @@
+{
+  "boot-source": {
+    "kernel_image_path": "/usr/local/share/var/bzImage.guest",
+    "boot_args": "console=ttyS0 quiet init=/init reboot=k panic=1 pci=off"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "/usr/local/share/var/initrd.guest",
+      "is_root_device": true,
+      "is_read_only": true
+    },
+    {
+      "drive_id": "data",
+      "path_on_host": "/usr/local/data/datafs.img",
+      "is_root_device": false,
+      "is_read_only": false,
+      "want_flush": true
+    },
+    {
+      "drive_id": "app",
+      "path_on_host": "APP_BLKDEV",
+      "is_root_device": false,
+      "is_read_only": true,
+      "want_flush": false
+    }
+  ],
+  "network-interfaces": [
+    {
+      "iface_id": "eth0",
+      "guest_mac": "TAP_MACADDR",
+      "host_dev_name": "TAP_DEVNAME"
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": 2,
+    "mem_size_mib": 512,
+    "ht_enabled": false
+  },
+  "metrics": {
+    "metrics_path" : "/usr/local/data/run/fcmetrics"
+  },
+  "vsock": {
+    "vsock_id": "1",
+    "guest_cid": 3,
+    "uds_path": "/usr/local/data/run/fcvsock.sock"
+  }
+}

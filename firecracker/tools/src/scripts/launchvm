@@ -1,0 +1,178 @@
+#!/system/bin/sh
+#
+# Launch a VM using the config files that were created for this VM
+#
+# There are two directory trees expected:
+#	share	ronly binaries
+#	data	config files and location for log files
+
+#set -xv
+if [ $# -ne 3 ] ; then
+	echo "usage $0 vm_id share_dir data_dir"
+        exit 1
+fi
+vmid=$1
+share=$2 
+data=$3
+
+# Binaries
+firecracker=""
+socat=""
+
+# Config files, logs, and control sockets
+vmconfig=""
+fcconfig=""
+vmstatus=""
+vmlog=""
+fclog=""
+fcmetrics=""
+ctlsock=""
+vsock=""
+
+# port to pass config data on
+vsock_cfgport=0
+vsock_logport=1
+vsock_statusport=2
+
+init_vars() {
+	local share=$1 data=$2
+	local confdir bindir rundir
+
+	if [[ ! -d $share ]] ; then
+		echo "Can not find dir $share"
+		exit 1
+	fi
+	if [[ ! -d $data ]] ; then
+		echo "Can not find dir $data"
+		exit 1
+	fi
+	bindir=${share}/bin
+	confdir=${data}/conf
+	rundir=${data}/run
+
+	firecracker=$bindir/firecracker
+	socat=$bindir/socat
+
+	vmconfig=$confdir/vmconf.json
+	fcconfig=$confdir/fcconf.json
+
+	vmstatus=$rundir/vmstatus
+	vmlog=$rundir/vmlog
+	fclog=$rundir/fclog
+	fcmetrics=$rundir/fcmetrics
+	ctlsock=$rundir/fcsock
+	# The vsock is named differently because the port number is
+	# attached as a suffix
+	vsock=$rundir/fcvsock.sock
+}
+
+
+# Wait for 5 seconds for FC to start
+wait_fcstart() {
+	local vsock=$1
+	local -i cnt timeout
+
+	cnt=0
+	timeout=50
+	while [[ $cnt -lt $timeout ]] ; do
+		if [[ -S $vsock ]] ; then
+			break
+		fi
+		usleep 100000
+		((cnt++))
+	done
+	
+	if [[ ! -S $vsock ]] ; then
+		echo "Can not find configuration vsock $vsock, exiting"
+		exit 1
+	fi
+
+	return 0
+}
+
+startvm() {
+	local vmid=$1
+	local status
+	local vsockcfg_pid 
+	local vsockstatus_pid 
+	local vsocklog_pid 
+
+	# Gotta love orthagonality. If the logfile does not exist
+	# FC won't start
+	if [[ ! -e $fclog ]] ; then
+		touch $fclog
+	fi
+
+	# If the metrics file exists, FC won't truncate it, and can
+	# corrupt it. 
+	#
+	# The path is specified in the config file
+	#
+	rm -f $fcmetrics > /dev/null 2>&1
+	#mkfifo $fcmetrics_file
+	touch $fcmetrics
+
+	# if the control socket exists, fc will fail with
+	# address in use
+	rm -f $ctlsock > /dev/null 2>&1
+
+	# If the vsock comm socket exists, fc will fail with
+	# address in use. If port number sockets exists, socat
+        # will fail
+	rm -f ${vsock} > /dev/null 2>&1
+	rm -f ${vsock}_? > /dev/null 2>&1
+
+	# Every instance start gets a new status and log file
+	rm -f ${vmstatus} ${vmlog} > /dev/null 2>&1
+
+	# Start the vsock server; it will wait for FC to
+	# create the socket then it will pass the config
+	# information on the config port
+	#
+	# This must be done inline, not in a function so that
+	# we can get the real pid of socat, not the spawned subshell
+	#
+	wait_fcstart $vsock &
+	$socat -u OPEN:$vmconfig,rdonly \
+		  UNIX-LISTEN:${vsock}_${vsock_cfgport} &
+	vsockcfg_pid=$!
+
+	# Start the status server
+	wait_fcstart $vsock &
+	$socat -u UNIX-LISTEN:${vsock}_${vsock_statusport} \
+		  OPEN:$vmstatus,creat &
+	vsockstatus_pid=$!
+
+	# Start the logging server. This is slightly different because
+	# there will be multiple connects from the VM, so we use
+	# fork option
+	wait_fcstart $vsock &
+	$socat -u UNIX-LISTEN:${vsock}_${vsock_logport},fork \
+		  OPEN:${vmlog},creat,append &
+	vsocklog_pid=$!
+
+	echo "Starting firecracker for vmid ${vmid} config at ${fcconfig} log at ${vmlog}"
+	$firecracker --api-sock ${ctlsock} \
+		--id "${vmid}" \
+		--log-path ${fclog} --level Debug \
+		--config-file ${fcconfig}
+
+	# firecracker always seems to exit with a non-zero
+	# status, either because of halt or shutdown
+	# so we don't exit on error
+	status=$?
+	echo "firecracker exit status $status"
+
+	kill -9 $vsockcfg_pid $vsockstatus_pid $vsocklog_pid > /dev/null 2>&1
+
+	if [[ -e $vmstatus ]] ; then
+		echo -n "VM application exited with status: "
+		cat $vmstatus
+	fi
+	return 0
+}
+
+init_vars $share $data
+
+startvm $vmid
+exit 0

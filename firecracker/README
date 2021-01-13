@@ -1,0 +1,60 @@
+To run a VM, a resource container is required that contains both the
+VM files (kernel and initrd) and the support files necessary to launch the VM.
+A sample resource container is available, but contains only a minimal
+initrd that is not useful for much of anything other than serving as
+an example
+
+Dirs
+=====
+config:
+	Configuration files for the VM kernel as well as
+	those necessary to launch the VM
+
+tools:
+	Files required in the container and initrd
+	for launching and running a VM
+
+container:
+	fc_resource
+		example resource container with kernel/initrd 
+	vm_netns
+		example container testing network namespaces
+		that runs in VM
+
+	To build the containers from the top level dir:
+ 		cargo run --bin sextant -- pack \
+			--dir firecracker/container/fc_resource \
+			--out target \
+			--key examples/keys/northstar.key
+
+ 		cargo run --bin sextant -- pack \
+			--dir firecracker/container/vm_netns \
+			--out target \
+			--key examples/keys/northstar.key
+
+initrd:
+=======
+The sample initrd is just that: a sample. The size of 32M is too small
+to be of any use, and just shows how one can create
+an Alpine-based initrd.
+
+The binaries for both nc-vsock and cttyhack should be built ahead
+of time for your architecture.
+	* Make sure they are static executables *
+
+There is a script firecracker/tools/bin/mkinitrd that
+will create a minimal initrd. You can use this as a template.
+
+Build Summary:
+=============
+	* Create initrd
+		firecracker/tools/bin/fc_mkinitrd \
+			firecracker/container/fc_resource/root/var/initrd.guest
+	* Create container
+		cargo run --bin sextant -- pack \
+                        --dir firecracker/container/fc_resource \
+                        --out target \
+                        --key examples/keys/northstar.key
+	* Push container to target
+		adb push target/fc_resource-0.0.1.npk <target_registry_path>
+

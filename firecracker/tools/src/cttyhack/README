@@ -1,0 +1,10 @@
+In a busybox shell, there is no controlling terminal by default.
+To work around this, busybox has an external utility that can be
+compliled in named cttyhack. This utility performs the necessary
+TIOC ioctls to allow signals (most notably ^C) to be correctly
+handled.
+
+This comes from the busybox source:git://git.busybox.net/busybox
+under ./shell/cttyhack.c , and has been modified to compile standalone.
+
+

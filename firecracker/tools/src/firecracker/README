@@ -1,0 +1,19 @@
+source:
+	git@github.com:firecracker-microvm/firecracker.git
+
+Firecracker must be built on the target architecture. For example, for
+aarch64, you must either have an arm development host, or spin up
+a qemu arm VM.
+
+You will need to add the patch that supports arbitrary path names
+for the macvtap interfaces.
+	0001-Add-prototype-support-for-macvtap-interfaces.patch
+
+You may also need to back out commit 76528ea49b76b994d38e6cbef2a6bda6121564d7
+	"aarch64: setup cache topology"
+if your target does not provide the cache architecture entries in the FDT
+that this commit is looking for. Upstream has no decision on how to
+handle this bug.
+
+To build:
+	tools/devtool build --release

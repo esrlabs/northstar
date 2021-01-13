@@ -1,0 +1,5 @@
+Source:
+	git@github.com:stefanha/nc-vsock.git 
+
+To build:
+	CFLAGS="-static" make 
