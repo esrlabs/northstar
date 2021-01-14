@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+* Add a Rust API client that implements the Northstar API protocol. See
+  `northstar::api::client`.
+* Exchange the length encoded wire format with newline seperated json.
 * Upgrade to Tokio 1.0
 * Rename the default configuration file from north.toml to northstar.toml
 * The `[directories]` section in the `north.toml` configuration file is replaced
