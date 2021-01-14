@@ -158,14 +158,8 @@ impl State {
             );
         }
 
-        let minijail = Minijail::new(
-            tx.clone(),
-            &config.run_dir,
-            &config.data_dir,
-            config.container_uid,
-            config.container_gid,
-        )
-        .map_err(Error::Process)?;
+        let minijail =
+            Minijail::new(tx.clone(), &config.run_dir, &config.data_dir).map_err(Error::Process)?;
 
         let mut state = State {
             events_tx: tx,

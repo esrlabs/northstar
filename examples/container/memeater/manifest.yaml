@@ -1,6 +1,8 @@
 name: memeater
 version: 0.0.1
 init: /memeater
+uid: 1000
+gid: 1000
 mounts:
     /lib:
       host: /lib

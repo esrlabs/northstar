@@ -49,10 +49,6 @@ pub const UNSQUASHFS_BIN: &str = "unsquashfs";
 // First half of version string in ZIP comment
 pub const NPK_VERSION_STR: &str = "npk_version:";
 
-// User and group id for squashfs pseudo directories ('/dev', '/proc', '/tmp' etc.)
-const PSEUDO_DIR_UID: u32 = 1000;
-const PSEUDO_DIR_GID: u32 = 1000;
-
 // File name and directory components
 pub const FS_IMG_NAME: &str = "fs.img";
 pub const MANIFEST_NAME: &str = "manifest.yaml";
@@ -656,21 +652,18 @@ async fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     let pseudo_file_entries =
         task::block_in_place(|| NamedTempFile::new().map_err(|e| Error::Io(e.to_string())))?;
     let file = pseudo_file_entries.as_file();
+    let uid = manifest.uid;
+    let gid = manifest.gid;
 
     async fn add_directory(
         mut file: &std::fs::File,
         directory: &Path,
         mode: u32,
+        uid: u32,
+        gid: u32,
     ) -> Result<(), Error> {
         task::block_in_place(|| {
-            writeln!(
-                file,
-                "{} d {} {} {}",
-                directory.display(),
-                mode,
-                PSEUDO_DIR_UID,
-                PSEUDO_DIR_GID
-            )
+            writeln!(file, "{} d {} {} {}", directory.display(), mode, uid, gid)
         })
         .map_err(|e| {
             Error::Io(format!(
@@ -683,8 +676,8 @@ async fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
 
     if manifest.init.is_some() {
         // The default is to have at least a minimal /dev mount
-        add_directory(&file, Path::new("/dev"), 444).await?;
-        add_directory(&file, Path::new("/proc"), 444).await?;
+        add_directory(&file, Path::new("/dev"), 444, uid, gid).await?;
+        add_directory(&file, Path::new("/proc"), 444, uid, gid).await?;
     }
 
     for (target, mount) in &manifest.mounts {
@@ -709,7 +702,7 @@ async fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
         let mut subdir = PathBuf::from("/");
         for dir in target.iter().skip(1) {
             subdir.push(dir);
-            add_directory(file, &subdir, mode).await?;
+            add_directory(file, &subdir, mode, uid, gid).await?;
         }
     }
 
@@ -787,6 +780,10 @@ async fn create_squashfs_img(
         .arg("-comp")
         .arg(compression_algorithm.to_string())
         .arg("-info")
+        .arg("-force-uid")
+        .arg(manifest.uid.to_string())
+        .arg("-force-gid")
+        .arg(manifest.gid.to_string())
         .arg("-pf")
         .arg(pseudo_files.path());
     if let Some(block_size) = squashfs_opts.block_size {

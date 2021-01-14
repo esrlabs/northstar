@@ -1,6 +1,8 @@
 name: crashing
 version: 0.0.1
 init: /crashing
+uid: 1000
+gid: 1000
 env:
   RUST_BACKTRACE: 1
 mounts:

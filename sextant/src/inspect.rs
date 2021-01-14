@@ -132,6 +132,8 @@ init: /hello
 env:
   HELLO: north
 # autostart: true
+uid: 1000
+gid: 1000
 mounts:
     /lib:
       host: /lib

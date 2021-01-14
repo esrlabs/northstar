@@ -1,6 +1,8 @@
 name: seccomp
 version: 0.0.1
 init: /seccomp
+uid: 1000
+gid: 1000
 mounts:
     /lib:
       host: /lib

@@ -53,10 +53,6 @@ pub struct Config {
     pub debug: bool,
     /// Console address.
     pub console_address: String,
-    /// Container UID
-    pub container_uid: u32,
-    /// Container GID
-    pub container_gid: u32,
     /// Directory with unpacked containers.
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored

@@ -68,8 +68,6 @@ pub struct Minijail {
     event_tx: EventTx,
     run_dir: PathBuf,
     data_dir: PathBuf,
-    uid: u32,
-    gid: u32,
 }
 
 impl Minijail {
@@ -77,8 +75,6 @@ impl Minijail {
         event_tx: EventTx,
         run_dir: &Path,
         data_dir: &Path,
-        uid: u32,
-        gid: u32,
     ) -> Result<Minijail, Error> {
         let pipe = AsyncPipe::new()?;
         let log_fd = pipe.writefd();
@@ -110,8 +106,6 @@ impl Minijail {
             event_tx,
             run_dir: run_dir.into(),
             data_dir: data_dir.into(),
-            uid,
-            gid,
             log_fd,
         })
     }
@@ -134,6 +128,9 @@ impl Minijail {
             .init
             .as_ref()
             .ok_or_else(|| Error::Start("Cannot start a resource".to_string()))?;
+
+        let uid = manifest.uid;
+        let gid = manifest.gid;
 
         let tmpdir = tempfile::TempDir::new()
             .map_err(|e| Error::Io(format!("Failed to create tmpdir for {}", manifest.name), e))?;
@@ -161,10 +158,10 @@ impl Minijail {
             // jail.use_seccomp_filter();
         }
 
-        // Configure UID
-        jail.change_uid(self.uid);
-        // Configure PID
-        jail.change_gid(self.gid);
+        debug!("Setting UID to {}", uid);
+        jail.change_uid(uid);
+        debug!("Setting GID to {}", gid);
+        jail.change_gid(gid);
 
         // Update the capability mask if specified
         if let Some(capabilities) = &manifest.capabilities {
@@ -195,7 +192,7 @@ impl Minijail {
         // Make the application the init process
         jail.run_as_init();
 
-        self.setup_mounts(&mut jail, container).await?;
+        self.setup_mounts(&mut jail, container, uid, gid).await?;
 
         // Arguments
         let args = manifest.args.clone().unwrap_or_default();
@@ -260,6 +257,8 @@ impl Minijail {
         &self,
         jail: &mut MinijailHandle,
         container: &Container,
+        uid: u32,
+        gid: u32,
     ) -> Result<(), Error> {
         let proc = Path::new("/proc");
         jail.mount_bind(&proc, &proc, false)
@@ -306,20 +305,15 @@ impl Minijail {
                         })?;
                     }
 
-                    debug!("Chowning {} to {}:{}", dir.display(), self.uid, self.gid);
+                    debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
                     chown(
                         dir.as_os_str(),
-                        Some(unistd::Uid::from_raw(self.uid)),
-                        Some(unistd::Gid::from_raw(self.gid)),
+                        Some(unistd::Uid::from_raw(uid)),
+                        Some(unistd::Gid::from_raw(gid)),
                     )
                     .map_err(|e| {
                         Error::Os(
-                            format!(
-                                "Failed to chown {} to {}:{}",
-                                dir.display(),
-                                self.uid,
-                                self.gid
-                            ),
+                            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
                             e,
                         )
                     })?;
