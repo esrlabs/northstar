@@ -50,7 +50,7 @@ impl Decoder for Codec {
             src.advance(1);
             match serde_json::from_slice::<model::Message>(&buf) {
                 Ok(message) => Ok(Some(message)),
-                Err(e) => Err(io::Error::new(ErrorKind::Other, e)),
+                Err(e) => Err(io::Error::new(ErrorKind::InvalidData, e)),
             }
         } else {
             Ok(None)

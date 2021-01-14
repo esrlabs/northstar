@@ -12,7 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{api::{self}, runtime::{state::State, EventTx}};
+use super::{Event, RepositoryId};
+use crate::{
+    api::{self},
+    runtime::{state::State, EventTx},
+};
 use futures::{sink::SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use std::{collections::HashMap, path::PathBuf};
@@ -25,7 +29,6 @@ use tokio::{
     sync::{self, broadcast, oneshot},
     task, time,
 };
-use super::{Event, RepositoryId};
 
 type NotificationRx = broadcast::Receiver<api::model::Notification>;
 

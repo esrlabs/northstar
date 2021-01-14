@@ -17,9 +17,8 @@ use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::runtime::RepositoryId;
-
 pub type Name = String;
+pub type RepositoryId = String;
 pub type MessageId = String; // UUID
 
 const VERSION: &str = "0.0.1";
