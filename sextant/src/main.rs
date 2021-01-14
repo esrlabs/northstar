@@ -36,7 +36,7 @@ enum Opt {
         out: PathBuf,
         /// Compression algorithm to use in squashfs (default gzip)
         #[structopt(short, long)]
-        comp: Option<npk::npk::CompAlg>,
+        comp: Option<npk::npk::CompressionAlgorithm>,
         /// Block size used by squashfs (default 128 KiB)
         #[structopt(short, long)]
         block_size: Option<u32>,
@@ -78,13 +78,7 @@ fn main() -> Result<()> {
             comp,
             block_size,
         } => {
-            let mut squashfs_opts = npk::npk::SquashfsOpts::default();
-            if let Some(compression_alg) = comp {
-                squashfs_opts.comp = compression_alg;
-            }
-            if let Some(size) = block_size {
-                squashfs_opts.block_size = size;
-            }
+            let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
             npk::npk::pack_with(&dir, &out, Some(key.as_path()), squashfs_opts)?
         }
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,

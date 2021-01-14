@@ -360,52 +360,44 @@ impl Builder {
 }
 
 #[derive(Debug)]
-pub enum CompAlg {
+pub enum CompressionAlgorithm {
     Gzip,
     Lzma,
     Lzo,
     Xz,
 }
 
-impl std::fmt::Display for CompAlg {
+impl std::fmt::Display for CompressionAlgorithm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CompAlg::Gzip => write!(f, "gzip"),
-            CompAlg::Lzma => write!(f, "lzma"),
-            CompAlg::Lzo => write!(f, "lzo"),
-            CompAlg::Xz => write!(f, "xz"),
+            CompressionAlgorithm::Gzip => write!(f, "gzip"),
+            CompressionAlgorithm::Lzma => write!(f, "lzma"),
+            CompressionAlgorithm::Lzo => write!(f, "lzo"),
+            CompressionAlgorithm::Xz => write!(f, "xz"),
         }
     }
 }
 
-impl FromStr for CompAlg {
+impl FromStr for CompressionAlgorithm {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "gzip" => Ok(CompAlg::Gzip),
-            "lzma" => Ok(CompAlg::Lzma),
-            "lzo" => Ok(CompAlg::Lzo),
-            "xz" => Ok(CompAlg::Xz),
+            "gzip" => Ok(CompressionAlgorithm::Gzip),
+            "lzma" => Ok(CompressionAlgorithm::Lzma),
+            "lzo" => Ok(CompressionAlgorithm::Lzo),
+            "xz" => Ok(CompressionAlgorithm::Xz),
             _ => Err(Error::InvalidCompressionAlgorithm),
         }
     }
 }
 
 /// Squashfs Options
+#[derive(Debug, Default)]
 pub struct SquashfsOpts {
     /// The compression algorithm used (default gzip)
-    pub comp: CompAlg,
+    pub comp: Option<CompressionAlgorithm>,
     /// Size of the blocks of data compressed separately
-    pub block_size: u32,
-}
-
-impl Default for SquashfsOpts {
-    fn default() -> Self {
-        SquashfsOpts {
-            comp: CompAlg::Gzip,
-            block_size: 131072,
-        }
-    }
+    pub block_size: Option<u32>,
 }
 
 /// Create an NPK for the northstar runtime.
@@ -728,16 +720,24 @@ fn create_squashfs_img(
         )));
     }
 
+    let compression_algorithm = squashfs_opts
+        .comp
+        .as_ref()
+        .unwrap_or(&CompressionAlgorithm::Gzip);
+
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
     cmd.arg(&dst.display().to_string())
         .arg(&src.display().to_string())
         .arg("-all-root")
-        .arg("-comp")
-        .arg(squashfs_opts.comp.to_string())
         .arg("-no-progress")
-        .arg("-info")
-        .arg("-b")
-        .arg(format!("{}", squashfs_opts.block_size));
+        .arg("-comp")
+        .arg(compression_algorithm.to_string())
+        .arg("-info");
+
+    if let Some(block_size) = squashfs_opts.block_size {
+        cmd.arg("-b").arg(format!("{}", block_size));
+    }
+
     for dir in pseudo_dirs {
         cmd.arg("-p");
         cmd.arg(format!(
