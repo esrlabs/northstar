@@ -1,6 +1,8 @@
 name: resource_hello
 version: 0.0.1
 init: /resource_hello
+uid: 1000
+gid: 1000
 mounts:
   /lib:
     host: /lib

@@ -3,6 +3,8 @@
 name: ferris_says_hello
 version: 0.0.1
 init: /bin/ferris
+uid: 1000
+gid: 1000
 args:
   - /message/hello
 mounts:

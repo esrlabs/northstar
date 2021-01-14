@@ -223,8 +223,6 @@ Here is an example:
 ```toml
 debug = true
 console_address = "localhost:4200"
-container_uid = 1000
-container_gid = 1000
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 

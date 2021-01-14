@@ -1,6 +1,8 @@
 name: datarw
 version: 0.0.1
 init: /datarw
+uid: 1000
+gid: 1000
 mounts:
   /data: persist
   /lib:

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+* Add UID and GID setting to the manifest. The values are used for preparing
+  the squashfs image and when a container is started.
 * Add a Rust API client that implements the Northstar API protocol. See
   `northstar::api::client`.
 * Exchange the length encoded wire format with newline seperated json.

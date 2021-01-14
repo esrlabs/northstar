@@ -1,6 +1,8 @@
 name: hello
 version: 0.0.1
 init: /hello
+uid: 1000
+gid: 1000
 env:
   HELLO: north
 mounts:

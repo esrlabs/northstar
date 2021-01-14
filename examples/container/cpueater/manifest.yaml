@@ -1,6 +1,8 @@
 name: cpueater
 version: 0.0.1
 init: /cpueater
+uid: 1000
+gid: 1000
 env:
   THREADS: 4
 cgroups:

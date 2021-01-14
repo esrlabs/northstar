@@ -1,6 +1,8 @@
 name: capabilities
 version: 0.0.1
 init: /capabilities
+uid: 1000
+gid: 1000
 capabilities:
   - cap_net_raw
 suppl_groups:

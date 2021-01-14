@@ -168,6 +168,10 @@ pub struct Manifest {
     /// Additional arguments for the application invocation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
+    /// UID
+    pub uid: u32,
+    /// GID
+    pub gid: u32,
     /// Environment passed to container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
@@ -484,6 +488,8 @@ args:
   - two
 env:
   LD_LIBRARY_PATH: /lib
+uid: 1000
+gid: 1001
 suppl_groups:
   - inet
   - log
@@ -528,6 +534,8 @@ seccomp:
             env.get("LD_LIBRARY_PATH"),
             Some("/lib".to_string()).as_ref()
         );
+        assert_eq!(manifest.uid, 1000);
+        assert_eq!(manifest.gid, 1001);
         let mut mounts = HashMap::new();
         mounts.insert(
             PathBuf::from("/lib"),
@@ -587,6 +595,8 @@ seccomp:
 name: hello
 version: 0.0.0
 init: /binary
+uid: 1000
+gid: 1001
 mounts:
   /dev: full
   /dev: full
@@ -602,6 +612,8 @@ mounts:
 name: hello
 version: 0.0.0
 init: /binary
+uid: 1000
+gid: 1001
 mounts:
   /a:
     tmpfs: 100
@@ -639,6 +651,8 @@ mounts:
 name: hello
 version: 0.0.0
 init: /binary
+uid: 1000
+gid: 1001
 mounts:
   /tmp:
     tmpfs: 100M
@@ -652,6 +666,8 @@ mounts:
 name: hello
 version: 0.0.0
 init: /binary
+uid: 1000
+gid: 1001
 mounts:
   /dev:
     tmpfs: 42
@@ -665,6 +681,8 @@ mounts:
 name: hello
 version: 0.0.0
 init: /binary
+uid: 1000
+gid: 1001
 mounts:
   /foo:
     resource: foo-bar.qwerty12:0.0.1/
@@ -678,6 +696,8 @@ mounts:
 name: hello
 version: 0.0.0
 init: /binary
+uid: 1000
+gid: 1001
 args:
   - one
   - two
