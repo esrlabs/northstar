@@ -14,7 +14,7 @@
 
 use anyhow::Result;
 use itertools::Itertools;
-use northstar::{api::model::{Container, Notification, Repository}, runtime::RepositoryId};
+use northstar::api::model::{Container, Notification, Repository, RepositoryId};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, io};
 use tokio::time;

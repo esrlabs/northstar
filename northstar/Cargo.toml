@@ -44,7 +44,6 @@ serde_json = { version = "1.0.61", optional = true }
 serde_yaml = { version = "0.8.15", optional = true }
 sha2 = { version = "0.9.2", optional = true }
 structopt = { version = "0.3.21", optional = true }
-structure = { version = "0.1.2", optional = true }
 tempfile = { version = "3.1.0", optional = true }
 thiserror = { version = "1.0.23", optional = true }
 tokio = { version = "1.0.1", features = ["full"], optional = true }
@@ -82,7 +81,6 @@ runtime = [
     "serde_yaml",
     "sha2",
     "structopt",
-    "structure",
     "tempfile",
     "thiserror",
     "tokio",

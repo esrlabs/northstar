@@ -14,7 +14,7 @@
 
 use futures::{SinkExt, Stream, StreamExt};
 use log::info;
-use npk::{manifest::Version};
+use npk::manifest::Version;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -30,11 +30,11 @@ use tokio::{
     task, time,
 };
 
-use crate::runtime::RepositoryId;
-
 use super::{
     codec::framed,
-    model::{Container, Message, Notification, Payload, Repository, Request, Response},
+    model::{
+        Container, Message, Notification, Payload, Repository, RepositoryId, Request, Response,
+    },
 };
 
 #[derive(Error, Debug)]

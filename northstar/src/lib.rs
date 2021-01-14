@@ -14,9 +14,6 @@
 
 #![deny(clippy::all)]
 
-#[cfg(all(feature = "runtime"))]
-extern crate structure;
-
 #[cfg(feature = "api")]
 /// Northstar remote API. Control start and stop of applications and
 /// receive updates about container states.
