@@ -10,19 +10,48 @@ this_script=$(basename $0)
 bold=$(tput bold)
 normal=$(tput sgr0)
 
-if [ -z ${1+x} ]
-then
-  PLATFORM="host"
-else
-  PLATFORM=${1}
-fi
+usage() {
+    echo "USAGE:"
+    echo "    build_examples.sh [OPTIONS]"
+    echo ""
+    echo "OPTIONS:"
+    echo "    -t, --target <platform>   Target platform"
+    echo "    -c, --comp   <algorithm>  Compression algorithm used by squashfs"
+    echo "                              (gzip, lzma, lzo, xz)"
+    echo "    -h, --help                Prints help information"
 
-if [ -z ${2+x} ]
-then
-  COMPRESSION_ALGORITHM="gzip"
-else
-  COMPRESSION_ALGORITHM=${2}
-fi
+}
+
+while [[ $# -gt 0 ]]
+do
+key=$1
+
+case $key in
+    -t|--target)
+    PLATFORM="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    -c|--comp)
+    COMPRESSION_ALGORITHM="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    -h|--help)
+    usage
+    exit 0
+    ;;
+    *) # unknown
+    shift
+    ;;
+esac
+done
+
+PLATFORM=${PLATFORM-"host"}
+COMPRESSION_ALGORITHM=${COMPRESSION_ALGORITHM-"gzip"}
+
+echo "PLATFORM              = ${PLATFORM}"
+echo "COMPRESSION_ALGORITHM = ${COMPRESSION_ALGORITHM}"
 
 exe() { echo " + $*" ; $* ; }
 

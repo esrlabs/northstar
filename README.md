@@ -148,10 +148,25 @@ The script in `doc/tools/check_conf.sh` can be used to check your running kernel
 Open a terminal, clone the repository and build the solution and start the runtime:
 
     $ git clone https://github.com/esrlabs/northstar.git
-    $ cargo build --release --bin north
+    $ cargo build --release --bin northstar
     $ cargo build --release --bin nstar
-    $ ./examples/build_examples.sh
-    $ sudo ./target/release/north
+    $ sudo ./target/release/northstar
+
+#### Build example containers
+The `examples/build_examples.sh` script can be used got build all the example
+containers inside the `example` folder.
+
+The containers are built for the host platform by default. The flag `-t,--target` can be used to build the containers for a different platform.
+
+    $ ./examples/build_examples.sh --help
+	USAGE:
+	    build_examples.sh [OPTIONS]
+
+	OPTIONS:
+	    -t, --target <platform>   Target platform
+	    -c, --comp   <algorithm>  Compression algorithm used by squashfs
+	                              (gzip, lzma, lzo, xz)
+	    -h, --help                Prints help information
 
 ### Run sample code
 Open a second terminal navigate to the directory where the northstar source is located. Start `nstar` to interact with the runtime.
