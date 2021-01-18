@@ -194,7 +194,7 @@ impl Client {
             Response::Ok(()) => Err(Error::Protocol),
             Response::Containers(containers) => Ok(containers),
             Response::Err(e) => Err(Error::Api(e)),
-            Response::Repositories(_) => Err(Error::Protocol),
+            _ => Err(Error::Protocol),
         }
     }
 
@@ -214,9 +214,9 @@ impl Client {
     pub async fn repositories(&self) -> Result<HashMap<RepositoryId, Repository>, Error> {
         match self.request(Request::Repositories).await? {
             Response::Ok(()) => Err(Error::Protocol),
-            Response::Containers(_) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),
             Response::Repositories(repositories) => Ok(repositories),
+            _ => Err(Error::Protocol),
         }
     }
 
@@ -237,9 +237,8 @@ impl Client {
     pub async fn start(&self, name: &str) -> Result<(), Error> {
         match self.request(Request::Start(name.to_string())).await? {
             Response::Ok(()) => Ok(()),
-            Response::Containers(_) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),
-            Response::Repositories(_) => Err(Error::Protocol),
+            _ => Err(Error::Protocol),
         }
     }
 
@@ -260,9 +259,8 @@ impl Client {
     pub async fn stop(&self, name: &str) -> Result<(), Error> {
         match self.request(Request::Stop(name.to_string())).await? {
             Response::Ok(()) => Ok(()),
-            Response::Containers(_) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),
-            Response::Repositories(_) => Err(Error::Protocol),
+            _ => Err(Error::Protocol),
         }
     }
 
@@ -290,9 +288,8 @@ impl Client {
             .map_err(|_| Error::Stopped)?;
         match rx.await.map_err(|_| Error::Stopped)?? {
             Response::Ok(()) => Ok(()),
-            Response::Containers(_) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),
-            Response::Repositories(_) => Err(Error::Protocol),
+            _ => Err(Error::Protocol),
         }
     }
 
@@ -318,9 +315,8 @@ impl Client {
             .await?
         {
             Response::Ok(()) => Ok(()),
-            Response::Containers(_) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),
-            Response::Repositories(_) => Err(Error::Protocol),
+            _ => Err(Error::Protocol),
         }
     }
 }

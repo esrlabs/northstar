@@ -30,8 +30,8 @@ pub enum Error {
     MissingResource(String),
     #[error("Container {0} already installed")]
     ContainerAlreadyInstalled(String),
-    #[error("Failed to find repository with id {0}")]
-    RepositoryNotFound(String),
+    #[error("Failed to find repository with id {0}, known ids: {1:?}")]
+    RepositoryIdUnknown(String, Vec<String>),
 
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
@@ -64,7 +64,9 @@ impl From<Error> for api::model::Error {
             Error::ContainerAlreadyInstalled(name) => {
                 api::model::Error::ContainerAlreadyInstalled(name)
             }
-            Error::RepositoryNotFound(id) => api::model::Error::RepositoryNotFound(id),
+            Error::RepositoryIdUnknown(id, known_ids) => {
+                api::model::Error::RepositoryIdUnknown(id, known_ids)
+            }
             Error::Npk(error) => api::model::Error::Npk(error.to_string()),
             Error::Process(error) => api::model::Error::Process(error.to_string()),
             Error::Console(error) => api::model::Error::Console(error.to_string()),
