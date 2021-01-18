@@ -14,7 +14,10 @@
 
 use anyhow::Result;
 use futures::{future::ready, stream::once, Stream, StreamExt};
-use northstar::api::{self, client::Client};
+use northstar::api::{
+    self,
+    client::{Client, Error},
+};
 use npk::manifest::Version;
 use std::{
     fmt::Debug,
@@ -164,10 +167,15 @@ async fn process<W: std::io::Write>(
                 let npk = if let Some(npk) = split.next() {
                     Path::new(npk)
                 } else {
-                    return Ok(Some("Invalid npk".into()));
+                    return Ok(Some("No npk argument found".into()));
                 };
                 if !npk.exists() {
-                    return Ok(Some("No such file or directory".into()));
+                    let pwd = std::env::current_dir()?;
+                    return Ok(Some(format!(
+                        "No npk found at {}/{}",
+                        pwd.to_string_lossy(),
+                        npk.to_string_lossy()
+                    )));
                 }
 
                 let repository = if let Some(repository) = split.next() {
@@ -175,8 +183,13 @@ async fn process<W: std::io::Write>(
                 } else {
                     return Ok(Some("Missing repository argument".into()));
                 };
-
-                client.install(npk, repository).await?;
+                return match client.install(npk, repository).await {
+                    Err(Error::Api(api::model::Error::RepositoryIdUnknown(id, known))) => Ok(Some(
+                        format!("No such repository id: {}, available: {:?}", id, known),
+                    )),
+                    Err(x) => Err(x.into()),
+                    Ok(()) => Ok(None),
+                };
             }
             "uninstall" => {
                 let name = if let Some(name) = split.next() {

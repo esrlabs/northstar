@@ -400,10 +400,12 @@ impl State {
 
     /// Install an NPK
     pub async fn install(&mut self, id: &str, npk: &Path) -> Result<(), Error> {
-        let repository = self
-            .repositories
-            .get(id)
-            .ok_or_else(|| Error::RepositoryNotFound(id.to_owned()))?;
+        let repository = self.repositories.get(id).ok_or_else(|| {
+            Error::RepositoryIdUnknown(
+                id.to_owned(),
+                self.repositories().keys().map(|id| id.into()).collect(),
+            )
+        })?;
 
         let manifest = task::block_in_place(|| {
             let file = std::fs::File::open(&npk)

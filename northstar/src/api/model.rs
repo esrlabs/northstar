@@ -141,7 +141,7 @@ pub enum Error {
     ResourceBusy(String),
     MissingResource(String),
     ContainerAlreadyInstalled(String),
-    RepositoryNotFound(String),
+    RepositoryIdUnknown(String, Vec<String>),
 
     Npk(String),
     NpkArchive(String),
