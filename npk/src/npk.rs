@@ -35,7 +35,7 @@ use std::{
     process::Command,
     str::FromStr,
 };
-use tempfile::TempDir;
+use tempfile::{NamedTempFile, TempDir};
 use thiserror::Error;
 use zip::{result::ZipError, ZipArchive};
 
@@ -623,42 +623,62 @@ fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String
     Ok(signature_yaml)
 }
 
-fn gen_pseudo_files(manifest: &Manifest) -> Vec<(String, u32)> {
-    let mut pseudo_files: Vec<(String, u32)> = vec![];
+/// Returns a temporary file with all the pseudo file definitions
+fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
+    let pseudo_file_entries = NamedTempFile::new().map_err(|e| Error::Io(e.to_string()))?;
+    let file = pseudo_file_entries.as_file();
+
+    fn add_directory(mut file: &File, directory: &Path, mode: u32) -> Result<(), Error> {
+        writeln!(
+            file,
+            "{} d {} {} {}",
+            directory.display(),
+            mode,
+            PSEUDO_DIR_UID,
+            PSEUDO_DIR_GID
+        )
+        .map_err(|e| {
+            Error::Io(format!(
+                "Failed to write entry {} on temp file ({})",
+                directory.display(),
+                e
+            ))
+        })
+    }
+
     if manifest.init.is_some() {
-        pseudo_files = vec![
-            // The default is to have at least a minimal /dev mount
-            ("/dev".to_string(), 444),
-            ("/proc".to_string(), 444),
-        ];
+        // The default is to have at least a minimal /dev mount
+        add_directory(&file, Path::new("/dev"), 444)?;
+        add_directory(&file, Path::new("/proc"), 444)?;
     }
 
     for (target, mount) in &manifest.mounts {
-        match mount {
+        let mode = match mount {
             Mount::Bind { flags, .. } => {
-                let mode = if flags.contains(&MountFlag::Rw) {
+                if flags.contains(&MountFlag::Rw) {
                     777
                 } else {
                     555
-                };
-                pseudo_files.push((target.display().to_string(), mode));
-            }
-            Mount::Persist => pseudo_files.push((target.display().to_string(), 777)),
-            // /dev is default
-            Mount::Dev { .. } => (),
-            Mount::Resource { .. } => {
-                // In order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
-                // e.g. to support res/foo in our image, we need to add /res/foo AND /res
-                // ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
-                let trail = path_trail(&target);
-                for path in trail {
-                    pseudo_files.push((path.display().to_string(), 555));
                 }
             }
-            Mount::Tmpfs { .. } => pseudo_files.push((target.display().to_string(), 777)),
+            Mount::Persist => 777,
+            Mount::Resource { .. } => 555,
+            Mount::Tmpfs { .. } => 777,
+            // /dev is default
+            Mount::Dev { .. } => continue,
+        };
+
+        // In order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
+        // e.g. to support res/foo in our image, we need to add /res/foo AND /res
+        // ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
+        let mut subdir = PathBuf::from("/");
+        for dir in target.iter().skip(1) {
+            subdir.push(dir);
+            add_directory(file, &subdir, mode)?;
         }
     }
-    pseudo_files
+
+    Ok(pseudo_file_entries)
 }
 
 fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
@@ -704,7 +724,7 @@ fn create_squashfs_img(
     src: &Path,
     squashfs_opts: &SquashfsOpts,
 ) -> Result<(), Error> {
-    let pseudo_dirs = gen_pseudo_files(&manifest);
+    let pseudo_files = gen_pseudo_files(&manifest)?;
 
     if which::which(&MKSQUASHFS_BIN).is_err() {
         return Err(Error::Squashfs(format!(
@@ -732,22 +752,14 @@ fn create_squashfs_img(
         .arg("-no-progress")
         .arg("-comp")
         .arg(compression_algorithm.to_string())
-        .arg("-info");
+        .arg("-info")
+        .arg("-pf")
+        .arg(pseudo_files.path());
 
     if let Some(block_size) = squashfs_opts.block_size {
         cmd.arg("-b").arg(format!("{}", block_size));
     }
 
-    for dir in pseudo_dirs {
-        cmd.arg("-p");
-        cmd.arg(format!(
-            "{} d {} {} {}",
-            dir.0,
-            dir.1.to_string(),
-            PSEUDO_DIR_UID,
-            PSEUDO_DIR_GID
-        ));
-    }
     cmd.output()
         .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS_BIN, e)))?;
 
@@ -846,18 +858,6 @@ fn write_npk<W: Write + Seek>(
         error: e,
     })?;
     Ok(())
-}
-
-/// Return the list of sub-paths to the given directory except the root.
-/// For example, the path '/res/dir/subdir' returns ('/res/dir/subdir', /res/dir/', '/res/').
-fn path_trail(path: &Path) -> Vec<&Path> {
-    let mut current_path = path;
-    let mut ret = vec![];
-    while let Some(parent_path) = current_path.parent() {
-        ret.push(current_path);
-        current_path = parent_path;
-    }
-    ret
 }
 
 fn assume_non_existing(path: &Path) -> Result<(), Error> {
