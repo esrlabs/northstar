@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use async_once::AsyncOnce;
 use color_eyre::eyre::WrapErr;
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
@@ -21,7 +22,7 @@ use tempfile::TempDir;
 
 lazy_static! {
     static ref REPOSITORIES_DIR: TempDir = TempDir::new().unwrap();
-    static ref TEST_CONTAINER_NPK: PathBuf = {
+    static ref TEST_CONTAINER_NPK: AsyncOnce<PathBuf> = AsyncOnce::new(async {
         let build_dir = TempDir::new().unwrap();
         let package_dir = TempDir::new().unwrap();
         let root = package_dir.path().join("root");
@@ -55,24 +56,26 @@ lazy_static! {
             REPOSITORIES_DIR.path(),
             Some(Path::new("examples/keys/northstar.key")),
         )
+        .await
         .unwrap();
         REPOSITORIES_DIR.path().join("test_container-0.0.1.npk")
-    };
-    static ref TEST_RESOURCE_NPK: PathBuf = {
+    });
+    static ref TEST_RESOURCE_NPK: AsyncOnce<PathBuf> = AsyncOnce::new(async {
         npk::pack(
             Path::new("northstar_tests/test_resource"),
             REPOSITORIES_DIR.path(),
             Some(Path::new("examples/keys/northstar.key")),
         )
+        .await
         .unwrap();
         REPOSITORIES_DIR.path().join("test_resource-0.0.1.npk")
-    };
+    });
 }
 
-pub fn get_test_container_npk() -> &'static Path {
-    &TEST_CONTAINER_NPK
+pub async fn get_test_container_npk() -> &'static Path {
+    &TEST_CONTAINER_NPK.get().await
 }
 
-pub fn get_test_resource_npk() -> &'static Path {
-    &TEST_RESOURCE_NPK
+pub async fn get_test_resource_npk() -> &'static Path {
+    &TEST_RESOURCE_NPK.get().await
 }

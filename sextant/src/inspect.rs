@@ -23,21 +23,21 @@ use std::{
     process::Command,
 };
 
-pub fn inspect(npk: &Path, short: bool) -> Result<()> {
+pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
     if short {
-        inspect_short(&npk)
+        inspect_short(&npk).await
     } else {
-        inspect_long(&npk)
+        inspect_long(&npk).await
     }
 }
 
-pub fn inspect_short(npk: &Path) -> Result<()> {
+pub async fn inspect_short(npk: &Path) -> Result<()> {
     let mut npk =
         Npk::new(File::open(&npk).context(format!("Failed to open NPK at '{}'", &npk.display()))?)?;
-    let manifest = npk.manifest()?;
+    let manifest = npk.manifest().await?;
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
-    let npk_version = npk.version()?;
+    let npk_version = npk.version().await?;
     let is_resource_container = manifest.init.map_or("yes", |_| "no");
     println!(
         "name: {}, version: {}, NPK version: {}, resource container: {}",
@@ -47,8 +47,8 @@ pub fn inspect_short(npk: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn inspect_long(npk: &Path) -> Result<()> {
-    let mut zip = npk::open_zipped_npk(&npk)?;
+pub async fn inspect_long(npk: &Path) -> Result<()> {
+    let mut zip = npk::open_zip(&npk).await?;
     let mut print_buf: String = String::new();
     println!(
         "{}",
@@ -136,12 +136,14 @@ mounts:
     /system:
       host: /system";
 
-    fn create_test_npk(dest: &Path) -> PathBuf {
+    async fn create_test_npk(dest: &Path) -> PathBuf {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
-        let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&src, &dest, Some(prv_key.as_path())).expect("Pack NPK");
+        let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
+        pack(&src, &dest, Some(prv_key.as_path()))
+            .await
+            .expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
@@ -160,8 +162,10 @@ mounts:
             .into_path()
     }
 
-    fn gen_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
-        gen_key(&TEST_KEY_NAME, &key_dir).expect("Generate key pair");
+    async fn gen_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
+        gen_key(&TEST_KEY_NAME, &key_dir)
+            .await
+            .expect("Generate key pair");
         let prv_key = key_dir.join(&TEST_KEY_NAME).with_extension("key");
         let pub_key = key_dir.join(&TEST_KEY_NAME).with_extension("pub");
         assert!(prv_key.exists());
@@ -169,17 +173,21 @@ mounts:
         (pub_key, prv_key)
     }
 
-    #[test]
-    fn inspect_npk() {
-        let npk = create_test_npk(&create_tmp_dir());
+    #[tokio::test]
+    async fn inspect_npk() {
+        let npk = create_test_npk(&create_tmp_dir()).await;
         assert!(npk.exists());
-        inspect(&npk, true).expect("Inspect NPK");
-        inspect(&npk, false).expect("Inspect NPK");
+        inspect(&npk, true).await.expect("Inspect NPK");
+        inspect(&npk, false).await.expect("Inspect NPK");
     }
 
-    #[test]
-    fn inspect_npk_no_file() {
-        inspect(&Path::new("invalid"), true).expect_err("Invalid NPK");
-        inspect(&Path::new("invalid"), false).expect_err("Invalid NPK");
+    #[tokio::test]
+    async fn inspect_npk_no_file() {
+        inspect(&Path::new("invalid"), true)
+            .await
+            .expect_err("Invalid NPK");
+        inspect(&Path::new("invalid"), false)
+            .await
+            .expect_err("Invalid NPK");
     }
 }
