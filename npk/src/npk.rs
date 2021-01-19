@@ -18,6 +18,7 @@ use crate::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Manifest, Mount, MountFlag, Version},
 };
+use const_format::concatcp;
 use ed25519_dalek::{
     ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
     SECRET_KEY_LENGTH,
@@ -51,15 +52,17 @@ const PSEUDO_DIR_UID: u32 = 1000;
 const PSEUDO_DIR_GID: u32 = 1000;
 
 // File name and directory components
+pub const FS_IMG_NAME: &str = concatcp!(FS_IMG_BASE, ".", FS_IMG_EXT);
+pub const MANIFEST_NAME: &str = concatcp!(MANIFEST_BASE, ".", MANIFEST_EXT);
+pub const SIGNATURE_NAME: &str = concatcp!(SIGNATURE_BASE, ".", SIGNATURE_EXT);
 const NPK_EXT: &str = "npk";
+const ROOT_DIR_NAME: &str = "root";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
-pub const FS_IMG_NAME: &str = "fs.img";
 const MANIFEST_BASE: &str = "manifest";
 const MANIFEST_EXT: &str = "yaml";
-pub const MANIFEST_NAME: &str = "manifest.yaml";
-pub const SIGNATURE_NAME: &str = "signature.yaml";
-const ROOT_DIR_NAME: &str = "root";
+const SIGNATURE_BASE: &str = "signature";
+const SIGNATURE_EXT: &str = "yaml";
 
 #[derive(Error, Debug)]
 pub enum Error {
