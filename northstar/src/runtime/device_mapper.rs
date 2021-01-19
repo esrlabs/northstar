@@ -142,6 +142,7 @@ pub enum Error {
     BufferFull,
 }
 
+#[derive(Debug)]
 pub struct Dm {
     file: std::fs::File,
 }
