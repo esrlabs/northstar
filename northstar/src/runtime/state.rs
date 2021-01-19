@@ -16,6 +16,7 @@ use super::{
     config::Config,
     error::Error,
     keys,
+    minijail::MinijailLog,
     mount::{mount_npk, mount_npk_repository, umount_npk},
     process::{ExitStatus, Process},
     Event, EventTx, RepositoryId,
@@ -51,6 +52,7 @@ pub struct State {
     pub applications: HashMap<Name, Application>,
     pub resources: HashMap<(Name, Version), Container>,
     pub config: Config,
+    minijail_log: MinijailLog,
 }
 
 #[derive(Debug)]
@@ -136,7 +138,11 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
+    pub(super) async fn new(
+        config: &Config,
+        tx: EventTx,
+        minijail_log: MinijailLog,
+    ) -> Result<State, Error> {
         let mut repositories = HashMap::new();
         for (id, repository) in &config.repositories {
             let key = {
@@ -163,6 +169,7 @@ impl State {
             applications: HashMap::new(),
             resources: HashMap::new(),
             config: config.clone(),
+            minijail_log,
         };
 
         // mount all the containers from each repository
@@ -259,6 +266,7 @@ impl State {
             &self.config.data_dir,
             self.config.container_uid,
             self.config.container_gid,
+            &self.minijail_log,
         )
         .await
         .map_err(Error::Process)?;

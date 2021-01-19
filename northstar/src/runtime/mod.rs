@@ -207,9 +207,9 @@ async fn runtime_task(
     mut event_rx: mpsc::Receiver<Event>,
     stop: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
-    let mut state = State::new(&config, event_tx.clone()).await?;
-
-    minijail::init().await.map_err(Error::Process)?;
+    let minijail_log = minijail::MinijailLog::new().await.map_err(Error::Process)?;
+    minijail::init(&minijail_log).map_err(Error::Process)?;
+    let mut state = State::new(&config, event_tx.clone(), minijail_log).await?;
 
     info!(
         "Mounted {} containers",
@@ -277,8 +277,7 @@ async fn runtime_task(
         }
     };
 
-    minijail::shutdown().await.map_err(Error::Process)?;
-
+    minijail::shutdown().map_err(Error::Process)?;
     result
 }
 

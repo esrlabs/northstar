@@ -42,10 +42,42 @@ use tokio::{
     select, task, time,
 };
 
-/// Initialize the minijail
-pub async fn init() -> Result<(), Error> {
-    let pipe = AsyncPipe::new()?;
+#[derive(Debug)]
+pub struct MinijailLog {
+    log_fd: i32,
+}
 
+impl MinijailLog {
+    /// Initialize the minijail log
+    pub async fn new() -> Result<MinijailLog, Error> {
+        let pipe = AsyncPipe::new()?;
+        let log_fd = pipe.writefd();
+        let mut lines = io::BufReader::new(pipe).lines();
+
+        // Spawn a task that forwards logs from minijail to the rust logger.
+        task::spawn(async move {
+            while let Ok(Some(line)) = lines.next_line().await {
+                let l = line.split_whitespace().skip(2).collect::<String>();
+                match line.chars().next() {
+                    Some('D') => debug!("{}", l),
+                    Some('I') => info!("{}", l),
+                    Some('W') => warn!("{}", l),
+                    Some('E') => error!("{}", l),
+                    _ => trace!("{}", line),
+                }
+            }
+        });
+        Ok(MinijailLog { log_fd })
+    }
+}
+
+impl std::os::unix::io::AsRawFd for MinijailLog {
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
+        self.log_fd
+    }
+}
+
+pub fn init<F: std::os::unix::io::AsRawFd>(log: &F) -> Result<(), Error> {
     let minijail_log_level = match log::max_level().to_level().unwrap_or(Level::Warn) {
         Level::Error => 3,
         Level::Warn => 4,
@@ -53,29 +85,11 @@ pub async fn init() -> Result<(), Error> {
         Level::Debug => 7,
         Level::Trace => i32::MAX,
     };
-    ::minijail::Minijail::log_to_fd(pipe.writefd(), minijail_log_level as i32);
-
-    let mut lines = io::BufReader::new(pipe).lines();
-
-    // Spawn a task that forwards logs from minijail to the rust logger.
-    task::spawn(async move {
-        while let Ok(Some(line)) = lines.next_line().await {
-            let l = line.split_whitespace().skip(2).collect::<String>();
-            match line.chars().next() {
-                Some('D') => debug!("{}", l),
-                Some('I') => info!("{}", l),
-                Some('W') => warn!("{}", l),
-                Some('E') => error!("{}", l),
-                _ => trace!("{}", line),
-            }
-        }
-    });
-
+    ::minijail::Minijail::log_to_fd(log.as_raw_fd(), minijail_log_level as i32);
     Ok(())
 }
 
-/// Shutdown minijail
-pub async fn shutdown() -> Result<(), Error> {
+pub fn shutdown() -> Result<(), Error> {
     Ok(())
 }
 
@@ -172,6 +186,7 @@ impl Process {
         data_dir: &Path,
         uid: u32,
         gid: u32,
+        minijail: &MinijailLog,
     ) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
@@ -273,9 +288,11 @@ impl Process {
         let stderr =
             CaptureOutput::new(OutputStream::Stderr, &manifest.name, event_tx.clone()).await?;
 
+        // Prevent minijail to close the log fd so that errors aren't missed
+        let log_fd = (minijail.log_fd, minijail.log_fd);
         let pid = jail.run_remap_env_preload(
             &init.as_path(),
-            &[(stdout.0, 1), (stderr.0, 2)],
+            &[(stdout.0, 1), (stderr.0, 2), log_fd],
             &argv,
             &env,
             false,
