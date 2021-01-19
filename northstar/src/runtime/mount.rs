@@ -29,13 +29,16 @@ use npk::{
     npk::{Error::MalformedManifest, Npk},
 };
 use std::{
-    fs::File,
     io,
     path::{Path, PathBuf},
     process,
 };
 use thiserror::Error;
-use tokio::{fs, fs::metadata, task, time};
+use tokio::{
+    fs,
+    fs::{metadata, File},
+    task, time,
+};
 
 const FS_TYPE: &str = "squashfs";
 
@@ -99,19 +102,17 @@ impl MountControl {
             debug!("Mounting NPK with size {}", meta.len());
         }
 
-        let (manifest, npk_version) = tokio::task::block_in_place(|| {
-            let file = std::fs::File::open(&npk)
-                .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-            let mut npk_archive = Npk::new(file).map_err(Error::Npk)?;
+        let file = File::open(&npk)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
+        let mut npk_archive = Npk::new(file).await.map_err(Error::Npk)?;
 
-            // verify signature only if a key is present
-            if let Some(pub_key) = repo.key {
-                npk_archive.verify(&pub_key).map_err(Error::Npk)?;
-            }
-
-            let npk_version = npk_archive.version().map_err(Error::Npk)?;
-            Ok((npk_archive.manifest().map_err(Error::Npk)?, npk_version))
-        })?;
+        // verify signature only if a key is present
+        if let Some(pub_key) = repo.key {
+            npk_archive.verify(&pub_key).await.map_err(Error::Npk)?;
+        }
+        let manifest = npk_archive.manifest().await.map_err(Error::Npk)?;
+        let npk_version = npk_archive.version().await.map_err(Error::Npk)?;
 
         if npk_version != Manifest::VERSION {
             return Err(Error::Npk(MalformedManifest(format!(
@@ -268,19 +269,14 @@ impl MountControl {
         root: &Path,
         use_verity: bool,
     ) -> Result<PathBuf, Error> {
-        // open NPK synchronously
-        let (verity, hashes, fsimg_offset, fsimg_size) = tokio::task::block_in_place(|| {
-            let file = File::open(npk)
-                .map_err(|e| npk::npk::Error::Io(format!("Failed to open NPK: {}", e)))?;
-            let mut npk = Npk::new(file)?;
-            Ok((
-                npk.verity_header()?,
-                npk.hashes()?,
-                npk.fsimg_offset()?,
-                npk.fsimg_size()?,
-            ))
-        })
-        .map_err(Error::Npk)?;
+        let npk_file = fs::File::open(npk)
+            .await
+            .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
+        let mut npk_archive = Npk::new(npk_file).await.map_err(Error::Npk)?;
+        let verity = npk_archive.verity_header().await.map_err(Error::Npk)?;
+        let hashes = npk_archive.hashes().await.map_err(Error::Npk)?;
+        let fsimg_offset = npk_archive.fsimg_offset().await.map_err(Error::Npk)?;
+        let fsimg_size = npk_archive.fsimg_size().await.map_err(Error::Npk)?;
 
         let mut npk_file = fs::File::open(npk)
             .await

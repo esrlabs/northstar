@@ -91,12 +91,10 @@ test!(missing_resource_container, {
 
     // install test container without resource
     // Expect MissingResource Error
-    let response = runtime.install(get_test_container_npk());
+    let response = runtime.install(get_test_container_npk().await);
     assert!(matches!(
         response.0,
-        Ok(api::model::Response::Err(
-            api::model::Error::MissingResource(_)
-        ))
+        Ok(api::model::Response::Err(api::model::Error::MissingResource(_)))
     ));
 
     runtime.shutdown()
@@ -106,8 +104,8 @@ test!(data_and_resource_mounts, {
     let mut runtime = Runtime::launch().await?;
 
     // install test container & resource
-    runtime.install(get_test_resource_npk()).could_fail();
-    runtime.install(get_test_container_npk()).could_fail();
+    runtime.install(get_test_resource_npk().await).could_fail();
+    runtime.install(get_test_container_npk().await).could_fail();
 
     let data_dir = Path::new("target/northstar/data/test_container");
     fs::create_dir_all(&data_dir).await?;
@@ -138,8 +136,8 @@ test!(uninstall_a_running_application, {
     let mut runtime = Runtime::launch().await?;
 
     // install test container & resource.
-    runtime.install(get_test_resource_npk()).could_fail();
-    runtime.install(get_test_container_npk()).could_fail();
+    runtime.install(get_test_resource_npk().await).could_fail();
+    runtime.install(get_test_container_npk().await).could_fail();
 
     let data_dir = Path::new("target/northstar/data/test_container");
     fs::create_dir_all(&data_dir).await?;
@@ -179,8 +177,8 @@ test!(crashing_containers, {
     let data_dir = Path::new("target/northstar/data/").canonicalize()?;
 
     // install test container
-    runtime.install(get_test_resource_npk()).could_fail();
-    runtime.install(get_test_container_npk()).could_fail();
+    runtime.install(get_test_resource_npk().await).could_fail();
+    runtime.install(get_test_container_npk().await).could_fail();
 
     let dir = data_dir.join("test_container".to_string());
     fs::create_dir_all(&dir).await?;
@@ -208,8 +206,8 @@ test!(mount_containers_without_verity, {
     let mut runtime = Runtime::launch_with_config(config).await?;
 
     // install test container & resource
-    runtime.install(get_test_resource_npk()).could_fail();
-    runtime.install(get_test_container_npk()).could_fail();
+    runtime.install(get_test_resource_npk().await).could_fail();
+    runtime.install(get_test_container_npk().await).could_fail();
 
     let data_dir = Path::new("target/northstar/data/test_container");
     fs::create_dir_all(&data_dir).await?;

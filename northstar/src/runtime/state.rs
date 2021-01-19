@@ -36,7 +36,7 @@ use std::{
     path::{Path, PathBuf},
     result,
 };
-use tokio::{fs, task, time};
+use tokio::{fs, time};
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -407,14 +407,13 @@ impl State {
             )
         })?;
 
-        let manifest = task::block_in_place(|| {
-            let file = std::fs::File::open(&npk)
-                .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-            Npk::new(file)
-                .map_err(Error::Npk)?
-                .manifest()
-                .map_err(Error::Npk)
-        })?;
+        let file = std::fs::File::open(&npk)
+            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
+        let manifest = Npk::new(file)
+            .map_err(Error::Npk)?
+            .manifest()
+            .await
+            .map_err(Error::Npk)?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -493,12 +492,13 @@ impl State {
                 Error::Io(format!("Failed to read {}", repository.dir.display()), e)
             })?;
             while let Ok(Some(entry)) = dir.next_entry().await {
-                let manifest = tokio::task::block_in_place(|| {
-                    let file = File::open(entry.path().as_path())
-                        .map_err(|e| npk::npk::Error::Io(format!("Failed to open NPK: {}", e)))?;
-                    Npk::new(file)?.manifest()
-                })
-                .map_err(Error::Npk)?;
+                let file = File::open(entry.path().as_path())
+                    .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
+                let manifest = Npk::new(file)
+                    .map_err(Error::Npk)?
+                    .manifest()
+                    .await
+                    .map_err(Error::Npk)?;
 
                 if manifest.name == name && manifest.version == *version {
                     return Ok(Some((manifest, entry.path())));

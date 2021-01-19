@@ -28,9 +28,7 @@ use rand::rngs::OsRng;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
-    fs,
-    fs::File,
-    io,
+    fs, io,
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -38,6 +36,7 @@ use std::{
 };
 use tempfile::{NamedTempFile, TempDir};
 use thiserror::Error;
+use tokio::{fs::File, io::AsyncWriteExt};
 use zip::{result::ZipError, ZipArchive};
 
 // Binaries
@@ -157,13 +156,13 @@ pub struct Npk<R: io::Read + io::Seek> {
 impl<R: io::Read + io::Seek> Npk<R> {
     pub fn new(npk: R) -> Result<Self, Error> {
         let zip = zip::ZipArchive::new(npk).map_err(|e| Error::Zip {
-            context: "Failed to parse ZIP format of NPK".to_string(),
+            context: "Failed to parse ZIP format".to_string(),
             error: e,
         })?;
         Ok(Self { inner: zip })
     }
 
-    pub fn manifest(&mut self) -> Result<Manifest, Error> {
+    pub async fn manifest(&mut self) -> Result<Manifest, Error> {
         if let Ok(mut file) = self.inner.by_name(&MANIFEST_NAME) {
             let mut content = String::new();
             file.read_to_string(&mut content).map_err(|e| Error::Os {
@@ -181,7 +180,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
     }
 
     /// contains the hashes and the key/signature pair
-    fn signature_yaml(&mut self) -> Result<String, Error> {
+    async fn signature_yaml(&mut self) -> Result<String, Error> {
         if let Ok(mut file) = self.inner.by_name(&SIGNATURE_NAME) {
             let mut content = String::new();
             file.read_to_string(&mut content).map_err(|e| Error::Os {
@@ -197,22 +196,22 @@ impl<R: io::Read + io::Seek> Npk<R> {
         }
     }
 
-    pub fn hashes(&mut self) -> Result<Hashes, Error> {
-        let sign_yaml = self.signature_yaml()?;
+    pub async fn hashes(&mut self) -> Result<Hashes, Error> {
+        let sign_yaml = self.signature_yaml().await?;
         let hashes_string = sign_yaml.split("---").next().unwrap_or_default();
         Hashes::from_str(hashes_string).map_err(|_e| {
             Error::MalformedHashes("Failed to read hashes from YAML file".to_string())
         })
     }
 
-    pub fn signature(&mut self) -> Result<ed25519_dalek::Signature, Error> {
+    pub async fn signature(&mut self) -> Result<ed25519_dalek::Signature, Error> {
         #[derive(Debug, Deserialize)]
         struct SerdeSignature {
             key: String,
             signature: String,
         }
 
-        let yaml = self.signature_yaml()?;
+        let yaml = self.signature_yaml().await?;
         let sign_string = yaml.split("---").nth(1).unwrap_or_default();
         let sign_serde = serde_yaml::from_str::<SerdeSignature>(sign_string).map_err(|e| {
             Error::MalformedSignature(format!("Failed to parse signature YAML format: {}", e))
@@ -225,15 +224,15 @@ impl<R: io::Read + io::Seek> Npk<R> {
         })
     }
 
-    pub fn verify(&mut self, key: &ed25519_dalek::PublicKey) -> Result<(), Error> {
-        let sign_yaml = self.signature_yaml()?;
+    pub async fn verify(&mut self, key: &ed25519_dalek::PublicKey) -> Result<(), Error> {
+        let sign_yaml = self.signature_yaml().await?;
         let hashes_string = sign_yaml.split("---").next().unwrap_or_default();
-        let signature = self.signature()?;
+        let signature = self.signature().await?;
         key.verify_strict(hashes_string.as_bytes(), &signature)
             .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))
     }
 
-    pub fn version(&self) -> Result<Version, Error> {
+    pub async fn version(&self) -> Result<Version, Error> {
         let comment = String::from_utf8(self.inner.comment().to_vec())
             .map_err(|e| Error::Manifest(format!("Failed to read NPK version string {}", e)))?;
         let mut split = comment.split(' ');
@@ -254,7 +253,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         ))
     }
 
-    pub fn fsimg_offset(&mut self) -> Result<u64, Error> {
+    pub async fn fsimg_offset(&mut self) -> Result<u64, Error> {
         if let Ok(fsimg) = self.inner.by_name(&FS_IMG_NAME) {
             Ok(fsimg.data_start())
         } else {
@@ -265,7 +264,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         }
     }
 
-    pub fn fsimg_size(&mut self) -> Result<u64, Error> {
+    pub async fn fsimg_size(&mut self) -> Result<u64, Error> {
         if let Ok(fsimg) = self.inner.by_name(&FS_IMG_NAME) {
             Ok(fsimg.size())
         } else {
@@ -276,8 +275,8 @@ impl<R: io::Read + io::Seek> Npk<R> {
         }
     }
 
-    pub fn verity_header(&mut self) -> Result<dm_verity::VerityHeader, Error> {
-        let verity_offset = self.hashes()?.fs_verity_offset;
+    pub async fn verity_header(&mut self) -> Result<dm_verity::VerityHeader, Error> {
+        let verity_offset = self.hashes().await?.fs_verity_offset;
         if let Ok(mut fsimg) = self.inner.by_name(&FS_IMG_NAME) {
             io::copy(&mut fsimg.by_ref().take(verity_offset), &mut io::sink()).map_err(|e| {
                 Error::Os {
@@ -294,7 +293,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         }
     }
 
-    pub fn file(&mut self, file: &Path) -> Result<impl std::io::Read + '_, Error> {
+    pub async fn file(&mut self, file: &Path) -> Result<impl std::io::Read + '_, Error> {
         if let Ok(zip_file) = self.inner.by_name(file.display().to_string().as_str()) {
             Ok(zip_file)
         } else {
@@ -305,7 +304,7 @@ impl<R: io::Read + io::Seek> Npk<R> {
         }
     }
 
-    pub fn into_inner(self) -> ZipArchive<R> {
+    pub async fn into_inner(self) -> ZipArchive<R> {
         self.inner
     }
 }
@@ -339,25 +338,25 @@ impl Builder {
 
     // TODO: If needed: add append method to include additional files to the npk
 
-    fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
+    async fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
         // Add manifest and root dir to tmp dir
         let tmp = tempfile::TempDir::new().map_err(|e| Error::Os {
             context: "Failed to create temporary directory".to_string(),
             error: e,
         })?;
-        let tmp_root = copy_src_root_to_tmp(&self.root, &tmp)?;
-        let tmp_manifest = write_manifest(&self.manifest, &tmp)?;
+        let tmp_root = copy_src_root_to_tmp(&self.root, &tmp).await?;
+        let tmp_manifest = write_manifest(&self.manifest, &tmp).await?;
 
         // Create filesystem image
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-        create_squashfs_img(&tmp_root, &self.manifest, &fsimg, &self.squashfs_opts)?;
+        create_squashfs_img(&tmp_root, &self.manifest, &fsimg, &self.squashfs_opts).await?;
 
         // Create NPK
         if let Some(key) = &self.key {
-            let signature = sign_npk(&key, &fsimg, &tmp_manifest)?;
-            write_npk(writer, &self.manifest, &fsimg, Some(&signature))
+            let signature = sign_npk(&key, &fsimg, &tmp_manifest).await?;
+            write_npk(writer, &self.manifest, &fsimg, Some(&signature)).await
         } else {
-            write_npk(writer, &self.manifest, &fsimg, None)
+            write_npk(writer, &self.manifest, &fsimg, None).await
         }
     }
 }
@@ -420,8 +419,8 @@ pub struct SquashfsOpts {
 /// --dir examples/container/hello \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
-    pack_with(dir, out, key, SquashfsOpts::default())
+pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
+    pack_with(dir, out, key, SquashfsOpts::default()).await
 }
 
 /// Create an NPK with special `squashfs` options
@@ -444,13 +443,13 @@ pub fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
 /// --key examples/keys/northstar.key \
 /// --comp xz \
 /// --block-size 65536 \
-pub fn pack_with(
+pub async fn pack_with(
     dir: &Path,
     out: &Path,
     key: Option<&Path>,
     squashfs_opts: SquashfsOpts,
 ) -> Result<(), Error> {
-    let manifest = read_manifest(dir)?;
+    let manifest = read_manifest(dir).await?;
     let name = manifest.name.clone();
     let version = manifest.version.clone();
     let mut builder = Builder::new(dir, manifest);
@@ -462,66 +461,72 @@ pub fn pack_with(
     let npk_dest = out
         .join(format!("{}-{}.", &name, &version.to_string()))
         .with_extension(&NPK_EXT);
-    let npk = File::create(&npk_dest).map_err(|e| Error::Os {
-        context: format!("Failed to create NPK at '{}'", &npk_dest.display()),
+    let npk = File::create(&npk_dest).await.map_err(|e| Error::Os {
+        context: format!("Failed to create NPK: '{}'", &npk_dest.display()),
         error: e,
     })?;
-    builder.build(&npk)
+    builder.build(npk.into_std().await).await
 }
 
-pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
-    let mut zip = open_zipped_npk(&npk)?;
+pub async fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
+    let mut zip = open_zip(&npk).await?;
     zip.extract(&out).map_err(|e| Error::Zip {
         context: format!("Failed to extract NPK to '{}'", &out.display()),
         error: e,
     })?;
     let fsimg = out.join(&FS_IMG_NAME);
-    unpack_squashfs(&fsimg, &out)
+    unpack_squashfs(&fsimg, &out).await
 }
 
 /// Generate a keypair suitable for signing and verifying NPKs
-pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
+pub async fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     let mut csprng = OsRng {};
     let key_pair = Keypair::generate(&mut csprng);
     let pub_key = out.join(name).with_extension("pub");
     let prv_key = out.join(name).with_extension("key");
-    assume_non_existing(&pub_key)?;
-    assume_non_existing(&prv_key)?;
+    assume_non_existing(&pub_key).await?;
+    assume_non_existing(&prv_key).await?;
 
-    fn write(data: &[u8], path: &Path) -> Result<(), Error> {
-        let mut file = File::create(&path).map_err(|e| Error::Os {
+    async fn write(data: &[u8], path: &Path) -> Result<(), Error> {
+        let mut file = File::create(&path).await.map_err(|e| Error::Os {
             context: format!("Failed to create '{}'", &path.display()),
             error: e,
         })?;
 
-        file.write_all(&data).map_err(|e| Error::Os {
+        file.write_all(&data).await.map_err(|e| Error::Os {
             context: format!("Failed to write to '{}'", &path.display()),
             error: e,
         })?;
         Ok(())
     }
-    write(&key_pair.public.to_bytes(), &pub_key)?;
-    write(&key_pair.secret.to_bytes(), &prv_key)?;
+    write(&key_pair.public.to_bytes(), &pub_key).await?;
+    write(&key_pair.secret.to_bytes(), &prv_key).await?;
     Ok(())
 }
 
-pub fn open_zipped_npk(npk: &Path) -> Result<ZipArchive<File>, Error> {
-    let zip = zip::ZipArchive::new(File::open(&npk).map_err(|e| Error::Os {
-        context: format!("Failed to open NPK at '{}'", &npk.display()),
-        error: e,
-    })?)
+pub async fn open_zip(file: &Path) -> Result<ZipArchive<std::fs::File>, Error> {
+    let zip = zip::ZipArchive::new(
+        File::open(&file)
+            .await
+            .map_err(|e| Error::Os {
+                context: format!("Failed to open file: '{}'", &file.display()),
+                error: e,
+            })?
+            .into_std()
+            .await,
+    )
     .map_err(|e| Error::Zip {
-        context: format!("Failed to parse ZIP format of NPK at '{}'", &npk.display()),
+        context: format!("Failed to parse ZIP format: '{}'", &file.display()),
         error: e,
     })?;
 
     Ok(zip)
 }
 
-fn read_manifest(src: &Path) -> Result<Manifest, Error> {
+async fn read_manifest(src: &Path) -> Result<Manifest, Error> {
     let manifest_path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
     let manifest_file = std::fs::File::open(&manifest_path).map_err(|e| Error::Os {
-        context: format!("Failed to open manifest at '{}'", &manifest_path.display()),
+        context: format!("Failed to open manifest: '{}'", &manifest_path.display()),
         error: e,
     })?;
     let manifest = Manifest::from_reader(&manifest_file).map_err(|e| {
@@ -534,28 +539,33 @@ fn read_manifest(src: &Path) -> Result<Manifest, Error> {
     Ok(manifest)
 }
 
-fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBuf, Error> {
+async fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBuf, Error> {
     let tmp_manifest_path = tmp_dir
         .path()
         .join(&MANIFEST_BASE)
         .with_extension(&MANIFEST_EXT);
-    let tmp_manifest = File::create(&tmp_manifest_path).map_err(|e| Error::Os {
-        context: format!("Failed to create '{}'", &tmp_manifest_path.display()),
-        error: e,
-    })?;
+    let tmp_manifest = File::create(&tmp_manifest_path)
+        .await
+        .map_err(|e| Error::Os {
+            context: format!("Failed to create '{}'", &tmp_manifest_path.display()),
+            error: e,
+        })?;
     manifest
-        .to_writer(tmp_manifest)
+        .to_writer(tmp_manifest.into_std().await)
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
     Ok(tmp_manifest_path)
 }
 
-fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
+async fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     File::open(&key_file)
+        .await
         .map_err(|e| Error::Os {
             context: format!("Failed to open '{}'", &key_file.display()),
             error: e,
         })?
+        .into_std()
+        .await
         .read_exact(&mut secret_key_bytes)
         .map_err(|e| Error::Os {
             context: format!("Failed to read key data from '{}'", &key_file.display()),
@@ -572,7 +582,7 @@ fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     })
 }
 
-fn gen_hashes_yaml(
+async fn gen_hashes_yaml(
     tmp_manifest_path: &Path,
     fsimg_path: &Path,
     fsimg_size: u64,
@@ -580,20 +590,22 @@ fn gen_hashes_yaml(
 ) -> Result<String, Error> {
     // Create hashes YAML
     let mut sha256 = Sha256::new();
-    let mut tmp_manifest = File::open(&tmp_manifest_path).map_err(|e| Error::Os {
-        context: format!("Failed to open '{}'", &tmp_manifest_path.display()),
-        error: e,
-    })?;
-    io::copy(&mut tmp_manifest, &mut sha256)
+    let tmp_manifest = File::open(&tmp_manifest_path)
+        .await
+        .map_err(|e| Error::Os {
+            context: format!("Failed to open '{}'", &tmp_manifest_path.display()),
+            error: e,
+        })?;
+    io::copy(&mut tmp_manifest.into_std().await, &mut sha256)
         .map_err(|_e| Error::Manifest("Failed to calculate manifest checksum".to_string()))?;
 
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
-    let mut fsimg = File::open(&fsimg_path).map_err(|e| Error::Os {
+    let fsimg = File::open(&fsimg_path).await.map_err(|e| Error::Os {
         context: format!("Failed to open '{}'", &fsimg_path.display()),
         error: e,
     })?;
-    io::copy(&mut fsimg, &mut sha256).map_err(|e| Error::Os {
+    io::copy(&mut fsimg.into_std().await, &mut sha256).map_err(|e| Error::Os {
         context: "Failed to read fs image".to_string(),
         error: e,
     })?;
@@ -612,17 +624,17 @@ fn gen_hashes_yaml(
     Ok(hashes)
 }
 
-fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String, Error> {
+async fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String, Error> {
     let fsimg_size = fs::metadata(&fsimg)
         .map_err(|e| Error::Os {
-            context: format!("Fail to read read size of '{}'", &fsimg.display()),
+            context: format!("Fail to read file size: '{}'", &fsimg.display()),
             error: e,
         })?
         .len();
     let root_hash = append_dm_verity_block(&fsimg, fsimg_size).map_err(Error::Verity)?;
-    let key_pair = read_keypair(&key_file)?;
-    let hashes_yaml = gen_hashes_yaml(&tmp_manifest, &fsimg, fsimg_size, &root_hash)?;
-    let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
+    let key_pair = read_keypair(&key_file).await?;
+    let hashes_yaml = gen_hashes_yaml(&tmp_manifest, &fsimg, fsimg_size, &root_hash).await?;
+    let signature_yaml = sign_hashes(&key_pair, &hashes_yaml).await;
     Ok(signature_yaml)
 }
 
@@ -631,7 +643,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     let pseudo_file_entries = NamedTempFile::new().map_err(|e| Error::Io(e.to_string()))?;
     let file = pseudo_file_entries.as_file();
 
-    fn add_directory(mut file: &File, directory: &Path, mode: u32) -> Result<(), Error> {
+    fn add_directory(mut file: &std::fs::File, directory: &Path, mode: u32) -> Result<(), Error> {
         writeln!(
             file,
             "{} d {} {} {}",
@@ -684,7 +696,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     Ok(pseudo_file_entries)
 }
 
-fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
+async fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     let signature = key_pair.sign(hashes_yaml.as_bytes());
     let signature_base64 = base64::encode(signature);
     let key_id = "northstar";
@@ -695,7 +707,7 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     signature_yaml
 }
 
-fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
+async fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     let src_root = src.join(&ROOT_DIR_NAME);
     let tmp_root = tmp.path().join(&ROOT_DIR_NAME);
     let options = fs_extra::dir::CopyOptions::new();
@@ -721,7 +733,7 @@ fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
     Ok(tmp_root)
 }
 
-fn create_squashfs_img(
+async fn create_squashfs_img(
     dst: &Path,
     manifest: &Manifest,
     src: &Path,
@@ -776,7 +788,7 @@ fn create_squashfs_img(
     }
 }
 
-fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
+async fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     if which::which(&UNSQUASHFS_BIN).is_err() {
         return Err(Error::Squashfs(format!(
             "Failed to locate '{}'",
@@ -785,7 +797,7 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     }
     if !image.exists() {
         return Err(Error::Squashfs(format!(
-            "Squashfs image at '{}' does not exist",
+            "Squashfs image '{}' does not exist",
             &image.display()
         )));
     }
@@ -804,7 +816,7 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn write_npk<W: Write + Seek>(
+async fn write_npk<W: Write + Seek>(
     npk: W,
     manifest: &Manifest,
     fsimg: &Path,
@@ -851,19 +863,19 @@ fn write_npk<W: Write + Seek>(
             context: "Could create aligned zip-file".to_string(),
             error: e,
         })?;
-    let mut fsimg = File::open(&fsimg).map_err(|e| Error::Os {
+    let fsimg = File::open(&fsimg).await.map_err(|e| Error::Os {
         context: format!("Failed to open '{}'", &fsimg.display()),
         error: e,
     })?;
 
-    io::copy(&mut fsimg, &mut zip).map_err(|e| Error::Os {
+    io::copy(&mut fsimg.into_std().await, &mut zip).map_err(|e| Error::Os {
         context: "Failed to write the filesystem image to the archive".to_string(),
         error: e,
     })?;
     Ok(())
 }
 
-fn assume_non_existing(path: &Path) -> Result<(), Error> {
+async fn assume_non_existing(path: &Path) -> Result<(), Error> {
     if path.exists() {
         Err(Error::Io(format!(
             "File '{}' already exists",
