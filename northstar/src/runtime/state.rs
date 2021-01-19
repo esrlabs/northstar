@@ -17,7 +17,7 @@ use super::{
     error::Error,
     keys,
     minijail::{Minijail, Process},
-    mount::{mount_npk, mount_npk_repository, umount_npk},
+    mount::{umount_npk, MountControl},
     process::ExitStatus,
     Event, EventTx, RepositoryId,
 };
@@ -53,6 +53,7 @@ pub struct State {
     pub resources: HashMap<(Name, Version), Container>,
     pub config: Config,
     minijail: Minijail,
+    pub mount_ctrl: MountControl,
 }
 
 #[derive(Debug)]
@@ -175,10 +176,11 @@ impl State {
             resources: HashMap::new(),
             config: config.clone(),
             minijail,
+            mount_ctrl: MountControl::new(&config).await.map_err(Error::Mount)?,
         };
 
         // mount all the containers from each repository
-        mount_repositories(&mut state).await?;
+        state.mount_repositories().await?;
         Ok(state)
     }
 
@@ -439,7 +441,9 @@ impl State {
             .map_err(|error| Error::Io("Failed to copy NPK to repository".to_string(), error))?;
 
         // Install and mount npk
-        let mounted_container = mount_npk(&self.config, &package_in_repository, &repository)
+        let mounted_container = self
+            .mount_ctrl
+            .mount_npk(&package_in_repository, &repository, &self.config.run_dir)
             .await
             .map_err(Error::Mount)?;
 
@@ -656,25 +660,48 @@ impl State {
             .await
             .expect("Internal channel error on main");
     }
-}
 
-async fn mount_repositories(state: &mut State) -> Result<(), Error> {
-    let mut mounted_containers = Vec::new();
+    /// Mount all the containers in every repository
+    async fn mount_repositories(&mut self) -> Result<(), Error> {
+        let mut mounted_containers = Vec::new();
 
-    // Mount all the containers from each repository
-    for repo in state.repositories.values() {
-        mounted_containers.append(
-            &mut mount_npk_repository(&state.config, &repo)
+        // Mount all the containers from each repository
+        for repo in self.repositories.keys() {
+            let mut containers = self.mount_repository(&repo).await?;
+            mounted_containers.append(&mut containers);
+        }
+
+        for container in mounted_containers {
+            self.add(container)?;
+        }
+
+        Ok(())
+    }
+
+    /// Mounts all the `npk` files in the specified repository
+    async fn mount_repository(&self, repo_id: &str) -> Result<Vec<Container>, Error> {
+        let repo = self
+            .repositories
+            .get(repo_id)
+            .ok_or_else(|| Error::RepositoryNotFound(repo_id.to_string()))?;
+
+        info!("Mounting NPKs from {}", repo.dir.display());
+        let mut dir = fs::read_dir(&repo.dir)
+            .await
+            .map_err(|e| Error::Io("Failed to read repository".to_string(), e))?;
+        let mut containers = Vec::new();
+
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let container = self
+                .mount_ctrl
+                .mount_npk(&entry.path(), repo, &self.config.run_dir)
                 .await
-                .map_err(Error::Mount)?,
-        );
-    }
+                .map_err(Error::Mount)?;
+            containers.push(container);
+        }
 
-    for container in mounted_containers {
-        state.add(container)?;
+        Ok(containers)
     }
-
-    Ok(())
 }
 
 // #[cfg(test)]
