@@ -207,9 +207,7 @@ async fn runtime_task(
     mut event_rx: mpsc::Receiver<Event>,
     stop: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
-    let minijail_log = minijail::MinijailLog::new().await.map_err(Error::Process)?;
-    minijail::init(&minijail_log).map_err(Error::Process)?;
-    let mut state = State::new(&config, event_tx.clone(), minijail_log).await?;
+    let mut state = State::new(&config, event_tx.clone()).await?;
 
     info!(
         "Mounted {} containers",
@@ -242,7 +240,7 @@ async fn runtime_task(
     });
 
     // Enter main loop
-    let result = loop {
+    loop {
         let result = match event_rx.recv().await.unwrap() {
             Event::ChildOutput { name, stream, line } => {
                 on_child_output(&mut state, &name, stream, &line).await;
@@ -275,10 +273,7 @@ async fn runtime_task(
         if result.is_err() {
             break result;
         }
-    };
-
-    minijail::shutdown().map_err(Error::Process)?;
-    result
+    }
 }
 
 // TODO: Where to send this?

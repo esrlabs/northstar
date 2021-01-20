@@ -42,14 +42,44 @@ use tokio::{
     select, task, time,
 };
 
-#[derive(Debug)]
-pub struct MinijailLog {
-    log_fd: i32,
+// We need a Send + Sync version of minijail::Minijail
+struct MinijailHandle(::minijail::Minijail);
+
+unsafe impl Send for MinijailHandle {}
+unsafe impl Sync for MinijailHandle {}
+
+impl ops::Deref for MinijailHandle {
+    type Target = ::minijail::Minijail;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-impl MinijailLog {
-    /// Initialize the minijail log
-    pub async fn new() -> Result<MinijailLog, Error> {
+impl ops::DerefMut for MinijailHandle {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct Minijail {
+    log_fd: i32,
+    event_tx: EventTx,
+    run_dir: PathBuf,
+    data_dir: PathBuf,
+    uid: u32,
+    gid: u32,
+}
+
+impl Minijail {
+    pub(crate) fn new(
+        event_tx: EventTx,
+        run_dir: &Path,
+        data_dir: &Path,
+        uid: u32,
+        gid: u32,
+    ) -> Result<Minijail, Error> {
         let pipe = AsyncPipe::new()?;
         let log_fd = pipe.writefd();
         let mut lines = io::BufReader::new(pipe).lines();
@@ -67,130 +97,38 @@ impl MinijailLog {
                 }
             }
         });
-        Ok(MinijailLog { log_fd })
+
+        let minijail_log_level = match log::max_level().to_level().unwrap_or(Level::Warn) {
+            Level::Error => 3,
+            Level::Warn => 4,
+            Level::Info => 6,
+            Level::Debug => 7,
+            Level::Trace => i32::MAX,
+        };
+        ::minijail::Minijail::log_to_fd(log_fd, minijail_log_level as i32);
+        Ok(Minijail {
+            event_tx,
+            run_dir: run_dir.into(),
+            data_dir: data_dir.into(),
+            uid,
+            gid,
+            log_fd,
+        })
     }
-}
 
-impl std::os::unix::io::AsRawFd for MinijailLog {
-    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
-        self.log_fd
+    pub(crate) fn shutdown(&self) -> Result<(), Error> {
+        // Just make clippy happy
+        if false {
+            Err(Error::Stop)
+        } else {
+            Ok(())
+        }
     }
-}
 
-pub fn init<F: std::os::unix::io::AsRawFd>(log: &F) -> Result<(), Error> {
-    let minijail_log_level = match log::max_level().to_level().unwrap_or(Level::Warn) {
-        Level::Error => 3,
-        Level::Warn => 4,
-        Level::Info => 6,
-        Level::Debug => 7,
-        Level::Trace => i32::MAX,
-    };
-    ::minijail::Minijail::log_to_fd(log.as_raw_fd(), minijail_log_level as i32);
-    Ok(())
-}
-
-pub fn shutdown() -> Result<(), Error> {
-    Ok(())
-}
-
-// We need a Send + Sync version of Minijail
-struct Minijail(::minijail::Minijail);
-unsafe impl Send for Minijail {}
-unsafe impl Sync for Minijail {}
-
-impl ops::Deref for Minijail {
-    type Target = ::minijail::Minijail;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl ops::DerefMut for Minijail {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-// Capture output of a child process. Create a pipe and spawn a task that forwards each line to
-// the main loop. When this struct is dropped the internal spawned tasks are stopped.
-#[derive(Debug)]
-struct CaptureOutput(i32, oneshot::Sender<()>);
-
-impl CaptureOutput {
-    pub async fn new(
-        stream: OutputStream,
-        tag: &str,
-        event_tx: EventTx,
-    ) -> Result<CaptureOutput, Error> {
-        let pipe = AsyncPipe::new()?;
-        let writefd = pipe.writefd();
-        let mut lines = io::BufReader::new(pipe).lines();
-        let tag = tag.to_string();
-        let (tx, mut rx) = oneshot::channel();
-
-        debug!("Starting stream capture of {} on {:?}", tag, stream);
-        task::spawn(async move {
-            loop {
-                select! {
-                    _ = &mut rx => break,
-                    line = lines.next_line() => {
-                        if let Ok(Some(line)) = line {
-                            let event = Event::ChildOutput {
-                                    name: tag.clone(),
-                                    stream: stream.clone(),
-                                    line,
-                                };
-                            event_tx.send(event).await.ok();
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-            debug!("Stopped stream capture of {} on {:?}", tag, stream);
-        });
-
-        Ok(CaptureOutput(writefd, tx))
-    }
-}
-
-pub(super) struct Process {
-    /// PID of this process
-    pid: u32,
-    /// Handle to a libminijail configuration
-    _jail: Minijail,
-    /// Temporary directory created in the systems tmp folder.
-    /// This directory holds process instance specific data that needs
-    /// to be dumped to disk for startup. e.g seccomp config (TODO)
-    _tmpdir: tempfile::TempDir,
-    /// Captured stdout output
-    _stdout: CaptureOutput,
-    /// Captured stderr output
-    _stderr: CaptureOutput,
-    /// Rx part of the exit handle of this process
-    exit_handle_wait: ExitHandleWait,
-}
-
-impl fmt::Debug for Process {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Process").field("pid", &self.pid).finish()
-    }
-}
-
-impl Process {
-    pub(crate) async fn start(
-        container: &Container,
-        event_tx: EventTx,
-        run_dir: &Path,
-        data_dir: &Path,
-        uid: u32,
-        gid: u32,
-        minijail: &MinijailLog,
-    ) -> Result<Process, Error> {
+    pub(crate) async fn start(&self, container: &Container) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
-        let mut jail = Minijail(::minijail::Minijail::new().map_err(Error::Minijail)?);
+        let mut jail = MinijailHandle(::minijail::Minijail::new().map_err(Error::Minijail)?);
 
         let init = manifest
             .init
@@ -224,9 +162,9 @@ impl Process {
         }
 
         // Configure UID
-        jail.change_uid(uid);
+        jail.change_uid(self.uid);
         // Configure PID
-        jail.change_gid(gid);
+        jail.change_gid(self.gid);
 
         // Update the capability mask if specified
         if let Some(capabilities) = &manifest.capabilities {
@@ -257,7 +195,7 @@ impl Process {
         // Make the application the init process
         jail.run_as_init();
 
-        setup_mounts(&mut jail, container, &data_dir, uid, gid, &run_dir).await?;
+        self.setup_mounts(&mut jail, container).await?;
 
         // Arguments
         let args = manifest.args.clone().unwrap_or_default();
@@ -284,12 +222,12 @@ impl Process {
         );
 
         let stdout =
-            CaptureOutput::new(OutputStream::Stdout, &manifest.name, event_tx.clone()).await?;
+            CaptureOutput::new(OutputStream::Stdout, &manifest.name, self.event_tx.clone()).await?;
         let stderr =
-            CaptureOutput::new(OutputStream::Stderr, &manifest.name, event_tx.clone()).await?;
+            CaptureOutput::new(OutputStream::Stderr, &manifest.name, self.event_tx.clone()).await?;
 
         // Prevent minijail to close the log fd so that errors aren't missed
-        let log_fd = (minijail.log_fd, minijail.log_fd);
+        let log_fd = (self.log_fd, self.log_fd);
         let pid = jail.run_remap_env_preload(
             &init.as_path(),
             &[(stdout.0, 1), (stderr.0, 2), log_fd],
@@ -300,7 +238,13 @@ impl Process {
 
         let (exit_handle_signal, exit_handle_wait) = exit_handle();
         // Spawn a task thats waits for the child to exit
-        waitpid(&manifest.name, pid, exit_handle_signal, event_tx).await;
+        waitpid(
+            &manifest.name,
+            pid,
+            exit_handle_signal,
+            self.event_tx.clone(),
+        )
+        .await;
 
         Ok(Process {
             pid,
@@ -311,133 +255,157 @@ impl Process {
             exit_handle_wait,
         })
     }
-}
 
-async fn setup_mounts(
-    jail: &mut Minijail,
-    container: &Container,
-    data_dir: &Path,
-    uid: u32,
-    gid: u32,
-    run_dir: &Path,
-) -> Result<(), Error> {
-    let proc = Path::new("/proc");
-    jail.mount_bind(&proc, &proc, false)
-        .map_err(Error::Minijail)?;
-    jail.remount_proc_readonly();
+    async fn setup_mounts(
+        &self,
+        jail: &mut MinijailHandle,
+        container: &Container,
+    ) -> Result<(), Error> {
+        let proc = Path::new("/proc");
+        jail.mount_bind(&proc, &proc, false)
+            .map_err(Error::Minijail)?;
+        jail.remount_proc_readonly();
 
-    // If there's no explicit mount for /dev add a minimal variant
-    if !container
-        .manifest
-        .mounts
-        .contains_key(&PathBuf::from("/dev"))
-    {
-        debug!("Mounting minimal /dev");
-        jail.mount_dev();
-    }
+        // If there's no explicit mount for /dev add a minimal variant
+        if !container
+            .manifest
+            .mounts
+            .contains_key(&PathBuf::from("/dev"))
+        {
+            debug!("Mounting minimal /dev");
+            jail.mount_dev();
+        }
 
-    for (target, mount) in &container.manifest.mounts {
-        match &mount {
-            Mount::Bind { host, flags } => {
-                if !&host.exists() {
-                    warn!(
-                        "Cannot bind mount nonexitent source {} to {}",
+        for (target, mount) in &container.manifest.mounts {
+            match &mount {
+                Mount::Bind { host, flags } => {
+                    if !&host.exists() {
+                        warn!(
+                            "Cannot bind mount nonexitent source {} to {}",
+                            host.display(),
+                            target.display()
+                        );
+                        continue;
+                    }
+                    let rw = flags.contains(&MountFlag::Rw);
+                    debug!(
+                        "Mounting {} on {}{}",
                         host.display(),
-                        target.display()
+                        target.display(),
+                        if rw { " (rw)" } else { "" }
                     );
-                    continue;
+                    jail.mount_bind(&host, &target, rw)
+                        .map_err(Error::Minijail)?;
                 }
-                let rw = flags.contains(&MountFlag::Rw);
-                debug!(
-                    "Mounting {} on {}{}",
-                    host.display(),
-                    target.display(),
-                    if rw { " (rw)" } else { "" }
-                );
-                jail.mount_bind(&host, &target, rw)
-                    .map_err(Error::Minijail)?;
-            }
-            Mount::Persist => {
-                let dir = data_dir.join(&container.manifest.name);
-                if !dir.exists() {
-                    debug!("Creating {}", dir.display());
-                    fs::create_dir_all(&dir)
-                        .await
-                        .map_err(|e| Error::Io(format!("Failed to create {}", dir.display()), e))?;
-                }
-
-                debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
-                chown(
-                    dir.as_os_str(),
-                    Some(unistd::Uid::from_raw(uid)),
-                    Some(unistd::Gid::from_raw(gid)),
-                )
-                .map_err(|e| {
-                    Error::Os(
-                        format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-                        e,
-                    )
-                })?;
-
-                debug!("Mounting {} on {}", dir.display(), target.display(),);
-                jail.mount_bind(&dir, &target, true)
-                    .map_err(Error::Minijail)?;
-            }
-            Mount::Resource { name, version, dir } => {
-                let src = {
-                    // Join the source of the resource container with the mount dir
-                    let resource_root = run_dir.join(&name).join(&version.to_string());
-                    let dir = dir
-                        .strip_prefix("/")
-                        .map(|d| resource_root.join(d))
-                        .unwrap_or(resource_root);
-
+                Mount::Persist => {
+                    let dir = self.data_dir.join(&container.manifest.name);
                     if !dir.exists() {
-                        return Err(Error::Start(format!(
-                            "Resource folder {} is missing",
-                            dir.display()
-                        )));
+                        debug!("Creating {}", dir.display());
+                        fs::create_dir_all(&dir).await.map_err(|e| {
+                            Error::Io(format!("Failed to create {}", dir.display()), e)
+                        })?;
                     }
 
-                    dir
-                };
+                    debug!("Chowning {} to {}:{}", dir.display(), self.uid, self.gid);
+                    chown(
+                        dir.as_os_str(),
+                        Some(unistd::Uid::from_raw(self.uid)),
+                        Some(unistd::Gid::from_raw(self.gid)),
+                    )
+                    .map_err(|e| {
+                        Error::Os(
+                            format!(
+                                "Failed to chown {} to {}:{}",
+                                dir.display(),
+                                self.uid,
+                                self.gid
+                            ),
+                            e,
+                        )
+                    })?;
 
-                debug!("Mounting {} on {}", src.display(), target.display());
+                    debug!("Mounting {} on {}", dir.display(), target.display(),);
+                    jail.mount_bind(&dir, &target, true)
+                        .map_err(Error::Minijail)?;
+                }
+                Mount::Resource { name, version, dir } => {
+                    let src = {
+                        // Join the source of the resource container with the mount dir
+                        let resource_root = self.run_dir.join(&name).join(&version.to_string());
+                        let dir = dir
+                            .strip_prefix("/")
+                            .map(|d| resource_root.join(d))
+                            .unwrap_or(resource_root);
 
-                jail.mount_bind(&src, &target, false)
-                    .map_err(Error::Minijail)?;
-            }
-            Mount::Tmpfs { size } => {
-                debug!(
-                    "Mounting tmpfs with size {} on {}",
-                    bytesize::ByteSize::b(*size),
-                    target.display()
-                );
-                let data = format!("size={},mode=1777", size);
-                jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
-                    .map_err(Error::Minijail)?;
-            }
-            Mount::Dev { r#type } => {
-                match r#type {
-                    // The Full mount of /dev is a simple rw bind mount of /dev
-                    Dev::Full => {
-                        let dev = Path::new("/dev");
-                        jail.mount_bind(&dev, &dev, true).map_err(Error::Minijail)?;
+                        if !dir.exists() {
+                            return Err(Error::Start(format!(
+                                "Resource folder {} is missing",
+                                dir.display()
+                            )));
+                        }
+
+                        dir
+                    };
+
+                    debug!("Mounting {} on {}", src.display(), target.display());
+
+                    jail.mount_bind(&src, &target, false)
+                        .map_err(Error::Minijail)?;
+                }
+                Mount::Tmpfs { size } => {
+                    debug!(
+                        "Mounting tmpfs with size {} on {}",
+                        bytesize::ByteSize::b(*size),
+                        target.display()
+                    );
+                    let data = format!("size={},mode=1777", size);
+                    jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
+                        .map_err(Error::Minijail)?;
+                }
+                Mount::Dev { r#type } => {
+                    match r#type {
+                        // The Full mount of /dev is a simple rw bind mount of /dev
+                        Dev::Full => {
+                            let dev = Path::new("/dev");
+                            jail.mount_bind(&dev, &dev, true).map_err(Error::Minijail)?;
+                        }
                     }
                 }
             }
         }
+        Ok(())
     }
-    Ok(())
 }
 
-#[async_trait::async_trait]
-impl super::process::Process for Process {
-    fn pid(&self) -> Pid {
+pub(crate) struct Process {
+    /// PID of this process
+    pid: u32,
+    /// Handle to a libminijail configuration
+    _jail: MinijailHandle,
+    /// Temporary directory created in the systems tmp folder.
+    /// This directory holds process instance specific data that needs
+    /// to be dumped to disk for startup. e.g seccomp config (TODO)
+    _tmpdir: tempfile::TempDir,
+    /// Captured stdout output
+    _stdout: CaptureOutput,
+    /// Captured stderr output
+    _stderr: CaptureOutput,
+    /// Rx part of the exit handle of this process
+    exit_handle_wait: ExitHandleWait,
+}
+
+impl fmt::Debug for Process {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Process").field("pid", &self.pid).finish()
+    }
+}
+
+impl Process {
+    pub fn pid(&self) -> Pid {
         self.pid
     }
 
-    async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
+    pub async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
         // Send a SIGTERM to the application. If the application does not terminate with a timeout
         // it is SIGKILLed.
         let sigterm = signal::Signal::SIGTERM;
@@ -506,5 +474,48 @@ impl AsyncRead for AsyncPipe {
                 Err(_would_block) => continue,
             }
         }
+    }
+}
+
+// Capture output of a child process. Create a pipe and spawn a task that forwards each line to
+// the main loop. When this struct is dropped the internal spawned tasks are stopped.
+#[derive(Debug)]
+struct CaptureOutput(i32, oneshot::Sender<()>);
+
+impl CaptureOutput {
+    pub async fn new(
+        stream: OutputStream,
+        tag: &str,
+        event_tx: EventTx,
+    ) -> Result<CaptureOutput, Error> {
+        let pipe = AsyncPipe::new()?;
+        let writefd = pipe.writefd();
+        let mut lines = io::BufReader::new(pipe).lines();
+        let tag = tag.to_string();
+        let (tx, mut rx) = oneshot::channel();
+
+        debug!("Starting stream capture of {} on {:?}", tag, stream);
+        task::spawn(async move {
+            loop {
+                select! {
+                    _ = &mut rx => break,
+                    line = lines.next_line() => {
+                        if let Ok(Some(line)) = line {
+                            let event = Event::ChildOutput {
+                                    name: tag.clone(),
+                                    stream: stream.clone(),
+                                    line,
+                                };
+                            event_tx.send(event).await.ok();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            debug!("Stopped stream capture of {} on {:?}", tag, stream);
+        });
+
+        Ok(CaptureOutput(writefd, tx))
     }
 }

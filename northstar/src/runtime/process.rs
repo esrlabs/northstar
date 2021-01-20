@@ -13,13 +13,12 @@
 //   limitations under the License.
 
 use super::{Event, EventTx};
-use async_trait::async_trait;
 use log::debug;
 use nix::{
     sys::{signal, wait},
     unistd,
 };
-use std::{fmt::Debug, time};
+use std::fmt::Debug;
 use thiserror::Error;
 use tokio::{sync::mpsc, task};
 use wait::WaitStatus;
@@ -59,12 +58,6 @@ pub enum Error {
     Io(String, std::io::Error),
     #[error("OS error: {0}: {1:?}")]
     Os(String, nix::Error),
-}
-
-#[async_trait]
-pub trait Process: Debug + Sync + Send {
-    fn pid(&self) -> Pid;
-    async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error>;
 }
 
 /// Spawn a task that waits for the process to exit. Once the process is exited send the return code

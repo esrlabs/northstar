@@ -16,9 +16,9 @@ use super::{
     config::Config,
     error::Error,
     keys,
-    minijail::MinijailLog,
+    minijail::{Minijail, Process},
     mount::{mount_npk, mount_npk_repository, umount_npk},
-    process::{ExitStatus, Process},
+    process::ExitStatus,
     Event, EventTx, RepositoryId,
 };
 use crate::api::model::Notification;
@@ -52,7 +52,7 @@ pub struct State {
     pub applications: HashMap<Name, Application>,
     pub resources: HashMap<(Name, Version), Container>,
     pub config: Config,
-    minijail_log: MinijailLog,
+    minijail: Minijail,
 }
 
 #[derive(Debug)]
@@ -77,22 +77,22 @@ pub struct Application {
 
 #[derive(Debug)]
 pub struct ProcessContext {
-    process: Box<dyn Process>,
+    process: Process,
     incarnation: u32,
     start_timestamp: time::Instant,
     cgroups: Option<super::cgroups::CGroups>,
 }
 
 impl ProcessContext {
-    pub fn process(&self) -> &dyn Process {
-        self.process.as_ref()
+    pub(crate) fn process(&self) -> &Process {
+        &self.process
     }
 
-    pub fn process_mut(&mut self) -> &mut dyn Process {
-        self.process.as_mut()
+    pub(crate) fn process_mut(&mut self) -> &mut Process {
+        &mut self.process
     }
 
-    pub fn uptime(&self) -> time::Duration {
+    pub(crate) fn uptime(&self) -> time::Duration {
         self.start_timestamp.elapsed()
     }
 }
@@ -138,11 +138,7 @@ impl fmt::Display for Application {
 
 impl State {
     /// Create a new empty State instance
-    pub(super) async fn new(
-        config: &Config,
-        tx: EventTx,
-        minijail_log: MinijailLog,
-    ) -> Result<State, Error> {
+    pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         let mut repositories = HashMap::new();
         for (id, repository) in &config.repositories {
             let key = {
@@ -163,13 +159,22 @@ impl State {
             );
         }
 
+        let minijail = Minijail::new(
+            tx.clone(),
+            &config.run_dir,
+            &config.data_dir,
+            config.container_uid,
+            config.container_gid,
+        )
+        .map_err(Error::Process)?;
+
         let mut state = State {
             events_tx: tx,
             repositories,
             applications: HashMap::new(),
             resources: HashMap::new(),
             config: config.clone(),
-            minijail_log,
+            minijail,
         };
 
         // mount all the containers from each repository
@@ -259,19 +264,11 @@ impl State {
         // Spawn process
         info!("Starting {}", app);
 
-        let process = super::minijail::Process::start(
-            &app.container,
-            self.events_tx.clone(),
-            &self.config.run_dir,
-            &self.config.data_dir,
-            self.config.container_uid,
-            self.config.container_gid,
-            &self.minijail_log,
-        )
-        .await
-        .map_err(Error::Process)?;
-
-        let process = Box::new(process) as Box<dyn Process>;
+        let process = self
+            .minijail
+            .start(&app.container)
+            .await
+            .map_err(Error::Process)?;
 
         // CGroups
         let cgroups = if let Some(ref c) = app.manifest().cgroups {
@@ -394,7 +391,7 @@ impl State {
                 .map_err(Error::Mount)?;
         }
 
-        Ok(())
+        self.minijail.shutdown().map_err(Error::Process)
     }
 
     /// Install an NPK
