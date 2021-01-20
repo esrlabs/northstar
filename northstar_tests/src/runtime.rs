@@ -17,10 +17,20 @@
 use color_eyre::eyre::{eyre, Result, WrapErr};
 use northstar::{
     api,
-    runtime::{self, config::Config},
+    runtime::{self},
 };
 use std::{future::Future, path::Path};
 use tokio::{fs, time, time::timeout};
+
+pub use northstar::runtime::config::Config;
+
+/// Returns the default northstar config
+pub async fn default_config() -> Result<Config> {
+    let config_string = fs::read_to_string("northstar.toml")
+        .await
+        .wrap_err("Failed to read northstar.toml")?;
+    toml::from_str::<Config>(&config_string).wrap_err("Failed to parse northstar.toml")
+}
 
 const TIMEOUT: time::Duration = time::Duration::from_secs(3);
 
@@ -55,12 +65,11 @@ pub fn timeout_on<R>(f: impl Future<Output = R>) -> Result<R> {
 impl Runtime {
     /// Launches an instance of north
     pub async fn launch() -> Result<Runtime> {
-        let config = toml::from_str::<Config>(
-            &fs::read_to_string("northstar.toml")
-                .await
-                .wrap_err("Failed to read northstar.toml")?,
-        )
-        .wrap_err("Failed to parse northstar.toml")?;
+        Runtime::launch_with_config(default_config().await?).await
+    }
+
+    /// Launches an instance of north with the specified configuration
+    pub async fn launch_with_config(config: Config) -> Result<Runtime> {
         let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
             .wrap_err("Launching northstar timed out")
