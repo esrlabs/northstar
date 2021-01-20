@@ -17,7 +17,7 @@ use northstar::api;
 use northstar_tests::{
     logger,
     process_assert::ProcessAssert,
-    runtime::Runtime,
+    runtime::{default_config, Runtime},
     test,
     test_container::{get_test_container_npk, get_test_resource_npk},
 };
@@ -193,6 +193,44 @@ test!(crashing_containers, {
 
     // Try to stop the containers before issuing the shutdown
     runtime.stop(&"test_container".to_string()).could_fail();
+
+    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
+    runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
+
+    runtime.shutdown()
+});
+
+test!(mount_containers_without_verity, {
+    // remove the keys from the repositories
+    let mut config = default_config().await?;
+    for (_, repo) in config.repositories.iter_mut() {
+        repo.key.take();
+    }
+
+    let mut runtime = Runtime::launch_with_config(config).await?;
+
+    // install test container & resource
+    runtime.install(get_test_resource_npk()).could_fail();
+    runtime.install(get_test_container_npk()).could_fail();
+
+    let data_dir = Path::new("target/northstar/data/test_container");
+    fs::create_dir_all(&data_dir).await?;
+
+    let input_file = data_dir.join("input.txt");
+
+    // Write the input to the test_container
+    fs::write(&input_file, b"cat /resource/hello").await?;
+
+    // Start the test_container process
+    runtime.start("test_container").expect_ok()?;
+
+    logger::assume("hello from test resource", Duration::from_secs(5)).await?;
+
+    // The container might have finished at this point
+    runtime.stop("test_container").could_fail();
+
+    // Remove the temporary data directory
+    fs::remove_dir_all(&data_dir).await?;
 
     runtime.uninstall("test_container", "0.0.1").expect_ok()?;
     runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
