@@ -211,14 +211,13 @@ async fn runtime_task(
 
     info!(
         "Mounted {} containers",
-        state.applications.len() + state.resources.len()
+        state.applications().count() + state.resources().count()
     );
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
     let autostart_apps = state
-        .applications
-        .values()
+        .applications()
         .filter(|app| app.manifest().autostart.unwrap_or_default())
         .map(|app| app.name().to_string())
         .collect::<Vec<Name>>();

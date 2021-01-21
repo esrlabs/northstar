@@ -64,28 +64,14 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-pub struct MountControl {
+pub(super) struct MountControl {
     dm: dm::Dm,
     lc: LoopControl,
     device_mapper_dev: String,
 }
 
-/// Creates the mount point directory for the corresponding container
-async fn create_mount_point(run_dir: &Path, manifest: &Manifest) -> Result<PathBuf, Error> {
-    let mnt = run_dir
-        .join(&manifest.name)
-        .join(manifest.version.to_string());
-    if !mnt.exists() {
-        info!("Creating mount point {}", mnt.display());
-        fs::create_dir_all(&mnt)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to create directory {}", mnt.display()), e))?;
-    }
-    Ok(mnt)
-}
-
 impl MountControl {
-    pub async fn new(config: &Config) -> Result<MountControl, Error> {
+    pub(super) async fn new(config: &Config) -> Result<MountControl, Error> {
         let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
             .await
             .map_err(Error::LoopDevice)?;
@@ -166,6 +152,37 @@ impl MountControl {
         Ok(container)
     }
 
+    pub(super) async fn umount_npk(
+        &self,
+        container: &Container,
+        wait_for_dm: bool,
+    ) -> Result<(), Error> {
+        debug!("Unmounting {}", container.root.display());
+        task::block_in_place(|| nix::mount::umount(&container.root).map_err(Error::Os))?;
+
+        if wait_for_dm {
+            debug!("Waiting for dm device removal");
+            wait_for_file_deleted(&container.device, std::time::Duration::from_secs(5)).await?;
+        }
+
+        debug!("Removing mountpoint {}", container.root.display());
+        // Root which is the container version
+        fs::remove_dir(&container.root)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
+        // Container name
+        fs::remove_dir(
+            container
+                .root
+                .parent()
+                .expect("Failed to get parent dir of container!"),
+        )
+        .await
+        .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
+
+        Ok(())
+    }
+
     async fn create_dm_device(&self, name: &str) -> Result<PathBuf, Error> {
         let dm_device = self
             .dm
@@ -183,7 +200,7 @@ impl MountControl {
         )))
     }
 
-    pub async fn verity_setup(
+    async fn verity_setup(
         &self,
         dev: &str,
         verity: &VerityHeader,
@@ -309,37 +326,6 @@ impl MountControl {
     }
 }
 
-pub async fn umount_npk(container: &Container, wait_for_dm: bool) -> Result<(), Error> {
-    unmount(&container.root).await?;
-
-    if wait_for_dm {
-        debug!("Waiting for dm device removal");
-        wait_for_file_deleted(&container.device, std::time::Duration::from_secs(5)).await?;
-    }
-
-    debug!("Removing mountpoint {}", container.root.display());
-    // Root which is the container version
-    fs::remove_dir(&container.root)
-        .await
-        .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
-    // Container name
-    fs::remove_dir(
-        container
-            .root
-            .parent()
-            .expect("Failed to get parent dir of container!"),
-    )
-    .await
-    .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
-
-    Ok(())
-}
-
-async fn unmount(target: &Path) -> Result<(), Error> {
-    debug!("Unmounting {}", target.display(),);
-    task::block_in_place(|| nix::mount::umount(target).map_err(Error::Os))
-}
-
 async fn mount(
     dev: &Path,
     target: &Path,
@@ -362,6 +348,20 @@ async fn mount(
     debug!("Mounting took {:.03}s", mount_duration.as_fractional_secs());
 
     Ok(())
+}
+
+/// Creates the mount point directory for the corresponding container
+async fn create_mount_point(run_dir: &Path, manifest: &Manifest) -> Result<PathBuf, Error> {
+    let mnt = run_dir
+        .join(&manifest.name)
+        .join(manifest.version.to_string());
+    if !mnt.exists() {
+        info!("Creating mount point {}", mnt.display());
+        fs::create_dir_all(&mnt)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to create directory {}", mnt.display()), e))?;
+    }
+    Ok(mnt)
 }
 
 async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {

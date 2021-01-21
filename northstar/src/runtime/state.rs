@@ -17,7 +17,7 @@ use super::{
     error::Error,
     keys,
     minijail::{Minijail, Process},
-    mount::{umount_npk, MountControl},
+    mount::MountControl,
     process::ExitStatus,
     Event, EventTx, RepositoryId,
 };
@@ -49,11 +49,11 @@ pub struct Repository {
 pub struct State {
     events_tx: EventTx,
     repositories: HashMap<RepositoryId, Repository>,
-    pub applications: HashMap<Name, Application>,
-    pub resources: HashMap<(Name, Version), Container>,
-    pub config: Config,
+    applications: HashMap<Name, Application>,
+    resources: HashMap<(Name, Version), Container>,
+    config: Config,
     minijail: Minijail,
-    pub mount_ctrl: MountControl,
+    mount_control: MountControl,
 }
 
 #[derive(Debug)]
@@ -176,7 +176,7 @@ impl State {
             resources: HashMap::new(),
             config: config.clone(),
             minijail,
-            mount_ctrl: MountControl::new(&config).await.map_err(Error::Mount)?,
+            mount_control: MountControl::new(&config).await.map_err(Error::Mount)?,
         };
 
         // mount all the containers from each repository
@@ -377,7 +377,8 @@ impl State {
                 .get(&container.repository)
                 .map(|r| r.key.is_some())
                 .unwrap_or(false);
-            umount_npk(container, wait_for_dm)
+            self.mount_control
+                .umount_npk(container, wait_for_dm)
                 .await
                 .map_err(Error::Mount)?;
         }
@@ -388,7 +389,8 @@ impl State {
                 .get(&container.repository)
                 .map(|r| r.key.is_some())
                 .unwrap_or(false);
-            umount_npk(container, wait_for_dm)
+            self.mount_control
+                .umount_npk(container, wait_for_dm)
                 .await
                 .map_err(Error::Mount)?;
         }
@@ -442,7 +444,7 @@ impl State {
 
         // Install and mount npk
         let mounted_container = self
-            .mount_ctrl
+            .mount_control
             .mount_npk(&package_in_repository, &repository, &self.config.run_dir)
             .await
             .map_err(Error::Mount)?;
@@ -524,7 +526,8 @@ impl State {
                     .get(&resource_container.repository)
                     .map(|r| r.key.is_some())
                     .unwrap_or(false);
-                umount_npk(resource_container, wait_for_dm)
+                self.mount_control
+                    .umount_npk(resource_container, wait_for_dm)
                     .await
                     .map_err(Error::Mount)?;
                 self.resources.remove(&(name.to_owned(), version.clone()));
@@ -549,7 +552,8 @@ impl State {
                         .get(&container.repository)
                         .map(|r| r.key.is_some())
                         .unwrap_or(false);
-                    umount_npk(container, wait_for_dm)
+                    self.mount_control
+                        .umount_npk(container, wait_for_dm)
                         .await
                         .map_err(Error::Mount)?;
                     self.applications.remove(name);
@@ -693,7 +697,7 @@ impl State {
 
         while let Ok(Some(entry)) = dir.next_entry().await {
             let container = self
-                .mount_ctrl
+                .mount_control
                 .mount_npk(&entry.path(), repo, &self.config.run_dir)
                 .await
                 .map_err(Error::Mount)?;
