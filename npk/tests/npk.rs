@@ -71,12 +71,12 @@ env:
         (pub_key, prv_key)
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn pack_npk() {
         create_test_npk(&create_tmp_dir().await).await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn pack_npk_no_manifest() {
         let key_dir = create_tmp_dir().await;
         let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
@@ -89,7 +89,7 @@ env:
         .expect_err("Invalid manifest");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn pack_npk_no_dest() {
         let src = create_tmp_dir().await;
         let key_dir = create_tmp_dir().await;
@@ -100,7 +100,7 @@ env:
             .expect_err("Invalid destination dir");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn pack_npk_no_keys() {
         let src = create_tmp_dir().await;
         create_test_manifest(&src).await;
@@ -109,7 +109,7 @@ env:
             .expect_err("Invalid key dir");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn unpack_npk() {
         let npk = create_test_npk(&create_tmp_dir().await).await;
         assert!(npk.exists());
@@ -122,19 +122,19 @@ env:
         assert_eq!(TEST_MANIFEST_UNPACKED, manifest);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn gen_key_pair() {
         gen_test_key(&create_tmp_dir().await).await;
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn gen_key_pair_no_dest() {
         gen_key(&TEST_KEY_NAME, &Path::new("invalid"))
             .await
             .expect_err("Invalid key dir");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn do_not_overwrite_keys() -> Result<(), anyhow::Error> {
         let tmp = create_tmp_dir().await;
         gen_key(&TEST_KEY_NAME, &tmp).await.expect("Generate keys");
