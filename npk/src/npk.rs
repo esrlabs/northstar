@@ -18,7 +18,6 @@ use crate::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Manifest, Mount, MountFlag, Version},
 };
-use const_format::concatcp;
 use ed25519_dalek::{
     ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
     SECRET_KEY_LENGTH,
@@ -55,17 +54,15 @@ const PSEUDO_DIR_UID: u32 = 1000;
 const PSEUDO_DIR_GID: u32 = 1000;
 
 // File name and directory components
-pub const FS_IMG_NAME: &str = concatcp!(FS_IMG_BASE, ".", FS_IMG_EXT);
-pub const MANIFEST_NAME: &str = concatcp!(MANIFEST_BASE, ".", MANIFEST_EXT);
-pub const SIGNATURE_NAME: &str = concatcp!(SIGNATURE_BASE, ".", SIGNATURE_EXT);
-const NPK_EXT: &str = "npk";
-const ROOT_DIR_NAME: &str = "root";
+pub const FS_IMG_NAME: &str = "fs.img";
+pub const MANIFEST_NAME: &str = "manifest.yaml";
+pub const SIGNATURE_NAME: &str = "signature.yaml";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
 const MANIFEST_BASE: &str = "manifest";
 const MANIFEST_EXT: &str = "yaml";
-const SIGNATURE_BASE: &str = "signature";
-const SIGNATURE_EXT: &str = "yaml";
+const NPK_EXT: &str = "npk";
+const ROOT_DIR_NAME: &str = "root";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -230,11 +227,11 @@ impl Npk {
         })
     }
 
-    pub async fn verify(&mut self, key: &ed25519_dalek::PublicKey) -> Result<(), Error> {
+    pub async fn verify(&mut self, pubkey: &ed25519_dalek::PublicKey) -> Result<(), Error> {
         let sign_yaml = self.signature_yaml().await?;
         let hashes_string = sign_yaml.split("---").next().unwrap_or_default();
         let signature = self.signature().await?;
-        key.verify_strict(hashes_string.as_bytes(), &signature)
+        task::block_in_place(|| pubkey.verify_strict(hashes_string.as_bytes(), &signature))
             .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))
     }
 
@@ -313,8 +310,8 @@ impl Npk {
         }
     }
 
-    pub async fn into_inner(self) -> ZipArchive<std::fs::File> {
-        self.inner
+    pub fn into_inner(self) -> tokio::fs::File {
+        tokio::fs::File::from_std(self.inner.into_inner())
     }
 }
 
@@ -640,7 +637,7 @@ async fn gen_hashes_yaml(
     Ok(hashes)
 }
 
-async fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String, Error> {
+async fn sign_npk(key: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String, Error> {
     let fsimg_size = task::block_in_place(|| fs::metadata(&fsimg))
         .map_err(|e| Error::Os {
             context: format!("Fail to read file size: '{}'", &fsimg.display()),
@@ -648,7 +645,7 @@ async fn sign_npk(key_file: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<
         })?
         .len();
     let root_hash = append_dm_verity_block(&fsimg, fsimg_size).map_err(Error::Verity)?;
-    let key_pair = read_keypair(&key_file).await?;
+    let key_pair = read_keypair(&key).await?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest, &fsimg, fsimg_size, &root_hash).await?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml).await;
     Ok(signature_yaml)
@@ -720,7 +717,7 @@ async fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
 }
 
 async fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
-    let signature = key_pair.sign(hashes_yaml.as_bytes());
+    let signature = task::block_in_place(|| key_pair.sign(hashes_yaml.as_bytes()));
     let signature_base64 = base64::encode(signature);
     let key_id = "northstar";
     let signature_yaml = format!(
@@ -735,29 +732,25 @@ async fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Erro
     let tmp_root = tmp.path().join(&ROOT_DIR_NAME);
     let options = fs_extra::dir::CopyOptions::new();
 
-    task::block_in_place(|| -> Result<(), Error> {
-        if src_root.exists() {
-            fs_extra::dir::copy(&src_root, &tmp, &options).map_err(|e| {
-                Error::Io(format!(
-                    "Failed to copy from '{}' to '{}': {}",
-                    &src_root.display(),
-                    &tmp.path().display(),
-                    e
-                ))
-            })?;
-            Ok(())
-        } else {
-            // Create empty root dir at destination if we have nothing to copy
-            fs_extra::dir::create(&tmp_root, false).map_err(|e| {
-                Error::Io(format!(
-                    "Failed to create directory '{}': {}",
-                    &tmp_root.display(),
-                    e
-                ))
-            })?;
-            Ok(())
-        }
-    })?;
+    if src_root.exists() {
+        task::block_in_place(|| fs_extra::dir::copy(&src_root, &tmp, &options)).map_err(|e| {
+            Error::Io(format!(
+                "Failed to copy from '{}' to '{}': {}",
+                &src_root.display(),
+                &tmp.path().display(),
+                e
+            ))
+        })?;
+    } else {
+        // Create empty root dir at destination if we have nothing to copy
+        task::block_in_place(|| fs_extra::dir::create(&tmp_root, false)).map_err(|e| {
+            Error::Io(format!(
+                "Failed to create directory '{}': {}",
+                &tmp_root.display(),
+                e
+            ))
+        })?;
+    }
     Ok(tmp_root)
 }
 
@@ -775,7 +768,7 @@ async fn create_squashfs_img(
             &MKSQUASHFS_BIN
         )));
     }
-    if !task::block_in_place(|| dst.exists()) {
+    if !dst.exists() {
         return Err(Error::Squashfs(format!(
             "Output directory '{}' does not exist",
             &dst.display()
@@ -823,7 +816,7 @@ async fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
             &UNSQUASHFS_BIN
         )));
     }
-    if !task::block_in_place(|| image.exists()) {
+    if !image.exists() {
         return Err(Error::Squashfs(format!(
             "Squashfs image '{}' does not exist",
             &image.display()
@@ -912,7 +905,7 @@ async fn write_npk<W: Write + Seek>(
 }
 
 async fn assume_non_existing(path: &Path) -> Result<(), Error> {
-    if task::block_in_place(|| path.exists()) {
+    if path.exists() {
         Err(Error::Io(format!(
             "File '{}' already exists",
             &path.display()

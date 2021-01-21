@@ -177,7 +177,7 @@ mounts:
         (pub_key, prv_key)
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn inspect_npk() {
         let npk = create_test_npk(&create_tmp_dir()).await;
         assert!(npk.exists());
@@ -185,7 +185,7 @@ mounts:
         inspect(&npk, false).await.expect("Inspect NPK");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn inspect_npk_no_file() {
         inspect(&Path::new("invalid"), true)
             .await

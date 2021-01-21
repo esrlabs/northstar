@@ -94,7 +94,9 @@ test!(missing_resource_container, {
     let response = runtime.install(get_test_container_npk().await);
     assert!(matches!(
         response.0,
-        Ok(api::model::Response::Err(api::model::Error::MissingResource(_)))
+        Ok(api::model::Response::Err(
+            api::model::Error::MissingResource(_)
+        ))
     ));
 
     runtime.shutdown()
