@@ -30,13 +30,11 @@ use npk::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    fmt,
-    fs::File,
-    iter,
+    fmt, iter,
     path::{Path, PathBuf},
     result,
 };
-use tokio::{fs, time};
+use tokio::{fs, fs::File, time};
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -407,9 +405,11 @@ impl State {
             )
         })?;
 
-        let file = std::fs::File::open(&npk)
+        let file = File::open(&npk)
+            .await
             .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
         let manifest = Npk::new(file)
+            .await
             .map_err(Error::Npk)?
             .manifest()
             .await
@@ -493,8 +493,10 @@ impl State {
             })?;
             while let Ok(Some(entry)) = dir.next_entry().await {
                 let file = File::open(entry.path().as_path())
+                    .await
                     .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
                 let manifest = Npk::new(file)
+                    .await
                     .map_err(Error::Npk)?
                     .manifest()
                     .await

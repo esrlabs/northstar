@@ -17,11 +17,11 @@ use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use npk::npk;
 use std::{
-    fs::File,
     io::{self, Read},
     path::Path,
     process::Command,
 };
+use tokio::fs::File;
 
 pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
     if short {
@@ -32,8 +32,12 @@ pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
 }
 
 pub async fn inspect_short(npk: &Path) -> Result<()> {
-    let mut npk =
-        Npk::new(File::open(&npk).context(format!("Failed to open NPK at '{}'", &npk.display()))?)?;
+    let mut npk = Npk::new(
+        File::open(&npk)
+            .await
+            .context(format!("Failed to open NPK at '{}'", &npk.display()))?,
+    )
+    .await?;
     let manifest = npk.manifest().await?;
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
