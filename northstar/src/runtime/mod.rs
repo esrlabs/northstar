@@ -214,6 +214,11 @@ async fn runtime_task(
         state.applications().count() + state.resources().count()
     );
 
+    // Initialize console
+    let console = console::Console::new(&config.console_address, &event_tx);
+    // Start to listen for incoming connections
+    console.listen().await.map_err(Error::Console)?;
+
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
     let autostart_apps = state
@@ -225,11 +230,6 @@ async fn runtime_task(
         info!("Autostarting {}", app);
         state.start(&app).await.ok();
     }
-
-    // Initialize console
-    let console = console::Console::new(&config.console_address, &event_tx);
-    // Start to listen for incoming connections
-    console.listen().await.map_err(Error::Console)?;
 
     // Wait for a external shutdown request
     let shutdown_tx = event_tx.clone();
