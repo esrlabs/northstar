@@ -48,6 +48,18 @@ impl ApiResponse {
         }
     }
 
+    pub fn expect_err_kind(self, err: api::model::Error) -> Result<()> {
+        use std::mem;
+        match self.0 {
+            Ok(api::model::Response::Err(e))
+                if mem::discriminant(&err) == mem::discriminant(&e) =>
+            {
+                Ok(())
+            }
+            _ => Err(eyre!("Response is not an error")),
+        }
+    }
+
     pub fn expect_err(self, err: api::model::Error) -> Result<()> {
         match self.0 {
             Ok(api::model::Response::Err(e)) if err == e => Ok(()),

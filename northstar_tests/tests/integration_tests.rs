@@ -90,16 +90,10 @@ test!(missing_resource_container, {
     let mut runtime = Runtime::launch().await?;
 
     // install test container without resource
-    runtime.install(get_test_container_npk()).could_fail();
-
     // Expect MissingResource Error
-    runtime
-        .start("test_container")
-        .expect_err(api::model::Error::MissingResource(
-            "test_resource".to_owned(),
-        ))?;
-
-    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
+    runtime.install(get_test_container_npk()).expect_err_kind(
+        api::model::Error::MissingResource("test_resource".to_owned()),
+    )?;
 
     runtime.shutdown()
 });
