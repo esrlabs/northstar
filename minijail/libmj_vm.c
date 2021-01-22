@@ -468,6 +468,7 @@ out:
 
 /*
  * Create a sparse file for the data partition
+ * If the file already exists, we do nothing.
  */
 static int setup_data_fsimg(char *datadir)
 {
@@ -480,6 +481,11 @@ static int setup_data_fsimg(char *datadir)
 	char cmdbuf[PATH_MAX];
 
 	setstr(path, "%s/%s", datadir, FS_IMG);
+	error = access(path, F_OK);
+	if (error == 0)
+		goto out;
+
+	error = 0;
 
 	/*
 	 * Make sure any uid/gid combo can R/W to the image

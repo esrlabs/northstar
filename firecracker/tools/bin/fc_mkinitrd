@@ -76,7 +76,7 @@ populate() {
 
 		docker run --rm \
 			-v $mntpoint:/foo -v $mkalpine:/mkalpine \
-			arm64v8/alpine /mkalpine
+			arm64v8/alpine /mkalpine /foo
 
 		# Add external (non-Alpine) files
 		echo "Adding tools"

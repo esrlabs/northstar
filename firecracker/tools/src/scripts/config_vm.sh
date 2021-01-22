@@ -144,6 +144,56 @@ verify_file() {
 	return $status
 }
 
+# Since root is ronly, the SSH keys are symlinked to /data/etc/ssh
+start_ssh() {
+	local status link
+
+	logit "starting ssh server"
+
+	# sshd requires a writable /var/log/btmp
+	/bin/mount -t tmpfs none /var
+	if [ $? -ne 0 ] ; then
+		echo "Can not mount /var"
+		exit 1
+	fi
+	mkdir /var/empty
+	mkdir /var/log
+	touch /var/log/btmp
+	chmod 0600 /var/log/btmp
+	mkdir /var/run
+
+	mkdir /dev/pts
+	/bin/mount -t devpts devpts /dev/pts
+	if [ $? -ne 0 ] ; then
+		echo "Can not mount /dev/pts"
+		exit 1
+	fi
+
+	if [ ! -d /data/etc/ssh ] ; then
+		mkdir /data/etc
+		mkdir /data/etc/ssh
+
+		link=$(readlink /etc/ssh)
+		if [ "$link" != /data/etc/ssh ] ; then
+			echo "Writable ssh symlink missing"
+			exit 1
+		fi
+
+		cp /etc/ssh.old/* /data/etc/ssh
+
+		if [ ! -e /etc/ssh/ssh_host_rs_key ] ; then
+			/usr/bin/ssh-keygen -A
+			status=$?
+			if [ $status -ne 0 ] ; then
+				echo "Can not create ssh host keys"
+				exit $status
+			fi
+		fi
+	fi
+
+	/usr/sbin/sshd &
+}
+
 logit "start VM config"
 
 wait_for_file $filename
@@ -163,6 +213,9 @@ ifup $filename
 
 # Mount the optional filesystems
 do_mounts $filename
+
+# Start ssh daemon
+start_ssh
 
 logit "End VM config"
 
