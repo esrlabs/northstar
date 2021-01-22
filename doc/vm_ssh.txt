@@ -1,0 +1,42 @@
+For debug purposes, it is possible to ssh to a VM that
+is running in a container. 
+
+On android, use an ssh client such as dropbear that is intended for 
+small embedded environments (https://matt.ucc.asn.au/dropbear/dropbear.html).
+
+TL;DR
+	user: ncracker
+	pw:   EndlichTrexit
+
+For example, on android the following will connect to the VM
+that is configured as follows:
+  netconf:
+    enable_namespace: true
+    namespace_uniq_subnet: 20
+  use_vm: true
+
+dbclient -y ncracker@172.30.20.20
+
+The user ncracker is configured as a system user, and is the
+suduers file. Note that the home directory for the ncracker user
+is not writeable, as it is in the root under /home/ncracker.
+
+When first booting, the sshd may appear to hang. This is because
+it is performing a getrandom() call, and the system needs to wait
+for sufficient entropy. This unforunately is a well known issue with
+VMs that do not have a HW random number generator that can be used
+to seed the VM.
+
+The sshd is started as part of the VM configuration. It requires
+that a writeable directory exist for the host keys, so a symlink
+is established from /etc/ssh to /data/etc/ssh . The sshd also requires
+some addditional accessible files in /var, so a tmpfs filesystem is
+mounted. 
+
+Lastly, to allow for ptys for the ssh login, the devpts filesystem is
+mounted at /dev/pts.
+
+The configuration of SSH is done in two places. First, the Alpine linux
+packages are added to the initrd by the firecracker/tools/bin/fc_mkalpine
+script. During the VM boot process, the sshd is configured and started
+by the /bin/config_vm.sh script.

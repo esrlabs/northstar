@@ -1,17 +1,69 @@
 #!/bin/sh
 #
-# Script to be run to populate an Alpine image
+# Script to be run to populate an Alpine image.
+#
+
+if [ $# -ne 1 ] ; then
+	echo "Usage: $0 <image mountpoint>"
+	exit 1
+fi
+image=$1
 
 set -o errexit
 set -o pipefail
 
-apk add util-linux
-apk add jq
-apk add mosquitto-clients
-for d in bin etc lib root sbin usr; do tar c "/$d" | tar x -C /foo; done
-for dir in dev proc run sys var; do mkdir /foo/${dir}; done
-mkdir /foo/data
-mkdir /foo/tmp
-mkdir /foo/app
-chmod 777 /foo/tmp
+
+default_image() {
+	apk add util-linux
+	apk add jq
+	apk add mosquitto-clients
+	apk add strace
+
+	return 0
+}
+
+copy_image() {
+	local dir
+
+	for dir in bin etc lib root sbin usr home; do
+		find $dir | cpio -pdu $image
+	done
+
+	for dir in dev proc run sys var; do
+		mkdir ${image}/${dir};
+	done
+
+	if [ ! -d ${image}/data ] ; then
+		mkdir ${image}/data
+	fi
+	mkdir ${image}/tmp
+	mkdir ${image}/app
+	chmod 777 ${image}/tmp
+
+	return 0
+}
+
+add_ssh() {
+	apk add openssh
+	apk add sudo
+
+	# Add default user
+	mkdir /home/ncracker
+	/usr/sbin/adduser --system --shell /bin/ash ncracker
+	echo "ncracker:EndlichTrexit" | chpasswd
+	echo "ncracker ALL=(ALL) ALL" >> /etc/sudoers
+
+	# Since root is ronly, we make a symlink to the writable
+	# data partition for the host keys. When first mounted,
+	# the dirs will be created by the vm config
+	mv /etc/ssh /etc/ssh.old
+	ln -s /data/etc/ssh /etc/ssh
+
+	return 0
+}
+
+default_image
+add_ssh
+copy_image
+
 exit 0

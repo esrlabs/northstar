@@ -1,0 +1,17 @@
+name: sshtest
+version: 0.0.1
+init: /startup.sh
+mounts:
+    /bin:
+      host: /system/bin
+    /lib:
+      host: /lib
+    /system:
+      host: /system
+    /dev: full
+    /sys:
+      host: /sys
+netconf:
+  enable_namespace: true
+  namespace_uniq_subnet: 20
+use_vm: true
