@@ -97,6 +97,14 @@ impl Command {
     }
 }
 
+const HELP: &str = r"containers:                   List installed containers
+repositories:                 List available repositories
+shutdown:                     Stop the northstar runtime
+start <name>:                 Start application
+stop <name>:                  Stop application
+install <npk-file> <repo-id>: Install npk into repository
+uninstall <name> <version>:   Unstall npk";
+
 async fn process<W: std::io::Write>(
     client: &mut Client,
     output: &mut W,
@@ -105,6 +113,9 @@ async fn process<W: std::io::Write>(
     let mut split = input.split_whitespace();
     if let Some(cmd) = split.next() {
         match cmd {
+            "help" | "h" => {
+                writeln!(output, "{}", HELP)?;
+            }
             "containers" | "ls" => {
                 let containers = client.containers().await?;
                 pretty::containers(output, &containers)?;
@@ -178,12 +189,12 @@ async fn process<W: std::io::Write>(
                     )));
                 }
 
-                let repository = if let Some(repository) = split.next() {
+                let repo_id = if let Some(repository) = split.next() {
                     repository
                 } else {
                     return Ok(Some("Missing repository argument".into()));
                 };
-                return match client.install(npk, repository).await {
+                return match client.install(npk, repo_id).await {
                     Err(Error::Api(api::model::Error::RepositoryIdUnknown(id, known))) => Ok(Some(
                         format!("No such repository id: {}, available: {:?}", id, known),
                     )),

@@ -36,6 +36,8 @@ use std::{
 use tokio::{sync::mpsc, task};
 
 const COMMANDS: &[&str] = &[
+    "help",
+    "h",
     "start",
     "stop",
     "containers",

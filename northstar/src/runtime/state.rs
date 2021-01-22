@@ -403,7 +403,7 @@ impl State {
         let repository = self.repositories.get(id).ok_or_else(|| {
             Error::RepositoryIdUnknown(
                 id.to_owned(),
-                self.repositories().keys().map(|id| id.into()).collect(),
+                self.repositories.keys().map(|id| id.into()).collect(),
             )
         })?;
 
@@ -438,6 +438,20 @@ impl State {
             warn!("Container with the same name and version already installed");
             return Err(Error::ContainerAlreadyInstalled(manifest.name.clone()));
         }
+        // check if required resources exist
+        let required_resources = manifest.mounts.values().filter_map(|m| match m {
+            Mount::Resource { name, version, .. } => Some((name, version)),
+            _ => None,
+        });
+
+        for (name, version) in required_resources {
+            if let Ok(false) = self.resource_available(name, version).await {
+                return Err(Error::MissingResource(format!(
+                    "Resource {}.{} unavailable",
+                    name, version
+                )));
+            }
+        }
 
         // Copy tmp file into repository
         fs::copy(&npk, &package_in_repository)
@@ -461,6 +475,10 @@ impl State {
         .await;
 
         Ok(())
+    }
+
+    async fn resource_available(&self, name: &str, version: &Version) -> Result<bool, Error> {
+        Ok(self.find_installed_npk(name, version).await?.is_some())
     }
 
     // finds the npk that contains either an application that matches the id
@@ -686,10 +704,12 @@ impl State {
 
     /// Mounts all the `npk` files in the specified repository
     async fn mount_repository(&self, repo_id: &str) -> Result<Vec<Container>, Error> {
-        let repo = self
-            .repositories
-            .get(repo_id)
-            .ok_or_else(|| Error::RepositoryNotFound(repo_id.to_string()))?;
+        let repo = self.repositories.get(repo_id).ok_or_else(|| {
+            Error::RepositoryIdUnknown(
+                repo_id.to_string(),
+                self.repositories().keys().map(|id| id.into()).collect(),
+            )
+        })?;
 
         info!("Mounting NPKs from {}", repo.dir.display());
         let mut dir = fs::read_dir(&repo.dir)
