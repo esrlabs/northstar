@@ -91,9 +91,13 @@ test!(missing_resource_container, {
 
     // install test container without resource
     // Expect MissingResource Error
-    runtime.install(get_test_container_npk()).expect_err_kind(
-        api::model::Error::MissingResource("test_resource".to_owned()),
-    )?;
+    let response = runtime.install(get_test_container_npk());
+    assert!(matches!(
+        response.0,
+        Ok(api::model::Response::Err(
+            api::model::Error::MissingResource(_)
+        ))
+    ));
 
     runtime.shutdown()
 });

@@ -191,7 +191,6 @@ impl Client {
     /// ```
     pub async fn containers(&self) -> Result<Vec<Container>, Error> {
         match self.request(Request::Containers).await? {
-            Response::Ok(()) => Err(Error::Protocol),
             Response::Containers(containers) => Ok(containers),
             Response::Err(e) => Err(Error::Api(e)),
             _ => Err(Error::Protocol),
@@ -213,7 +212,6 @@ impl Client {
     /// ```
     pub async fn repositories(&self) -> Result<HashMap<RepositoryId, Repository>, Error> {
         match self.request(Request::Repositories).await? {
-            Response::Ok(()) => Err(Error::Protocol),
             Response::Err(e) => Err(Error::Api(e)),
             Response::Repositories(repositories) => Ok(repositories),
             _ => Err(Error::Protocol),
