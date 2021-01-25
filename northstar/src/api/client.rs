@@ -319,6 +319,15 @@ impl Client {
             _ => Err(Error::Protocol),
         }
     }
+
+    /// Stop the runtime
+    pub async fn shutdown(&self) -> Result<(), Error> {
+        match self.request(Request::Shutdown).await? {
+            Response::Ok(()) => Ok(()),
+            Response::Err(e) => Err(Error::Api(e)),
+            _ => Err(Error::Protocol),
+        }
+    }
 }
 
 /// Stream notifications

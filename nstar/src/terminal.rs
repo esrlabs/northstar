@@ -45,6 +45,7 @@ const COMMANDS: &[&str] = &[
     "repositories",
     "install",
     "uninstall",
+    "shutdown",
 ];
 
 pub struct Terminal {
