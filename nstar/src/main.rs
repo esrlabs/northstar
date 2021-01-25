@@ -218,6 +218,9 @@ async fn process<W: std::io::Write>(
                 };
                 client.uninstall(name, &version).await?;
             }
+            "shutdown" => {
+                client.shutdown().await?;
+            }
             c => return Ok(Some(format!("Unimplemented command \"{}\"", c))),
         }
     }
