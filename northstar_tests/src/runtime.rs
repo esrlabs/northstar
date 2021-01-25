@@ -38,25 +38,13 @@ const TIMEOUT: time::Duration = time::Duration::from_secs(3);
 pub struct Runtime(runtime::Runtime);
 
 #[must_use = "Shoud be checked for expected response"]
-pub struct ApiResponse(Result<api::model::Response>);
+pub struct ApiResponse(pub Result<api::model::Response>);
 
 impl ApiResponse {
     pub fn expect_ok(self) -> Result<()> {
         match self.0 {
             Ok(api::model::Response::Ok(())) => Ok(()),
             _ => Err(eyre!("Response is not ok")),
-        }
-    }
-
-    pub fn expect_err_kind(self, err: api::model::Error) -> Result<()> {
-        use std::mem;
-        match self.0 {
-            Ok(api::model::Response::Err(e))
-                if mem::discriminant(&err) == mem::discriminant(&e) =>
-            {
-                Ok(())
-            }
-            _ => Err(eyre!("Response is not an error")),
         }
     }
 
