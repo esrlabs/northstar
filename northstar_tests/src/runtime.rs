@@ -15,14 +15,19 @@
 //! Controls Northstar runtime instances
 
 use color_eyre::eyre::{eyre, Result, WrapErr};
+use nix::mount::MsFlags;
 use northstar::{
     api,
     runtime::{self},
 };
-use std::{future::Future, path::Path};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+};
+use tempfile::TempDir;
 use tokio::{fs, time, time::timeout};
 
-pub use northstar::runtime::config::Config;
+pub use northstar::runtime::config::{Config, Repository};
 
 /// Returns the default northstar config
 pub async fn default_config() -> Result<Config> {
@@ -33,9 +38,6 @@ pub async fn default_config() -> Result<Config> {
 }
 
 const TIMEOUT: time::Duration = time::Duration::from_secs(3);
-
-/// A running instance of northstar.
-pub struct Runtime(runtime::Runtime);
 
 #[must_use = "Shoud be checked for expected response"]
 pub struct ApiResponse(pub Result<api::model::Response>);
@@ -62,6 +64,9 @@ pub fn timeout_on<R>(f: impl Future<Output = R>) -> Result<R> {
     futures::executor::block_on(timeout(TIMEOUT, f)).wrap_err("Future timed out")
 }
 
+/// A running instance of northstar.
+pub struct Runtime(runtime::Runtime);
+
 impl Runtime {
     /// Launches an instance of north
     pub async fn launch() -> Result<Runtime> {
@@ -69,11 +74,23 @@ impl Runtime {
     }
 
     /// Launches an instance of north with the specified configuration
-    pub async fn launch_with_config(config: Config) -> Result<Runtime> {
+    pub async fn launch_with_config(mut config: Config) -> Result<Runtime> {
+        // It is expected that the "default" repository contains the example containers
+        let default_repository = &mut config
+            .repositories
+            .get_mut("default")
+            .ok_or(eyre!("No \"default\" repository in configuration"))?
+            .dir;
+
+        // Discard changes to the default repository at the end of the test
+        *default_repository =
+            tokio::task::block_in_place(|| overlay_directory(default_repository))?;
+
         let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
             .wrap_err("Launching northstar timed out")
             .and_then(|result| result.wrap_err("Failed to instantiate northstar runtime"))?;
+
         Ok(Runtime(runtime))
     }
 
@@ -129,4 +146,38 @@ impl Runtime {
             .and_then(|result| result.wrap_err("Failed to shutdown runtime"))
             .map(|_| ())
     }
+}
+
+/// Returns a path to a directory overlay-ed on top of the input directory
+/// Notice that this function is meant to be called inside a mount namespace
+/// Every change done to this directory is discarded at the end of the test
+fn overlay_directory(dir: &Path) -> Result<PathBuf> {
+    let repository = TempDir::new()?.into_path();
+    let workdir = repository.join("workdir");
+    let target = repository.join("target");
+    let upper = repository.join("upper");
+
+    std::fs::create_dir(&workdir)?;
+    std::fs::create_dir(&target)?;
+    std::fs::create_dir(&upper)?;
+
+    use std::os::unix::ffi::OsStrExt;
+    let mut options = Vec::new();
+    options.extend(b"lowerdir=");
+    options.extend_from_slice(dir.as_os_str().as_bytes());
+    options.extend(b",upperdir=");
+    options.extend_from_slice(upper.as_os_str().as_bytes());
+    options.extend(b",workdir=");
+    options.extend_from_slice(workdir.as_os_str().as_bytes());
+
+    nix::mount::mount(
+        Some("overlay"),
+        &target,
+        Some("overlay"),
+        MsFlags::empty(),
+        Some(&*options),
+    )
+    .map_err(|e| eyre!("Failed to mount overlay repository ({})", e))?;
+
+    Ok(target)
 }
