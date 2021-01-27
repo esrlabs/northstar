@@ -120,7 +120,7 @@ test!(data_and_resource_mounts, {
     // Start the test_container process
     runtime.start("test_container").expect_ok()?;
 
-    logger::assume("hello from test resource", Duration::from_secs(5)).await?;
+    logger::expect_entry("hello from test resource", Duration::from_secs(5)).await?;
 
     // The container might have finished at this point
     runtime.stop("test_container").could_fail();
@@ -198,6 +198,33 @@ test!(crashing_containers, {
     runtime.shutdown()
 });
 
+test!(check_uid_and_gid, {
+    let mut runtime = Runtime::launch().await?;
+
+    let data_dir = Path::new("target/northstar/data/").canonicalize()?;
+
+    // install test container
+    runtime.install(get_test_resource_npk().await).could_fail();
+    runtime.install(get_test_container_npk().await).could_fail();
+
+    let dir = data_dir.join("test_container".to_string());
+    fs::create_dir_all(&dir).await?;
+    fs::write(dir.join("input.txt"), b"whoami").await?;
+
+    // Start the test_container process
+    runtime.start(&"test_container".to_string()).expect_ok()?;
+
+    logger::expect_entry("uid: 1000, gid: 1000", Duration::from_secs(5)).await?;
+
+    // Try to stop the containers before issuing the shutdown
+    runtime.stop(&"test_container".to_string()).could_fail();
+
+    runtime.uninstall("test_container", "0.0.1").expect_ok()?;
+    runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
+
+    runtime.shutdown()
+});
+
 test!(mount_containers_without_verity, {
     // remove the keys from the repositories
     let mut config = default_config().await?;
@@ -222,7 +249,7 @@ test!(mount_containers_without_verity, {
     // Start the test_container process
     runtime.start("test_container").expect_ok()?;
 
-    logger::assume("hello from test resource", Duration::from_secs(5)).await?;
+    logger::expect_entry("hello from test resource", Duration::from_secs(5)).await?;
 
     // The container might have finished at this point
     runtime.stop("test_container").could_fail();

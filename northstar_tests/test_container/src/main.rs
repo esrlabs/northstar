@@ -38,6 +38,7 @@ enum TestCommands {
     Touch {
         path: PathBuf,
     },
+    Whoami,
     Loop,
 }
 
@@ -57,6 +58,7 @@ fn main() -> Result<()> {
             TestCommands::Echo { message } => echo(&message),
             TestCommands::Write { message, path } => write(&message, path.as_path())?,
             TestCommands::Touch { path } => touch(&path)?,
+            TestCommands::Whoami => whoami()?,
             TestCommands::Loop => loop {},
         };
     }
@@ -92,5 +94,12 @@ fn write(input: &str, path: &Path) -> Result<()> {
 
 fn touch(path: &Path) -> Result<()> {
     fs::File::create(path)?;
+    Ok(())
+}
+
+fn whoami() -> Result<()> {
+    let uid = nix::unistd::getuid();
+    let gid = nix::unistd::getgid();
+    println!("uid: {}, gid: {}", uid, gid);
     Ok(())
 }
