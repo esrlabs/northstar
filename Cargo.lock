@@ -2130,6 +2130,7 @@ name = "test_container"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "nix 0.19.1",
  "structopt",
 ]
 

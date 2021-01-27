@@ -64,7 +64,7 @@ impl log::Log for LogParser {
     fn flush(&self) {}
 }
 
-pub async fn assume(pattern: &str, timeout: Duration) -> Result<()> {
+pub async fn expect_entry(pattern: &str, timeout: Duration) -> Result<()> {
     let regex = Regex::new(pattern).expect("Invalid regex");
     let consume_log = task::spawn_blocking(move || loop {
         if let Some(line) = LOG_BUFFER.lock().unwrap().pop_front() {
