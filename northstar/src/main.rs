@@ -80,7 +80,7 @@ fn main() -> Result<(), Error> {
 }
 
 async fn run(config: Config) -> Result<(), Error> {
-    let mut runtime = runtime::Runtime::start(config)
+    let (runtime, stop) = runtime::Runtime::start(config)
         .await
         .context("Failed to start runtime")?;
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())
@@ -88,18 +88,19 @@ async fn run(config: Config) -> Result<(), Error> {
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
         .context("Failed to install sigterm handler")?;
 
-    let status = select! {
-        _ = sigint.recv() => {
-            info!("Received SIGINT. Stopping Northstar runtime");
-            runtime.stop_wait().await
-        }
-        _ = sigterm.recv() => {
-            info!("Received SIGTERM. Stopping Northstar runtime");
-            runtime.stop_wait().await
-        }
-        status = &mut runtime => status,
-    };
-    match status {
+    tokio::task::spawn(async move {
+        select! {
+            _ = sigint.recv() => {
+                info!("Received SIGINT. Stopping Northstar runtime");
+            }
+            _ = sigterm.recv() => {
+                info!("Received SIGTERM. Stopping Northstar runtime");
+            }
+        };
+        stop.cancel()
+    });
+
+    match runtime.wait().await {
         Ok(_) => exit(0),
         Err(e) => {
             warn!("Runtime exited with {:?}", e);

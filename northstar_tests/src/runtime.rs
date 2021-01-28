@@ -26,6 +26,7 @@ use std::{
 };
 use tempfile::TempDir;
 use tokio::{fs, time, time::timeout};
+use tokio_util::sync::CancellationToken;
 
 pub use northstar::runtime::config::{Config, Repository};
 
@@ -65,7 +66,21 @@ pub fn timeout_on<R>(f: impl Future<Output = R>) -> Result<R> {
 }
 
 /// A running instance of northstar.
-pub struct Runtime(runtime::Runtime);
+pub struct Runtime {
+    runtime: Option<runtime::Runtime>,
+    stop: CancellationToken,
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        self.stop.cancel();
+        if let Some(r) = self.runtime.take() {
+            futures::executor::block_on(timeout(TIMEOUT, r.wait()))
+                .expect("Failed to wait for runtime termination")
+                .expect("Failed shutdown")
+        }
+    }
+}
 
 impl Runtime {
     /// Launches an instance of north
@@ -86,25 +101,38 @@ impl Runtime {
         *default_repository =
             tokio::task::block_in_place(|| overlay_directory(default_repository))?;
 
-        let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
+        let (runtime, stop) = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
             .wrap_err("Launching northstar timed out")
             .and_then(|result| result.wrap_err("Failed to instantiate northstar runtime"))?;
-
-        Ok(Runtime(runtime))
+        Ok(Runtime {
+            runtime: Some(runtime),
+            stop,
+        })
     }
 
     pub fn start(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(self.0.request(api::model::Request::Start(name.to_string())))
-            .and_then(|result| result.wrap_err("Failed to start container"));
+        let response = timeout_on(
+            self.runtime
+                .as_mut()
+                .unwrap()
+                .request(api::model::Request::Start(name.to_string())),
+        )
+        .and_then(|result| result.wrap_err("Failed to start container"));
         ApiResponse(response)
     }
 
     pub async fn pid(&mut self, name: &str) -> Result<u32> {
-        let response = timeout(TIMEOUT, self.0.request(api::model::Request::Containers))
-            .await
-            .wrap_err("Getting containers status timed out")
-            .and_then(|result| result.wrap_err("Failed to get container status"))?;
+        let response = timeout(
+            TIMEOUT,
+            self.runtime
+                .as_mut()
+                .unwrap()
+                .request(api::model::Request::Containers),
+        )
+        .await
+        .wrap_err("Getting containers status timed out")
+        .and_then(|result| result.wrap_err("Failed to get container status"))?;
 
         match response {
             api::model::Response::Containers(containers) => containers
@@ -119,13 +147,18 @@ impl Runtime {
     }
 
     pub fn stop(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(self.0.request(api::model::Request::Stop(name.to_string())))
-            .and_then(|result| result.wrap_err("Failed to stop container"));
+        let response = timeout_on(
+            self.runtime
+                .as_mut()
+                .unwrap()
+                .request(api::model::Request::Stop(name.to_string())),
+        )
+        .and_then(|result| result.wrap_err("Failed to stop container"));
         ApiResponse(response)
     }
 
     pub fn install(&mut self, npk: &Path) -> ApiResponse {
-        let response = timeout_on(self.0.install("default", npk))
+        let response = timeout_on(self.runtime.as_mut().unwrap().install("default", npk))
             .and_then(|result| result.wrap_err("Failed to install container"));
         ApiResponse(response)
     }
@@ -136,15 +169,18 @@ impl Runtime {
             npk::manifest::Version::parse(version).expect("Failed to parse version"),
         );
 
-        let response = timeout_on(self.0.request(uninstall))
+        let response = timeout_on(self.runtime.as_mut().unwrap().request(uninstall))
             .and_then(|result| result.wrap_err("Failed to uninstall container"));
         ApiResponse(response)
     }
 
-    pub fn shutdown(self) -> Result<()> {
-        timeout_on(self.0.stop_wait())
-            .and_then(|result| result.wrap_err("Failed to shutdown runtime"))
-            .map(|_| ())
+    pub fn shutdown(mut self) -> Result<()> {
+        let shutdown = api::model::Request::Shutdown;
+        timeout_on(self.runtime.as_mut().unwrap().request(shutdown))
+            .and_then(|result| result.wrap_err("Failed to shutdown runtime"))?;
+
+        timeout_on(self.runtime.take().unwrap().wait())?
+            .wrap_err("Failed to wait for runtime termination")
     }
 }
 

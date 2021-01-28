@@ -33,18 +33,14 @@ use nix::{sys::stat, unistd};
 use npk::manifest::Name;
 use process::ExitStatus;
 use state::State;
-use std::{
-    future::Future,
-    path::Path,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::path::Path;
 use sync::mpsc;
 use tokio::{
     fs, io,
     sync::{self, oneshot},
     task,
 };
+use tokio_util::sync::CancellationToken;
 
 pub(crate) type EventTx = mpsc::Sender<Event>;
 pub type RepositoryId = String;
@@ -81,9 +77,6 @@ pub type RuntimeResult = Result<(), Error>;
 
 /// Handle to the Northstar runtime
 pub struct Runtime {
-    /// Channel receive a stop signal for the runtime
-    /// Drop the tx part to gracefully shutdown the mail loop.
-    stop: Option<oneshot::Sender<()>>,
     // Channel to signal the runtime exit status to the caller of `start`
     // When the runtime is shut down the result of shutdown is sent to this
     // channel. If a error happens during normal operation the error is also
@@ -93,8 +86,8 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub async fn start(config: Config) -> Result<Runtime, Error> {
-        let (stop_tx, stop_rx) = oneshot::channel();
+    pub async fn start(config: Config) -> Result<(Runtime, CancellationToken), Error> {
+        let token = CancellationToken::new();
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
         // Ensure the configured run_dir exists
@@ -104,11 +97,21 @@ impl Runtime {
         // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
         let (event_tx, event_rx) = mpsc::channel::<Event>(100);
 
+        // Start a task that sends a shutdown request on cancellation
+        {
+            let event_tx = event_tx.clone();
+            let cloned_token = token.clone();
+            task::spawn(async move {
+                cloned_token.cancelled().await;
+                event_tx.send(Event::Shutdown).await.ok();
+            });
+        }
+
         // Start a task that drives the main loop and wait for shutdown results
         {
             let event_tx = event_tx.clone();
             task::spawn(async move {
-                match runtime_task(config, event_tx, event_rx, stop_rx).await {
+                match runtime_task(config, event_tx, event_rx).await {
                     Err(e) => {
                         log::error!("Runtime error: {}", e);
                         stopped_tx.send(Err(e)).ok();
@@ -118,23 +121,20 @@ impl Runtime {
             });
         }
 
-        Ok(Runtime {
-            stop: Some(stop_tx),
-            stopped: stopped_rx,
-            event_tx,
-        })
+        Ok((
+            Runtime {
+                stopped: stopped_rx,
+                event_tx,
+            },
+            token,
+        ))
     }
 
-    /// Stop the runtime
-    pub fn stop(mut self) {
-        // Drop the sending part of the stop handle
-        self.stop.take();
-    }
-
-    /// Stop the runtime and wait for the termination
-    pub fn stop_wait(mut self) -> impl Future<Output = RuntimeResult> {
-        self.stop.take();
-        self
+    /// Wait for the termination
+    pub async fn wait(self) -> RuntimeResult {
+        self.stopped.await.map_err(|_| {
+            Error::AsyncRuntime(String::from("Failed to wait for runtime's termination"))
+        })?
     }
 
     /// Send a request to the runtime directly
@@ -186,27 +186,11 @@ impl Runtime {
     }
 }
 
-impl Future for Runtime {
-    type Output = RuntimeResult;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.stopped).poll(cx) {
-            Poll::Ready(r) => match r {
-                Ok(r) => Poll::Ready(r),
-                // Channel error -> tx side dropped
-                Err(_) => Poll::Ready(Ok(())),
-            },
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
 async fn runtime_task(
     config: Config,
     event_tx: mpsc::Sender<Event>,
     mut event_rx: mpsc::Receiver<Event>,
-    stop: oneshot::Receiver<()>,
-) -> Result<(), Error> {
+) -> RuntimeResult {
     let mut state = State::new(&config, event_tx.clone()).await?;
 
     info!(
@@ -230,13 +214,6 @@ async fn runtime_task(
         info!("Autostarting {}", app);
         state.start(&app).await.ok();
     }
-
-    // Wait for a external shutdown request
-    let shutdown_tx = event_tx.clone();
-    task::spawn(async move {
-        stop.await.ok();
-        shutdown_tx.send(Event::Shutdown).await.ok();
-    });
 
     // Enter main loop
     loop {
