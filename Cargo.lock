@@ -1309,6 +1309,7 @@ name = "nstar"
 version = "0.2.3"
 dependencies = [
  "anyhow",
+ "colored",
  "directories",
  "futures",
  "itertools",
@@ -1318,6 +1319,7 @@ dependencies = [
  "regex",
  "rustyline",
  "rustyline-derive",
+ "serde_json",
  "structopt",
  "tokio",
  "url",

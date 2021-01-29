@@ -12,7 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::commands::{is_quit_command, parse_prompt};
 use anyhow::{Context as _, Result};
+use colored::Colorize;
 use futures::Stream;
 use pin::Pin;
 use rustyline::{
@@ -33,20 +35,8 @@ use std::{
     io::Write,
     pin,
 };
+use structopt::clap;
 use tokio::{sync::mpsc, task};
-
-const COMMANDS: &[&str] = &[
-    "help",
-    "h",
-    "start",
-    "stop",
-    "containers",
-    "ls",
-    "repositories",
-    "install",
-    "uninstall",
-    "shutdown",
-];
 
 pub struct Terminal {
     rx: mpsc::Receiver<String>,
@@ -101,6 +91,10 @@ impl Terminal {
                 let readline = rl.readline(&prompt);
                 match readline {
                     Ok(line) => {
+                        if is_quit_command(&line) {
+                            break;
+                        }
+
                         if tx.blocking_send(line).is_err() {
                             break;
                         }
@@ -176,7 +170,7 @@ impl Highlighter for NstarHelper {
     }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
+        Owned(hint.to_owned())
     }
 
     fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
@@ -193,13 +187,28 @@ impl Validator for NstarHelper {
         &self,
         ctx: &mut validate::ValidationContext,
     ) -> rustyline::Result<validate::ValidationResult> {
-        if COMMANDS.iter().any(|c| ctx.input().starts_with(c)) {
-            Ok(validate::ValidationResult::Valid(None))
-        } else {
-            Ok(validate::ValidationResult::Invalid(Some(format!(
-                " Unknown command \"{}\"",
-                ctx.input()
-            ))))
+        use validate::ValidationResult::*;
+
+        match parse_prompt(ctx.input()) {
+            Ok(_) => Ok(Valid(None)),
+            Err(e) => {
+                // Help requested
+                if e.kind == clap::ErrorKind::HelpDisplayed {
+                    return Ok(Valid(None));
+                }
+
+                let message = match e.kind {
+                    clap::ErrorKind::InvalidSubcommand | clap::ErrorKind::UnknownArgument => {
+                        format!("Invalid command, use {}", "help".blue())
+                    }
+                    clap::ErrorKind::MissingRequiredArgument => {
+                        format!("Missing argument, use {} for help", "-h,--help".blue())
+                    }
+                    _ => format!("{:?} {}", e.kind, "Unknown".normal()),
+                };
+
+                Ok(Invalid(Some(format!("    <- ⚠️: {}", message))))
+            }
         }
     }
 

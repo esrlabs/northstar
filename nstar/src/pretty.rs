@@ -12,9 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use colored::Colorize;
 use itertools::Itertools;
-use northstar::api::model::{Container, Notification, Repository, RepositoryId};
+use northstar::api::model::{Container, Notification, Repository, RepositoryId, Response};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, io};
 use tokio::time;
@@ -94,6 +95,22 @@ pub(crate) fn repositories<W: io::Write>(
     }
 
     print_table(&mut w, &table)
+}
+
+pub(crate) async fn print_response<W: std::io::Write>(
+    mut output: &mut W,
+    response: Response,
+) -> Result<()> {
+    match response {
+        Response::Containers(cs) => containers(&mut output, &cs),
+        Response::Repositories(rs) => repositories(&mut output, &rs),
+        Response::Ok(()) => {
+            writeln!(output, "{}", "✔ success".green()).context("Failed to write to stdout")
+        }
+        Response::Err(e) => {
+            writeln!(output, "{}: {:?}", "✗ failed".red(), e).context("Failed to write to stdout")
+        }
+    }
 }
 
 fn print_table<W: std::io::Write>(mut w: W, table: &Table) -> Result<()> {
