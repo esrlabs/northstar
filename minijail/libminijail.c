@@ -3050,9 +3050,11 @@ static int minijail_run_internal(struct minijail *j,
 
 	setup_child_std_fds(j, state_out);
 
+#ifndef NORTHSTAR
 	/* If running an init program, let it decide when/how to mount /proc. */
 	if (pid_namespace && !do_init)
 		j->flags.remount_proc_ro = 0;
+#endif
 
 	if (use_preload) {
 		/* Strip out flags that cannot be inherited across execve(2). */

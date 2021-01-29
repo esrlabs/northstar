@@ -119,6 +119,7 @@ fn main() -> io::Result<()> {
 
     build
         .define("ALLOW_DEBUG_LOGGING", "1")
+        .define("NORTHSTAR", "1")
         .define("PRELOADPATH", "\"invalid\"")
         .flag("-Wno-implicit-function-declaration")
         .flag("-I../../../libcap-sys")
