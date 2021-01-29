@@ -177,10 +177,8 @@ impl Minijail {
                 .map_err(Error::Minijail)?;
         }
 
-        // TODO: Do not use pid namespace because of multithreadding
-        // issues discovered by minijail. See libminijail.c for details.
         // Make the process enter a pid namespace
-        //jail.namespace_pids();
+        jail.namespace_pids();
 
         // Make the process enter a vfs namespace
         jail.namespace_vfs();
