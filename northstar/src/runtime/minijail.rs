@@ -402,20 +402,19 @@ impl Process {
         signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm))
             .map_err(|e| Error::Os(format!("Failed to SIGTERM {}", self.pid), e))?;
 
-        let timeout = Box::pin(time::sleep(timeout));
-        let exited = Box::pin(self.exit_handle_wait.recv());
-
-        let pid = self.pid;
-        Ok(select! {
-            s = exited => {
-                s.expect("Internal channel error during process termination")  // This is the happy path...
-            },
-            _ = timeout => {
-                signal::kill(unistd::Pid::from_raw(pid as i32), Some(signal::Signal::SIGKILL))
-                    .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
-                ExitStatus::Signaled(signal::Signal::SIGKILL)
+        let s = match tokio::time::timeout(timeout, self.exit_handle_wait.recv()).await {
+            Err(_) => {
+                // Send SIGKILL if the process did not terminate before timeout
+                signal::kill(
+                    unistd::Pid::from_raw(self.pid as i32),
+                    Some(signal::Signal::SIGKILL),
+                )
+                .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
+                self.exit_handle_wait.recv().await
             }
-        })
+            Ok(s) => s,
+        };
+        Ok(s.expect("Internal channel error during process termination"))
     }
 }
 
