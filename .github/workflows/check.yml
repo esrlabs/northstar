@@ -19,7 +19,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly 
+          toolchain: nightly
           override: true
           components: rustfmt
       - name: Cargo fmt --check
@@ -101,7 +101,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
+            toolchain: stable
             components: clippy
             override: true
       - name: Clippy
