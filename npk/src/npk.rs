@@ -369,6 +369,7 @@ pub enum CompressionAlgorithm {
     Lzma,
     Lzo,
     Xz,
+    Zstd,
 }
 
 impl std::fmt::Display for CompressionAlgorithm {
@@ -378,6 +379,7 @@ impl std::fmt::Display for CompressionAlgorithm {
             CompressionAlgorithm::Lzma => write!(f, "lzma"),
             CompressionAlgorithm::Lzo => write!(f, "lzo"),
             CompressionAlgorithm::Xz => write!(f, "xz"),
+            CompressionAlgorithm::Zstd => write!(f, "zstd"),
         }
     }
 }
@@ -390,6 +392,7 @@ impl FromStr for CompressionAlgorithm {
             "lzma" => Ok(CompressionAlgorithm::Lzma),
             "lzo" => Ok(CompressionAlgorithm::Lzo),
             "xz" => Ok(CompressionAlgorithm::Xz),
+            "zstd" => Ok(CompressionAlgorithm::Zstd),
             _ => Err(Error::InvalidCompressionAlgorithm),
         }
     }

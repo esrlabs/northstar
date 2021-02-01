@@ -165,7 +165,7 @@ The containers are built for the host platform by default. The flag `-t,--target
 	OPTIONS:
 	    -t, --target <platform>   Target platform
 	    -c, --comp   <algorithm>  Compression algorithm used by squashfs
-	                              (gzip, lzma, lzo, xz)
+	                              (gzip, lzma, lzo, xz, zstd)
 	    -h, --help                Prints help information
 
 ### Run sample code
