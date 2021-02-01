@@ -17,7 +17,7 @@ usage() {
     echo "OPTIONS:"
     echo "    -t, --target <platform>   Target platform"
     echo "    -c, --comp   <algorithm>  Compression algorithm used by squashfs"
-    echo "                              (gzip, lzma, lzo, xz)"
+    echo "                              (gzip, lzma, lzo, xz, zstd)"
     echo "    -h, --help                Prints help information"
 
 }
