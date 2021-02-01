@@ -79,7 +79,7 @@ impl Runtime {
         let default_repository = &mut config
             .repositories
             .get_mut("default")
-            .ok_or(eyre!("No \"default\" repository in configuration"))?
+            .ok_or_else(|| eyre!("No \"default\" repository in configuration"))?
             .dir;
 
         // Discard changes to the default repository at the end of the test
