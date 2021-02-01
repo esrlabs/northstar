@@ -1900,7 +1900,6 @@ dependencies = [
  "ed25519-dalek",
  "env_logger 0.8.2",
  "log",
- "northstar",
  "npk",
  "structopt",
  "tempfile",
