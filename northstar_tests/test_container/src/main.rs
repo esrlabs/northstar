@@ -58,7 +58,7 @@ fn main() -> Result<()> {
             TestCommands::Echo { message } => echo(&message),
             TestCommands::Write { message, path } => write(&message, path.as_path())?,
             TestCommands::Touch { path } => touch(&path)?,
-            TestCommands::Whoami => whoami()?,
+            TestCommands::Whoami => whoami(),
             TestCommands::Loop => loop {},
         };
     }
@@ -97,9 +97,8 @@ fn touch(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn whoami() -> Result<()> {
+fn whoami() {
     let uid = nix::unistd::getuid();
     let gid = nix::unistd::getgid();
     println!("uid: {}, gid: {}", uid, gid);
-    Ok(())
 }
