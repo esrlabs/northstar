@@ -22,13 +22,10 @@ use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
-use npk::{
-    dm_verity::VerityHeader,
-    manifest::Manifest,
-    npk::{Error::MalformedManifest, Npk},
-};
+use npk::{dm_verity::VerityHeader, manifest::Manifest, npk::Npk};
 use std::{
     io,
+    os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     process,
 };
@@ -53,6 +50,8 @@ pub enum Error {
     DmVerity(npk::dm_verity::Error),
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
+    #[error("NPK version mismatch")]
+    NpkVersionMismatch,
     #[error("UTF-8 conversion error: {0:?}")]
     Utf8Conversion(Utf8Error),
     #[error("Inotify timeout error {0}")]
@@ -89,13 +88,13 @@ impl MountControl {
     pub(super) async fn mount_npk(
         &self,
         npk: &Path,
-        repo: &Repository,
+        repository: &Repository,
         run_dir: &Path,
     ) -> Result<Container, Error> {
         let start = time::Instant::now();
 
         debug!("Mounting {}", npk.display());
-        let use_verity = repo.key.is_some();
+        let use_verity = repository.key.is_some();
 
         if let Ok(meta) = metadata(&npk).await {
             debug!("Mounting NPK with size {}", meta.len());
@@ -104,22 +103,15 @@ impl MountControl {
         let file = File::open(&npk)
             .await
             .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-        let mut npk = Npk::new(file).await.map_err(Error::Npk)?;
+        let npk = Npk::new(file, repository.key.as_ref())
+            .await
+            .map_err(Error::Npk)?;
 
-        // verify signature only if a key is present
-        if let Some(pub_key) = repo.key {
-            npk.verify(&pub_key).await.map_err(Error::Npk)?;
+        if npk.version() != &Manifest::VERSION {
+            return Err(Error::NpkVersionMismatch);
         }
-        let manifest = npk.manifest().await.map_err(Error::Npk)?;
-        let version = npk.version().await.map_err(Error::Npk)?;
+        let manifest = npk.manifest().clone();
 
-        if version != Manifest::VERSION {
-            return Err(Error::Npk(MalformedManifest(format!(
-                "Invalid NPK version (detected: {}, supported: {})",
-                version.to_string(),
-                &Manifest::VERSION
-            ))));
-        }
         debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
         let root = create_mount_point(run_dir, &manifest).await?;
@@ -128,9 +120,9 @@ impl MountControl {
 
         let container = Container {
             root,
-            manifest: manifest.clone(),
+            manifest,
             device,
-            repository: repo.id.to_string(),
+            repository: repository.id.to_string(),
         };
 
         let duration = start.elapsed();
@@ -254,17 +246,12 @@ impl MountControl {
         Ok(dm_dev)
     }
 
-    async fn setup_and_mount(
-        &self,
-        mut npk: Npk,
-        root: &Path,
-        verity: bool,
-    ) -> Result<PathBuf, Error> {
-        let verity_header = npk.verity_header().await.map_err(Error::Npk)?;
-        let hashes = npk.hashes().await.map_err(Error::Npk)?;
-        let fsimg_offset = npk.fsimg_offset().await.map_err(Error::Npk)?;
-        let fsimg_size = npk.fsimg_size().await.map_err(Error::Npk)?;
-        let manifest = npk.manifest().await.map_err(Error::Npk)?;
+    async fn setup_and_mount(&self, npk: Npk, root: &Path, verity: bool) -> Result<PathBuf, Error> {
+        let verity_header = npk.verity_header().to_owned();
+        let hashes = npk.hashes().clone();
+        let fsimg_offset = npk.fsimg_offset();
+        let fsimg_size = npk.fsimg_size();
+        let manifest = npk.manifest();
         let name = format!(
             "north_{}_{}_{}",
             process::id(),
@@ -272,8 +259,7 @@ impl MountControl {
             manifest.version
         );
 
-        let mut npk = npk.into_inner();
-        let loop_device = losetup(&self.lc, &mut npk, fsimg_offset, fsimg_size)
+        let loop_device = losetup(&self.lc, npk.as_raw_fd(), fsimg_offset, fsimg_size)
             .await
             .map_err(Error::LoopDevice)?;
 

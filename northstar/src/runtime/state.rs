@@ -402,12 +402,10 @@ impl State {
         let file = File::open(&npk)
             .await
             .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-        let manifest = Npk::new(file)
+        let manifest = Npk::new(file, repository.key.as_ref())
             .await
-            .map_err(Error::Npk)?
-            .manifest()
-            .await
-            .map_err(Error::Npk)?;
+            .map_err(Error::Npk)
+            .map(|npk| npk.manifest().clone())?;
 
         let package = format!("{}-{}.npk", manifest.name, manifest.version);
         debug!(
@@ -474,14 +472,14 @@ impl State {
         Ok(self.find_installed_npk(name, version).await?.is_some())
     }
 
-    // finds the npk that contains either an application that matches the id
+    // Finds the npk that contains either an application that matches the id
     // or a resource container that matches id and version
     async fn find_installed_npk(
         &self,
         name: &str,
         version: &Version,
     ) -> Result<Option<(Manifest, PathBuf)>, Error> {
-        for repository in self.config.repositories.values() {
+        for (id, repository) in &self.config.repositories {
             let mut dir = fs::read_dir(&repository.dir).await.map_err(|e| {
                 Error::Io(format!("Failed to read {}", repository.dir.display()), e)
             })?;
@@ -489,12 +487,10 @@ impl State {
                 let file = File::open(entry.path().as_path())
                     .await
                     .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
-                let manifest = Npk::new(file)
+                let manifest = Npk::new(file, self.repositories.get(id).unwrap().key.as_ref())
                     .await
-                    .map_err(Error::Npk)?
-                    .manifest()
-                    .await
-                    .map_err(Error::Npk)?;
+                    .map_err(Error::Npk)
+                    .map(|n| n.manifest().clone())?;
 
                 if manifest.name == name && manifest.version == *version {
                     return Ok(Some((manifest, entry.path())));
