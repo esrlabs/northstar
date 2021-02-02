@@ -51,7 +51,7 @@ pub enum Error {
 }
 
 // https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VerityHeader {
     pub header: [u8; 8],
     pub version: u32,

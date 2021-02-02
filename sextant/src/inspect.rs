@@ -32,17 +32,18 @@ pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
 }
 
 pub async fn inspect_short(npk: &Path) -> Result<()> {
-    let mut npk = Npk::new(
+    let npk = Npk::new(
         File::open(&npk)
             .await
             .context(format!("Failed to open NPK at '{}'", &npk.display()))?,
+        None,
     )
     .await?;
-    let manifest = npk.manifest().await?;
+    let manifest = npk.manifest();
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
-    let npk_version = npk.version().await?;
-    let is_resource_container = manifest.init.map_or("yes", |_| "no");
+    let npk_version = npk.version();
+    let is_resource_container = manifest.init.as_ref().map_or("yes", |_| "no");
     println!(
         "name: {}, version: {}, NPK version: {}, resource container: {}",
         name, version, npk_version, is_resource_container
