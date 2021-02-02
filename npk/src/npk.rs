@@ -667,7 +667,9 @@ async fn sign_npk(key: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<Strin
             error: e,
         })?
         .len();
-    let root_hash = append_dm_verity_block(&fsimg, fsimg_size).map_err(Error::Verity)?;
+    let root_hash = append_dm_verity_block(fsimg, fsimg_size)
+        .await
+        .map_err(Error::Verity)?;
     let key_pair = read_keypair(&key).await?;
     let hashes_yaml = gen_hashes_yaml(&tmp_manifest, &fsimg, fsimg_size, &root_hash).await?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml).await;
