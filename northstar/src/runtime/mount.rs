@@ -93,10 +93,10 @@ impl MountControl {
         repo: &Repository,
         run_dir: &Path,
     ) -> Result<Container, Error> {
+        let start = time::Instant::now();
+
         debug!("Mounting {}", npk.display());
         let use_verity = repo.key.is_some();
-
-        let start = time::Instant::now();
 
         if let Ok(meta) = metadata(&npk).await {
             debug!("Mounting NPK with size {}", meta.len());
@@ -105,19 +105,19 @@ impl MountControl {
         let file = File::open(&npk)
             .await
             .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-        let mut npk_archive = Npk::new(file).await.map_err(Error::Npk)?;
+        let mut npk = Npk::new(file).await.map_err(Error::Npk)?;
 
         // verify signature only if a key is present
         if let Some(pub_key) = repo.key {
-            npk_archive.verify(&pub_key).await.map_err(Error::Npk)?;
+            npk.verify(&pub_key).await.map_err(Error::Npk)?;
         }
-        let manifest = npk_archive.manifest().await.map_err(Error::Npk)?;
-        let npk_version = npk_archive.version().await.map_err(Error::Npk)?;
+        let manifest = npk.manifest().await.map_err(Error::Npk)?;
+        let version = npk.version().await.map_err(Error::Npk)?;
 
-        if npk_version != Manifest::VERSION {
+        if version != Manifest::VERSION {
             return Err(Error::Npk(MalformedManifest(format!(
                 "Invalid NPK version (detected: {}, supported: {})",
-                npk_version.to_string(),
+                version.to_string(),
                 &Manifest::VERSION
             ))));
         }
@@ -125,14 +125,7 @@ impl MountControl {
 
         let root = create_mount_point(run_dir, &manifest).await?;
 
-        let name = format!(
-            "north_{}_{}_{}",
-            process::id(),
-            manifest.name,
-            manifest.version
-        );
-
-        let device = self.setup_and_mount(&name, &npk, &root, use_verity).await?;
+        let device = self.setup_and_mount(npk, &root, use_verity).await?;
 
         let container = Container {
             root,
@@ -264,28 +257,28 @@ impl MountControl {
 
     async fn setup_and_mount(
         &self,
-        name: &str,
-        npk: &Path,
+        mut npk: Npk,
         root: &Path,
-        use_verity: bool,
+        verity: bool,
     ) -> Result<PathBuf, Error> {
-        let npk_file = fs::File::open(npk)
-            .await
-            .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
-        let mut npk_archive = Npk::new(npk_file).await.map_err(Error::Npk)?;
-        let verity = npk_archive.verity_header().await.map_err(Error::Npk)?;
-        let hashes = npk_archive.hashes().await.map_err(Error::Npk)?;
-        let fsimg_offset = npk_archive.fsimg_offset().await.map_err(Error::Npk)?;
-        let fsimg_size = npk_archive.fsimg_size().await.map_err(Error::Npk)?;
+        let verity_header = npk.verity_header().await.map_err(Error::Npk)?;
+        let hashes = npk.hashes().await.map_err(Error::Npk)?;
+        let fsimg_offset = npk.fsimg_offset().await.map_err(Error::Npk)?;
+        let fsimg_size = npk.fsimg_size().await.map_err(Error::Npk)?;
+        let manifest = npk.manifest().await.map_err(Error::Npk)?;
+        let name = format!(
+            "north_{}_{}_{}",
+            process::id(),
+            manifest.name,
+            manifest.version
+        );
 
-        let mut npk_file = fs::File::open(npk)
-            .await
-            .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
-        let loop_device = losetup(&self.lc, &mut npk_file, fsimg_offset, fsimg_size)
+        let mut npk = npk.into_inner();
+        let loop_device = losetup(&self.lc, &mut npk, fsimg_offset, fsimg_size)
             .await
             .map_err(Error::LoopDevice)?;
 
-        let device = if !use_verity {
+        let device = if !verity {
             loop_device.path().await.unwrap()
         } else {
             let loop_device_id = loop_device
@@ -296,8 +289,8 @@ impl MountControl {
 
             self.verity_setup(
                 &loop_device_id,
-                &verity,
-                name,
+                &verity_header,
+                &name,
                 hashes.fs_verity_hash.as_str(),
                 hashes.fs_verity_offset,
             )
@@ -307,7 +300,7 @@ impl MountControl {
         mount(&device, root, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;
 
         // Set the device to auto-remove once unmounted
-        if use_verity {
+        if verity {
             self.dm
                 .device_remove(
                     &name.to_string(),
