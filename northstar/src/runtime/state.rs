@@ -171,7 +171,7 @@ impl State {
             mount_control: MountControl::new(&config).await.map_err(Error::Mount)?,
         };
 
-        // mount all the containers from each repository
+        // Mount all the containers from each repository
         state.mount_repositories().await?;
         Ok(state)
     }
@@ -426,7 +426,7 @@ impl State {
             warn!("Container with the same name and version already installed");
             return Err(Error::ContainerAlreadyInstalled(manifest.name.clone()));
         }
-        // check if required resources exist
+        // Check if required resources exist
         let required_resources = manifest.mounts.values().filter_map(|m| match m {
             Mount::Resource { name, version, .. } => Some((name, version)),
             _ => None,
@@ -502,7 +502,7 @@ impl State {
         name: &str,
         version: &Version,
     ) -> result::Result<(), Error> {
-        // check if resource still needed
+        // Check if resource still needed
         for app in self.applications() {
             for mount in app.container.manifest.mounts.values() {
                 if let Mount::Resource {

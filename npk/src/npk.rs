@@ -315,14 +315,7 @@ impl Npk {
         npk: &Path,
         key: Option<&ed25519_dalek::PublicKey>,
     ) -> Result<Self, Error> {
-        return Npk::new(
-            File::open(&npk).await.map_err(|e| Error::Io {
-                context: format!("Failed to open file: '{}'", &npk.display()),
-                error: e,
-            })?,
-            key,
-        )
-        .await;
+        return Npk::new(open_file(&npk).await?, key).await;
     }
 
     pub fn manifest(&self) -> &Manifest {
@@ -530,12 +523,16 @@ pub async fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 
 /// Generate a keypair suitable for signing and verifying NPKs
 pub async fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
-    let mut csprng = OsRng {};
-    let key_pair = Keypair::generate(&mut csprng);
-    let pub_key = out.join(name).with_extension("pub");
-    let prv_key = out.join(name).with_extension("key");
-    assume_non_existing(&pub_key).await?;
-    assume_non_existing(&prv_key).await?;
+    async fn assume_non_existing(path: &Path) -> Result<(), Error> {
+        if path.exists() {
+            Err(Error::Io {
+                context: format!("File '{}' already exists", &path.display()),
+                error: io::ErrorKind::NotFound.into(),
+            })
+        } else {
+            Ok(())
+        }
+    }
 
     async fn write(data: &[u8], path: &Path) -> Result<(), Error> {
         let mut file = File::create(&path).await.map_err(|e| Error::Io {
@@ -548,41 +545,45 @@ pub async fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
         })?;
         Ok(())
     }
+
+    let mut csprng = OsRng {};
+    let key_pair = Keypair::generate(&mut csprng);
+    let pub_key = out.join(name).with_extension("pub");
+    let prv_key = out.join(name).with_extension("key");
+    assume_non_existing(&pub_key).await?;
+    assume_non_existing(&prv_key).await?;
     write(&key_pair.public.to_bytes(), &pub_key).await?;
     write(&key_pair.secret.to_bytes(), &prv_key).await?;
     Ok(())
 }
 
-pub async fn open_zip(file: &Path) -> Result<ZipArchive<std::fs::File>, Error> {
-    let opened_file = File::open(&file)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to open file: '{}'", &file.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
-    let zip =
-        task::block_in_place(|| zip::ZipArchive::new(opened_file)).map_err(|e| Error::Zip {
-            context: format!("Failed to parse ZIP format: '{}'", &file.display()),
-            error: e,
-        })?;
-    Ok(zip)
-}
-
 async fn read_manifest(src: &Path) -> Result<Manifest, Error> {
     let path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
-    let file = File::open(&path)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to open manifest: '{}'", &path.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
+    let file = open_file(&path).await?.into_std().await;
     let manifest = task::block_in_place(|| Manifest::from_reader(&file))
         .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))?;
     Ok(manifest)
+}
+
+async fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
+    let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
+    open_file(&key_file)
+        .await?
+        .read_exact(&mut secret_key_bytes)
+        .await
+        .map_err(|e| Error::Io {
+            context: format!("Failed to read key data from '{}'", &key_file.display()),
+            error: e,
+        })?;
+    let secret_key = SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
+        context: format!("Failed to derive secret key from '{}'", &key_file.display()),
+        error: e,
+    })?;
+    let public_key = PublicKey::from(&secret_key);
+    Ok(Keypair {
+        secret: secret_key,
+        public: public_key,
+    })
 }
 
 async fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBuf, Error> {
@@ -603,31 +604,6 @@ async fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBu
     Ok(tmp_manifest_path)
 }
 
-async fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
-    let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
-    File::open(&key_file)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to open '{}'", &key_file.display()),
-            error: e,
-        })?
-        .read_exact(&mut secret_key_bytes)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to read key data from '{}'", &key_file.display()),
-            error: e,
-        })?;
-    let secret_key = SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
-        context: format!("Failed to derive secret key from '{}'", &key_file.display()),
-        error: e,
-    })?;
-    let public_key = PublicKey::from(&secret_key);
-    Ok(Keypair {
-        secret: secret_key,
-        public: public_key,
-    })
-}
-
 async fn gen_hashes_yaml(
     tmp_manifest: &Path,
     fsimg: &Path,
@@ -636,27 +612,13 @@ async fn gen_hashes_yaml(
 ) -> Result<String, Error> {
     // Create hashes YAML
     let mut sha256 = Sha256::new();
-    let mut tmp_manifest = File::open(&tmp_manifest)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to open '{}'", &tmp_manifest.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
+    let mut tmp_manifest = open_file(&tmp_manifest).await?.into_std().await;
     task::block_in_place(|| io::copy(&mut tmp_manifest, &mut sha256))
         .map_err(|_e| Error::Manifest("Failed to calculate manifest checksum".to_string()))?;
 
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
-    let mut fsimg = File::open(&fsimg)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to open '{}'", &fsimg.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
+    let mut fsimg = open_file(&fsimg).await?.into_std().await;
     task::block_in_place(|| io::copy(&mut fsimg, &mut sha256)).map_err(|e| Error::Io {
         context: "Failed to read fs image".to_string(),
         error: e,
@@ -887,14 +849,7 @@ async fn write_npk<W: Write + Seek>(
     fsimg: &Path,
     signature: Option<&str>,
 ) -> Result<(), Error> {
-    let mut fsimg = File::open(&fsimg)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to open '{}'", &fsimg.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
+    let mut fsimg = open_file(&fsimg).await?.into_std().await;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string = serde_yaml::to_string(&manifest)
@@ -948,13 +903,18 @@ async fn write_npk<W: Write + Seek>(
     Ok(())
 }
 
-async fn assume_non_existing(path: &Path) -> Result<(), Error> {
-    if path.exists() {
-        Err(Error::Io {
-            context: format!("File '{}' already exists", &path.display()),
-            error: io::ErrorKind::NotFound.into(),
-        })
-    } else {
-        Ok(())
-    }
+pub async fn open_zip(file: &Path) -> Result<ZipArchive<std::fs::File>, Error> {
+    let open_file = open_file(&file).await?.into_std().await;
+    let zip = task::block_in_place(|| zip::ZipArchive::new(open_file)).map_err(|e| Error::Zip {
+        context: format!("Failed to parse ZIP format: '{}'", &file.display()),
+        error: e,
+    })?;
+    Ok(zip)
+}
+
+async fn open_file(path: &Path) -> Result<tokio::fs::File, Error> {
+    Ok(File::open(&path).await.map_err(|e| Error::Io {
+        context: format!("Failed to open '{}'", &path.display()),
+        error: e,
+    })?)
 }

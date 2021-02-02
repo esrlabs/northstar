@@ -674,7 +674,7 @@ mounts:
     }
 
     #[test]
-    fn mount_ressource() {
+    fn mount_resource() {
         let manifest = "
 name: hello
 version: 0.0.0

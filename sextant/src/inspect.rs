@@ -21,7 +21,6 @@ use std::{
     path::Path,
     process::Command,
 };
-use tokio::fs::File;
 
 pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
     if short {
