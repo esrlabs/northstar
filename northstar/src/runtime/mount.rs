@@ -30,11 +30,7 @@ use std::{
     process,
 };
 use thiserror::Error;
-use tokio::{
-    fs,
-    fs::{metadata, File},
-    task, time,
-};
+use tokio::{fs, fs::metadata, task, time};
 
 const FS_TYPE: &str = "squashfs";
 
@@ -100,10 +96,7 @@ impl MountControl {
             debug!("Mounting NPK with size {}", meta.len());
         }
 
-        let file = File::open(&npk)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-        let npk = Npk::new(file, repository.key.as_ref())
+        let npk = Npk::from_path(&npk, repository.key.as_ref())
             .await
             .map_err(Error::Npk)?;
 
@@ -115,16 +108,13 @@ impl MountControl {
         debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
         let root = create_mount_point(run_dir, &manifest).await?;
-
         let device = self.setup_and_mount(npk, &root, use_verity).await?;
-
         let container = Container {
             root,
             manifest,
             device,
             repository: repository.id.to_string(),
         };
-
         let duration = start.elapsed();
 
         info!(

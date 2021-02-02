@@ -311,6 +311,20 @@ impl Npk {
         })
     }
 
+    pub async fn from_path(
+        npk: &Path,
+        key: Option<&ed25519_dalek::PublicKey>,
+    ) -> Result<Self, Error> {
+        return Npk::new(
+            File::open(&npk).await.map_err(|e| Error::Io {
+                context: format!("Failed to open file: '{}'", &npk.display()),
+                error: e,
+            })?,
+            key,
+        )
+        .await;
+    }
+
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
     }
@@ -557,22 +571,17 @@ pub async fn open_zip(file: &Path) -> Result<ZipArchive<std::fs::File>, Error> {
 }
 
 async fn read_manifest(src: &Path) -> Result<Manifest, Error> {
-    let manifest_path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
-    let manifest_file = File::open(&manifest_path)
+    let path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
+    let file = File::open(&path)
         .await
         .map_err(|e| Error::Io {
-            context: format!("Failed to open manifest: '{}'", &manifest_path.display()),
+            context: format!("Failed to open manifest: '{}'", &path.display()),
             error: e,
         })?
         .into_std()
         .await;
-    let manifest = task::block_in_place(|| Manifest::from_reader(&manifest_file)).map_err(|e| {
-        Error::Manifest(format!(
-            "Failed to parse '{}': {}",
-            &manifest_path.display(),
-            e
-        ))
-    })?;
+    let manifest = task::block_in_place(|| Manifest::from_reader(&file))
+        .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))?;
     Ok(manifest)
 }
 
