@@ -28,7 +28,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs, io,
-    io::{Read, Seek, Write},
+    io::{BufReader, Read, Seek, Write},
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
@@ -147,16 +147,18 @@ impl FromStr for Hashes {
 }
 
 pub struct Npk {
-    inner: zip::ZipArchive<std::fs::File>,
+    inner: zip::ZipArchive<BufReader<std::fs::File>>,
 }
 
 impl Npk {
     pub async fn new(npk: tokio::fs::File) -> Result<Self, Error> {
-        let npk_file = npk.into_std().await;
+        let npk = npk.into_std().await;
         let zip =
-            task::block_in_place(|| zip::ZipArchive::new(npk_file)).map_err(|e| Error::Zip {
-                context: "Failed to parse ZIP format".to_string(),
-                error: e,
+            task::block_in_place(|| zip::ZipArchive::new(BufReader::new(npk))).map_err(|e| {
+                Error::Zip {
+                    context: "Failed to parse ZIP format".to_string(),
+                    error: e,
+                }
             })?;
         Ok(Self { inner: zip })
     }
@@ -307,7 +309,7 @@ impl Npk {
     }
 
     pub fn into_inner(self) -> tokio::fs::File {
-        tokio::fs::File::from_std(self.inner.into_inner())
+        tokio::fs::File::from_std(self.inner.into_inner().into_inner())
     }
 }
 
