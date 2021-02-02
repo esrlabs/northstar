@@ -54,7 +54,7 @@ lazy_static! {
         npk::pack(
             package_dir.path(),
             REPOSITORIES_DIR.path(),
-            Some(Path::new("examples/keys/northstar.key")),
+            Some(PathBuf::from("examples/keys/northstar.key")),
         )
         .await
         .unwrap();
@@ -64,7 +64,7 @@ lazy_static! {
         npk::pack(
             Path::new("northstar_tests/test_resource"),
             REPOSITORIES_DIR.path(),
-            Some(Path::new("examples/keys/northstar.key")),
+            Some(PathBuf::from("examples/keys/northstar.key")),
         )
         .await
         .unwrap();

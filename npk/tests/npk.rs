@@ -43,9 +43,7 @@ env:
         let key_dir = create_tmp_dir().await;
         create_test_manifest(&src).await;
         let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
-        pack(&src, &dest, Some(prv_key.as_path()))
-            .await
-            .expect("Pack NPK");
+        pack(&src, &dest, Some(prv_key)).await.expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
@@ -84,13 +82,9 @@ env:
     async fn pack_npk_no_manifest() {
         let key_dir = create_tmp_dir().await;
         let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
-        pack(
-            Path::new("invalid"),
-            &create_tmp_dir().await,
-            Some(prv_key.as_path()),
-        )
-        .await
-        .expect_err("Invalid manifest");
+        pack(Path::new("invalid"), &create_tmp_dir().await, Some(prv_key))
+            .await
+            .expect_err("Invalid manifest");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -99,7 +93,7 @@ env:
         let key_dir = create_tmp_dir().await;
         create_test_manifest(&src).await;
         let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
-        pack(&src, &Path::new("invalid"), Some(prv_key.as_path()))
+        pack(&src, &Path::new("invalid"), Some(prv_key))
             .await
             .expect_err("Invalid destination dir");
     }
@@ -108,9 +102,13 @@ env:
     async fn pack_npk_no_keys() {
         let src = create_tmp_dir().await;
         create_test_manifest(&src).await;
-        pack(&src, &create_tmp_dir().await, Some(Path::new("invalid")))
-            .await
-            .expect_err("Invalid key dir");
+        pack(
+            &src,
+            &create_tmp_dir().await,
+            Some(PathBuf::from("invalid")),
+        )
+        .await
+        .expect_err("Invalid key dir");
     }
 
     #[tokio::test(flavor = "multi_thread")]

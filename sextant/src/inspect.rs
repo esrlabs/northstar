@@ -69,16 +69,18 @@ pub async fn inspect_long(npk: &Path) -> Result<()> {
     drop(man);
 
     // print signature
-    let mut sig = zip
-        .by_name(npk::SIGNATURE_NAME)
-        .context("Failed to find signature in NPK")?;
-    println!("{}", format!("## {}", npk::SIGNATURE_NAME).green());
-    sig.read_to_string(&mut print_buf)
-        .with_context(|| "Failed to read signature")?;
-    println!("{}", &print_buf);
-    print!("\n\n");
-    print_buf.clear();
-    drop(sig);
+    match zip.by_name(npk::SIGNATURE_NAME) {
+        Ok(mut sig) => {
+            println!("{}", format!("## {}", npk::SIGNATURE_NAME).green());
+            sig.read_to_string(&mut print_buf)
+                .with_context(|| "Failed to read signature")?;
+            println!("{}", &print_buf);
+            print!("\n\n");
+            print_buf.clear();
+            drop(sig);
+        }
+        _ => println!("No signature found"),
+    }
 
     // print squashfs listing
     println!("{}", "## SquashFS listing".green());
@@ -141,9 +143,7 @@ mounts:
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
-        pack(&src, &dest, Some(prv_key.as_path()))
-            .await
-            .expect("Pack NPK");
+        pack(&src, &dest, Some(prv_key)).await.expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 

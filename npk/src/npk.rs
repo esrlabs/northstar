@@ -462,7 +462,7 @@ pub struct SquashfsOpts {
 /// --dir examples/container/hello \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
+pub async fn pack(dir: &Path, out: &Path, key: Option<PathBuf>) -> Result<(), Error> {
     pack_with(dir, out, key, SquashfsOpts::default()).await
 }
 
@@ -489,7 +489,7 @@ pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Erro
 pub async fn pack_with(
     dir: &Path,
     out: &Path,
-    key: Option<&Path>,
+    key: Option<PathBuf>,
     squashfs_opts: SquashfsOpts,
 ) -> Result<(), Error> {
     let manifest = read_manifest(dir).await?;
@@ -497,7 +497,7 @@ pub async fn pack_with(
     let version = manifest.version.clone();
     let mut builder = Builder::new(dir, manifest);
     if let Some(key) = key {
-        builder = builder.key(key);
+        builder = builder.key(&key);
     }
     builder = builder.squashfs_opts(squashfs_opts);
 

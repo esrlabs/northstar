@@ -254,8 +254,16 @@ impl MountControl {
             .map_err(Error::LoopDevice)?;
 
         let device = if !verity {
+            let loop_device = losetup(&self.lc, &mut npk.into_inner(), fsimg_offset, fsimg_size)
+                .await
+                .map_err(Error::LoopDevice)?;
             loop_device.path().await.unwrap()
         } else {
+            let hashes = npk.hashes().await.map_err(Error::Npk)?;
+            let verity_header = npk.verity_header().await.map_err(Error::Npk)?;
+            let loop_device = losetup(&self.lc, &mut npk.into_inner(), fsimg_offset, fsimg_size)
+                .await
+                .map_err(Error::LoopDevice)?;
             let loop_device_id = loop_device
                 .dev_id()
                 .await

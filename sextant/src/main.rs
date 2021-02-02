@@ -30,7 +30,7 @@ enum Opt {
         dir: PathBuf,
         /// Key file
         #[structopt(short, long)]
-        key: PathBuf,
+        key: Option<PathBuf>,
         /// Output directory
         #[structopt(short, long)]
         out: PathBuf,
@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
             block_size,
         } => {
             let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-            npk::npk::pack_with(&dir, &out, Some(key.as_path()), squashfs_opts).await?
+            npk::npk::pack_with(&dir, &out, key, squashfs_opts).await?
         }
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out).await?,
         Opt::Inspect { npk, short } => inspect::inspect(&npk, short).await?,

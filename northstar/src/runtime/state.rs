@@ -34,6 +34,7 @@ use std::{
     path::{Path, PathBuf},
     result,
 };
+use tempfile::tempdir;
 use tokio::{fs, time};
 
 #[derive(Debug, Clone)]
@@ -135,10 +136,41 @@ impl fmt::Display for Application {
     }
 }
 
+async fn prepare_hello_world_repo(
+    repositories: &mut HashMap<RepositoryId, Repository>,
+) -> Result<(), std::io::Error> {
+    use tokio::io::AsyncWriteExt;
+    let hello_world_data = include_bytes!(concat!(env!("OUT_DIR"), "/hello_world-0.0.1.npk"));
+
+    let internal_repo_id = "internal_repository";
+    let pack_tmp_dir = tempdir()
+        .expect("Could not create tmp dir for packaging hello_world container")
+        .path()
+        .join(internal_repo_id);
+    tokio::fs::create_dir_all(&pack_tmp_dir).await?;
+
+    let hello_npk_path = pack_tmp_dir.join("hello_world-0.0.1.npk");
+    let mut hello_npk_file: File = File::create(&hello_npk_path).await?;
+    hello_npk_file.write_all(hello_world_data).await?;
+    // add internal repository
+    repositories.insert(
+        internal_repo_id.to_owned(),
+        Repository {
+            id: internal_repo_id.to_owned(),
+            dir: pack_tmp_dir,
+            key: None,
+        },
+    );
+    Ok(())
+}
+
 impl State {
     /// Create a new empty State instance
     pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         let mut repositories = HashMap::new();
+        if prepare_hello_world_repo(&mut repositories).await.is_err() {
+            warn!("Could not prepare hello-world repository");
+        }
         for (id, repository) in &config.repositories {
             let key = {
                 if let Some(key) = repository.key.as_ref() {
