@@ -428,8 +428,6 @@ pub enum Error {
     Invalid(String),
     #[error("Failed to parse YAML format: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
-    #[error("IO: {0}")]
-    Io(#[from] io::Error),
 }
 
 impl Manifest {
