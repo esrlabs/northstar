@@ -20,15 +20,11 @@ use std::{
     io::{Read, SeekFrom::Start},
 };
 
-use std::{
-    io::{BufReader, Seek},
-    path::Path,
-};
+use std::{io::Seek, path::Path};
 use thiserror::Error;
 use tokio::{
     fs::{File, OpenOptions},
     io::AsyncWriteExt,
-    task,
 };
 use uuid::Uuid;
 
@@ -226,7 +222,7 @@ async fn gen_hash_tree(
     // For a description of the overall hash tree generation logic see
     // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
-    let image = &File::open(&fsimg)
+    let mut fsimg = &File::open(&fsimg)
         .await
         .map_err(|e| Error::Os {
             context: format!("Cannot open '{}'", &fsimg.display()),
@@ -270,18 +266,13 @@ async fn gen_hash_tree(
                 // hash block of original file
                 let offset = level_size - rem_size;
                 let mut data = vec![0_u8; BLOCK_SIZE];
-                task::block_in_place(|| {
-                    let mut image_reader = BufReader::new(image);
-                    // TODO: use tokio::io::BufReader once https://github.com/tokio-rs/tokio/issues/2291 is resolved
-                    image_reader.seek(Start(offset)).map_err(|e| Error::Os {
-                        context: "Failed to seek in fs-image".to_string(),
-                        error: e,
-                    })?;
-                    image_reader.read_exact(&mut data).map_err(|e| Error::Os {
-                        context: "Failed to read from fs-image".to_string(),
-                        error: e,
-                    })?;
-                    Ok(())
+                fsimg.seek(Start(offset)).map_err(|e| Error::Os {
+                    context: "Failed to seek in fs-image".to_string(),
+                    error: e,
+                })?;
+                fsimg.read_exact(&mut data).map_err(|e| Error::Os {
+                    context: "Failed to read from fs-image".to_string(),
+                    error: e,
                 })?;
                 sha256.update(&data);
             } else {

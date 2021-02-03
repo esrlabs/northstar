@@ -523,7 +523,7 @@ pub async fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 
 /// Generate a keypair suitable for signing and verifying NPKs
 pub async fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
-    async fn assume_non_existing(path: &Path) -> Result<(), Error> {
+    fn assume_non_existing(path: &Path) -> Result<(), Error> {
         if path.exists() {
             Err(Error::Io {
                 context: format!("File '{}' already exists", &path.display()),
@@ -550,8 +550,8 @@ pub async fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     let key_pair = Keypair::generate(&mut csprng);
     let pub_key = out.join(name).with_extension("pub");
     let prv_key = out.join(name).with_extension("key");
-    assume_non_existing(&pub_key).await?;
-    assume_non_existing(&prv_key).await?;
+    assume_non_existing(&pub_key)?;
+    assume_non_existing(&prv_key)?;
     write(&key_pair.public.to_bytes(), &pub_key).await?;
     write(&key_pair.secret.to_bytes(), &prv_key).await?;
     Ok(())
