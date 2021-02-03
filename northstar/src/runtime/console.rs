@@ -29,6 +29,7 @@ use tokio::{
     sync::{self, broadcast, oneshot},
     task, time,
 };
+use tokio_util::sync::CancellationToken;
 
 type NotificationRx = broadcast::Receiver<api::model::Notification>;
 
@@ -46,6 +47,7 @@ pub(crate) struct Console {
     event_tx: EventTx,
     address: String,
     notification_tx: broadcast::Sender<api::model::Notification>,
+    token: CancellationToken,
 }
 
 #[derive(Error, Debug)]
@@ -64,6 +66,7 @@ impl Console {
             event_tx: tx.clone(),
             address: address.to_owned(),
             notification_tx,
+            token: CancellationToken::new(),
         }
     }
 
@@ -155,16 +158,31 @@ impl Console {
             .map_err(|e| Error::Io(format!("Failed to open listener on {}", self.address), e))?;
 
         let notification_tx = self.notification_tx.clone();
+        let token = self.token.clone();
         task::spawn(async move {
-            // Spawn a task for each incoming connection.
-            while let Ok(stream) = listener.accept().await {
-                let event_tx = event_tx.clone();
-                let notification_rx = notification_tx.subscribe();
-                task::spawn(async move {
-                    if let Err(e) = Self::connection(stream.0, event_tx, notification_rx).await {
-                        warn!("Error servicing connection: {}", e);
+            loop {
+                select! {
+                    stream = listener.accept() => {
+                        match stream {
+                            Ok(stream) => {
+                                let event_tx = event_tx.clone();
+                                let notification_rx = notification_tx.subscribe();
+                                // Spawn a task for each incoming connection.
+                                task::spawn(async move {
+                                    if let Err(e) = Self::connection(stream.0, event_tx, notification_rx).await {
+                                        warn!("Error servicing connection: {}", e);
+                                    }
+                                });
+
+                            }
+                            Err(e) => {
+                                warn!("Error listening: {}", e);
+                                break;
+                            }
+                        }
                     }
-                });
+                    _ = token.cancelled() => break,
+                }
             }
         });
         Ok(())
@@ -286,6 +304,12 @@ impl Console {
         info!("Connection to {} closed", peer);
 
         Ok(())
+    }
+}
+
+impl Drop for Console {
+    fn drop(&mut self) {
+        self.token.cancel();
     }
 }
 
