@@ -25,7 +25,7 @@ use log::{debug, error, info, trace, warn, Level};
 use nix::{
     fcntl::{self, fcntl, OFlag},
     sys::signal,
-    unistd::{self, chown, pipe},
+    unistd::{self, chown, close, pipe},
 };
 use npk::manifest::{Dev, Mount, MountFlag};
 use std::{
@@ -105,6 +105,7 @@ impl Minijail {
             Level::Trace => i32::MAX,
         };
         ::minijail::Minijail::log_to_fd(log_fd, minijail_log_level as i32);
+
         Ok(Minijail {
             event_tx,
             run_dir: run_dir.into(),
@@ -114,12 +115,8 @@ impl Minijail {
     }
 
     pub(crate) fn shutdown(&self) -> Result<(), Error> {
-        // Just make clippy happy
-        if false {
-            Err(Error::Stop)
-        } else {
-            Ok(())
-        }
+        close(self.log_fd).map_err(|e| Error::Os("Failed to close log_fd".into(), e))?;
+        Ok(())
     }
 
     pub(crate) async fn start(&self, container: &Container) -> Result<Process, Error> {
@@ -520,7 +517,7 @@ impl Output {
             });
         }
 
-        Ok(Output { fd, token: token })
+        Ok(Output { fd, token })
     }
 }
 
