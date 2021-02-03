@@ -20,7 +20,6 @@ use super::{
     OutputStream,
 };
 use crate::runtime::{Event, EventTx};
-use futures::channel::oneshot;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
@@ -31,7 +30,10 @@ use nix::{
 use npk::manifest::{Dev, Mount, MountFlag};
 use std::{
     fmt, iter, ops,
-    os::unix::prelude::RawFd,
+    os::unix::{
+        io::{AsRawFd, FromRawFd},
+        prelude::RawFd,
+    },
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
@@ -41,6 +43,7 @@ use tokio::{
     io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, AsyncWriteExt, ReadBuf},
     select, task, time,
 };
+use tokio_util::sync::CancellationToken;
 
 // We need a Send + Sync version of minijail::Minijail
 struct MinijailHandle(::minijail::Minijail);
@@ -77,7 +80,7 @@ impl Minijail {
         data_dir: &Path,
     ) -> Result<Minijail, Error> {
         let pipe = AsyncPipe::new()?;
-        let log_fd = pipe.writefd();
+        let log_fd = pipe.as_raw_fd_right();
         let mut lines = io::BufReader::new(pipe).lines();
 
         // Spawn a task that forwards logs from minijail to the rust logger.
@@ -219,15 +222,15 @@ impl Minijail {
         );
 
         let stdout =
-            CaptureOutput::new(OutputStream::Stdout, &manifest.name, self.event_tx.clone()).await?;
+            Output::new(OutputStream::Stdout, &manifest.name, self.event_tx.clone()).await?;
         let stderr =
-            CaptureOutput::new(OutputStream::Stderr, &manifest.name, self.event_tx.clone()).await?;
+            Output::new(OutputStream::Stderr, &manifest.name, self.event_tx.clone()).await?;
 
         // Prevent minijail to close the log fd so that errors aren't missed
         let log_fd = (self.log_fd, self.log_fd);
         let pid = jail.run_remap_env_preload(
             &init.as_path(),
-            &[(stdout.0, 1), (stderr.0, 2), log_fd],
+            &[(stdout.as_raw_fd(), 1), (stderr.as_raw_fd(), 2), log_fd],
             &argv,
             &env,
             false,
@@ -381,9 +384,9 @@ pub(crate) struct Process {
     /// to be dumped to disk for startup. e.g seccomp config (TODO)
     _tmpdir: tempfile::TempDir,
     /// Captured stdout output
-    _stdout: CaptureOutput,
+    _stdout: Output,
     /// Captured stderr output
-    _stderr: CaptureOutput,
+    _stderr: Output,
     /// Rx part of the exit handle of this process
     exit_handle_wait: ExitHandleWait,
 }
@@ -423,29 +426,34 @@ impl Process {
     }
 }
 
+#[derive(Debug)]
 struct AsyncPipe {
-    inner: AsyncFd<std::fs::File>,
-    writefd: i32,
+    left: AsyncFd<std::fs::File>,
+    right: AsyncFd<std::fs::File>,
 }
 
 impl AsyncPipe {
     fn new() -> Result<AsyncPipe, Error> {
-        let (readfd, writefd) =
+        let (left, right) =
             pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
 
-        let mut flags = OFlag::from_bits(fcntl(readfd, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
-
+        let mut flags = OFlag::from_bits(fcntl(left, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
         flags.set(OFlag::O_NONBLOCK, true);
-        fcntl(readfd, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
+        fcntl(left, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
+        let left = unsafe { std::fs::File::from_raw_fd(left) };
+        let left = AsyncFd::new(left).map_err(|e| Error::Io("Async fd".to_string(), e))?;
 
-        let pipe =
-            unsafe { <std::fs::File as std::os::unix::prelude::FromRawFd>::from_raw_fd(readfd) };
-        let inner = AsyncFd::new(pipe).map_err(|e| Error::Io("Async fd".to_string(), e))?;
-        Ok(AsyncPipe { inner, writefd })
+        let mut flags = OFlag::from_bits(fcntl(right, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
+        flags.set(OFlag::O_NONBLOCK, true);
+        fcntl(right, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
+        let right = unsafe { std::fs::File::from_raw_fd(right) };
+        let right = AsyncFd::new(right).map_err(|e| Error::Io("Async fd".to_string(), e))?;
+
+        Ok(AsyncPipe { left, right })
     }
 
-    fn writefd(&self) -> RawFd {
-        self.writefd
+    fn as_raw_fd_right(&self) -> RawFd {
+        self.right.as_raw_fd()
     }
 }
 
@@ -456,7 +464,7 @@ impl AsyncRead for AsyncPipe {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         loop {
-            let mut guard = futures::ready!(self.inner.poll_read_ready(cx))?;
+            let mut guard = futures::ready!(self.left.poll_read_ready(cx))?;
             match guard
                 .try_io(|inner| std::io::Read::read(&mut inner.get_ref(), buf.initialized_mut()))
             {
@@ -474,42 +482,56 @@ impl AsyncRead for AsyncPipe {
 // Capture output of a child process. Create a pipe and spawn a task that forwards each line to
 // the main loop. When this struct is dropped the internal spawned tasks are stopped.
 #[derive(Debug)]
-struct CaptureOutput(i32, oneshot::Sender<()>);
+struct Output {
+    fd: RawFd,
+    token: CancellationToken,
+}
 
-impl CaptureOutput {
-    pub async fn new(
-        stream: OutputStream,
-        tag: &str,
-        event_tx: EventTx,
-    ) -> Result<CaptureOutput, Error> {
+impl Output {
+    pub async fn new(stream: OutputStream, tag: &str, event_tx: EventTx) -> Result<Output, Error> {
+        let token = CancellationToken::new();
         let pipe = AsyncPipe::new()?;
-        let writefd = pipe.writefd();
+        let fd = pipe.as_raw_fd_right();
         let mut lines = io::BufReader::new(pipe).lines();
         let tag = tag.to_string();
-        let (tx, mut rx) = oneshot::channel();
 
-        debug!("Starting stream capture of {} on {:?}", tag, stream);
-        task::spawn(async move {
-            loop {
-                select! {
-                    _ = &mut rx => break,
-                    line = lines.next_line() => {
-                        if let Ok(Some(line)) = line {
-                            let event = Event::ChildOutput {
-                                    name: tag.clone(),
-                                    stream: stream.clone(),
-                                    line,
-                                };
-                            event_tx.send(event).await.ok();
-                        } else {
-                            break;
+        {
+            let token = token.clone();
+            debug!("Starting stream capture of {} on {:?}", tag, stream);
+            task::spawn(async move {
+                loop {
+                    select! {
+                        _ = token.cancelled() => break,
+                        line = lines.next_line() => {
+                            if let Ok(Some(line)) = line {
+                                let event = Event::ChildOutput {
+                                        name: tag.clone(),
+                                        stream: stream.clone(),
+                                        line,
+                                    };
+                                event_tx.send(event).await.ok();
+                            } else {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            debug!("Stopped stream capture of {} on {:?}", tag, stream);
-        });
+                debug!("Stopped stream capture of {} on {:?}", tag, stream);
+            });
+        }
 
-        Ok(CaptureOutput(writefd, tx))
+        Ok(Output { fd, token: token })
+    }
+}
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        self.token.cancel();
+    }
+}
+
+impl AsRawFd for Output {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd
     }
 }
