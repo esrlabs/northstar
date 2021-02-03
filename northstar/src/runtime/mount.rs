@@ -22,7 +22,6 @@ use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
-use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use npk::{
     dm_verity::VerityHeader,
     manifest::Manifest,
@@ -354,25 +353,14 @@ async fn create_mount_point(run_dir: &Path, manifest: &Manifest) -> Result<PathB
 }
 
 async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
-    let notify_path = path.to_owned();
-    let file_removed = task::spawn_blocking(move || {
-        let inotify = Inotify::init(InitFlags::IN_CLOEXEC).map_err(Error::Os)?;
-        inotify
-            .add_watch(&notify_path, AddWatchFlags::IN_DELETE_SELF)
-            .map_err(Error::Os)?;
-
-        loop {
-            if !notify_path.exists() {
-                break;
-            }
-            inotify.read_events().map_err(Error::Os)?;
+    let wait = async {
+        while path.exists() {
+            time::sleep(time::Duration::from_millis(1)).await;
         }
-        Result::<(), Error>::Ok(())
-    });
-
-    time::timeout(timeout, file_removed)
+        Ok(())
+    };
+    time::timeout(timeout, wait)
         .await
-        .map_err(|_| Error::Timeout(format!("Inotify error on {}", &path.display())))
-        .and_then(|r| r.map_err(Error::JoinError))
+        .map_err(|_| Error::Timeout(format!("Failed to wait for removal of {}", &path.display())))
         .and_then(|r| r)
 }
