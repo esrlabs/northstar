@@ -94,4 +94,4 @@ runtime = [
 vergen = "3.1.0"
 tempfile = "3.2.0"
 npk = { path = "../npk" }
-tokio = { version = "1.1.1", features = ["rt"], optional = true }
+tokio = { version = "1.1.1", features = ["rt"] }

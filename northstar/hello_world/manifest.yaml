@@ -4,9 +4,9 @@ init: /hello_world
 uid: 1000
 gid: 1000
 mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system

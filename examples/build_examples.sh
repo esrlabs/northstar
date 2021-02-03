@@ -143,7 +143,6 @@ main() {
     "./examples/container/cpueater"
     "./examples/container/crashing"
     "./examples/container/datarw"
-    "./examples/container/hello"
     "./examples/container/memeater"
     "./examples/container/capabilities"
     "./examples/container/resource/resource_hello"

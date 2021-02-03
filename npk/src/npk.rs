@@ -155,8 +155,65 @@ pub struct Npk {
     version: Version,
     fs_img_offset: u64,
     fs_img_size: u64,
-    verity_header: dm_verity::VerityHeader,
-    hashes: Hashes,
+    verity_header: Option<dm_verity::VerityHeader>,
+    hashes: Option<Hashes>,
+}
+
+fn extract_hashes(
+    mut zip: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>>,
+    key: Option<&ed25519_dalek::PublicKey>,
+) -> Result<Option<Hashes>, Error> {
+    match key {
+        Some(k) => {
+            let signature_content = read_zip_file(&mut zip, SIGNATURE_NAME)?;
+            let mut sections = signature_content.split("---");
+            let hashes_string = sections.next().unwrap_or_default();
+
+            let signature_string = sections.next().unwrap_or_default();
+            let signature = decode_signature(signature_string)?;
+            k.verify_strict(hashes_string.as_bytes(), &signature)
+                .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))?;
+
+            Ok(Some(Hashes::from_str(hashes_string)?))
+        }
+        None => Ok(None),
+    }
+}
+
+fn read_zip_file(
+    zip: &mut zip::ZipArchive<std::io::BufReader<std::fs::File>>,
+    name: &str,
+) -> Result<String, Error> {
+    let mut file = zip.by_name(name).map_err(|e| Error::Zip {
+        context: format!("Failed to locate {} in ZIP file", name),
+        error: e,
+    })?;
+    let mut content = String::new();
+    file.read_to_string(&mut content).map_err(|e| Error::Io {
+        context: format!("Failed to read from {}", name),
+        error: e,
+    })?;
+    Ok(content)
+}
+
+fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
+    #[derive(Debug, Deserialize)]
+    struct SerdeSignature {
+        key: String,
+        signature: String,
+    }
+
+    let de: SerdeSignature = serde_yaml::from_str::<SerdeSignature>(s).map_err(|e| {
+        Error::MalformedSignature(format!("Failed to parse signature YAML format: {}", e))
+    })?;
+
+    let signature = base64::decode(de.signature).map_err(|e| {
+        Error::MalformedSignature(format!("Failed to decode signature base 64 format: {}", e))
+    })?;
+
+    ed25519_dalek::Signature::from_bytes(&signature).map_err(|e| {
+        Error::MalformedSignature(format!("Failed to parse signature ed25519 format: {}", e))
+    })
 }
 
 impl Npk {
@@ -172,129 +229,61 @@ impl Npk {
             })?;
 
             let manifest = {
-                inner
-                    .by_name(&MANIFEST_NAME)
-                    .map_err(|e| Error::Zip {
-                        context: format!("Failed to locate {}", &MANIFEST_NAME),
-                        error: e,
-                    })
-                    .and_then(|mut file| {
-                        let mut content = String::new();
-                        file.read_to_string(&mut content)
-                            .map_err(|e| Error::Io {
-                                context: "Failed to read manifest".to_string(),
-                                error: e,
-                            })
-                            .map(|_| content)
-                    })
-                    .and_then(|c| {
-                        Manifest::from_str(&c).map_err(|e| {
-                            Error::Manifest(format!("Failed to parse manifest: {}", e))
-                        })
-                    })?
+                let content = read_zip_file(&mut inner, &MANIFEST_NAME)?;
+                Manifest::from_str(&content)
+                    .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))?
             };
 
             let version = {
                 let comment = &std::str::from_utf8(&inner.comment()).map_err(|e| {
                     Error::Manifest(format!("Failed to read NPK version string {}", e))
                 })?;
-                if let Some(version) = comment
+                let version = comment
                     .split_whitespace()
                     .tuples()
                     .find(|(k, _)| k == &NPK_VERSION_STR)
                     .map(|(_, v)| v)
-                {
-                    Version::parse(&version).map_err(|e| {
-                        Error::Manifest(format!("Failed to parse NPK version {}", e))
-                    })?
-                } else {
-                    return Err(Error::Manifest("Missing NPK version value".to_string()));
-                }
+                    .ok_or_else(|| Error::Manifest("Missing NPK version value".to_string()))?;
+
+                Version::parse(&version)
+                    .map_err(|e| Error::Manifest(format!("Failed to parse NPK version {}", e)))?
             };
 
-            let hashes = if let Ok(mut file) = inner.by_name(&SIGNATURE_NAME) {
-                let mut content = String::new();
-                file.read_to_string(&mut content).map_err(|e| Error::Io {
-                    context: "Failed to read signature from file".to_string(),
-                    error: e,
-                })?;
-                let hashes_string = content.split("---").next().unwrap_or_default();
-                let hashes = Hashes::from_str(hashes_string).map_err(|_e| {
-                    Error::MalformedHashes("Failed to read hashes from YAML file".to_string())
-                })?;
+            let hashes = extract_hashes(&mut inner, key)?;
 
-                if let Some(key) = key {
-                    let sign_string = content.split("---").nth(1).unwrap_or_default();
-                    #[derive(Debug, Deserialize)]
-                    struct SerdeSignature {
-                        key: String,
-                        signature: String,
-                    }
-                    let sign_serde =
-                        serde_yaml::from_str::<SerdeSignature>(sign_string).map_err(|e| {
-                            Error::MalformedSignature(format!(
-                                "Failed to parse signature YAML format: {}",
-                                e
-                            ))
-                        })?;
-                    let sign_bytes = base64::decode(sign_serde.signature).map_err(|e| {
-                        Error::MalformedSignature(format!(
-                            "Failed to decode signature base 64 format: {}",
-                            e
-                        ))
+            let fs_img_offset = inner
+                .by_name(&FS_IMG_NAME)
+                .map_err(|e| Error::Zip {
+                    context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
+                    error: e,
+                })?
+                .data_start();
+
+            let fs_img_size = inner
+                .by_name(&FS_IMG_NAME)
+                .map_err(|e| Error::Zip {
+                    context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
+                    error: e,
+                })?
+                .size();
+
+            let verity_header = match &hashes {
+                Some(hs) => {
+                    let mut fsimg = inner.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
+                        context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
+                        error: e,
                     })?;
-                    let signature =
-                        ed25519_dalek::Signature::from_bytes(&sign_bytes).map_err(|e| {
-                            Error::MalformedSignature(format!(
-                                "Failed to parse signature ed25519 format: {}",
-                                e
-                            ))
-                        })?;
-                    key.verify_strict(hashes_string.as_bytes(), &signature)
-                        .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))?;
+                    io::copy(
+                        &mut fsimg.by_ref().take(hs.fs_verity_offset),
+                        &mut io::sink(),
+                    )
+                    .map_err(|e| Error::Io {
+                        context: format!("{} too small to extract verity header", &FS_IMG_NAME),
+                        error: e,
+                    })?;
+                    Some(VerityHeader::from_bytes(fsimg.by_ref()).map_err(Error::Verity)?)
                 }
-
-                hashes
-            } else {
-                return Err(Error::Io {
-                    context: format!("Failed to locate {} in ZIP file", &SIGNATURE_NAME),
-                    error: io::ErrorKind::NotFound.into(),
-                });
-            };
-
-            let fs_img_offset = if let Ok(fsimg) = inner.by_name(&FS_IMG_NAME) {
-                fsimg.data_start()
-            } else {
-                return Err(Error::Io {
-                    context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
-                    error: io::ErrorKind::NotFound.into(),
-                });
-            };
-
-            let fs_img_size = if let Ok(fsimg) = inner.by_name(&FS_IMG_NAME) {
-                fsimg.size()
-            } else {
-                return Err(Error::Io {
-                    context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
-                    error: io::ErrorKind::NotFound.into(),
-                });
-            };
-
-            let verity_header = if let Ok(mut fsimg) = inner.by_name(&FS_IMG_NAME) {
-                io::copy(
-                    &mut fsimg.by_ref().take(hashes.fs_verity_offset),
-                    &mut io::sink(),
-                )
-                .map_err(|e| Error::Io {
-                    context: format!("{} too small to extract verity header", &FS_IMG_NAME),
-                    error: e,
-                })?;
-                VerityHeader::from_bytes(fsimg.by_ref()).map_err(Error::Verity)?
-            } else {
-                return Err(Error::Io {
-                    context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
-                    error: io::ErrorKind::NotFound.into(),
-                });
+                None => None,
             };
 
             let file = inner.into_inner().into_inner();
@@ -326,8 +315,8 @@ impl Npk {
         &self.version
     }
 
-    pub fn hashes(&self) -> &Hashes {
-        &self.hashes
+    pub fn hashes(&self) -> Option<&Hashes> {
+        self.hashes.as_ref()
     }
 
     pub fn fsimg_offset(&self) -> u64 {
@@ -338,8 +327,8 @@ impl Npk {
         self.fs_img_size
     }
 
-    pub fn verity_header(&self) -> &dm_verity::VerityHeader {
-        &self.verity_header
+    pub fn verity_header(&self) -> Option<&dm_verity::VerityHeader> {
+        self.verity_header.as_ref()
     }
 }
 
@@ -462,7 +451,7 @@ pub struct SquashfsOpts {
 /// --dir examples/container/hello \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub async fn pack(dir: &Path, out: &Path, key: Option<PathBuf>) -> Result<(), Error> {
+pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
     pack_with(dir, out, key, SquashfsOpts::default()).await
 }
 
@@ -489,7 +478,7 @@ pub async fn pack(dir: &Path, out: &Path, key: Option<PathBuf>) -> Result<(), Er
 pub async fn pack_with(
     dir: &Path,
     out: &Path,
-    key: Option<PathBuf>,
+    key: Option<&Path>,
     squashfs_opts: SquashfsOpts,
 ) -> Result<(), Error> {
     let manifest = read_manifest(dir).await?;
@@ -764,12 +753,10 @@ async fn create_squashfs_img(
 ) -> Result<(), Error> {
     let pseudo_files = gen_pseudo_files(&manifest).await?;
 
-    if task::block_in_place(|| which::which(&MKSQUASHFS_BIN).is_err()) {
-        return Err(Error::Squashfs(format!(
-            "Failed to locate '{}'",
-            &MKSQUASHFS_BIN
-        )));
-    }
+    task::block_in_place(|| {
+        which::which(&MKSQUASHFS_BIN)
+            .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS_BIN)))
+    })?;
     if !dst.exists() {
         return Err(Error::Squashfs(format!(
             "Output directory '{}' does not exist",
@@ -816,12 +803,10 @@ async fn create_squashfs_img(
 async fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     let squashfs_root = out.join("squashfs-root");
 
-    if task::block_in_place(|| which::which(&UNSQUASHFS_BIN).is_err()) {
-        return Err(Error::Squashfs(format!(
-            "Failed to locate '{}'",
-            &UNSQUASHFS_BIN
-        )));
-    }
+    task::block_in_place(|| {
+        which::which(&UNSQUASHFS_BIN)
+            .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &UNSQUASHFS_BIN)))
+    })?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "Squashfs image '{}' does not exist",

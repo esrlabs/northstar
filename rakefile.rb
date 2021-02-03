@@ -18,7 +18,6 @@ def cross_packages
     crashing
     datarw
     ferris
-    hello
     memeater
     minijail
     northstar

@@ -80,7 +80,7 @@ async fn main() -> Result<()> {
             block_size,
         } => {
             let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-            npk::npk::pack_with(&dir, &out, key, squashfs_opts).await?
+            npk::npk::pack_with(&dir, &out, key.as_deref(), squashfs_opts).await?
         }
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out).await?,
         Opt::Inspect { npk, short } => inspect::inspect(&npk, short).await?,

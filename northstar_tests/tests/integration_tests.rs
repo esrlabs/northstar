@@ -28,21 +28,9 @@ test!(stop_application_not_running, {
     let mut runtime = Runtime::launch().await?;
 
     runtime
-        .stop("hello")
+        .stop("cpueater")
         .expect_err(api::model::Error::ApplicationNotRunning)?;
 
-    runtime.shutdown()
-});
-
-test!(hello, {
-    let mut runtime = Runtime::launch().await?;
-    runtime.start("hello").expect_ok()?;
-    let hello = runtime.pid("hello").await.map(ProcessAssert::new)?;
-
-    // Here goes some kind of health check for the spawned process
-    assert!(hello.is_running().await?);
-
-    runtime.stop("hello").expect_ok()?;
     runtime.shutdown()
 });
 

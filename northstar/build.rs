@@ -12,25 +12,22 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::env;
 use vergen::{generate_cargo_keys, ConstantsFlags};
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=hello_world/src/main.rs");
-    println!("cargo:rerun-if-changed=hello_world/Cargo.toml");
-    println!("cargo:rerun-if-changed=hello_world/manifest.yaml");
     let flags = ConstantsFlags::BUILD_TIMESTAMP
         | ConstantsFlags::TARGET_TRIPLE
         | ConstantsFlags::SHA_SHORT
         | ConstantsFlags::SEMVER_FROM_CARGO_PKG;
     generate_cargo_keys(flags).expect("Unable to generate the cargo keys!");
 
+    #[cfg(debug_assertions)]
     package_hello_example();
 }
 
+#[cfg(debug_assertions)]
 pub fn package_hello_example() {
-    use std::{fs, path::Path, process::Command};
+    use std::{env, fs, path::Path, process::Command};
     use tempfile::tempdir;
 
     let out_dir_var = env::var_os("OUT_DIR").unwrap();
@@ -40,8 +37,8 @@ pub fn package_hello_example() {
     let args = ["build", "--release", "--target-dir", &out_dir_string];
     let mut cmd = Command::new("cargo");
 
-    let pwd = env::var_os("PWD").unwrap();
-    let hello_dir = Path::new(&pwd).join("northstar").join("hello_world");
+    let pwd = env::current_dir().expect("Could not get current dir");
+    let hello_dir = (&pwd).join("hello_world");
 
     cmd.stdout(std::process::Stdio::piped())
         .current_dir(&hello_dir)

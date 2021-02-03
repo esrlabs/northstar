@@ -83,20 +83,20 @@ impl MountControl {
 
     pub(super) async fn mount_npk(
         &self,
-        npk: &Path,
+        npk_path: &Path,
         repository: &Repository,
         run_dir: &Path,
     ) -> Result<Container, Error> {
         let start = time::Instant::now();
 
-        debug!("Mounting {}", npk.display());
+        debug!("Mounting {}", npk_path.display());
         let use_verity = repository.key.is_some();
 
-        if let Ok(meta) = metadata(&npk).await {
+        if let Ok(meta) = metadata(&npk_path).await {
             debug!("Mounting NPK with size {}", meta.len());
         }
 
-        let npk = Npk::from_path(&npk, repository.key.as_ref())
+        let npk = Npk::from_path(&npk_path, repository.key.as_ref())
             .await
             .map_err(Error::Npk)?;
 
@@ -238,7 +238,6 @@ impl MountControl {
 
     async fn setup_and_mount(&self, npk: Npk, root: &Path, verity: bool) -> Result<PathBuf, Error> {
         let verity_header = npk.verity_header().to_owned();
-        let hashes = npk.hashes().clone();
         let fsimg_offset = npk.fsimg_offset();
         let fsimg_size = npk.fsimg_size();
         let manifest = npk.manifest();
@@ -254,30 +253,27 @@ impl MountControl {
             .map_err(Error::LoopDevice)?;
 
         let device = if !verity {
-            let loop_device = losetup(&self.lc, &mut npk.into_inner(), fsimg_offset, fsimg_size)
-                .await
-                .map_err(Error::LoopDevice)?;
             loop_device.path().await.unwrap()
         } else {
-            let hashes = npk.hashes().await.map_err(Error::Npk)?;
-            let verity_header = npk.verity_header().await.map_err(Error::Npk)?;
-            let loop_device = losetup(&self.lc, &mut npk.into_inner(), fsimg_offset, fsimg_size)
-                .await
-                .map_err(Error::LoopDevice)?;
-            let loop_device_id = loop_device
-                .dev_id()
-                .await
-                .map(|(major, minor)| format!("{}:{}", major, minor))
-                .map_err(Error::LoopDevice)?;
+            match (&verity_header, &npk.hashes()) {
+                (Some(header), Some(hashes)) => {
+                    let loop_device_id = loop_device
+                        .dev_id()
+                        .await
+                        .map(|(major, minor)| format!("{}:{}", major, minor))
+                        .map_err(Error::LoopDevice)?;
 
-            self.verity_setup(
-                &loop_device_id,
-                &verity_header,
-                &name,
-                hashes.fs_verity_hash.as_str(),
-                hashes.fs_verity_offset,
-            )
-            .await?
+                    self.verity_setup(
+                        &loop_device_id,
+                        &header,
+                        &name,
+                        hashes.fs_verity_hash.as_str(),
+                        hashes.fs_verity_offset,
+                    )
+                    .await?
+                }
+                _ => loop_device.path().await.unwrap(),
+            }
         };
 
         mount(&device, root, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;

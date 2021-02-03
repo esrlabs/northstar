@@ -143,7 +143,7 @@ mounts:
         let key_dir = create_tmp_dir();
         create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir).await;
-        pack(&src, &dest, Some(prv_key)).await.expect("Pack NPK");
+        pack(&src, &dest, Some(&prv_key)).await.expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
