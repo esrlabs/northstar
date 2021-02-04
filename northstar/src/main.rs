@@ -63,7 +63,7 @@ fn main() -> Result<(), Error> {
     nix::mount::mount(
         Option::<&'static [u8]>::None,
         config.devices.unshare_root.as_os_str(),
-        Some(config.devices.unshare_fstype.as_str()),
+        Option::<&str>::None,
         nix::mount::MsFlags::MS_PRIVATE,
         Option::<&'static [u8]>::None,
     )?;

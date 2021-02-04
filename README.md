@@ -238,7 +238,6 @@ cpu = "northstar"
 
 [devices]
 unshare_root = "/"
-unshare_fstype = "ext4"
 loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"
@@ -260,7 +259,6 @@ Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchie
 `[devices]`-section:
 
 * **`unshare_root`** -- Set to mountpoint of the fs containing run_dir. The runtime needs this directory to set the mount propagation to MS_PRIVATE.
-* **`unshare_fstype`** -- For applying the mount propagation type the fs type is needed.
 * **`loop_control`** -- Location of the loopback block device control file
 * **`loop_dev`** -- Prefix of preconfigured loopback devices. Usually loopback devices are e.g /dev/block0
 * **`device_mapper`** -- Device mapper control file.

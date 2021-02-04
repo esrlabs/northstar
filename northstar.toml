@@ -13,7 +13,6 @@ cpu = "northstar"
 
 [devices]
 unshare_root = "/"
-unshare_fstype = "ext4"
 loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"

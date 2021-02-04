@@ -35,8 +35,6 @@ pub struct Devices {
     /// Parent mountpoint of northstar path. Northstar needs to set private mount propagation
     /// on the parent mount of the northstar runtime dir. This mountpoint varies.
     pub unshare_root: PathBuf,
-    /// Filesystem type of the fs mounted on `unshare_root`
-    pub unshare_fstype: String,
     /// Device mapper control file e.g /dev/mapper/control
     pub device_mapper: PathBuf,
     /// Device mapper dev prefix e.g /dev/mapper/dm-
