@@ -13,10 +13,12 @@ main() {
     )
 
     apt-get update
+    apt-get install --assume-yes --no-install-recommends --fix-missing squashfs-tools
+
     local purge_list=()
     for dep in "${dependencies[@]}"; do
         if ! dpkg -L "${dep}"; then
-            apt-get install --assume-yes --no-install-recommends "${dep}"
+            apt-get install --assume-yes --no-install-recommends --fix-missing "${dep}"
             purge_list+=( "${dep}" )
         fi
     done
