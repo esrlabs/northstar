@@ -34,7 +34,7 @@ use std::{
     path::{Path, PathBuf},
     result,
 };
-use tokio::{fs, fs::File, time};
+use tokio::{fs, time};
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -171,7 +171,7 @@ impl State {
             mount_control: MountControl::new(&config).await.map_err(Error::Mount)?,
         };
 
-        // mount all the containers from each repository
+        // Mount all the containers from each repository
         state.mount_repositories().await?;
         Ok(state)
     }
@@ -399,10 +399,7 @@ impl State {
             )
         })?;
 
-        let file = File::open(&npk)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to open NPK at {}", npk.display()), e))?;
-        let manifest = Npk::new(file, repository.key.as_ref())
+        let manifest = Npk::from_path(&npk, repository.key.as_ref())
             .await
             .map_err(Error::Npk)
             .map(|npk| npk.manifest().clone())?;
@@ -429,7 +426,7 @@ impl State {
             warn!("Container with the same name and version already installed");
             return Err(Error::ContainerAlreadyInstalled(manifest.name.clone()));
         }
-        // check if required resources exist
+        // Check if required resources exist
         let required_resources = manifest.mounts.values().filter_map(|m| match m {
             Mount::Resource { name, version, .. } => Some((name, version)),
             _ => None,
@@ -484,13 +481,13 @@ impl State {
                 Error::Io(format!("Failed to read {}", repository.dir.display()), e)
             })?;
             while let Ok(Some(entry)) = dir.next_entry().await {
-                let file = File::open(entry.path().as_path())
-                    .await
-                    .map_err(|e| Error::Io("Failed to open NPK".to_string(), e))?;
-                let manifest = Npk::new(file, self.repositories.get(id).unwrap().key.as_ref())
-                    .await
-                    .map_err(Error::Npk)
-                    .map(|n| n.manifest().clone())?;
+                let manifest = Npk::from_path(
+                    entry.path().as_path(),
+                    self.repositories.get(id).unwrap().key.as_ref(),
+                )
+                .await
+                .map_err(Error::Npk)
+                .map(|n| n.manifest().clone())?;
 
                 if manifest.name == name && manifest.version == *version {
                     return Ok(Some((manifest, entry.path())));
@@ -505,7 +502,7 @@ impl State {
         name: &str,
         version: &Version,
     ) -> result::Result<(), Error> {
-        // check if resource still needed
+        // Check if resource still needed
         for app in self.applications() {
             for mount in app.container.manifest.mounts.values() {
                 if let Mount::Resource {

@@ -21,7 +21,6 @@ use std::{
     path::Path,
     process::Command,
 };
-use tokio::fs::File;
 
 pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
     if short {
@@ -32,13 +31,7 @@ pub async fn inspect(npk: &Path, short: bool) -> Result<()> {
 }
 
 pub async fn inspect_short(npk: &Path) -> Result<()> {
-    let npk = Npk::new(
-        File::open(&npk)
-            .await
-            .context(format!("Failed to open NPK at '{}'", &npk.display()))?,
-        None,
-    )
-    .await?;
+    let npk = Npk::from_path(&npk, None).await?;
     let manifest = npk.manifest();
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();
