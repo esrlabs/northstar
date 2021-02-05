@@ -85,6 +85,19 @@ ifup() {
 		echo "Can not configure default route"
 		exit 1
 	fi
+
+	# Bring up loopback so localhost works
+	/sbin/ip addr add 127.0.0.1/8 dev lo
+	if [ $? -ne 0 ] ; then
+		echo "Can not configure lo"
+		exit 1
+	fi
+
+	/sbin/ip link set lo up
+	if [ $? -ne 0 ] ; then
+		echo "Can not bring up loopback"
+		exit 1
+	fi
 	
 	logit "end network config"
 }
