@@ -24,7 +24,7 @@ use std::{
 use thiserror::Error;
 use tokio::{
     fs, io,
-    net::TcpStream,
+    net::{TcpStream, UnixStream},
     select,
     sync::{mpsc, oneshot},
     task, time,
@@ -51,6 +51,8 @@ pub enum Error {
     PendingRequest,
     #[error("Api error: {0:?}")]
     Api(super::model::Error),
+    #[error("Invalid console address {0}, use either tcp://... or unix:...")]
+    InvalidConsoleAddress(String),
 }
 
 /// Client for a Northstar runtime instance.
@@ -78,6 +80,37 @@ enum ClientRequest {
     Install(PathBuf, String),
 }
 
+trait Connection:
+    futures::sink::Sink<Message, Error = io::Error>
+    + Stream<Item = Result<Message, io::Error>>
+    + Unpin
+    + io::AsyncRead
+    + io::AsyncWrite
+    + Send
+{
+}
+
+impl Connection for super::codec::Framed<TcpStream> {}
+impl Connection for super::codec::Framed<UnixStream> {}
+
+async fn open_connection(url: &url::Url) -> Result<Box<dyn Connection>, Error> {
+    match url.scheme() {
+        "tcp" => {
+            let address = format!("{}:{}", url.host().unwrap(), url.port().unwrap_or(4200));
+            Ok(Box::new(framed(
+                TcpStream::connect(&address).await.map_err(Error::Io)?,
+            )))
+        }
+        "unix" => {
+            let path = url.path();
+            Ok(Box::new(framed(
+                UnixStream::connect(&path).await.map_err(Error::Io)?,
+            )))
+        }
+        _ => Err(Error::InvalidConsoleAddress(url.to_string())),
+    }
+}
+
 impl Client {
     /// Create a new northstar client and connect to a runtime instance running on `host`.
     pub async fn new(host: &str) -> Result<Client, Error> {
@@ -86,11 +119,12 @@ impl Client {
         let (request_tx, mut request_rx) =
             mpsc::channel::<(ClientRequest, oneshot::Sender<Result<Response, Error>>)>(10);
         let mut response_tx = Option::<oneshot::Sender<Result<Response, Error>>>::None;
-        let mut connection =
-            match time::timeout(time::Duration::from_secs(2), TcpStream::connect(host)).await {
-                Ok(connection) => framed(connection.map_err(Error::Io)?),
-                Err(_) => return Err(Error::Timeout),
-            };
+        let url =
+            url::Url::parse(&host).map_err(|url| Error::InvalidConsoleAddress(url.to_string()))?;
+        let mut connection: Box<dyn Connection> =
+            time::timeout(time::Duration::from_secs(2), open_connection(&url))
+                .await
+                .map_err(|_| Error::Timeout)??;
 
         task::spawn(async move {
             loop {

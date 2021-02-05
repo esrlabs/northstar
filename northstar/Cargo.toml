@@ -57,7 +57,7 @@ anyhow = "1.0.37"
 
 [features]
 default = ["api", "runtime"]
-api = ["bytes", "futures", "serde", "serde_json", "tokio", "derive-new", "uuid", "tokio-util", "thiserror"]
+api = ["bytes", "futures", "serde", "serde_json", "tokio", "derive-new", "url", "uuid", "tokio-util", "thiserror"]
 runtime = [
     "api",
     "async-trait",

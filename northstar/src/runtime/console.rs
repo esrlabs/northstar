@@ -17,6 +17,7 @@ use crate::{
     api::{self},
     runtime::{state::State, EventTx},
 };
+use async_trait::async_trait;
 use futures::{sink::SinkExt, StreamExt};
 use log::{debug, error, info, warn};
 use std::{collections::HashMap, path::PathBuf};
@@ -24,7 +25,7 @@ use thiserror::Error;
 use tokio::{
     fs,
     io::{self},
-    net::{TcpListener, TcpStream},
+    net::{TcpListener, TcpStream, UnixListener, UnixStream},
     select,
     sync::{self, broadcast, oneshot},
     task, time,
@@ -41,14 +42,6 @@ pub(crate) enum Request {
     Install(RepositoryId, PathBuf),
 }
 
-fn parse_url(url: &str) -> Result<Url, Error> {
-    let url = Url::parse(url).map_err(|_| Error::InvalidConsoleAddress)?;
-    match url.scheme() {
-        "tcp" | "unix" => Ok(url),
-        _ => Err(Error::InvalidConsoleAddress),
-    }
-}
-
 /// A console is responsible for monitoring and serving incoming client connections
 /// It feeds relevant events back to the runtime and forwards responses and notifications
 /// to connected clients
@@ -63,10 +56,101 @@ pub(crate) struct Console {
 pub enum Error {
     #[error("Protocol error: {0}")]
     Protocol(String),
-    #[error("IO error: {0}")]
+    #[error("IO error: {0} ({1})")]
     Io(String, #[source] io::Error),
-    #[error("Invalid console address")]
-    InvalidConsoleAddress,
+    #[error("Invalid console address {0}, use either tcp://... or unix:...")]
+    InvalidConsoleAddress(String),
+}
+
+trait ClientStream: Unpin + io::AsyncRead + io::AsyncWrite + Send {
+    fn client_addr(&self) -> io::Result<String>;
+}
+
+impl ClientStream for UnixStream {
+    fn client_addr(&self) -> io::Result<String> {
+        Ok(format!("{:?}", self.peer_addr()?))
+    }
+}
+
+impl ClientStream for TcpStream {
+    fn client_addr(&self) -> io::Result<String> {
+        Ok(format!("{:?}", self.peer_addr()?))
+    }
+}
+
+#[async_trait]
+trait Listener: Send {
+    async fn accept_connection(&self) -> io::Result<Box<dyn ClientStream>>;
+}
+
+#[async_trait]
+impl Listener for UnixListener {
+    async fn accept_connection(&self) -> io::Result<Box<dyn ClientStream>> {
+        Ok(Box::new(self.accept().await?.0))
+    }
+}
+
+#[async_trait]
+impl Listener for TcpListener {
+    async fn accept_connection(&self) -> io::Result<Box<dyn ClientStream>> {
+        Ok(Box::new(self.accept().await?.0))
+    }
+}
+
+/// Creates either a Unix or Tcp socket as source of connections
+async fn create_listener(url: &Url) -> Result<Box<dyn Listener>, Error> {
+    match url.scheme() {
+        "tcp" => {
+            let host = url.host().unwrap_or(url::Host::Domain("localhost"));
+            let port = url.port().unwrap_or(4200);
+            let address = format!("{}:{}", host, port);
+            debug!("Starting console on {}", &address);
+            Ok(Box::new(TcpListener::bind(&address).await.map_err(
+                |e| Error::Io(format!("Failed to open listener on {}", &address), e),
+            )?))
+        }
+        "unix" => {
+            debug!("Starting console on {}", &url.path());
+            let path = url.path();
+            Ok(Box::new(UnixListener::bind(&path).map_err(|e| {
+                Error::Io(format!("Failed to open listener on {}", &path), e)
+            })?))
+        }
+        _ => return Err(Error::InvalidConsoleAddress(url.to_string())),
+    }
+}
+
+/// Spawns a new task for each new client
+async fn listen_for_connections(
+    listener: Box<dyn Listener>,
+    event_tx: EventTx,
+    notification_tx: broadcast::Sender<api::model::Notification>,
+    token: CancellationToken,
+) {
+    loop {
+        select! {
+            stream = listener.accept_connection() => {
+                match stream {
+                    Ok(stream) => {
+                        let event_tx = event_tx.clone();
+                        let notification_rx = notification_tx.subscribe();
+                        // Spawn a task for each incoming connection.
+                        task::spawn(async move {
+                            if let Err(e) = Console::connection(stream, event_tx, notification_rx).await {
+                                warn!("Error servicing connection: {}", e);
+                            }
+                        });
+
+                    }
+                    Err(e) => {
+                        warn!("Error listening: {}", e);
+                        break;
+                    }
+                }
+            }
+            _ = token.cancelled() => break,
+        }
+    }
 }
 
 impl Console {
@@ -75,7 +159,8 @@ impl Console {
         let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
         Ok(Self {
             event_tx: tx.clone(),
-            url: parse_url(address)?,
+            url: Url::parse(address)
+                .map_err(|_| Error::InvalidConsoleAddress(address.to_string()))?,
             notification_tx,
             token: CancellationToken::new(),
         })
@@ -162,52 +247,12 @@ impl Console {
     /// Open a TCP socket and listen for incoming connections
     /// spawn a task for each connection
     pub(crate) async fn listen(&self) -> Result<(), Error> {
+        let listener = create_listener(&self.url).await?;
         let event_tx = self.event_tx.clone();
-        let listener = match self.url.scheme() {
-            "tcp" => {
-                let address = format!(
-                    "{}:{}",
-                    self.url.host().unwrap(),
-                    self.url.port().unwrap_or(4200)
-                );
-
-                debug!("Starting console on {}", &address);
-
-                TcpListener::bind(&address)
-                    .await
-                    .map_err(|e| Error::Io(format!("Failed to open listener on {}", &address), e))?
-            }
-            "unix" => unimplemented!(),
-            _ => return Err(Error::InvalidConsoleAddress),
-        };
-
         let notification_tx = self.notification_tx.clone();
         let token = self.token.clone();
         task::spawn(async move {
-            loop {
-                select! {
-                    stream = listener.accept() => {
-                        match stream {
-                            Ok(stream) => {
-                                let event_tx = event_tx.clone();
-                                let notification_rx = notification_tx.subscribe();
-                                // Spawn a task for each incoming connection.
-                                task::spawn(async move {
-                                    if let Err(e) = Self::connection(stream.0, event_tx, notification_rx).await {
-                                        warn!("Error servicing connection: {}", e);
-                                    }
-                                });
-
-                            }
-                            Err(e) => {
-                                warn!("Error listening: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                    _ = token.cancelled() => break,
-                }
-            }
+            listen_for_connections(listener, event_tx, notification_tx, token).await;
         });
         Ok(())
     }
@@ -218,12 +263,12 @@ impl Console {
     }
 
     async fn connection(
-        stream: TcpStream,
+        stream: Box<dyn ClientStream>,
         event_tx: EventTx,
         mut notification_rx: NotificationRx,
     ) -> Result<(), Error> {
         let peer = stream
-            .peer_addr()
+            .client_addr()
             .map_err(|e| Error::Io("Failed to get peer from command connection".to_string(), e))?;
 
         debug!("Client {:?} connected", peer);
