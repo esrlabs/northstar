@@ -22,62 +22,71 @@ fn main() {
     generate_cargo_keys(flags).expect("Unable to generate the cargo keys!");
 
     #[cfg(debug_assertions)]
-    package_hello_example();
+    package_hello_example().expect("Failed to package hello_world");
 }
 
 #[cfg(debug_assertions)]
-pub fn package_hello_example() {
-    use std::{env, fs, path::Path, process::Command};
-    use tempfile::tempdir;
+pub fn package_hello_example() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use npk::npk;
+    use std::{env, fs, path::Path};
+    use tokio::runtime;
 
-    let out_dir_var = env::var_os("OUT_DIR").unwrap();
-    let out_dir_path = Path::new(&out_dir_var);
-    let out_dir_string = out_dir_var.to_string_lossy();
+    const MANIFEST: &str = r#"name: hello_world
+version: 0.0.1
+uid: 1000
+gid: 1000
+init: /bin/sh
+args:
+  - "-c"
+  - "echo Hello World!"
+mounts:
+  /bin:
+    host: /bin
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64"#;
 
-    let args = ["build", "--release", "--target-dir", &out_dir_string];
-    let mut cmd = Command::new("cargo");
+    const MANIFEST_ANDROID: &str = r#"name: hello_world
+version: 0.0.1
+uid: 1000
+gid: 1000
+init: /system/bin/sh
+args:
+  - "-c"
+  - "echo Hello World!"
+mounts:
+  /system:
+    host: /system"#;
 
-    let pwd = env::current_dir().expect("Could not get current dir");
-    let hello_dir = (&pwd).join("hello_world");
+    let out_dir = env::var("OUT_DIR").context("Failed to read OUT_DIR")?;
+    let out_dir = Path::new(&out_dir);
 
-    cmd.stdout(std::process::Stdio::piped())
-        .current_dir(&hello_dir)
-        .args(&args)
-        .output()
-        .expect("Could not execute cargo build in build.rs");
-    let hello_example_manifest = hello_dir.join("manifest.yaml");
-    let pack_tmp_dir =
-        tempdir().expect("Could not create tmp dir for packaging hello_world container");
-    let hello_exe_path = out_dir_path.join("release").join("hello_world");
-    let root_dir = pack_tmp_dir.path().join("root");
+    let root_dir = out_dir.join("root");
+    fs::create_dir_all(&root_dir).context("Failed to create root dir")?;
 
-    if !root_dir.exists() {
-        fs::create_dir(&root_dir).expect("Could not create container root directory");
-    }
-    fs::copy(hello_exe_path, root_dir.join("hello_world"))
-        .expect("Could not copy hello_world file");
-    fs::copy(
-        hello_example_manifest,
-        pack_tmp_dir.path().join("manifest.yaml"),
-    )
-    .expect("Could not copy hello_world manifest file");
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("northstar")
-        .build()
-        .expect("Creating tokio runtime failed");
-
-    let squashfs_opts = npk::npk::SquashfsOpts {
-        comp: None,
-        block_size: None,
+    let manifest = match env::var("CARGO_CFG_TARGET_OS")
+        .context("Failed to read CARGO_CFG_TARGET_OS")?
+        .as_str()
+    {
+        "android" => MANIFEST_ANDROID,
+        _ => MANIFEST,
     };
-    runtime
-        .block_on(npk::npk::pack_with(
-            &pack_tmp_dir.path(),
-            &out_dir_path,
-            None, // without a key
-            squashfs_opts,
-        ))
-        .expect("Packaging the hello_world container failed");
+    std::fs::write(out_dir.join("manifest.yaml"), &manifest)
+        .context("Failed to create manifest")?;
+
+    runtime::Builder::new_multi_thread()
+        .enable_io()
+        .build()?
+        .block_on(npk::pack_with(
+            &out_dir,
+            &out_dir,
+            None,
+            npk::SquashfsOpts {
+                comp: None,
+                block_size: None,
+            },
+        ))?;
+    Ok(())
 }
