@@ -52,7 +52,7 @@ pub struct Config {
     /// Print debug logs.
     pub debug: bool,
     /// Console address.
-    pub console_address: String,
+    pub console: Option<String>,
     /// Directory with unpacked containers.
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored
