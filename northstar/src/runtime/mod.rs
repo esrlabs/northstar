@@ -214,10 +214,15 @@ async fn runtime_task(
         state.applications().count() + state.resources().count()
     );
 
+    let console = config
+        .console
+        .map(|url| console::Console::new(&url, &event_tx));
+
     // Initialize console
-    let console = console::Console::new(&config.console_address, &event_tx);
-    // Start to listen for incoming connections
-    console.listen().await.map_err(Error::Console)?;
+    if let Some(console) = console.as_ref() {
+        // Start to listen for incoming connections
+        console.listen().await.map_err(Error::Console)?;
+    }
 
     // Autostart flagged containers. Each container with the `autostart` option
     // set to true in the manifest is started.
@@ -250,7 +255,9 @@ async fn runtime_task(
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
             Event::Console(msg, txr) => {
-                console.process(&mut state, &msg, txr).await;
+                if let Some(console) = console.as_ref() {
+                    console.process(&mut state, &msg, txr).await;
+                }
                 Ok(())
             }
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
@@ -263,7 +270,9 @@ async fn runtime_task(
             Event::Shutdown => break state.shutdown().await,
             // Forward notifications to console
             Event::Notification(notification) => {
-                console.notification(notification).await;
+                if let Some(console) = console.as_ref() {
+                    console.notification(notification).await;
+                }
                 Ok(())
             }
         };
