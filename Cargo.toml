@@ -12,7 +12,6 @@ members = [
     "minijail/rust/minijail",
     "minijail/rust/minijail-sys",
     "northstar",
-    "northstar/hello_world",
     "northstar_tests",
     "northstar_tests/test_container",
     "npk",

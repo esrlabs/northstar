@@ -52,6 +52,9 @@ pub struct State {
     config: Config,
     minijail: Minijail,
     mount_control: MountControl,
+    /// Internal test repository tempdir
+    #[cfg(debug_assertions)]
+    internal_repository: tempfile::TempDir,
 }
 
 #[derive(Debug)]
@@ -135,47 +138,46 @@ impl fmt::Display for Application {
     }
 }
 
+/// Dump the hello world npk created at compile time into a tmpdir that acts as internal
+/// repository.
 #[cfg(debug_assertions)]
-async fn prepare_hello_world_repo(repositories: &mut HashMap<RepositoryId, Repository>) {
-    use tempfile::tempdir;
-    use tokio::io::AsyncWriteExt;
-    async fn prepare(
-        repositories: &mut HashMap<RepositoryId, Repository>,
-    ) -> Result<(), std::io::Error> {
-        let hello_world_data = include_bytes!(concat!(env!("OUT_DIR"), "/hello_world-0.0.1.npk"));
+async fn prepare_hello_world_repo(name: &str) -> Result<(tempfile::TempDir, Repository), Error> {
+    let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello_world-0.0.1.npk"));
+    let tempdir = tokio::task::block_in_place(|| {
+        tempfile::tempdir().map_err(|e| Error::Io("Failed to create tmpdir".into(), e))
+    })?;
+    let dir = tempdir.path().to_owned();
+    let npk = dir.join("hello_world-0.0.1.npk");
 
-        let internal_repo_id = "internal_repository";
-        let pack_tmp_dir = tempdir()
-            .expect("Could not create tmp dir for packaging hello_world container")
-            .path()
-            .join(internal_repo_id);
-        tokio::fs::create_dir_all(&pack_tmp_dir).await?;
-
-        let hello_npk_path = pack_tmp_dir.join("hello_world-0.0.1.npk");
-        let mut hello_npk_file: fs::File = fs::File::create(&hello_npk_path).await?;
-        hello_npk_file.write_all(hello_world_data).await?;
-        // add internal repository
-        repositories.insert(
-            internal_repo_id.to_owned(),
-            Repository {
-                id: internal_repo_id.to_owned(),
-                dir: pack_tmp_dir,
-                key: None,
-            },
-        );
-        Ok(())
-    };
-    if prepare(repositories).await.is_err() {
-        warn!("Could not prepare hello-world repository");
-    }
+    fs::write(&npk, hello_world)
+        .await
+        .map_err(|e| Error::Io(format!("Failed to write {}", npk.display()), e))
+        .map(|_| {
+            (
+                tempdir,
+                Repository {
+                    id: name.to_owned(),
+                    dir,
+                    key: None,
+                },
+            )
+        })
 }
 
 impl State {
     /// Create a new empty State instance
     pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
         let mut repositories = HashMap::new();
+
+        // Internal test repository
         #[cfg(debug_assertions)]
-        prepare_hello_world_repo(&mut repositories).await;
+        let internal_repository = {
+            let name = "internal".to_string();
+            let (dir, repository) = prepare_hello_world_repo(&name).await?;
+            repositories.insert(name, repository);
+            dir
+        };
+
         for (id, repository) in &config.repositories {
             let key = {
                 if let Some(key) = repository.key.as_ref() {
@@ -206,6 +208,8 @@ impl State {
             config: config.clone(),
             minijail,
             mount_control: MountControl::new(&config).await.map_err(Error::Mount)?,
+            #[cfg(debug_assertions)]
+            internal_repository,
         };
 
         // Mount all the containers from each repository
