@@ -30,6 +30,7 @@ use tokio::{
     task, time,
 };
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
 type NotificationRx = broadcast::Receiver<api::model::Notification>;
 
@@ -40,12 +41,20 @@ pub(crate) enum Request {
     Install(RepositoryId, PathBuf),
 }
 
+fn parse_url(url: &str) -> Result<Url, Error> {
+    let url = Url::parse(url).map_err(|_| Error::InvalidConsoleAddress)?;
+    match url.scheme() {
+        "tcp" | "unix" => Ok(url),
+        _ => Err(Error::InvalidConsoleAddress),
+    }
+}
+
 /// A console is responsible for monitoring and serving incoming client connections
 /// It feeds relevant events back to the runtime and forwards responses and notifications
 /// to connected clients
 pub(crate) struct Console {
     event_tx: EventTx,
-    address: String,
+    url: Url,
     notification_tx: broadcast::Sender<api::model::Notification>,
     token: CancellationToken,
 }
@@ -56,18 +65,20 @@ pub enum Error {
     Protocol(String),
     #[error("IO error: {0}")]
     Io(String, #[source] io::Error),
+    #[error("Invalid console address")]
+    InvalidConsoleAddress,
 }
 
 impl Console {
     /// Construct a new console instance
-    pub fn new(address: &str, tx: &EventTx) -> Self {
+    pub fn new(address: &str, tx: &EventTx) -> Result<Self, Error> {
         let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
-        Self {
+        Ok(Self {
             event_tx: tx.clone(),
-            address: address.to_owned(),
+            url: parse_url(address)?,
             notification_tx,
             token: CancellationToken::new(),
-        }
+        })
     }
 
     /// Process console events
@@ -151,11 +162,24 @@ impl Console {
     /// Open a TCP socket and listen for incoming connections
     /// spawn a task for each connection
     pub(crate) async fn listen(&self) -> Result<(), Error> {
-        debug!("Starting console on {}", self.address);
         let event_tx = self.event_tx.clone();
-        let listener = TcpListener::bind(&self.address)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to open listener on {}", self.address), e))?;
+        let listener = match self.url.scheme() {
+            "tcp" => {
+                let address = format!(
+                    "{}:{}",
+                    self.url.host().unwrap(),
+                    self.url.port().unwrap_or(4200)
+                );
+
+                debug!("Starting console on {}", &address);
+
+                TcpListener::bind(&address)
+                    .await
+                    .map_err(|e| Error::Io(format!("Failed to open listener on {}", &address), e))?
+            }
+            "unix" => unimplemented!(),
+            _ => return Err(Error::InvalidConsoleAddress),
+        };
 
         let notification_tx = self.notification_tx.clone();
         let token = self.token.clone();
