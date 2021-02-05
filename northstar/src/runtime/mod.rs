@@ -216,7 +216,9 @@ async fn runtime_task(
 
     let console = config
         .console
-        .map(|url| console::Console::new(&url, &event_tx));
+        .map(|url| console::Console::new(&url, &event_tx))
+        .map_or(Ok(None), |r| r.map(Some))
+        .map_err(Error::Console)?;
 
     // Initialize console
     if let Some(console) = console.as_ref() {
