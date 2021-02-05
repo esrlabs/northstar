@@ -13,13 +13,12 @@
 //   limitations under the License.
 
 use super::{
-    process::{
-        exit_handle, waitpid, Error, ExitHandleWait, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
-    },
+    process::{waitpid, Error, ExitStatus, Pid, ENV_NAME, ENV_VERSION},
     state::Container,
     OutputStream,
 };
 use crate::runtime::{Event, EventTx};
+use futures::Future;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
@@ -28,6 +27,7 @@ use nix::{
     unistd::{self, chown, close, pipe},
 };
 use npk::manifest::{Dev, Mount, MountFlag};
+use signal::Signal::{SIGKILL, SIGTERM};
 use std::{
     fmt, iter, ops,
     os::unix::{
@@ -40,7 +40,7 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, AsyncWriteExt, ReadBuf},
+    io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, ReadBuf},
     select, task, time,
 };
 use tokio_util::sync::CancellationToken;
@@ -132,31 +132,31 @@ impl Minijail {
         let uid = manifest.uid;
         let gid = manifest.gid;
 
-        let tmpdir = tempfile::TempDir::new()
-            .map_err(|e| Error::Io(format!("Failed to create tmpdir for {}", manifest.name), e))?;
-        let tmpdir_path = tmpdir.path();
+        // let tmpdir = tempfile::TempDir::new()
+        //     .map_err(|e| Error::Io(format!("Failed to create tmpdir for {}", manifest.name), e))?;
+        // let tmpdir_path = tmpdir.path();
 
         // Dump seccomp config to process tmpdir. This is a subject to be changed since
         // minijail provides a API to configure seccomp without writing to a file.
         // TODO: configure seccomp via API instead of a file
-        if let Some(ref seccomp) = container.manifest.seccomp {
-            let seccomp_config = tmpdir_path.join("seccomp");
-            let mut f = fs::File::create(&seccomp_config)
-                .await
-                .map_err(|e| Error::Io("Failed to create seccomp configuraiton".to_string(), e))?;
-            let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
-            f.write_all(s.as_bytes())
-                .await
-                .map_err(|e| Error::Io("Failed to write seccomp configuraiton".to_string(), e))?;
+        // if let Some(ref seccomp) = container.manifest.seccomp {
+        //     let seccomp_config = tmpdir_path.join("seccomp");
+        //     let mut f = fs::File::create(&seccomp_config)
+        //         .await
+        //         .map_err(|e| Error::Io("Failed to create seccomp configuraiton".to_string(), e))?;
+        //     let s = itertools::join(seccomp.iter().map(|(k, v)| format!("{}: {}", k, v)), "\n");
+        //     f.write_all(s.as_bytes())
+        //         .await
+        //         .map_err(|e| Error::Io("Failed to write seccomp configuraiton".to_string(), e))?;
 
-            // Temporary disabled
-            // Must be called before parse_seccomp_filters
-            // jail.log_seccomp_filter_failures();
-            // let p: std::path::PathBuf = seccomp_config.into();
-            // jail.parse_seccomp_filters(p.as_path())
-            //     .context("Failed parse seccomp config")?;
-            // jail.use_seccomp_filter();
-        }
+        //     // Temporary disabled
+        //     // Must be called before parse_seccomp_filters
+        //     // jail.log_seccomp_filter_failures();
+        //     // let p: std::path::PathBuf = seccomp_config.into();
+        //     // jail.parse_seccomp_filters(p.as_path())
+        //     //     .context("Failed parse seccomp config")?;
+        //     // jail.use_seccomp_filter();
+        // }
 
         debug!("Setting UID to {}", uid);
         jail.change_uid(uid);
@@ -229,23 +229,17 @@ impl Minijail {
             false,
         )? as u32;
 
-        let (exit_handle_signal, exit_handle_wait) = exit_handle();
         // Spawn a task thats waits for the child to exit
-        waitpid(
-            &manifest.name,
-            pid,
-            exit_handle_signal,
-            self.event_tx.clone(),
-        )
-        .await;
+        let exit_status = Box::new(Box::pin(
+            waitpid(&manifest.name, pid, self.event_tx.clone()).await,
+        ));
 
         Ok(Process {
             pid,
             _jail: jail,
-            _tmpdir: tmpdir,
             _stdout: stdout,
             _stderr: stderr,
-            exit_handle_wait,
+            exit_status,
         })
     }
 
@@ -369,19 +363,15 @@ impl Minijail {
 
 pub(crate) struct Process {
     /// PID of this process
-    pid: u32,
+    pid: Pid,
+    /// Exit handle of this process
+    exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
     /// Handle to a libminijail configuration
     _jail: MinijailHandle,
-    /// Temporary directory created in the systems tmp folder.
-    /// This directory holds process instance specific data that needs
-    /// to be dumped to disk for startup. e.g seccomp config (TODO)
-    _tmpdir: tempfile::TempDir,
     /// Captured stdout output
     _stdout: Output,
     /// Captured stderr output
     _stderr: Output,
-    /// Rx part of the exit handle of this process
-    exit_handle_wait: ExitHandleWait,
 }
 
 impl fmt::Debug for Process {
@@ -395,26 +385,26 @@ impl Process {
         self.pid
     }
 
-    pub async fn stop(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
+    pub async fn terminate(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
         // Send a SIGTERM to the application. If the application does not terminate with a timeout
         // it is SIGKILLed.
-        let sigterm = signal::Signal::SIGTERM;
-        signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(sigterm))
+        signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGTERM))
             .map_err(|e| Error::Os(format!("Failed to SIGTERM {}", self.pid), e))?;
 
-        let s = match tokio::time::timeout(timeout, self.exit_handle_wait.recv()).await {
+        match time::timeout(timeout, &mut self.exit_status).await {
             Err(_) => {
+                warn!(
+                    "Process {} did not exit within {:?}. Sending SIGKILL...",
+                    self.pid, timeout
+                );
                 // Send SIGKILL if the process did not terminate before timeout
-                signal::kill(
-                    unistd::Pid::from_raw(self.pid as i32),
-                    Some(signal::Signal::SIGKILL),
-                )
-                .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
-                self.exit_handle_wait.recv().await
+                signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGKILL))
+                    .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
+
+                (&mut self.exit_status).await
             }
-            Ok(s) => s,
-        };
-        Ok(s.expect("Internal channel error during process termination"))
+            Ok(exit_status) => exit_status,
+        }
     }
 }
 

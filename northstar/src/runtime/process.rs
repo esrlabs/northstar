@@ -13,6 +13,7 @@
 //   limitations under the License.
 
 use super::{Event, EventTx};
+use futures::{Future, FutureExt};
 use log::debug;
 use nix::{
     sys::{signal, wait},
@@ -20,7 +21,7 @@ use nix::{
 };
 use std::fmt::Debug;
 use thiserror::Error;
-use tokio::{sync::mpsc, task};
+use tokio::{io, task};
 use wait::WaitStatus;
 
 pub(crate) const ENV_NAME: &str = "NAME";
@@ -35,13 +36,6 @@ pub enum ExitStatus {
     Exit(ExitCode),
     /// Process was terminated by a signal
     Signaled(signal::Signal),
-}
-
-pub(crate) type ExitHandleWait = mpsc::Receiver<ExitStatus>;
-type ExitHandleSignal = mpsc::Sender<ExitStatus>;
-
-pub fn exit_handle() -> (ExitHandleSignal, ExitHandleWait) {
-    mpsc::channel(1)
 }
 
 #[derive(Error, Debug)]
@@ -60,29 +54,29 @@ pub enum Error {
     Os(String, nix::Error),
 }
 
-/// Spawn a task that waits for the process to exit. Once the process is exited send the return code
-// (if any) to the exit_tx handle passed
+/// Spawn a task that waits for the process to exit. This resolves to the exit status
+/// of `pid`.
 pub(crate) async fn waitpid(
     name: &str,
-    pid: u32,
-    exit_handle: ExitHandleSignal,
+    pid: Pid,
     event_handle: EventTx,
-) {
+) -> impl Future<Output = Result<ExitStatus, Error>> {
     let name = name.to_string();
     task::spawn_blocking(move || {
         let pid = unistd::Pid::from_raw(pid as i32);
         let status = loop {
-            let result = wait::waitpid(Some(pid), None);
-            debug!("Result of wait_pid is {:?}", result);
-
-            match result {
+            match wait::waitpid(Some(pid), None) {
                 // The process exited normally (as with exit() or returning from main) with the given exit code.
                 // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
-                Ok(WaitStatus::Exited(_pid, code)) => break ExitStatus::Exit(code),
+                Ok(WaitStatus::Exited(pid, code)) => {
+                    debug!("Process {} exit code is {}", pid, code);
+                    break ExitStatus::Exit(code);
+                }
 
                 // The process was killed by the given signal.
                 // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
-                Ok(WaitStatus::Signaled(_pid, signal, _dump)) => {
+                Ok(WaitStatus::Signaled(pid, signal, _dump)) => {
+                    debug!("Process {} exit status is signal {}", pid, signal);
                     break ExitStatus::Signaled(signal);
                 }
 
@@ -113,12 +107,19 @@ pub(crate) async fn waitpid(
             }
         };
 
-        // Send notification to exit handle
-        exit_handle.blocking_send(status.clone()).ok();
-
         // Send notification to main loop
         event_handle
-            .blocking_send(Event::Exit(name.to_string(), status))
+            .blocking_send(Event::Exit(name.to_string(), status.clone()))
             .expect("Internal channel error on main event handle");
-    });
+
+        status
+    })
+    .then(|f| async {
+        f.map_err(|e| {
+            Error::Io(
+                "Task join error".into(),
+                io::Error::new(io::ErrorKind::Other, e),
+            )
+        })
+    })
 }

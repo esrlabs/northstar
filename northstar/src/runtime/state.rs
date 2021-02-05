@@ -351,7 +351,7 @@ impl State {
                 info!("Stopping {}", app);
                 let status = context
                     .process
-                    .stop(timeout)
+                    .terminate(timeout)
                     .await
                     .map_err(Error::Process)?;
 
@@ -690,7 +690,7 @@ impl State {
                 info!("Stopping {}", app);
                 context
                     .process_mut()
-                    .stop(time::Duration::from_secs(1))
+                    .terminate(time::Duration::from_secs(1))
                     .await
                     .map_err(Error::Process)?;
 
