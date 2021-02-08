@@ -164,7 +164,7 @@ async fn prepare_hello_world_repo(repositories: &mut HashMap<RepositoryId, Repos
             },
         );
         Ok(())
-    };
+    }
     if prepare(repositories).await.is_err() {
         warn!("Could not prepare hello-world repository");
     }
