@@ -28,7 +28,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs, io,
-    io::{BufReader, Read, Seek, Write},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     process::Command,
@@ -188,7 +188,7 @@ fn read_zip_file(
         context: format!("Failed to locate {} in ZIP file", name),
         error: e,
     })?;
-    let mut content = String::new();
+    let mut content = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut content).map_err(|e| Error::Io {
         context: format!("Failed to read from {}", name),
         error: e,
@@ -223,19 +223,14 @@ impl Npk {
     ) -> Result<Self, Error> {
         let npk = npk.into_std().await;
         task::block_in_place(|| {
-            let mut inner = zip::ZipArchive::new(BufReader::new(npk)).map_err(|e| Error::Zip {
-                context: "Failed to parse ZIP format".to_string(),
-                error: e,
-            })?;
-
-            let manifest = {
-                let content = read_zip_file(&mut inner, &MANIFEST_NAME)?;
-                Manifest::from_str(&content)
-                    .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))?
-            };
+            let mut archive =
+                zip::ZipArchive::new(BufReader::new(npk)).map_err(|e| Error::Zip {
+                    context: "Failed to parse ZIP format".to_string(),
+                    error: e,
+                })?;
 
             let version = {
-                let comment = &std::str::from_utf8(&inner.comment()).map_err(|e| {
+                let comment = &std::str::from_utf8(&archive.comment()).map_err(|e| {
                     Error::Manifest(format!("Failed to read NPK version string {}", e))
                 })?;
                 let version = comment
@@ -249,44 +244,51 @@ impl Npk {
                     .map_err(|e| Error::Manifest(format!("Failed to parse NPK version {}", e)))?
             };
 
-            let hashes = extract_hashes(&mut inner, key)?;
+            let hashes = extract_hashes(&mut archive, key)?;
 
-            let fs_img_offset = inner
-                .by_name(&FS_IMG_NAME)
-                .map_err(|e| Error::Zip {
+            let manifest = {
+                let content = read_zip_file(&mut archive, &MANIFEST_NAME)?;
+                if let Some(Hashes { manifest_hash, .. }) = &hashes {
+                    let expected_hash = hex::decode(manifest_hash).map_err(|e| {
+                        Error::Manifest(format!("Failed to parse manifest hash {}", e))
+                    })?;
+                    let actual_hash = Sha256::digest(&content.as_bytes());
+                    if expected_hash != actual_hash[..] {
+                        return Err(Error::Manifest(format!(
+                            "Invalid manifest hash (expected={} actual={})",
+                            manifest_hash,
+                            hex::encode(actual_hash)
+                        )));
+                    }
+                }
+                Manifest::from_str(&content)
+                    .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))?
+            };
+
+            let (fs_img_offset, fs_img_size) = {
+                let fs_img = &archive.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
                     context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
                     error: e,
-                })?
-                .data_start();
+                })?;
+                (fs_img.data_start(), fs_img.size())
+            };
 
-            let fs_img_size = inner
-                .by_name(&FS_IMG_NAME)
-                .map_err(|e| Error::Zip {
-                    context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
-                    error: e,
-                })?
-                .size();
+            let mut reader = archive.into_inner();
 
             let verity_header = match &hashes {
                 Some(hs) => {
-                    let mut fsimg = inner.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
-                        context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
-                        error: e,
-                    })?;
-                    io::copy(
-                        &mut fsimg.by_ref().take(hs.fs_verity_offset),
-                        &mut io::sink(),
-                    )
-                    .map_err(|e| Error::Io {
-                        context: format!("{} too small to extract verity header", &FS_IMG_NAME),
-                        error: e,
-                    })?;
-                    Some(VerityHeader::from_bytes(fsimg.by_ref()).map_err(Error::Verity)?)
+                    reader
+                        .seek(SeekFrom::Start(fs_img_offset + hs.fs_verity_offset))
+                        .map_err(|e| Error::Io {
+                            context: format!("{} too small to extract verity header", &FS_IMG_NAME),
+                            error: e,
+                        })?;
+                    Some(VerityHeader::from_bytes(reader.by_ref()).map_err(Error::Verity)?)
                 }
                 None => None,
             };
 
-            let file = inner.into_inner().into_inner();
+            let file = reader.into_inner();
 
             Ok(Self {
                 file,
