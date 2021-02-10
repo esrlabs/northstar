@@ -31,6 +31,8 @@ use thiserror::Error;
 pub struct Version(pub semver::Version);
 
 pub type Name = String;
+pub type CGroup = HashMap<String, String>;
+pub type CGroups = HashMap<String, CGroup>;
 
 impl Version {
     #[allow(dead_code)]
@@ -153,8 +155,26 @@ pub enum Mount {
     Tmpfs { size: u64 },
 }
 
-pub type CGroup = HashMap<String, String>;
-pub type CGroups = HashMap<String, CGroup>;
+/// IO configuration for stdin, stdout, stderr
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Io {
+    /// stdout configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<Output>,
+    /// stderr configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<Output>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Output {
+    /// Inherit the runtimes stdout/stderr
+    #[serde(rename = "pipe")]
+    Pipe,
+    /// Forward output to the logging system with level and optional tag
+    #[serde(rename = "log")]
+    Log { level: log::Level, tag: String },
+}
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Manifest {
@@ -201,6 +221,9 @@ pub struct Manifest {
     /// String containing group names to give to new container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suppl_groups: Option<Vec<String>>,
+    /// IO configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub io: Option<Io>,
 }
 
 /// Configuration for the persist mounts
@@ -435,7 +458,7 @@ impl Manifest {
     pub const VERSION: Version = Version(semver::Version {
         major: 0,
         minor: 0,
-        patch: 1,
+        patch: 2,
         pre: vec![],
         build: vec![],
     });
@@ -689,7 +712,7 @@ mounts:
     }
 
     #[test]
-    fn serialize_back_and_forth() -> Result<()> {
+    fn roundtrip() -> Result<()> {
         let m = "
 name: hello
 version: 0.0.0
@@ -721,10 +744,13 @@ cgroups:
 seccomp:
   fork: 1
   waitpid: 1
-log:
-  tag: test
-  buffer:
-    custom: 8
+io:
+  stdin: pipe
+  stdout: 
+    log:
+      - DEBUG
+      - test
+  stderr: pipe
 ";
 
         let manifest = serde_yaml::from_str::<Manifest>(m)?;

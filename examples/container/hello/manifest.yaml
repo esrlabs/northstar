@@ -5,6 +5,11 @@ uid: 1000
 gid: 1000
 env:
   HELLO: northstar
+io:
+  stdout:
+    log:
+      - DEBUG
+      - hello
 mounts:
     /lib:
       host: /lib

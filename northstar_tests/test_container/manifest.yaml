@@ -13,3 +13,8 @@ mounts:
     tmpfs: 20480000
   /resource:
     resource: test_resource:0.0.1/
+io:
+  stdout:
+    log:
+      - DEBUG
+      - test_container

@@ -28,10 +28,6 @@ struct Opt {
     /// File that contains the northstar configuration
     #[structopt(short, long, default_value = "northstar.toml")]
     pub config: PathBuf,
-
-    #[structopt(short, long)]
-    /// Print debug logs
-    pub debug: bool,
 }
 
 fn main() -> Result<(), Error> {
@@ -41,17 +37,15 @@ fn main() -> Result<(), Error> {
     let config: Config = toml::from_str(&config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
 
-    let log_filter = if opt.debug || config.debug {
-        "northstar=debug"
-    } else {
-        "northstar=info"
-    };
-    {
-        logd_logger::builder()
-            .parse_filters(log_filter)
-            .tag("northstar")
-            .init();
-    }
+    let debug = config.debug.as_ref().and_then(|d| d.runtime.as_ref());
+
+    // Log level
+    let level = debug.and_then(|r| r.log_level).unwrap_or(log::Level::Info);
+
+    logd_logger::builder()
+        .parse_filters(&format!("northstar={}", level.to_string().to_lowercase()))
+        .tag("northstar")
+        .init();
 
     info!(
         "Northstar v{} ({})",
@@ -59,18 +53,22 @@ fn main() -> Result<(), Error> {
         env!("VERGEN_SHA_SHORT")
     );
 
-    // Set the mount propagation of unshare_root to MS_PRIVATE
-    nix::mount::mount(
-        Option::<&'static [u8]>::None,
-        config.devices.unshare_root.as_os_str(),
-        Option::<&str>::None,
-        nix::mount::MsFlags::MS_PRIVATE,
-        Option::<&'static [u8]>::None,
-    )?;
+    // Skip mount namespace setup in case it's disabled for debugging purposes
+    if !debug.map(|r| r.disable_mount_namespace).unwrap_or(false) {
+        warn!("Mount namespace is disabled");
+        // Set the mount propagation of unshare_root to MS_PRIVATE
+        nix::mount::mount(
+            Option::<&'static [u8]>::None,
+            config.devices.unshare_root.as_os_str(),
+            Option::<&str>::None,
+            nix::mount::MsFlags::MS_PRIVATE,
+            Option::<&'static [u8]>::None,
+        )?;
 
-    // Enter a mount namespace. This needs to be done before spawning
-    // the tokio threadpool.
-    nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
+        // Enter a mount namespace. This needs to be done before spawning
+        // the tokio threadpool.
+        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
+    }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

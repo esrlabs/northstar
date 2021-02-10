@@ -12,3 +12,8 @@ mounts:
     resource: hello_message:0.0.1/
   /system:
     host: /system
+io:
+  stdout:
+    log:
+      - DEBUG
+      - hello

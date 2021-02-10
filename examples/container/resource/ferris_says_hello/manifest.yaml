@@ -18,3 +18,8 @@ mounts:
       host: /system
     /message:
       resource: hello_message:0.0.1/
+io:
+  stdout:
+    log:
+      - DEBUG
+      - ferris

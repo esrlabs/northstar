@@ -14,6 +14,7 @@
 
 use super::{
     config::Config,
+    console::Request,
     error::Error,
     keys,
     minijail::{Minijail, Process},
@@ -21,9 +22,9 @@ use super::{
     process::ExitStatus,
     Event, EventTx, RepositoryId,
 };
-use crate::api::model::Notification;
+use crate::api::{self, model::Notification};
 use ed25519_dalek::*;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use npk::{
     manifest::{Manifest, Mount, Name, Version},
     npk::Npk,
@@ -34,7 +35,7 @@ use std::{
     path::{Path, PathBuf},
     result,
 };
-use tokio::{fs, time};
+use tokio::{fs, sync::oneshot, time};
 
 #[derive(Debug, Clone)]
 pub struct Repository {
@@ -44,13 +45,13 @@ pub struct Repository {
 }
 
 #[derive(Debug)]
-pub struct State {
+pub struct State<'a> {
     events_tx: EventTx,
     repositories: HashMap<RepositoryId, Repository>,
     applications: HashMap<Name, Application>,
     resources: HashMap<(Name, Version), Container>,
-    config: Config,
-    minijail: Minijail,
+    config: &'a Config,
+    minijail: Minijail<'a>,
     mount_control: MountControl,
     /// Internal test repository tempdir
     #[cfg(debug_assertions)]
@@ -96,6 +97,15 @@ impl ProcessContext {
 
     pub(crate) fn uptime(&self) -> time::Duration {
         self.start_timestamp.elapsed()
+    }
+
+    pub(crate) async fn destroy(mut self) -> Result<(), Error> {
+        if let Some(cgroups) = self.cgroups.take() {
+            cgroups.destroy().await?;
+        }
+
+        self.process.destroy().await.map_err(Error::Process)?;
+        Ok(())
     }
 }
 
@@ -164,9 +174,9 @@ async fn prepare_hello_world_repo(name: &str) -> Result<(tempfile::TempDir, Repo
         })
 }
 
-impl State {
+impl<'a> State<'a> {
     /// Create a new empty State instance
-    pub(super) async fn new(config: &Config, tx: EventTx) -> Result<State, Error> {
+    pub(super) async fn new(config: &'a Config, tx: EventTx) -> Result<State<'a>, Error> {
         let mut repositories = HashMap::new();
 
         // Internal test repository
@@ -197,15 +207,14 @@ impl State {
             );
         }
 
-        let minijail =
-            Minijail::new(tx.clone(), &config.run_dir, &config.data_dir).map_err(Error::Process)?;
+        let minijail = Minijail::new(tx.clone(), config).map_err(Error::Process)?;
 
         let mut state = State {
             events_tx: tx,
             repositories,
             applications: HashMap::new(),
             resources: HashMap::new(),
-            config: config.clone(),
+            config,
             minijail,
             mount_control: MountControl::new(&config).await.map_err(Error::Mount)?,
             #[cfg(debug_assertions)]
@@ -225,11 +234,6 @@ impl State {
     /// Return an iterator over all known resources
     pub fn resources(&self) -> impl iter::Iterator<Item = &Container> {
         self.resources.values()
-    }
-
-    /// Try to find a application with name `name`
-    pub fn application(&self, name: &str) -> Option<&Application> {
-        self.applications.get(name)
     }
 
     /// Return the list of repositories
@@ -299,9 +303,9 @@ impl State {
         // Spawn process
         info!("Starting {}", app);
 
-        let process = self
+        let mut process = self
             .minijail
-            .start(&app.container)
+            .create(&app.container)
             .await
             .map_err(Error::Process)?;
 
@@ -325,6 +329,8 @@ impl State {
         } else {
             None
         };
+
+        process.start().await.map_err(Error::Process)?;
 
         app.process = Some(ProcessContext {
             process,
@@ -359,10 +365,7 @@ impl State {
                     .await
                     .map_err(Error::Process)?;
 
-                if let Some(cgroups) = context.cgroups {
-                    debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await?;
-                }
+                context.destroy().await?;
 
                 // Send notification to main loop
                 Self::notification(
@@ -404,7 +407,7 @@ impl State {
             self.stop(&name, time::Duration::from_secs(5)).await?;
         }
 
-        for (_name, container) in self.applications.values().map(|a| (a.name(), &a.container)) {
+        for container in self.applications.values().map(|a| &a.container) {
             let wait_for_dm = self
                 .repositories
                 .get(&container.repository)
@@ -651,7 +654,7 @@ impl State {
     /// to be removed and handled externally
     pub async fn on_exit(&mut self, name: &str, exit_status: &ExitStatus) -> Result<(), Error> {
         if let Some(app) = self.applications.get_mut(name) {
-            if let Some(mut context) = app.process.take() {
+            if let Some(context) = app.process.take() {
                 info!(
                     "Process {} exited after {:?} and status {:?}",
                     app,
@@ -659,10 +662,8 @@ impl State {
                     exit_status,
                 );
 
-                if let Some(cgroups) = context.cgroups.take() {
-                    debug!("Destroying cgroup configuration of {}", app);
-                    cgroups.destroy().await?;
-                }
+                info!("Destroying context");
+                context.destroy().await?;
 
                 let exit_info = match exit_status {
                     ExitStatus::Exit(c) => format!("Exited with code {}", c),
@@ -713,6 +714,138 @@ impl State {
         tx.send(Event::Notification(n))
             .await
             .expect("Internal channel error on main");
+    }
+
+    /// Process console events
+    pub(crate) async fn console_request(
+        &mut self,
+        request: &Request,
+        response_tx: oneshot::Sender<api::model::Message>,
+    ) -> Result<(), Error> {
+        match request {
+            Request::Message(message) => {
+                let payload = &message.payload;
+                if let api::model::Payload::Request(ref request) = payload {
+                    let response = match request {
+                        api::model::Request::Containers => {
+                            api::model::Response::Containers(self.list_containers())
+                        }
+                        api::model::Request::Repositories => {
+                            debug!("Request::Repositories received");
+                            api::model::Response::Repositories(self.list_repositories())
+                        }
+                        api::model::Request::Start(name) => match self.start(&name).await {
+                            Ok(_) => api::model::Response::Ok(()),
+                            Err(e) => {
+                                error!("Failed to start {}: {}", name, e);
+                                api::model::Response::Err(e.into())
+                            }
+                        },
+                        api::model::Request::Stop(name) => {
+                            match self.stop(&name, std::time::Duration::from_secs(1)).await {
+                                Ok(_) => api::model::Response::Ok(()),
+                                Err(e) => {
+                                    error!("Failed to stop {}: {}", name, e);
+                                    api::model::Response::Err(e.into())
+                                }
+                            }
+                        }
+                        api::model::Request::Uninstall(name, version) => {
+                            match self.uninstall(name, version).await {
+                                Ok(_) => api::model::Response::Ok(()),
+                                Err(e) => {
+                                    error!("Failed to uninstall {}: {}", name, e);
+                                    api::model::Response::Err(e.into())
+                                }
+                            }
+                        }
+                        api::model::Request::Shutdown => {
+                            self.initiate_shutdown().await;
+                            api::model::Response::Ok(())
+                        }
+                        api::model::Request::Install(_, _) => unreachable!(),
+                    };
+
+                    let response_message = api::model::Message {
+                        id: message.id.clone(),
+                        payload: api::model::Payload::Response(response),
+                    };
+
+                    // A error on the response_tx means that the connection
+                    // was closed in the meantime. Ignore it.
+                    response_tx.send(response_message).ok();
+                } else {
+                    warn!("Received message is not a request");
+                }
+            }
+            Request::Install(repository, path) => {
+                let payload = match self.install(&repository, &path).await {
+                    Ok(_) => api::model::Response::Ok(()),
+                    Err(e) => api::model::Response::Err(e.into()),
+                };
+
+                let response = api::model::Message::new_response(payload);
+
+                // A error on the response_tx means that the connection
+                // was closed in the meantime. Ignore it.
+                response_tx.send(response).ok();
+            }
+        }
+        Ok(())
+    }
+
+    fn list_containers(&self) -> Vec<api::model::Container> {
+        let mut containers: Vec<api::model::Container> = self
+            .applications()
+            .map(|app| api::model::Container {
+                manifest: app.manifest().clone(),
+                repository: app.container().repository.clone(),
+                process: app.process_context().map(|f| api::model::Process {
+                    pid: f.process().pid(),
+                    uptime: f.uptime().as_nanos() as u64,
+                    resources: api::model::Resources {
+                        memory: {
+                            {
+                                let page_size = page_size::get();
+                                let pid = f.process().pid();
+
+                                procinfo::pid::statm(pid as i32).ok().map(|statm| {
+                                    api::model::Memory {
+                                        size: (statm.size * page_size) as u64,
+                                        resident: (statm.resident * page_size) as u64,
+                                        shared: (statm.share * page_size) as u64,
+                                        text: (statm.text * page_size) as u64,
+                                        data: (statm.data * page_size) as u64,
+                                    }
+                                })
+                            }
+                        },
+                    },
+                }),
+            })
+            .collect();
+        let mut resources = self
+            .resources()
+            .map(|container| api::model::Container {
+                manifest: container.manifest.clone(),
+                process: None,
+                repository: container.repository.clone(),
+            })
+            .collect();
+        containers.append(&mut resources);
+        containers
+    }
+
+    fn list_repositories(&self) -> HashMap<RepositoryId, api::model::Repository> {
+        self.repositories()
+            .iter()
+            .map(|(id, repository)| {
+                (
+                    id.clone(),
+                    api::model::Repository::new(repository.dir.clone()),
+                )
+            })
+            .collect()
     }
 
     /// Mount all the containers in every repository

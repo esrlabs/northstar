@@ -1,6 +1,6 @@
 [package]
 name = "northstar"
-version = "0.6.1"
+version = "0.6.2"
 authors = ["ESRLabs"]
 edition = "2018"
 build = "build.rs"
@@ -25,11 +25,11 @@ derive-new = { version = "0.5.8", optional = true }
 ed25519-dalek = { version = "1.0.1", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
 futures = { version = "0.3.8", optional = true }
-hex = "0.4.2"
+hex = { version = "0.4.2", optional = true }
 itertools = { version = "0.10.0", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 libc = { version = "0.2.81", optional = true }
-log = "0.4.11"
+log = { version = "0.4.11", features = [ "serde"] }
 logd-logger = { git = "https://github.com/flxo/logd-logger.git" }
 minijail = { path = "../minijail/rust/minijail", optional = true }
 nix = { version = "0.19.1", optional = true }
@@ -69,6 +69,7 @@ runtime = [
     "ed25519-dalek",
     "floating-duration",
     "futures",
+    "hex",
     "itertools",
     "lazy_static",
     "libc",

@@ -19,6 +19,25 @@ use url_serde::SerdeUrl;
 use super::RepositoryId;
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct Config {
+    /// Console address.
+    pub console: Option<SerdeUrl>,
+    /// Directory with unpacked containers.
+    pub run_dir: PathBuf,
+    /// Directory where rw data of container shall be stored
+    pub data_dir: PathBuf,
+    /// Directory for logfile
+    pub log_dir: PathBuf,
+
+    pub repositories: HashMap<RepositoryId, Repository>,
+    pub cgroups: CGroups,
+    pub devices: Devices,
+
+    /// Debugging options
+    pub debug: Option<Debug>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
     /// Directory containing images in container format
     pub dir: PathBuf,
@@ -47,17 +66,60 @@ pub struct Devices {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct Config {
-    /// Print debug logs.
-    pub debug: bool,
-    /// Console address.
-    pub console: Option<SerdeUrl>,
-    /// Directory with unpacked containers.
-    pub run_dir: PathBuf,
-    /// Directory where rw data of container shall be stored
-    pub data_dir: PathBuf,
+pub struct Debug {
+    /// Runtime debug options
+    pub runtime: Option<debug::Runtime>,
+    /// Strace options
+    pub strace: Option<debug::Strace>,
+    /// perf options
+    pub perf: Option<debug::Perf>,
+}
 
-    pub repositories: HashMap<RepositoryId, Repository>,
-    pub cgroups: CGroups,
-    pub devices: Devices,
+pub mod debug {
+    use log::Level;
+    use serde::Deserialize;
+    use std::path::PathBuf;
+
+    /// Runtime debug options
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Runtime {
+        /// Log level: DEBUG, INFO, WARN or ERROR
+        pub log_level: Option<Level>,
+        /// Do not enter a mount namespace if this option is set
+        /// This exposes the `run_dir` mounts for debugging. Be aware
+        /// that in case of a non normal termination of the runtime the
+        /// images mounted in `run_dir` have to be umounted manually before
+        /// starting the runtime again.
+        pub disable_mount_namespace: bool,
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub enum StraceOutput {
+        /// Log to a file in log_dir
+        #[serde(rename = "file")]
+        File,
+        /// Log the runtimes logging system
+        #[serde(rename = "log")]
+        Log,
+    }
+
+    /// Strace debug options
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Strace {
+        /// Log to a file in log_dir
+        pub output: StraceOutput,
+        /// Path to the strace binary
+        pub path: Option<PathBuf>,
+        /// Additional strace command line flags options
+        pub flags: Option<String>,
+    }
+
+    /// perf profiling options
+    #[derive(Clone, Debug, Deserialize)]
+    pub struct Perf {
+        /// Path to the perf binary
+        pub path: Option<PathBuf>,
+        /// Optional additional flags
+        pub flags: Option<String>,
+    }
 }

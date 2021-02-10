@@ -1,11 +1,7 @@
-debug = true
 console = "tcp://localhost:4200"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
-
-[repositories.default]
-dir = "target/northstar/repository"
-key = "examples/keys/northstar.pub"
+log_dir = "target/northstar/logs"
 
 [cgroups]
 memory = "northstar"
@@ -17,3 +13,38 @@ loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
+
+[debug.runtime]
+# The runtime log level: TRACE, DEBUG, INFO, WARN, ERROR
+log_level = "DEBUG"
+# Disable the mount namespace feature. If this optional flag is set to
+# true the runtime will not enter a mount namespace upon startup. This
+# allows to examine the mounted roots of the npks in the repositories.
+# 
+# WARNING: Be aware that this prevents automatic umounts of the npks when
+# the runtime quits abnormally.
+disable_mount_namespace = false
+
+# # Start a `strace -p PID ...` instance after a container is started.
+# # The execution of the application is defered until strace is attached.
+# [debug.strace]
+# # Confgure the output of the strace instance attached to a started
+# # application. "file" for a file named strace-<PID>-name.log or "log"
+# # to forward the strace output to the runtimes log.
+# output = "file"
+# # Optional additional flags passed to `strace`
+# flags = "-v -f -s 256"
+# # Optional path to the strace binary
+# path = /bin/strace
+
+# # Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
+# # after a container is started.
+# [debug.perf]
+# # Optional path to the perf binary
+# path = /bin/perf
+# # Optional additional flags passed to `perf`
+# flags = ""
+
+[repositories.default]
+dir = "target/northstar/repository"
+key = "examples/keys/northstar.pub"
