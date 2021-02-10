@@ -140,16 +140,16 @@ main() {
   assert_is_toplevel_dir
 
   local EXAMPLES=(
+    "./examples/container/capabilities"
     "./examples/container/cpueater"
     "./examples/container/crashing"
     "./examples/container/datarw"
+    "./examples/container/hello"
     "./examples/container/memeater"
-    "./examples/container/capabilities"
-    "./examples/container/resource/resource_hello"
     "./examples/container/resource/ferris"
     "./examples/container/resource/ferris_says_hello"
     "./examples/container/resource/hello_message"
-    "./examples/container/resource/hello_message"
+    "./examples/container/resource/resource_hello"
     "./examples/container/seccomp"
   )
 
