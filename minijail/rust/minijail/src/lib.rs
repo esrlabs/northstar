@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-use libc::pid_t;
+use libc::{c_int, c_void, pid_t};
 use minijail_sys::*;
 use std::{
     ffi::CString,
@@ -197,6 +197,12 @@ impl Display for Error {
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub enum Hook {
+    PreDropCaps = 0,
+    PreExecve = 1,
+    PreChroot = 2,
+}
 
 /// Configuration to jail a process based on wrapping libminijail.
 ///
@@ -860,7 +866,44 @@ impl Minijail {
         }
         Ok(())
     }
+
+    #[must_use]
+    pub fn add_hook<F>(&mut self, cb: F, hook: Hook) -> HookHandle
+    where
+        F: FnMut() + 'static,
+    {
+        let hook = match hook {
+            Hook::PreChroot => minijail_hook_event_t::MINIJAIL_HOOK_EVENT_PRE_CHROOT,
+            Hook::PreDropCaps => minijail_hook_event_t::MINIJAIL_HOOK_EVENT_PRE_DROP_CAPS,
+            Hook::PreExecve => minijail_hook_event_t::MINIJAIL_HOOK_EVENT_PRE_EXECVE,
+        };
+        let cb: Box<Box<dyn FnMut()>> = Box::new(Box::new(cb));
+        let ptr = Box::into_raw(cb) as *mut _;
+
+        extern "C" fn trampoline(arg: *mut c_void) -> c_int {
+            let f = unsafe { &mut *(arg as *mut std::boxed::Box<dyn std::ops::FnMut()>) };
+            f();
+            0
+        }
+
+        unsafe {
+            // This leaks cb. Store it in a HookHandle that makes sure that it's freed on drop.
+            minijail_add_hook(self.jail, Some(trampoline), ptr, hook);
+        }
+
+        HookHandle {
+            _cb: unsafe { Box::from_raw(ptr as *mut _) },
+        }
+    }
 }
+
+/// Holds a raw callback to ensure that it's not leaked cause of the unsafe transmute above
+pub struct HookHandle {
+    _cb: Box<Box<dyn FnMut()>>,
+}
+
+unsafe impl Send for HookHandle {}
+unsafe impl Sync for HookHandle {}
 
 impl Drop for Minijail {
     /// Frees the Minijail created in Minijail::new.
