@@ -222,7 +222,7 @@ Here is an example:
 
 ```toml
 debug = true
-console_address = "localhost:4200"
+console = "tcp://localhost:4200"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 

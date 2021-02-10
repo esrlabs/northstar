@@ -14,6 +14,7 @@
 
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
+use url_serde::SerdeUrl;
 
 use super::RepositoryId;
 
@@ -50,7 +51,7 @@ pub struct Config {
     /// Print debug logs.
     pub debug: bool,
     /// Console address.
-    pub console: Option<String>,
+    pub console: Option<SerdeUrl>,
     /// Directory with unpacked containers.
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored

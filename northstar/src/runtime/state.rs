@@ -779,7 +779,7 @@ impl State {
 //     async fn uninstall_application() -> Result<()> {
 //         let config_str = r#"
 // debug = true
-// console_address = "localhost:4200"
+// console_address = "tcp://localhost:4200"
 // container_uid = 1000
 // container_gid = 1000
 

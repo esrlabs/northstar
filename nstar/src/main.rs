@@ -39,7 +39,7 @@ type Output = Box<dyn std::io::Write>;
 #[structopt(name = "nstar", about = "Northstar CLI")]
 struct Opt {
     /// File that contains the northstar configuration
-    #[structopt(short, long, default_value = "localhost:4200")]
+    #[structopt(short, long, default_value = "tcp://localhost:4200")]
     host: String,
 
     /// Optional single command to run and exit
@@ -230,6 +230,7 @@ async fn process<W: std::io::Write>(
 #[tokio::main]
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
+    let host = url::Url::parse(&opt.host)?;
 
     let (mut terminal, mut input, interactive): (Output, Input, bool) = match opt.cmd {
         Some(cmd) => (
@@ -248,7 +249,7 @@ async fn main() -> Result<()> {
 
         let mut client = match time::timeout(
             time::Duration::from_secs(2),
-            api::client::Client::new(&opt.host),
+            api::client::Client::new(&host),
         )
         .await
         {

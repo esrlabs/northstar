@@ -17,3 +17,4 @@ rustyline = { git = "https://github.com/gwenn/rustyline.git", branch = "external
 rustyline-derive = "0.4.0"
 structopt = "0.3.21"
 tokio = { version = "1.0.1", features = ["full"] }
+url = "1.4.1"
