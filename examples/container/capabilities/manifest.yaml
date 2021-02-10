@@ -14,3 +14,8 @@ mounts:
       host: /lib64
     /system:
       host: /system
+io:
+  stdout:
+    log:
+      - DEBUG
+      - hello

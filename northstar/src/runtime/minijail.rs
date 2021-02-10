@@ -13,11 +13,13 @@
 //   limitations under the License.
 
 use super::{
+    config::Config,
     process::{waitpid, Error, ExitStatus, Pid, ENV_NAME, ENV_VERSION},
+    process_debug::{Perf, Strace},
     state::Container,
-    OutputStream,
 };
-use crate::runtime::{Event, EventTx};
+use crate::runtime::EventTx;
+use bytes::{Buf, BytesMut};
 use futures::Future;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
@@ -26,61 +28,35 @@ use nix::{
     sys::signal,
     unistd::{self, chown, close, pipe},
 };
-use npk::manifest::{Dev, Mount, MountFlag};
+use npk::manifest::{Dev, Manifest, Mount, MountFlag, Output};
 use signal::Signal::{SIGKILL, SIGTERM};
 use std::{
     fmt, iter, ops,
-    os::unix::{
-        io::{AsRawFd, FromRawFd},
-        prelude::RawFd,
-    },
+    os::unix::prelude::*,
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
+    unimplemented,
 };
 use tokio::{
     fs,
-    io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, ReadBuf},
+    io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, AsyncWrite, ReadBuf},
     select, task, time,
 };
 use tokio_util::sync::CancellationToken;
 
-// We need a Send + Sync version of minijail::Minijail
-struct MinijailHandle(::minijail::Minijail);
-
-unsafe impl Send for MinijailHandle {}
-unsafe impl Sync for MinijailHandle {}
-
-impl ops::Deref for MinijailHandle {
-    type Target = ::minijail::Minijail;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl ops::DerefMut for MinijailHandle {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 #[derive(Debug)]
-pub struct Minijail {
+pub struct Minijail<'a> {
     log_fd: i32,
     event_tx: EventTx,
-    run_dir: PathBuf,
-    data_dir: PathBuf,
+    config: &'a Config,
 }
 
-impl Minijail {
-    pub(crate) fn new(
-        event_tx: EventTx,
-        run_dir: &Path,
-        data_dir: &Path,
-    ) -> Result<Minijail, Error> {
+impl<'a> Minijail<'a> {
+    /// Initialize minijail
+    pub(crate) fn new(event_tx: EventTx, config: &'a Config) -> Result<Minijail<'a>, Error> {
         let pipe = AsyncPipe::new()?;
-        let log_fd = pipe.as_raw_fd_right();
+        let log_fd = pipe.blocking_fd();
         let mut lines = io::BufReader::new(pipe).lines();
 
         // Spawn a task that forwards logs from minijail to the rust logger.
@@ -104,22 +80,24 @@ impl Minijail {
             Level::Debug => 7,
             Level::Trace => i32::MAX,
         };
+
         ::minijail::Minijail::log_to_fd(log_fd, minijail_log_level as i32);
 
         Ok(Minijail {
             event_tx,
-            run_dir: run_dir.into(),
-            data_dir: data_dir.into(),
+            config,
             log_fd,
         })
     }
 
+    /// Shutdown minijail
     pub(crate) fn shutdown(&self) -> Result<(), Error> {
         close(self.log_fd).map_err(|e| Error::Os("Failed to close log_fd".into(), e))?;
         Ok(())
     }
 
-    pub(crate) async fn start(&self, container: &Container) -> Result<Process, Error> {
+    /// Create a new minijailed process which is forked and blocks before execve. Start it with Process::start.
+    pub(crate) async fn create(&self, container: &Container) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
         let mut jail = MinijailHandle(::minijail::Minijail::new().map_err(Error::Minijail)?);
@@ -207,27 +185,22 @@ impl Minijail {
             .collect::<Vec<String>>();
         let env = env.iter().map(|a| a.as_str()).collect::<Vec<&str>>();
 
-        debug!(
-            "Executing \"{}{}{}\"",
-            init.display(),
-            if args.len() > 1 { " " } else { "" },
-            argv.iter().skip(1).join(" ")
-        );
+        // Construct the io objects configured in the manifest toghether with the log_fd
+        // that needs to be preserved.
+        let (io, mut fds) = self.inheritable_fds(&manifest).await?;
 
-        let stdout =
-            Output::new(OutputStream::Stdout, &manifest.name, self.event_tx.clone()).await?;
-        let stderr =
-            Output::new(OutputStream::Stderr, &manifest.name, self.event_tx.clone()).await?;
+        // Create a child sync
+        let sync = ProcessSync::with(&mut jail)?;
+        // Add the sync fd to the list of preserved fds
+        fds.push((sync.child_fd(), sync.child_fd()));
 
-        // Prevent minijail to close the log fd so that errors aren't missed
-        let log_fd = (self.log_fd, self.log_fd);
-        let pid = jail.run_remap_env_preload(
-            &init.as_path(),
-            &[(stdout.as_raw_fd(), 1), (stderr.as_raw_fd(), 2), log_fd],
-            &argv,
-            &env,
-            false,
-        )? as u32;
+        // And finally start it....
+        let argv_str = argv.iter().join(" ");
+        debug!("Preparing \"{}\"", argv_str);
+        let pid = jail.run_remap_env_preload(&init.as_path(), &fds, &argv, &env, false)? as u32;
+
+        // Attach debug tools if configured in the runtime configuration.
+        let debug = Debug::from(&self.config, &manifest, pid).await?;
 
         // Spawn a task thats waits for the child to exit
         let exit_status = Box::new(Box::pin(
@@ -235,12 +208,57 @@ impl Minijail {
         ));
 
         Ok(Process {
+            argv: argv_str,
             pid,
             _jail: jail,
-            _stdout: stdout,
-            _stderr: stderr,
+            _io: io,
             exit_status,
+            debug,
+            sync: Some(sync),
         })
+    }
+
+    /// Configure stdout/stderr as declared in the manifest and return list of fds that
+    /// shall be preserved by minijail for the spanwed process
+    async fn inheritable_fds(
+        &self,
+        manifest: &Manifest,
+    ) -> Result<((Option<Io>, Option<Io>), Vec<(i32, i32)>), Error> {
+        // Add the minijail logging fd to the list of preserved fds to prevent
+        // minijail to close it after it execved.
+        let mut fds = vec![(self.log_fd, self.log_fd)];
+
+        // stdout
+        let stdout = if let Some(io) = manifest.io.as_ref().and_then(|io| io.stdout.as_ref()) {
+            if *io == Output::Pipe {
+                fds.push((1, 1));
+                None
+            } else {
+                let io = Io::new(io).await?;
+                fds.push((io.writefd, 1));
+                Some(io)
+            }
+        } else {
+            None
+        };
+
+        // stderr
+        let stderr = if let Some(io) = manifest.io.as_ref().and_then(|io| io.stderr.as_ref()) {
+            if *io == Output::Pipe {
+                fds.push((2, 2));
+                None
+            } else {
+                let io = Io::new(io).await?;
+                fds.push((io.writefd, 2));
+                Some(io)
+            }
+        } else {
+            None
+        };
+
+        let io = (stdout, stderr);
+
+        Ok((io, fds))
     }
 
     async fn setup_mounts(
@@ -287,7 +305,7 @@ impl Minijail {
                         .map_err(Error::Minijail)?;
                 }
                 Mount::Persist => {
-                    let dir = self.data_dir.join(&container.manifest.name);
+                    let dir = self.config.data_dir.join(&container.manifest.name);
                     if !dir.exists() {
                         debug!("Creating {}", dir.display());
                         fs::create_dir_all(&dir).await.map_err(|e| {
@@ -315,7 +333,8 @@ impl Minijail {
                 Mount::Resource { name, version, dir } => {
                     let src = {
                         // Join the source of the resource container with the mount dir
-                        let resource_root = self.run_dir.join(&name).join(&version.to_string());
+                        let resource_root =
+                            self.config.run_dir.join(&name).join(&version.to_string());
                         let dir = dir
                             .strip_prefix("/")
                             .map(|d| resource_root.join(d))
@@ -361,7 +380,29 @@ impl Minijail {
     }
 }
 
+/// We need a Send + Sync version of minijail::Minijail
+struct MinijailHandle(::minijail::Minijail);
+
+unsafe impl Send for MinijailHandle {}
+unsafe impl Sync for MinijailHandle {}
+
+impl ops::Deref for MinijailHandle {
+    type Target = ::minijail::Minijail;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl ops::DerefMut for MinijailHandle {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// A started minijailed process
 pub(crate) struct Process {
+    argv: String,
     /// PID of this process
     pid: Pid,
     /// Exit handle of this process
@@ -369,9 +410,11 @@ pub(crate) struct Process {
     /// Handle to a libminijail configuration
     _jail: MinijailHandle,
     /// Captured stdout output
-    _stdout: Output,
-    /// Captured stderr output
-    _stderr: Output,
+    _io: (Option<Io>, Option<Io>),
+    /// Debugging facilities
+    debug: Debug,
+    /// Sync childs execve
+    sync: Option<ProcessSync>,
 }
 
 impl fmt::Debug for Process {
@@ -383,6 +426,15 @@ impl fmt::Debug for Process {
 impl Process {
     pub fn pid(&self) -> Pid {
         self.pid
+    }
+
+    /// Resume the process
+    pub async fn start(&mut self) -> Result<(), Error> {
+        debug!("Starting \"{}\"", self.argv);
+        if let Some(sync) = self.sync.take() {
+            sync.resume().await?;
+        }
+        Ok(())
     }
 
     pub async fn terminate(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
@@ -406,36 +458,91 @@ impl Process {
             Ok(exit_status) => exit_status,
         }
     }
+
+    pub async fn destroy(self) -> Result<(), Error> {
+        self.debug.destroy().await
+    }
 }
 
+/// Debugging facilities attached to a started container
+#[derive(Debug)]
+struct Debug {
+    strace: Option<Strace>,
+    perf: Option<Perf>,
+}
+
+impl Debug {
+    /// Start configured debug facilities and attach to `pid`
+    async fn from(config: &Config, manifest: &Manifest, pid: u32) -> Result<Debug, Error> {
+        // Attach a strace instance if configured in the runtime configuration
+        let strace = if let Some(strace) = config
+            .debug
+            .as_ref()
+            .and_then(|debug| debug.strace.as_ref())
+        {
+            Some(Strace::new(strace, manifest, &config.log_dir, pid).await?)
+        } else {
+            None
+        };
+
+        // Attach a perf instance if configured in the runtime configuration
+        let perf = if let Some(perf) = config.debug.as_ref().and_then(|debug| debug.perf.as_ref()) {
+            Some(Perf::new(perf, manifest, &config.log_dir, pid).await?)
+        } else {
+            None
+        };
+
+        Ok(Debug { strace, perf })
+    }
+
+    /// Shutdown configured debug facilities and attached to `pid`
+    async fn destroy(self) -> Result<(), Error> {
+        if let Some(strace) = self.strace {
+            strace.destroy().await?;
+        }
+
+        if let Some(perf) = self.perf {
+            perf.destroy().await?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Pipe with async tokio impls
 #[derive(Debug)]
 struct AsyncPipe {
-    left: AsyncFd<std::fs::File>,
-    right: AsyncFd<std::fs::File>,
+    non_blocking: AsyncFd<std::fs::File>,
+    blocking: RawFd,
 }
 
 impl AsyncPipe {
     fn new() -> Result<AsyncPipe, Error> {
-        let (left, right) =
+        let (non_blocking, blocking) =
             pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
 
-        let mut flags = OFlag::from_bits(fcntl(left, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
+        let mut flags =
+            OFlag::from_bits(fcntl(non_blocking, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
         flags.set(OFlag::O_NONBLOCK, true);
-        fcntl(left, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
-        let left = unsafe { std::fs::File::from_raw_fd(left) };
-        let left = AsyncFd::new(left).map_err(|e| Error::Io("Async fd".to_string(), e))?;
+        fcntl(non_blocking, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
+        let non_blocking = unsafe { std::fs::File::from_raw_fd(non_blocking) };
+        let non_blocking =
+            AsyncFd::new(non_blocking).map_err(|e| Error::Io("Async fd".to_string(), e))?;
 
-        let mut flags = OFlag::from_bits(fcntl(right, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
-        flags.set(OFlag::O_NONBLOCK, true);
-        fcntl(right, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
-        let right = unsafe { std::fs::File::from_raw_fd(right) };
-        let right = AsyncFd::new(right).map_err(|e| Error::Io("Async fd".to_string(), e))?;
-
-        Ok(AsyncPipe { left, right })
+        Ok(AsyncPipe {
+            non_blocking,
+            blocking,
+        })
     }
 
-    fn as_raw_fd_right(&self) -> RawFd {
-        self.right.as_raw_fd()
+    fn blocking_fd(&self) -> RawFd {
+        self.blocking
+    }
+}
+
+impl Drop for AsyncPipe {
+    fn drop(&mut self) {
+        unistd::close(self.blocking).ok();
     }
 }
 
@@ -446,7 +553,7 @@ impl AsyncRead for AsyncPipe {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         loop {
-            let mut guard = futures::ready!(self.left.poll_read_ready(cx))?;
+            let mut guard = futures::ready!(self.non_blocking.poll_read_ready(cx))?;
             match guard
                 .try_io(|inner| std::io::Read::read(&mut inner.get_ref(), buf.initialized_mut()))
             {
@@ -461,59 +568,162 @@ impl AsyncRead for AsyncPipe {
     }
 }
 
-// Capture output of a child process. Create a pipe and spawn a task that forwards each line to
-// the main loop. When this struct is dropped the internal spawned tasks are stopped.
 #[derive(Debug)]
-struct Output {
-    fd: RawFd,
+struct Io {
+    writefd: i32,
     token: CancellationToken,
 }
 
-impl Output {
-    pub async fn new(stream: OutputStream, tag: &str, event_tx: EventTx) -> Result<Output, Error> {
+impl Io {
+    /// Create a new Io handle
+    pub async fn new(io: &Output) -> Result<Io, Error> {
+        let mut pipe = AsyncPipe::new()?;
+        let writefd = pipe.blocking_fd();
         let token = CancellationToken::new();
-        let pipe = AsyncPipe::new()?;
-        let fd = pipe.as_raw_fd_right();
-        let mut lines = io::BufReader::new(pipe).lines();
-        let tag = tag.to_string();
 
         {
             let token = token.clone();
-            debug!("Starting stream capture of {} on {:?}", tag, stream);
+            let mut io = Self::io(io).await?;
+
             task::spawn(async move {
-                loop {
-                    select! {
-                        _ = token.cancelled() => break,
-                        line = lines.next_line() => {
-                            if let Ok(Some(line)) = line {
-                                let event = Event::ChildOutput {
-                                        name: tag.clone(),
-                                        stream: stream.clone(),
-                                        line,
-                                    };
-                                event_tx.send(event).await.ok();
-                            } else {
-                                break;
-                            }
+                let copy = io::copy(&mut pipe, &mut io);
+                select! {
+                    r = copy => {
+                        match r {
+                            Ok(_) => (),
+                            Err(e) => unimplemented!("Error handling of output forward: {}", e),
                         }
                     }
+                    _ = token.cancelled() => (),
                 }
-                debug!("Stopped stream capture of {} on {:?}", tag, stream);
             });
         }
 
-        Ok(Output { fd, token })
+        Ok(Io { writefd, token })
+    }
+
+    /// Create a AsyncWrite from the IoOutput configuration
+    async fn io(io: &Output) -> Result<Box<dyn AsyncWrite + Unpin + Send>, Error> {
+        match io {
+            Output::Pipe => unreachable!(),
+            Output::Log { level, tag } => Ok(Box::new(Log::new(*level, tag))),
+        }
     }
 }
 
-impl Drop for Output {
+impl Drop for Io {
     fn drop(&mut self) {
+        // Stop the internally spawned task
         self.token.cancel();
     }
 }
 
-impl AsRawFd for Output {
-    fn as_raw_fd(&self) -> RawFd {
-        self.fd
+/// Wrap the Rust log into a AsyncWrite
+struct Log {
+    level: Level,
+    tag: String,
+    buffer: BytesMut,
+}
+
+impl Log {
+    fn new(level: Level, tag: &str) -> Log {
+        Log {
+            level,
+            tag: tag.to_string(),
+            buffer: BytesMut::new(),
+        }
+    }
+}
+
+impl AsyncWrite for Log {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        self.buffer.extend(buf);
+        while let Some(p) = self.buffer.iter().position(|b| *b == b'\n') {
+            let line = self.buffer.split_to(p);
+            self.buffer.advance(1);
+            let line = String::from_utf8_lossy(&line);
+            let line = format!("{}: {}", self.tag, line);
+            match self.level {
+                Level::Trace => trace!("{}", line),
+                Level::Debug => debug!("{}", line),
+                Level::Info => info!("{}", line),
+                Level::Warn => warn!("{}", line),
+                Level::Error => error!("{}", line),
+            }
+        }
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Suspend the execve call withing a minijail child until resume is called.
+/// This is needed in order to not execute any application code before the process
+/// is fully setup e.g debugging things like strace or the cgroups setup
+struct ProcessSync {
+    /// Parent half
+    parent: RawFd,
+    /// Childs half
+    child: RawFd,
+    /// Handle the the Fn passed to minijail which must be freed.
+    _hook: ::minijail::HookHandle,
+}
+
+impl ProcessSync {
+    fn with(jail: &mut MinijailHandle) -> Result<ProcessSync, Error> {
+        // Sync the parent and child via a pipe. The readfd is owned by child. The writefd
+        // is owned by the parent.
+        let (childfd, parentfd) =
+            pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
+
+        // Install a hook in libminijail that block on a `read` until two bytes
+        // are received. This hook runs as last thing before the execve.
+        let execve_hook = move || {
+            // Block until a byte is read of the pipe is closed.
+            unistd::read(childfd, &mut [0u8; 1]).ok();
+            // The parent fd is already closed because it's not added to the list of
+            // inheritable fds. But close the child half:
+            unistd::close(childfd).expect("Failed to close sync fd");
+        };
+
+        // Keep hook
+        let hook_handle = jail.add_hook(execve_hook, minijail::Hook::PreExecve);
+
+        Ok(ProcessSync {
+            parent: parentfd,
+            child: childfd,
+            _hook: hook_handle,
+        })
+    }
+
+    /// Provide access to the childs half because this needs to be added
+    /// to the list of fds that minijail shall preserve in the child process
+    /// and instead of closing.
+    fn child_fd(&self) -> RawFd {
+        self.child.as_raw_fd()
+    }
+
+    /// Send a byte to the child that might block in the hook.
+    async fn resume(self) -> Result<(), Error> {
+        unistd::write(self.parent, &[0u8; 1])
+            .map_err(|e| Error::Os("Sync".into(), e))
+            .map(drop)
+    }
+}
+
+impl Drop for ProcessSync {
+    fn drop(&mut self) {
+        unistd::close(self.child).expect("Failed to close child");
+        unistd::close(self.parent).expect("Failed to close parentfd");
     }
 }

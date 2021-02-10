@@ -23,6 +23,7 @@ mod loopdev;
 mod minijail;
 mod mount;
 mod process;
+mod process_debug;
 mod state;
 
 use crate::{api, api::model::Notification};
@@ -49,12 +50,6 @@ use tokio::{
 pub(crate) type EventTx = mpsc::Sender<Event>;
 pub type RepositoryId = String;
 
-#[derive(Clone, Debug)]
-pub enum OutputStream {
-    Stdout,
-    Stderr,
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Event {
@@ -66,12 +61,6 @@ pub(crate) enum Event {
     Oom(Name),
     /// Northstar shall shut down
     Shutdown,
-    /// Stdout and stderr of child processes
-    ChildOutput {
-        name: Name,
-        stream: OutputStream,
-        line: String,
-    },
     /// Notification events
     Notification(Notification),
 }
@@ -100,6 +89,7 @@ impl Runtime {
         // Ensure the configured run_dir exists
         mkdir_p_rw(&config.data_dir).await?;
         mkdir_p_rw(&config.run_dir).await?;
+        mkdir_p_rw(&config.log_dir).await?;
 
         // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
         let (event_tx, event_rx) = mpsc::channel::<Event>(100);
@@ -108,7 +98,7 @@ impl Runtime {
         {
             let event_tx = event_tx.clone();
             task::spawn(async move {
-                match runtime_task(config, event_tx, event_rx, stop_rx).await {
+                match runtime_task(&config, event_tx, event_rx, stop_rx).await {
                     Err(e) => {
                         log::error!("Runtime error: {}", e);
                         stopped_tx.send(Err(e)).ok();
@@ -202,12 +192,12 @@ impl Future for Runtime {
 }
 
 async fn runtime_task(
-    config: Config,
+    config: &'_ Config,
     event_tx: mpsc::Sender<Event>,
     mut event_rx: mpsc::Receiver<Event>,
     stop: oneshot::Receiver<()>,
 ) -> Result<(), Error> {
-    let mut state = State::new(&config, event_tx.clone()).await?;
+    let mut state = State::new(config, event_tx.clone()).await?;
 
     info!(
         "Mounted {} containers",
@@ -216,6 +206,7 @@ async fn runtime_task(
 
     let console = config
         .console
+        .clone()
         .map(|url| console::Console::new(url.into_inner(), &event_tx))
         .map_or(Ok(None), |r| r.map(Some))
         .map_err(Error::Console)?;
@@ -248,20 +239,11 @@ async fn runtime_task(
     // Enter main loop
     loop {
         let result = match event_rx.recv().await.unwrap() {
-            Event::ChildOutput { name, stream, line } => {
-                on_child_output(&mut state, &name, stream, &line).await;
-                Ok(())
-            }
             // Debug console commands are handled via the main loop in order to get access
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
-            Event::Console(msg, txr) => {
-                if let Some(console) = console.as_ref() {
-                    console.process(&mut state, &msg, txr).await;
-                }
-                Ok(())
-            }
+            Event::Console(msg, txr) => state.console_request(&msg, txr).await,
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
@@ -282,15 +264,6 @@ async fn runtime_task(
         // Break if a error happens in the runtime
         if result.is_err() {
             break result;
-        }
-    }
-}
-
-// TODO: Where to send this?
-async fn on_child_output(state: &mut State, name: &str, stream: OutputStream, line: &str) {
-    if let Some(p) = state.application(name) {
-        if let Some(p) = p.process_context() {
-            debug!("[{}] {}: {:?}: {}", p.process().pid(), name, stream, line);
         }
     }
 }

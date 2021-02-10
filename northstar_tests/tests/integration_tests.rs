@@ -21,7 +21,11 @@ use northstar_tests::{
     test,
     test_container::{get_test_container_npk, get_test_resource_npk},
 };
-use std::{path::Path, time::Duration};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tokio::fs;
 
 test!(stop_application_not_running, {
@@ -257,4 +261,34 @@ test!(mount_containers_without_verity, {
     runtime.uninstall("test_resource", "0.0.1").expect_ok()?;
 
     runtime.shutdown()
+});
+
+// Check whether after a runtime start, container start and shutdow
+// any filedescriptor is leaked
+test!(fd_leak, {
+    /// Collect a set of files in /proc/$$/fd
+    async fn fds() -> Result<HashSet<PathBuf>> {
+        let mut fds = HashSet::new();
+        let mut dir = fs::read_dir(format!("/proc/{}/fd", std::process::id()))
+            .await
+            .unwrap();
+        while let Ok(Some(e)) = dir.next_entry().await {
+            fds.insert(e.path());
+        }
+        Ok(fds)
+    }
+
+    // Collect list of fds
+    // A runtime launch and shutdown not leave anything open
+    let before = fds().await?;
+
+    let mut runtime = Runtime::launch().await?;
+    runtime.start("hello").expect_ok()?;
+    runtime.stop("hello").expect_ok()?;
+    runtime.shutdown().expect("Failed to shutdown runtime");
+
+    // Compare the list of fds before and after the RT run.
+    assert_eq!(before, fds().await?);
+
+    Ok(())
 });

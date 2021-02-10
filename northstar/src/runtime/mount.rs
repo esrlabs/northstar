@@ -132,7 +132,7 @@ impl MountControl {
         container: &Container,
         wait_for_dm: bool,
     ) -> Result<(), Error> {
-        debug!("Unmounting {}", container.root.display());
+        info!("Unmounting {}", container.root.display());
         task::block_in_place(|| nix::mount::umount(&container.root).map_err(Error::Os))?;
 
         if wait_for_dm {

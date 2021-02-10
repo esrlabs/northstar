@@ -15,11 +15,11 @@
 use super::{Event, RepositoryId};
 use crate::{
     api::{self},
-    runtime::{state::State, EventTx},
+    runtime::EventTx,
 };
 use futures::{sink::SinkExt, StreamExt};
 use log::{debug, error, info, warn};
-use std::{collections::HashMap, net::ToSocketAddrs, path::PathBuf, unreachable};
+use std::{net::ToSocketAddrs, path::PathBuf, unreachable};
 use thiserror::Error;
 use tokio::{
     fs,
@@ -69,84 +69,6 @@ impl Console {
             notification_tx,
             token: CancellationToken::new(),
         })
-    }
-
-    /// Process console events
-    pub async fn process(
-        &self,
-        state: &mut State,
-        request: &Request,
-        response_tx: oneshot::Sender<api::model::Message>,
-    ) {
-        match request {
-            Request::Message(message) => {
-                let payload = &message.payload;
-                if let api::model::Payload::Request(ref request) = payload {
-                    let response = match request {
-                        api::model::Request::Containers => {
-                            api::model::Response::Containers(list_containers(&state))
-                        }
-                        api::model::Request::Repositories => {
-                            debug!("Request::Repositories received");
-                            api::model::Response::Repositories(list_repositories(&state))
-                        }
-                        api::model::Request::Start(name) => match state.start(&name).await {
-                            Ok(_) => api::model::Response::Ok(()),
-                            Err(e) => {
-                                error!("Failed to start {}: {}", name, e);
-                                api::model::Response::Err(e.into())
-                            }
-                        },
-                        api::model::Request::Stop(name) => {
-                            match state.stop(&name, std::time::Duration::from_secs(1)).await {
-                                Ok(_) => api::model::Response::Ok(()),
-                                Err(e) => {
-                                    error!("Failed to stop {}: {}", name, e);
-                                    api::model::Response::Err(e.into())
-                                }
-                            }
-                        }
-                        api::model::Request::Uninstall(name, version) => {
-                            match state.uninstall(name, version).await {
-                                Ok(_) => api::model::Response::Ok(()),
-                                Err(e) => {
-                                    error!("Failed to uninstall {}: {}", name, e);
-                                    api::model::Response::Err(e.into())
-                                }
-                            }
-                        }
-                        api::model::Request::Shutdown => {
-                            state.initiate_shutdown().await;
-                            api::model::Response::Ok(())
-                        }
-                        api::model::Request::Install(_, _) => unreachable!(),
-                    };
-
-                    let response_message = api::model::Message {
-                        id: message.id.clone(),
-                        payload: api::model::Payload::Response(response),
-                    };
-
-                    // A error on the response_tx means that the connection
-                    // was closed in the meantime. Ignore it.
-                    response_tx.send(response_message).ok();
-                } else {
-                    warn!("Received message is not a request");
-                }
-            }
-            Request::Install(repository, path) => {
-                let payload = match state.install(&repository, &path).await {
-                    Ok(_) => api::model::Response::Ok(()),
-                    Err(e) => api::model::Response::Err(e.into()),
-                };
-
-                let response = api::model::Message::new_response(payload);
-
-                // A error on the response_tx means that the connection
-                // was closed in the meantime. Ignore it.
-                response_tx.send(response).ok();
-            }
-        }
     }
 
     /// Open a TCP socket and listen for incoming connections
@@ -347,59 +269,4 @@ impl Drop for Console {
     fn drop(&mut self) {
         self.token.cancel();
     }
-}
-
-fn list_containers(state: &State) -> Vec<api::model::Container> {
-    let mut containers: Vec<api::model::Container> = state
-        .applications()
-        .map(|app| api::model::Container {
-            manifest: app.manifest().clone(),
-            repository: app.container().repository.clone(),
-            process: app.process_context().map(|f| api::model::Process {
-                pid: f.process().pid(),
-                uptime: f.uptime().as_nanos() as u64,
-                resources: api::model::Resources {
-                    memory: {
-                        {
-                            let page_size = page_size::get();
-                            let pid = f.process().pid();
-
-                            procinfo::pid::statm(pid as i32)
-                                .ok()
-                                .map(|statm| api::model::Memory {
-                                    size: (statm.size * page_size) as u64,
-                                    resident: (statm.resident * page_size) as u64,
-                                    shared: (statm.share * page_size) as u64,
-                                    text: (statm.text * page_size) as u64,
-                                    data: (statm.data * page_size) as u64,
-                                })
-                        }
-                    },
-                },
-            }),
-        })
-        .collect();
-    let mut resources = state
-        .resources()
-        .map(|container| api::model::Container {
-            manifest: container.manifest.clone(),
-            process: None,
-            repository: container.repository.clone(),
-        })
-        .collect();
-    containers.append(&mut resources);
-    containers
-}
-
-fn list_repositories(state: &State) -> HashMap<RepositoryId, api::model::Repository> {
-    state
-        .repositories()
-        .iter()
-        .map(|(id, repository)| {
-            (
-                id.clone(),
-                api::model::Repository::new(repository.dir.clone()),
-            )
-        })
-        .collect()
 }
