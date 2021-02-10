@@ -163,10 +163,12 @@ impl Console {
                     .to_socket_addrs()
                     .map_err(|e| Error::Io("Invalid console address".into(), e))?
                     .next()
-                    .ok_or(Error::Io(
-                        "Invalid console url".into(),
-                        io::Error::new(io::ErrorKind::Other, ""),
-                    ))?;
+                    .ok_or_else(|| {
+                        Error::Io(
+                            "Invalid console url".into(),
+                            io::Error::new(io::ErrorKind::Other, ""),
+                        )
+                    })?;
 
                 debug!("Starting console on {}", &address);
 
