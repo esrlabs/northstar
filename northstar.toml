@@ -1,3 +1,5 @@
+# The runtime log level: TRACE, DEBUG, INFO, WARN, ERROR
+log_level = "DEBUG"
 console = "tcp://localhost:4200"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
@@ -15,8 +17,6 @@ device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
 
 [debug.runtime]
-# The runtime log level: TRACE, DEBUG, INFO, WARN, ERROR
-log_level = "DEBUG"
 # Disable the mount namespace feature. If this optional flag is set to
 # true the runtime will not enter a mount namespace upon startup. This
 # allows to examine the mounted roots of the npks in the repositories.

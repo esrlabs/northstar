@@ -37,13 +37,11 @@ fn main() -> Result<(), Error> {
     let config: Config = toml::from_str(&config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
 
-    let debug = config.debug.as_ref().and_then(|d| d.runtime.as_ref());
-
-    // Log level
-    let level = debug.and_then(|r| r.log_level).unwrap_or(log::Level::Info);
-
     logd_logger::builder()
-        .parse_filters(&format!("northstar={}", level.to_string().to_lowercase()))
+        .parse_filters(&format!(
+            "northstar={}",
+            config.log_level.to_string().to_lowercase()
+        ))
         .tag("northstar")
         .init();
 
@@ -54,7 +52,13 @@ fn main() -> Result<(), Error> {
     );
 
     // Skip mount namespace setup in case it's disabled for debugging purposes
-    if !debug.map(|r| r.disable_mount_namespace).unwrap_or(false) {
+    if !config
+        .debug
+        .as_ref()
+        .and_then(|d| d.runtime.as_ref())
+        .map(|r| r.disable_mount_namespace)
+        .unwrap_or(false)
+    {
         warn!("Mount namespace is disabled");
         // Set the mount propagation of unshare_root to MS_PRIVATE
         nix::mount::mount(

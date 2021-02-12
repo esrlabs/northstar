@@ -209,7 +209,6 @@ USAGE:
     northstar [FLAGS] [OPTIONS]
 
 FLAGS:
-    -d, --debug      Print debug logs
     -h, --help       Prints help information
     -V, --version    Prints version information
 
@@ -221,7 +220,7 @@ The configuration of the runtime is done with a `*.toml` configuration file.
 Here is an example:
 
 ```toml
-debug = true
+log_level = "DEBUG"
 console = "tcp://localhost:4200"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"

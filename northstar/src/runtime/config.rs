@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use log::Level;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url_serde::SerdeUrl;
@@ -20,6 +21,8 @@ use super::RepositoryId;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
+    /// Log level: DEBUG, INFO, WARN or ERROR
+    pub log_level: Level,
     /// Console address.
     pub console: Option<SerdeUrl>,
     /// Directory with unpacked containers.
@@ -76,15 +79,12 @@ pub struct Debug {
 }
 
 pub mod debug {
-    use log::Level;
     use serde::Deserialize;
     use std::path::PathBuf;
 
     /// Runtime debug options
     #[derive(Clone, Debug, Deserialize)]
     pub struct Runtime {
-        /// Log level: DEBUG, INFO, WARN or ERROR
-        pub log_level: Option<Level>,
         /// Do not enter a mount namespace if this option is set
         /// This exposes the `run_dir` mounts for debugging. Be aware
         /// that in case of a non normal termination of the runtime the
