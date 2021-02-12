@@ -15,7 +15,7 @@
 #![deny(clippy::all)]
 
 use anyhow::{Context, Error};
-use log::{info, warn};
+use log::{debug, info, warn};
 use northstar::runtime;
 use runtime::config::Config;
 use std::{env, fs::read_to_string, path::PathBuf, process::exit};
@@ -59,7 +59,6 @@ fn main() -> Result<(), Error> {
         .map(|r| r.disable_mount_namespace)
         .unwrap_or(false)
     {
-        warn!("Mount namespace is disabled");
         // Set the mount propagation of unshare_root to MS_PRIVATE
         nix::mount::mount(
             Option::<&'static [u8]>::None,
@@ -71,7 +70,10 @@ fn main() -> Result<(), Error> {
 
         // Enter a mount namespace. This needs to be done before spawning
         // the tokio threadpool.
+        debug!("Entering mount namespace");
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
+    } else {
+        warn!("Mount namespace is disabled");
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
