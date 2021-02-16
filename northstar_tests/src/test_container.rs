@@ -52,7 +52,12 @@ lazy_static! {
         );
 
         npk::pack(
-            package_dir.path(),
+            package_dir
+                .path()
+                .join("manifest")
+                .with_extension("yaml")
+                .as_path(),
+            package_dir.path().join("root").as_path(),
             REPOSITORIES_DIR.path(),
             Some(Path::new("examples/keys/northstar.key")),
         )
@@ -62,7 +67,8 @@ lazy_static! {
     });
     static ref TEST_RESOURCE_NPK: AsyncOnce<PathBuf> = AsyncOnce::new(async {
         npk::pack(
-            Path::new("northstar_tests/test_resource"),
+            Path::new("northstar_tests/test_resource/manifest.yaml"),
+            Path::new("northstar_tests/test_resource/root"),
             REPOSITORIES_DIR.path(),
             Some(Path::new("examples/keys/northstar.key")),
         )
