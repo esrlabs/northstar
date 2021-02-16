@@ -73,14 +73,15 @@ mounts:
         "android" => MANIFEST_ANDROID,
         _ => MANIFEST,
     };
-    std::fs::write(out_dir.join("manifest.yaml"), &manifest)
-        .context("Failed to create manifest")?;
+    let manifest_dir = out_dir.join("manifest.yaml");
+    std::fs::write(&manifest_dir, &manifest).context("Failed to create manifest")?;
 
     runtime::Builder::new_multi_thread()
         .enable_io()
         .build()?
         .block_on(npk::pack_with(
-            &out_dir,
+            &manifest_dir,
+            &root_dir,
             &out_dir,
             None,
             npk::SquashfsOpts {

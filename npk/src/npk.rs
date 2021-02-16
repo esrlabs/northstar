@@ -375,7 +375,7 @@ impl Builder {
             context: "Failed to create temporary directory".to_string(),
             error: e,
         })?;
-        let tmp_root = copy_src_root_to_tmp(&self.root, &tmp).await?;
+        let tmp_root = copy_root_dir_to_tmp(&self.root, &tmp).await?;
         let tmp_manifest = write_manifest(&self.manifest, &tmp).await?;
 
         // Create filesystem image
@@ -441,8 +441,9 @@ pub struct SquashfsOpts {
 /// and packs the results into a zipped NPK file.
 ///
 /// # Arguments
-/// * `dir` - Directory containing the container's root and manifest
-/// * `out` - Directory where the resulting NPK will be put
+/// * `manifest` - Path to the container's manifest file
+/// * `root` - Path to the container's root directory
+/// * `out` - Directory where the resulting NPK will be written to
 /// * `key` - Path to the key used to sign the package
 ///
 /// # Example
@@ -450,11 +451,17 @@ pub struct SquashfsOpts {
 /// To build the 'hello' example container:
 ///
 /// sextant pack \
-/// --dir examples/container/hello \
+/// --manifest examples/container/hello/manifest.yaml \
+/// --root examples/container/hello/root \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
-    pack_with(dir, out, key, SquashfsOpts::default()).await
+pub async fn pack(
+    manifest: &Path,
+    root: &Path,
+    out: &Path,
+    key: Option<&Path>,
+) -> Result<(), Error> {
+    pack_with(manifest, root, out, key, SquashfsOpts::default()).await
 }
 
 /// Create an NPK with special `squashfs` options
@@ -462,8 +469,9 @@ pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Erro
 /// and packs the results into a zipped NPK file.
 ///
 /// # Arguments
-/// * `dir` - Directory containing the container's root and manifest
-/// * `out` - Directory where the resulting NPK will be put
+/// * `manifest` - Path to the container's manifest file
+/// * `root` - Path to the container's root directory
+/// * `out` - Directory where the resulting NPK will be written to
 /// * `key` - Path to the key used to sign the package
 /// * `squashfs_opts` - Options for `mksquashfs`
 ///
@@ -472,21 +480,23 @@ pub async fn pack(dir: &Path, out: &Path, key: Option<&Path>) -> Result<(), Erro
 /// To build the 'hello' example container:
 ///
 /// sextant pack \
-/// --dir examples/container/hello \
+/// --manifest examples/container/hello/manifest.yaml \
+/// --root examples/container/hello/root \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 /// --comp xz \
 /// --block-size 65536 \
 pub async fn pack_with(
-    dir: &Path,
+    manifest: &Path,
+    root: &Path,
     out: &Path,
     key: Option<&Path>,
     squashfs_opts: SquashfsOpts,
 ) -> Result<(), Error> {
-    let manifest = read_manifest(dir).await?;
+    let manifest = read_manifest(manifest).await?;
     let name = manifest.name.clone();
     let version = manifest.version.clone();
-    let mut builder = Builder::new(dir, manifest);
+    let mut builder = Builder::new(root, manifest);
     if let Some(key) = key {
         builder = builder.key(&key);
     }
@@ -548,8 +558,7 @@ pub async fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-async fn read_manifest(src: &Path) -> Result<Manifest, Error> {
-    let path = src.join(MANIFEST_BASE).with_extension(&MANIFEST_EXT);
+async fn read_manifest(path: &Path) -> Result<Manifest, Error> {
     let file = open_file(&path).await?.into_std().await;
     let manifest = task::block_in_place(|| Manifest::from_reader(&file))
         .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))?;
@@ -719,27 +728,26 @@ async fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     signature_yaml
 }
 
-async fn copy_src_root_to_tmp(src: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
-    let src_root = src.join(&ROOT_DIR_NAME);
-    let tmp_root = tmp.path().join(&ROOT_DIR_NAME);
-    let options = fs_extra::dir::CopyOptions::new();
-
-    if src_root.exists() {
-        task::block_in_place(|| fs_extra::dir::copy(&src_root, &tmp, &options)).map_err(|e| {
+async fn copy_root_dir_to_tmp(root: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
+    // create root dir in tmp
+    let tmp_root = tmp.path().join(ROOT_DIR_NAME);
+    task::block_in_place(|| fs_extra::dir::create(&tmp_root, false)).map_err(|e| {
+        Error::FsExtra {
+            context: format!("Failed to create directory '{}'", &tmp_root.display()),
+            error: e,
+        }
+    })?;
+    // copy src root to tmp root
+    if root.exists() {
+        let mut options = fs_extra::dir::CopyOptions::new();
+        options.content_only = true;
+        task::block_in_place(|| fs_extra::dir::copy(&root, &tmp_root, &options)).map_err(|e| {
             Error::FsExtra {
                 context: format!(
                     "Failed to copy from '{}' to '{}'",
-                    &src_root.display(),
+                    &root.display(),
                     &tmp.path().display()
                 ),
-                error: e,
-            }
-        })?;
-    } else {
-        // Create empty root dir at destination if we have nothing to copy
-        task::block_in_place(|| fs_extra::dir::create(&tmp_root, false)).map_err(|e| {
-            Error::FsExtra {
-                context: format!("Failed to create directory '{}'", &tmp_root.display()),
                 error: e,
             }
         })?;

@@ -25,9 +25,12 @@ mod inspect;
 enum Opt {
     /// Pack Northstar containers
     Pack {
-        /// Container source dir
+        /// Manifest path
         #[structopt(short, long)]
-        dir: PathBuf,
+        manifest: PathBuf,
+        /// Container source directory
+        #[structopt(short, long)]
+        root: PathBuf,
         /// Key file
         #[structopt(short, long)]
         key: Option<PathBuf>,
@@ -73,14 +76,15 @@ async fn main() -> Result<()> {
 
     match Opt::from_args() {
         Opt::Pack {
-            dir,
+            manifest,
+            root,
             out,
             key,
             comp,
             block_size,
         } => {
             let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-            npk::npk::pack_with(&dir, &out, key.as_deref(), squashfs_opts).await?
+            npk::npk::pack_with(&manifest, &root, &out, key.as_deref(), squashfs_opts).await?
         }
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out).await?,
         Opt::Inspect { npk, short } => inspect::inspect(&npk, short).await?,

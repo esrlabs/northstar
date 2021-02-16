@@ -122,6 +122,7 @@ build_example() {
   echo "${bold}Building ${NAME}${normal} (target: ${PLATFORM})"
 
   local ROOT_DIR="${TMP_DIR}/root"
+  local MANIFEST_DIR="${TMP_DIR}/manifest.yaml"
   exe rm -rf "${ROOT_DIR}"
   exe mkdir -p "${ROOT_DIR}"
 
@@ -133,7 +134,7 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant -- pack --dir "${TMP_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key" --comp "${COMPRESSION_ALGORITHM}"
+  exe cargo run --bin sextant -- pack --manifest "${MANIFEST_DIR}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key" --comp "${COMPRESSION_ALGORITHM}"
 }
 
 main() {
