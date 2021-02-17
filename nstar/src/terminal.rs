@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::commands::{is_quit_command, parse_prompt};
+use super::commands::parse_prompt;
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use futures::Stream;
@@ -38,8 +38,14 @@ use std::{
 use structopt::clap;
 use tokio::{sync::mpsc, task};
 
+#[derive(Debug)]
+pub enum UserInput {
+    Line(String),
+    Eof,
+}
+
 pub struct Terminal {
-    rx: mpsc::Receiver<String>,
+    rx: mpsc::Receiver<UserInput>,
 }
 
 impl Terminal {
@@ -91,15 +97,14 @@ impl Terminal {
                 let readline = rl.readline(&prompt);
                 match readline {
                     Ok(line) => {
-                        if is_quit_command(&line) {
-                            break;
-                        }
-
-                        if tx.blocking_send(line).is_err() {
+                        if tx.blocking_send(UserInput::Line(line)).is_err() {
                             break;
                         }
                     }
-                    Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
+                    Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
+                        tx.blocking_send(UserInput::Eof).unwrap();
+                        break;
+                    }
                     Err(err) => {
                         eprintln!("Error: {:?}", err);
                         break;
@@ -117,7 +122,7 @@ impl Terminal {
 
 // Stream of input lines
 impl<'a> Stream for Terminal {
-    type Item = String;
+    type Item = UserInput;
 
     fn poll_next(
         mut self: Pin<&mut Self>,

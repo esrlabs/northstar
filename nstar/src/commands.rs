@@ -25,19 +25,21 @@ pub enum Northstar {
     Containers,
     #[structopt(about = "List configured repositories", alias = "repos")]
     Repositories,
-    #[structopt(about = "Start a container")]
+    #[structopt(about = "Mount a container")]
     Mount {
         #[structopt(help = "Name of the container")]
         name: String,
         #[structopt(help = "Version of the container")]
         version: Version,
     },
+    #[structopt(about = "Unmount a container")]
     Umount {
         #[structopt(help = "Name of the container")]
         name: String,
         #[structopt(help = "Version of the container")]
         version: Version,
     },
+    #[structopt(about = "Start a container")]
     Start {
         #[structopt(help = "Name of the container")]
         name: String,
@@ -104,11 +106,6 @@ pub enum PromptCommand {
     Prompt(Prompt),
 }
 
-/// True if the input command triggers a quit
-pub fn is_quit_command(input: &str) -> bool {
-    matches!(parse_prompt(input), Ok(PromptCommand::Prompt(Prompt::Quit)))
-}
-
 /// Used to parse the input form the interactive prompt
 pub fn parse_prompt(input: &str) -> Result<PromptCommand> {
     PromptCommand::clap()
@@ -126,7 +123,7 @@ pub fn parse_prompt(input: &str) -> Result<PromptCommand> {
 
 /// Print prompt command help
 pub fn print_help<W: std::io::Write>(output: &mut W) -> Result<()> {
-    writeln!(output, "\nCommands:")?;
+    writeln!(output)?;
     PromptCommand::clap()
         .settings(&[
             AppSettings::NoBinaryName,
@@ -136,6 +133,6 @@ pub fn print_help<W: std::io::Write>(output: &mut W) -> Result<()> {
             AppSettings::DisableVersion,
             AppSettings::DisableHelpSubcommand,
         ])
-        .template("{subcommands}")
+        .template("{subcommands}\n")
         .write_help(output)
 }

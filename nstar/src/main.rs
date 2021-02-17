@@ -59,10 +59,19 @@ async fn send_request(
     client.request(request).await
 }
 
-async fn create_client(host: &str) -> Result<api::client::Client> {
-    api::client::Client::new(&url::Url::parse(host)?)
-        .await
-        .context(format!("Failed to establish connection to {}", host))
+/// Tries to connect to northstar indefinitely
+async fn try_connect<W: Write>(output: &mut W, url: &url::Url) -> Result<api::client::Client> {
+    loop {
+        match api::client::Client::new(url)
+            .await
+            .context(format!("Failed to connect to {}", url))
+        {
+            Err(e) => writeln!(output, "{}", e.to_string().red())?,
+            client => break client,
+        }
+        time::sleep(time::Duration::from_secs(1)).await;
+        writeln!(output, "Reconnecting...")?;
+    }
 }
 
 async fn print_response<W: Write>(mut out: &mut W, response: Response, json: bool) -> Result<()> {
@@ -75,61 +84,72 @@ async fn print_response<W: Write>(mut out: &mut W, response: Response, json: boo
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let opt = NstarOpt::from_args();
-    let mut client = create_client(&opt.host).await?;
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let res = runtime.block_on(async move {
+        let opt = NstarOpt::from_args();
+        let url = url::Url::parse(&opt.host)?;
 
-    // Execute the provided command and exit
-    if let Some(command) = opt.command {
-        let response = send_request(&mut client, command).await?;
-        return print_response(&mut std::io::stdout(), response, opt.json).await;
-    }
+        // Open connection to northstar
+        let mut client = try_connect(&mut std::io::stdout(), &url).await?;
 
-    // Interactive mode
-    let (mut terminal, mut input) = terminal::Terminal::new()?;
-    'outer: loop {
-        writeln!(terminal, "Connected to {}", &opt.host)?;
-
-        loop {
-            select! {
-                notification = client.next() => {
-                    if let Some(Ok(n)) = notification {
-                        pretty::notification(&mut terminal, &n);
-                    } else {
-                        break;
-                    }
-                }
-                input = input.next() => {
-                    let input: &str = if input.is_some() {
-                        input.as_deref().unwrap()
-                    } else {
-                        break 'outer;
-                    };
-                    match parse_prompt(input) {
-                        Ok(PromptCommand::Prompt(cmd)) => match cmd {
-                            Prompt::Help => print_help(&mut terminal)?,
-                            Prompt::Quit => break 'outer,
-                        },
-                        Ok(PromptCommand::Northstar(cmd)) => {
-                            match send_request(&mut client, cmd).await {
-                                Ok(response) => print_response(&mut terminal, response, opt.json).await?,
-                                // break the loop and try to reconnect
-                                Err(api::client::Error::Stopped) => break,
-                                Err(e) => writeln!(&mut terminal, "{}: {}", "client error".red(), e)?,
-                            };
-                        },
-                        Err(e) => writeln!(&mut terminal, "{}", e.message)?
-                    };
-                }
-            }
+        // Execute the provided command and exit
+        if let Some(command) = opt.command {
+            let response = send_request(&mut client, command).await?;
+            return print_response(&mut std::io::stdout(), response, opt.json).await;
         }
 
-        writeln!(terminal, "Disconnected")?;
-        time::sleep(time::Duration::from_secs(1)).await;
+        // Interactive mode
+        let (mut terminal, mut input) = terminal::Terminal::new()?;
+        loop {
+            writeln!(terminal, "Connected to {}", &url)?;
+            loop {
+                select! {
+                    notification = client.next() => {
+                        if let Some(Ok(n)) = notification {
+                            pretty::notification(&mut terminal, &n);
+                        } else {
+                            break;
+                        }
+                    },
+                    Some(input) = input.next() => {
+                        let input: String = match input {
+                            terminal::UserInput::Line(line) => line,
+                            terminal::UserInput::Eof => return Ok(()),
+                        };
 
-        // Try to reconnect
-        client = create_client(&opt.host).await?;
-    }
-    Ok(())
+                        match parse_prompt(&input) {
+                            Ok(PromptCommand::Prompt(cmd)) => match cmd {
+                                Prompt::Help => print_help(&mut terminal)?,
+                                Prompt::Quit => {
+                                    writeln!(&mut terminal, "bye!")?;
+                                    return Ok(())
+                                },
+                            },
+                            Ok(PromptCommand::Northstar(cmd)) => {
+                                match send_request(&mut client, cmd).await {
+                                    Ok(response) => print_response(&mut terminal, response, opt.json).await?,
+                                    // break the loop and try to reconnect
+                                    Err(api::client::Error::Stopped) => break,
+                                    Err(e) => writeln!(terminal, "{}: {}", "client error".red(), e)?,
+                                };
+                            },
+                            Err(e) => writeln!(terminal, "{}", e.message)?
+                        };
+                    }
+                    else => break,
+                }
+            }
+
+            // Try to reconnect
+            writeln!(terminal, "Disconnected, trying to reconnect")?;
+            client = try_connect(&mut terminal, &url).await?;
+        }
+    });
+
+    // Shutdown the runtime
+    // Also stops the terminal blocked reading from stdin
+    runtime.shutdown_background();
+
+    res
 }
