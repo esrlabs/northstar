@@ -54,7 +54,7 @@ pub enum Error {
     Timeout(String),
     #[error("Task join error: {0}")]
     JoinError(tokio::task::JoinError),
-    #[error("Os error: {0:?}")]
+    #[error("Os error: {0}")]
     Os(nix::Error),
     #[error("Repository error: {0:?}")]
     MissingKey(String),

@@ -15,15 +15,11 @@
 //! Controls Northstar runtime instances
 
 use color_eyre::eyre::{eyre, Result, WrapErr};
-use nix::mount::MsFlags;
 use northstar::{
     api,
     runtime::{self},
 };
-use std::{
-    future::Future,
-    path::{Path, PathBuf},
-};
+use std::{future::Future, path::Path};
 use tempfile::TempDir;
 use tokio::{fs, time, time::timeout};
 
@@ -65,7 +61,11 @@ pub fn timeout_on<R>(f: impl Future<Output = R>) -> Result<R> {
 }
 
 /// A running instance of northstar.
-pub struct Runtime(runtime::Runtime);
+pub struct Runtime {
+    runtime: runtime::Runtime,
+    /// Temporal repository for install/uninstall contaienrs in tests.
+    repository: TempDir,
+}
 
 impl Runtime {
     /// Launches an instance of north
@@ -75,36 +75,42 @@ impl Runtime {
 
     /// Launches an instance of north with the specified configuration
     pub async fn launch_with_config(mut config: Config) -> Result<Runtime> {
-        // It is expected that the "default" repository contains the example containers
-        let default_repository = &mut config
-            .repositories
-            .get_mut("default")
-            .ok_or_else(|| eyre!("No \"default\" repository in configuration"))?
-            .dir;
-
-        // Discard changes to the default repository at the end of the test
-        *default_repository =
-            tokio::task::block_in_place(|| overlay_directory(default_repository))?;
+        // Test scoped repository
+        let tmp_dir = TempDir::new()?;
+        let repo = Repository {
+            dir: tmp_dir.path().to_owned(),
+            key: None,
+        };
+        config.repositories.insert("test".to_string(), repo);
 
         let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
             .await
             .wrap_err("Launching northstar timed out")
             .and_then(|result| result.wrap_err("Failed to instantiate northstar runtime"))?;
 
-        Ok(Runtime(runtime))
+        Ok(Runtime {
+            runtime,
+            repository: tmp_dir,
+        })
     }
 
     pub fn start(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(self.0.request(api::model::Request::Start(name.to_string())))
-            .and_then(|result| result.wrap_err("Failed to start container"));
+        let response = timeout_on(
+            self.runtime
+                .request(api::model::Request::Start(name.to_string())),
+        )
+        .and_then(|result| result.wrap_err("Failed to start container"));
         ApiResponse(response)
     }
 
     pub async fn pid(&mut self, name: &str) -> Result<u32> {
-        let response = timeout(TIMEOUT, self.0.request(api::model::Request::Containers))
-            .await
-            .wrap_err("Getting containers status timed out")
-            .and_then(|result| result.wrap_err("Failed to get container status"))?;
+        let response = timeout(
+            TIMEOUT,
+            self.runtime.request(api::model::Request::Containers),
+        )
+        .await
+        .wrap_err("Getting containers status timed out")
+        .and_then(|result| result.wrap_err("Failed to get container status"))?;
 
         match response {
             api::model::Response::Containers(containers) => containers
@@ -119,13 +125,16 @@ impl Runtime {
     }
 
     pub fn stop(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(self.0.request(api::model::Request::Stop(name.to_string())))
-            .and_then(|result| result.wrap_err("Failed to stop container"));
+        let response = timeout_on(
+            self.runtime
+                .request(api::model::Request::Stop(name.to_string())),
+        )
+        .and_then(|result| result.wrap_err("Failed to stop container"));
         ApiResponse(response)
     }
 
     pub fn install(&mut self, npk: &Path) -> ApiResponse {
-        let response = timeout_on(self.0.install("default", npk))
+        let response = timeout_on(self.runtime.install("test", npk))
             .and_then(|result| result.wrap_err("Failed to install container"));
         ApiResponse(response)
     }
@@ -136,48 +145,17 @@ impl Runtime {
             npk::manifest::Version::parse(version).expect("Failed to parse version"),
         );
 
-        let response = timeout_on(self.0.request(uninstall))
+        let response = timeout_on(self.runtime.request(uninstall))
             .and_then(|result| result.wrap_err("Failed to uninstall container"));
         ApiResponse(response)
     }
 
     pub fn shutdown(self) -> Result<()> {
-        timeout_on(self.0.stop_wait())
+        timeout_on(self.runtime.stop_wait())
             .and_then(|result| result.wrap_err("Failed to shutdown runtime"))
-            .map(|_| ())
+            .map(|_| ())?;
+        self.repository
+            .close()
+            .wrap_err("Failed to remove test repository")
     }
-}
-
-/// Returns a path to a directory overlay-ed on top of the input directory
-/// Notice that this function is meant to be called inside a mount namespace
-/// Every change done to this directory is discarded at the end of the test
-fn overlay_directory(dir: &Path) -> Result<PathBuf> {
-    let repository = TempDir::new()?.into_path();
-    let workdir = repository.join("workdir");
-    let target = repository.join("target");
-    let upper = repository.join("upper");
-
-    std::fs::create_dir(&workdir)?;
-    std::fs::create_dir(&target)?;
-    std::fs::create_dir(&upper)?;
-
-    use std::os::unix::ffi::OsStrExt;
-    let mut options = Vec::new();
-    options.extend(b"lowerdir=");
-    options.extend_from_slice(dir.as_os_str().as_bytes());
-    options.extend(b",upperdir=");
-    options.extend_from_slice(upper.as_os_str().as_bytes());
-    options.extend(b",workdir=");
-    options.extend_from_slice(workdir.as_os_str().as_bytes());
-
-    nix::mount::mount(
-        Some("overlay"),
-        &target,
-        Some("overlay"),
-        MsFlags::empty(),
-        Some(&*options),
-    )
-    .map_err(|e| eyre!("Failed to mount overlay repository ({})", e))?;
-
-    Ok(target)
 }
