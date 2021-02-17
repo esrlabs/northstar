@@ -202,8 +202,10 @@ test!(check_uid_and_gid, {
     let data_dir = Path::new("target/northstar/data/").canonicalize()?;
 
     // install test container
-    runtime.install(get_test_resource_npk().await).could_fail();
-    runtime.install(get_test_container_npk().await).could_fail();
+    runtime.install(get_test_resource_npk().await).expect_ok()?;
+    runtime
+        .install(get_test_container_npk().await)
+        .expect_ok()?;
 
     let dir = data_dir.join("test_container".to_string());
     fs::create_dir_all(&dir).await?;
@@ -267,20 +269,16 @@ test!(mount_containers_without_verity, {
 // any filedescriptor is leaked
 test!(fd_leak, {
     /// Collect a set of files in /proc/$$/fd
-    async fn fds() -> Result<HashSet<PathBuf>> {
-        let mut fds = HashSet::new();
-        let mut dir = fs::read_dir(format!("/proc/{}/fd", std::process::id()))
-            .await
-            .unwrap();
-        while let Ok(Some(e)) = dir.next_entry().await {
-            fds.insert(e.path());
-        }
-        Ok(fds)
+    fn fds() -> Result<HashSet<PathBuf>> {
+        Ok(std::fs::read_dir("/proc/self/fd")?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect())
     }
 
     // Collect list of fds
     // A runtime launch and shutdown not leave anything open
-    let before = fds().await?;
+    let before = fds()?;
 
     let mut runtime = Runtime::launch().await?;
     runtime.start("hello").expect_ok()?;
@@ -288,7 +286,7 @@ test!(fd_leak, {
     runtime.shutdown().expect("Failed to shutdown runtime");
 
     // Compare the list of fds before and after the RT run.
-    assert_eq!(before, fds().await?);
+    assert_eq!(before, fds()?);
 
     Ok(())
 });
