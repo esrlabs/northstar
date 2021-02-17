@@ -40,16 +40,19 @@ pub struct ApiResponse(pub Result<api::model::Response>);
 
 impl ApiResponse {
     pub fn expect_ok(self) -> Result<()> {
-        match self.0 {
-            Ok(api::model::Response::Ok(())) => Ok(()),
-            _ => Err(eyre!("Response is not ok")),
+        match self.0? {
+            api::model::Response::Ok(()) => Ok(()),
+            unexpected => Err(eyre!("Unexpected response: {:?}", unexpected)),
         }
     }
 
     pub fn expect_err(self, err: api::model::Error) -> Result<()> {
-        match self.0 {
-            Ok(api::model::Response::Err(e)) if err == e => Ok(()),
-            _ => Err(eyre!("Response is not an error")),
+        match self.0? {
+            api::model::Response::Err(e) if e == err => Ok(()),
+            api::model::Response::Err(e) => {
+                Err(eyre!("Different error {:?}, expected {:?}", e, err))
+            }
+            unexpected => Err(eyre!("Unexpected response: {:?}", unexpected)),
         }
     }
 
