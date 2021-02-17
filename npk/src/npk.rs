@@ -34,7 +34,7 @@ use std::{
     process::Command,
     str::FromStr,
 };
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::NamedTempFile;
 use thiserror::Error;
 use tokio::{
     fs::File,
@@ -56,10 +56,7 @@ pub const MANIFEST_NAME: &str = "manifest.yaml";
 pub const SIGNATURE_NAME: &str = "signature.yaml";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
-const MANIFEST_BASE: &str = "manifest";
-const MANIFEST_EXT: &str = "yaml";
 const NPK_EXT: &str = "npk";
-const ROOT_DIR_NAME: &str = "root";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -367,24 +364,18 @@ impl Builder {
         self
     }
 
-    // TODO: If needed: add append method to include additional files to the npk
-
     async fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
-        // Add manifest and root dir to tmp dir
+        // Create squashfs image
         let tmp = tempfile::TempDir::new().map_err(|e| Error::Io {
             context: "Failed to create temporary directory".to_string(),
             error: e,
         })?;
-        let tmp_root = copy_root_dir_to_tmp(&self.root, &tmp).await?;
-        let tmp_manifest = write_manifest(&self.manifest, &tmp).await?;
-
-        // Create filesystem image
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-        create_squashfs_img(&tmp_root, &self.manifest, &fsimg, &self.squashfs_opts).await?;
+        create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_opts).await?;
 
-        // Create NPK
+        // Sign and write NPK
         if let Some(key) = &self.key {
-            let signature = sign_npk(&key, &fsimg, &tmp_manifest).await?;
+            let signature = sign_npk(&key, &fsimg, &self.manifest).await?;
             write_npk(writer, &self.manifest, &fsimg, Some(&signature)).await
         } else {
             write_npk(writer, &self.manifest, &fsimg, None).await
@@ -586,36 +577,18 @@ async fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     })
 }
 
-async fn write_manifest(manifest: &Manifest, tmp_dir: &TempDir) -> Result<PathBuf, Error> {
-    let tmp_manifest_path = tmp_dir
-        .path()
-        .join(&MANIFEST_BASE)
-        .with_extension(&MANIFEST_EXT);
-    let tmp_manifest = File::create(&tmp_manifest_path)
-        .await
-        .map_err(|e| Error::Io {
-            context: format!("Failed to create '{}'", &tmp_manifest_path.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
-    task::block_in_place(|| manifest.to_writer(tmp_manifest))
-        .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
-    Ok(tmp_manifest_path)
-}
-
 async fn gen_hashes_yaml(
-    tmp_manifest: &Path,
+    manifest: &Manifest,
     fsimg: &Path,
     fsimg_size: u64,
     verity_hash: &[u8],
 ) -> Result<String, Error> {
     // Create hashes YAML
     let mut sha256 = Sha256::new();
-    let mut tmp_manifest = open_file(&tmp_manifest).await?.into_std().await;
-    task::block_in_place(|| io::copy(&mut tmp_manifest, &mut sha256))
+    let manifest = manifest
+        .to_vec()
         .map_err(|_e| Error::Manifest("Failed to calculate manifest checksum".to_string()))?;
-
+    sha2::digest::Update::update(&mut sha256, manifest);
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
     let mut fsimg = open_file(&fsimg).await?.into_std().await;
@@ -638,10 +611,10 @@ async fn gen_hashes_yaml(
     Ok(hashes)
 }
 
-async fn sign_npk(key: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<String, Error> {
+async fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
     let fsimg_size = task::block_in_place(|| fs::metadata(&fsimg))
         .map_err(|e| Error::Io {
-            context: format!("Fail to read file size: '{}'", &fsimg.display()),
+            context: format!("Failed to read file size: '{}'", &fsimg.display()),
             error: e,
         })?
         .len();
@@ -649,7 +622,7 @@ async fn sign_npk(key: &Path, fsimg: &Path, tmp_manifest: &Path) -> Result<Strin
         .await
         .map_err(Error::Verity)?;
     let key_pair = read_keypair(&key).await?;
-    let hashes_yaml = gen_hashes_yaml(&tmp_manifest, &fsimg, fsimg_size, &root_hash).await?;
+    let hashes_yaml = gen_hashes_yaml(&manifest, &fsimg, fsimg_size, &root_hash).await?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml).await;
     Ok(signature_yaml)
 }
@@ -728,37 +701,10 @@ async fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     signature_yaml
 }
 
-async fn copy_root_dir_to_tmp(root: &Path, tmp: &TempDir) -> Result<PathBuf, Error> {
-    // create root dir in tmp
-    let tmp_root = tmp.path().join(ROOT_DIR_NAME);
-    task::block_in_place(|| fs_extra::dir::create(&tmp_root, false)).map_err(|e| {
-        Error::FsExtra {
-            context: format!("Failed to create directory '{}'", &tmp_root.display()),
-            error: e,
-        }
-    })?;
-    // copy src root to tmp root
-    if root.exists() {
-        let mut options = fs_extra::dir::CopyOptions::new();
-        options.content_only = true;
-        task::block_in_place(|| fs_extra::dir::copy(&root, &tmp_root, &options)).map_err(|e| {
-            Error::FsExtra {
-                context: format!(
-                    "Failed to copy from '{}' to '{}'",
-                    &root.display(),
-                    &tmp.path().display()
-                ),
-                error: e,
-            }
-        })?;
-    }
-    Ok(tmp_root)
-}
-
 async fn create_squashfs_img(
-    dst: &Path,
     manifest: &Manifest,
-    src: &Path,
+    root: &Path,
+    image: &Path,
     squashfs_opts: &SquashfsOpts,
 ) -> Result<(), Error> {
     let pseudo_files = gen_pseudo_files(&manifest).await?;
@@ -767,10 +713,10 @@ async fn create_squashfs_img(
         which::which(&MKSQUASHFS_BIN)
             .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS_BIN)))
     })?;
-    if !dst.exists() {
+    if !root.exists() {
         return Err(Error::Squashfs(format!(
-            "Output directory '{}' does not exist",
-            &dst.display()
+            "Root directory '{}' does not exist",
+            &root.display()
         )));
     }
 
@@ -779,8 +725,8 @@ async fn create_squashfs_img(
         .as_ref()
         .unwrap_or(&CompressionAlgorithm::Gzip);
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
-    cmd.arg(&dst.display().to_string())
-        .arg(&src.display().to_string())
+    cmd.arg(&root.display().to_string())
+        .arg(&image.display().to_string())
         .arg("-all-root")
         .arg("-no-progress")
         .arg("-comp")
@@ -799,10 +745,11 @@ async fn create_squashfs_img(
         cmd.output().map_err(|e| {
             Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS_BIN, e))
         })?;
-        if !src.exists() {
+        if !image.exists() {
             return Err(Error::Squashfs(format!(
-                "'{}' did not create '{}'",
-                &MKSQUASHFS_BIN, &FS_IMG_NAME
+                "'{}' failed to create '{}'",
+                &MKSQUASHFS_BIN,
+                &image.display()
             )));
         }
         Ok(())
