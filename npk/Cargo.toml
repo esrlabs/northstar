@@ -30,3 +30,4 @@ zip = { git = "https://github.com/esrlabs/zip.git", branch = "support-extra-fiel
 [dev-dependencies]
 anyhow = "1.0.37"
 tempfile  = "3.1.0"
+tokio = { version = "1.0.1", features = ["full"] }
