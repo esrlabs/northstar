@@ -253,7 +253,7 @@ impl Npk {
                         Error::Manifest(format!("Failed to parse manifest hash {}", e))
                     })?;
                     let actual_hash = Sha256::digest(&content.as_bytes());
-                    if expected_hash != actual_hash[..] {
+                    if expected_hash != actual_hash.as_slice() {
                         return Err(Error::Manifest(format!(
                             "Invalid manifest hash (expected={} actual={})",
                             manifest_hash,
