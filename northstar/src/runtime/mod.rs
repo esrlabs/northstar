@@ -54,7 +54,7 @@ pub type RepositoryId = String;
 #[derive(Debug)]
 pub(crate) enum Event {
     /// Incomming command
-    Console(console::Request, oneshot::Sender<api::model::Message>),
+    Console(console::Request, oneshot::Sender<api::model::Response>),
     /// A instance exited with return code
     Exit(Name, ExitStatus),
     /// Out of memory event occured
@@ -132,7 +132,7 @@ impl Runtime {
         &self,
         request: api::model::Request,
     ) -> Result<api::model::Response, Error> {
-        let (response_tx, response_rx) = oneshot::channel::<api::model::Message>();
+        let (response_tx, response_rx) = oneshot::channel::<api::model::Response>();
 
         let request = api::model::Message::new_request(request);
         self.event_tx
@@ -142,12 +142,10 @@ impl Runtime {
             ))
             .await
             .ok();
-
-        match response_rx.await.ok().map(|message| message.payload) {
-            Some(api::model::Payload::Response(response)) => Ok(response),
-            Some(_) => unreachable!(),
-            None => panic!("Internal channel error"),
-        }
+        let response: api::model::Response = response_rx
+            .await
+            .map_err(|e| Error::AsyncRuntime(format!("Error receiving from channel {}", e)))?;
+        Ok(response)
     }
 
     /// Installs a container in the repository
@@ -156,7 +154,7 @@ impl Runtime {
         repository: &str,
         npk: &Path,
     ) -> Result<api::model::Response, Error> {
-        let (response_tx, response_rx) = oneshot::channel::<api::model::Message>();
+        let (response_tx, response_rx) = oneshot::channel::<api::model::Response>();
 
         self.event_tx
             .send(Event::Console(
@@ -166,13 +164,10 @@ impl Runtime {
             .await
             .ok();
 
-        match response_rx.await.ok().map(|message| message.payload) {
-            Some(api::model::Payload::Response(response)) => Ok(response),
-            Some(_) => unreachable!(),
-            None => Err(Error::AsyncRuntime(
-                "Failed to receive response".to_string(),
-            )),
-        }
+        let response: api::model::Response = response_rx
+            .await
+            .map_err(|e| Error::AsyncRuntime(format!("Failed to receive response: {}", e)))?;
+        Ok(response)
     }
 }
 

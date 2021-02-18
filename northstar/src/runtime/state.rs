@@ -720,7 +720,7 @@ impl<'a> State<'a> {
     pub(crate) async fn console_request(
         &mut self,
         request: &Request,
-        response_tx: oneshot::Sender<api::model::Message>,
+        response_tx: oneshot::Sender<api::model::Response>,
     ) -> Result<(), Error> {
         match request {
             Request::Message(message) => {
@@ -766,14 +766,9 @@ impl<'a> State<'a> {
                         api::model::Request::Install(_, _) => unreachable!(),
                     };
 
-                    let response_message = api::model::Message {
-                        id: message.id.clone(),
-                        payload: api::model::Payload::Response(response),
-                    };
-
                     // A error on the response_tx means that the connection
                     // was closed in the meantime. Ignore it.
-                    response_tx.send(response_message).ok();
+                    response_tx.send(response).ok();
                 } else {
                     warn!("Received message is not a request");
                 }
@@ -784,11 +779,9 @@ impl<'a> State<'a> {
                     Err(e) => api::model::Response::Err(e.into()),
                 };
 
-                let response = api::model::Message::new_response(payload);
-
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                response_tx.send(response).ok();
+                response_tx.send(payload).ok();
             }
         }
         Ok(())

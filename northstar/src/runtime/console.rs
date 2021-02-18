@@ -104,7 +104,12 @@ impl Console {
                             stream = listener.accept() => {
                                 match stream {
                                     Ok(stream) => {
-                                        task::spawn(Self::connection(stream.0, stream.1.to_string(), event_tx.clone(), notification_tx.subscribe()));
+                                        task::spawn(Self::connection(
+                                            stream.0,
+                                            stream.1.to_string(),
+                                            event_tx.clone(),
+                                            notification_tx.subscribe(),
+                                        ));
                                     }
                                     Err(e) => {
                                         warn!("Error listening: {}", e);
@@ -131,7 +136,12 @@ impl Console {
                             stream = listener.accept() => {
                                 match stream {
                                     Ok(stream) => {
-                                        task::spawn(Self::connection(stream.0, format!("{:?}", &stream.1), event_tx.clone(), notification_tx.subscribe()));
+                                        task::spawn(Self::connection(
+                                            stream.0,
+                                            format!("{:?}", &stream.1),
+                                            event_tx.clone(),
+                                            notification_tx.subscribe(),
+                                        ));
                                     }
                                     Err(e) => {
                                         warn!("Error listening: {}", e);
@@ -164,7 +174,7 @@ impl Console {
         debug!("Client {:?} connected", peer);
 
         // Get a framed stream and sink interface.
-        let mut connection = api::codec::framed(stream);
+        let mut network_stream = api::codec::framed(stream);
 
         loop {
             select! {
@@ -180,60 +190,82 @@ impl Console {
                         }
                     };
 
-                    if let Err(e) = connection.send(api::model::Message::new_notification(notification)).await {
+                    if let Err(e) = network_stream
+                        .send(api::model::Message::new_notification(notification))
+                        .await
+                    {
                         warn!("{}: Connection error: {}", peer, e);
                         break;
                     }
                 }
-                message = connection.next() => {
-                    let message = if let Some(Ok(message)) = message {
-                        message
+                item = network_stream.next() => {
+                    let message = if let Some(Ok(msg)) = item {
+                        msg
                     } else {
                         info!("{}: Connection closed", peer);
                         break;
                     };
+                    let message_id = message.id.clone();
 
                     let mut keep_file = None;
 
-                    let request = if let api::model::Payload::Request(api::model::Request::Install(repository, size)) = message.payload {
-                        info!("{}: Received installation request with size {}", peer, bytesize::ByteSize::b(size));
-                        info!("{}: Using repository \"{}\"", peer, repository);
-                        // Get a tmpfile name
-                        let tmpfile = match tempfile::NamedTempFile::new() {
-                            Ok(f) => f,
-                            Err(e) => {
-                                warn!("Failed to create tempfile: {}" , e);
-                                break;
+                    let request =
+                        if let api::model::Payload::Request(
+                            api::model::Request::Install(repository, size)) =
+                            message.payload
+                        {
+                            info!(
+                                "{}: Received installation request with size {}",
+                                peer,
+                                bytesize::ByteSize::b(size)
+                            );
+                            info!("{}: Using repository \"{}\"", peer, repository);
+                            // Get a tmpfile name
+                            let tmpfile = match tempfile::NamedTempFile::new() {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    warn!("Failed to create tempfile: {}", e);
+                                    break;
+                                }
+                            };
+
+                            // Create a tmpfile
+                            let mut file = match fs::File::create(&tmpfile.path()).await {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    warn!("Failed to open tempfile: {}", e);
+                                    break;
+                                }
+                            };
+
+                            // Receive size bytes and dump to the tempfile
+                            let start = time::Instant::now();
+                            match io::copy(
+                                &mut io::AsyncReadExt::take(&mut network_stream, size),
+                                &mut file,
+                            )
+                            .await
+                            {
+                                Ok(n) => {
+                                    info!(
+                                        "{}: Received {} in {:?}",
+                                        peer,
+                                        bytesize::ByteSize::b(n),
+                                        start.elapsed()
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!("{}: Connection error: {}", peer, e);
+                                    break;
+                                }
                             }
+
+                            let tmpfile_path = tmpfile.path().to_owned();
+                            keep_file = Some(tmpfile);
+                            Request::Install(repository, tmpfile_path)
+                        } else {
+                            Request::Message(message)
                         };
-
-                        // Create a tmpfile
-                        let mut file = match fs::File::create(&tmpfile.path()).await {
-                            Ok(f) => f,
-                            Err(e) => {
-                                warn!("Failed to open tempfile: {}" , e);
-                                break;
-                            }
-                        };
-
-                        // Receive size bytes and dump to the tempfile
-                        let start = time::Instant::now();
-                        match io::copy(&mut io::AsyncReadExt::take(&mut connection, size), &mut file).await {
-                            Ok(n) => {
-                                info!("{}: Received {} in {:?}", peer, bytesize::ByteSize::b(n), start.elapsed());
-                            }
-                            Err(e) => {
-                                warn!("{}: Connection error: {}" , peer, e);
-                                break;
-                            }
-                        }
-
-                        let tmpfile_path = tmpfile.path().to_owned();
-                        keep_file = Some(tmpfile);
-                        Request::Install(repository, tmpfile_path)
-                    } else {
-                        Request::Message(message)
-                    };
 
                     // Create a oneshot channel for the runtimes reply
                     let (reply_tx, reply_rx) = oneshot::channel();
@@ -245,14 +277,18 @@ impl Console {
                         .expect("Internal channel error on main");
 
                     // Wait for the reply from the runtime
-                    let reply = reply_rx
+                    let response: api::model::Response = reply_rx
                         .await
                         .expect("Internal channel error on client reply");
 
                     keep_file.take();
 
                     // Report result to client
-                    if let Err(e) = connection.send(reply).await {
+                    let msg = api::model::Message {
+                        id: message_id,
+                        payload: api::model::Payload::Response(response),
+                    };
+                    if let Err(e) = network_stream.send(msg).await {
                         warn!("{}: Connection error: {}", peer, e);
                         break;
                     }
