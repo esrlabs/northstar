@@ -585,10 +585,7 @@ async fn gen_hashes_yaml(
 ) -> Result<String, Error> {
     // Create hashes YAML
     let mut sha256 = Sha256::new();
-    let manifest = manifest
-        .to_vec()
-        .map_err(|_e| Error::Manifest("Failed to calculate manifest checksum".to_string()))?;
-    sha2::digest::Update::update(&mut sha256, manifest);
+    sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
     let mut fsimg = open_file(&fsimg).await?.into_std().await;
