@@ -471,14 +471,6 @@ impl Manifest {
         serde_yaml::to_writer(writer, self).map_err(Error::SerdeYaml)
     }
 
-    pub fn to_vec(&self) -> Result<Vec<u8>, Error> {
-        serde_yaml::to_vec(self).map_err(Error::SerdeYaml)
-    }
-
-    pub fn to_string(&self) -> Result<String, Error> {
-        serde_yaml::to_string(self).map_err(Error::SerdeYaml)
-    }
-
     fn verify(&self) -> Result<(), Error> {
         // TODO: check for none on env, autostart, cgroups, seccomp
         if self.init.is_none() && self.args.is_some() {
@@ -498,6 +490,15 @@ impl FromStr for Manifest {
             manifest.verify()?;
         }
         parse_res
+    }
+}
+
+impl ToString for Manifest {
+    fn to_string(&self) -> String {
+        // A `Manifest` is convertible to `String` as long as its implementation of `Serialize` does
+        // not return an error. This should never happen for the types that we use in `Manifest` so
+        // we can safely use .unwrap() here.
+        serde_yaml::to_string(self).unwrap()
     }
 }
 
