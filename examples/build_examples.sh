@@ -103,12 +103,10 @@ provision_artifact() {
   fi
 }
 
-provision_manifest() {
+provision_root_folder() {
   local EXAMPLE="$1"
   local ROOT_DIR="$2"
-  local TMP_DIR="$3"
 
-  cp "${EXAMPLE}/manifest.yaml" "${TMP_DIR}"
   if [ -d "${EXAMPLE}/root/" ]; then
     cp -r "${EXAMPLE}/root/." "${ROOT_DIR}/"
   fi
@@ -121,13 +119,13 @@ build_example() {
   local NAME="$(basename "${EXAMPLE}")"
   echo "${bold}Building ${NAME}${normal} (target: ${PLATFORM})"
 
+  local MANIFEST="${EXAMPLE}/manifest.yaml"
   local ROOT_DIR="${TMP_DIR}/root"
-  local MANIFEST="${TMP_DIR}/manifest.yaml"
   exe rm -rf "${ROOT_DIR}"
   exe mkdir -p "${ROOT_DIR}"
 
-  # Copy manifest and root to tmp
-  provision_manifest "${EXAMPLE}" "${ROOT_DIR}" "${TMP_DIR}"
+  # Copy root folder to tmp
+  provision_root_folder "${EXAMPLE}" "${ROOT_DIR}"
 
   # Cross compile and store artifacts for Rust containers
   if [ -f "${EXAMPLE}/Cargo.toml" ]; then
