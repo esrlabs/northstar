@@ -397,7 +397,7 @@ impl<'a> State<'a> {
     }
 
     /// Shutdown the runtime: stop running applications and umount npks
-    pub async fn shutdown(&mut self) -> result::Result<(), Error> {
+    pub async fn shutdown(mut self) -> Result<(), Error> {
         let running_containers: Vec<String> = self
             .applications
             .values()
@@ -431,7 +431,7 @@ impl<'a> State<'a> {
                 .map_err(Error::Mount)?;
         }
 
-        self.minijail.shutdown().map_err(Error::Process)
+        self.minijail.shutdown().await.map_err(Error::Process)
     }
 
     /// Install an NPK
