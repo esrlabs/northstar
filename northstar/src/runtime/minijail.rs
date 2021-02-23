@@ -14,6 +14,7 @@
 
 use super::{
     config::Config,
+    pipe::{pipe, AsyncPipeReader, AsyncPipeWriter, PipeWriter},
     process::{waitpid, Error, ExitStatus, Pid, ENV_NAME, ENV_VERSION},
     process_debug::{Perf, Strace},
     state::Container,
@@ -24,15 +25,15 @@ use futures::Future;
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
-    fcntl::{self, fcntl, OFlag},
     sys::signal,
-    unistd::{self, chown, close, pipe},
+    unistd::{self, chown},
 };
 use npk::manifest::{Dev, Manifest, Mount, MountFlag, Output};
 use signal::Signal::{SIGKILL, SIGTERM};
 use std::{
+    convert::TryInto,
     fmt, iter, ops,
-    os::unix::prelude::*,
+    os::unix::{io::AsRawFd, prelude::*},
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
@@ -40,7 +41,7 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, AsyncWrite, ReadBuf},
+    io::{self, AsyncBufReadExt, AsyncWrite, AsyncWriteExt},
     select,
     task::{self, JoinHandle},
     time,
@@ -49,7 +50,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
 pub struct Minijail<'a> {
-    log_fd: i32,
+    log_fd: PipeWriter,
     event_tx: EventTx,
     config: &'a Config,
     log_task: JoinHandle<()>,
@@ -57,10 +58,16 @@ pub struct Minijail<'a> {
 
 impl<'a> Minijail<'a> {
     /// Initialize minijail
-    pub(crate) fn new(event_tx: EventTx, config: &'a Config) -> Result<Minijail<'a>, Error> {
-        let pipe = AsyncPipe::new()?;
-        let log_fd = pipe.blocking_fd();
-        let mut lines = io::BufReader::new(pipe).lines();
+    pub(crate) async fn new(event_tx: EventTx, config: &'a Config) -> Result<Minijail<'a>, Error> {
+        let (reader, log_fd) =
+            pipe().map_err(|e| Error::Io("Failed to open pipe".to_string(), e))?;
+        let async_reader: AsyncPipeReader = reader.try_into().map_err(|e| {
+            Error::Io(
+                "Failed to get async handler from pipe reader".to_string(),
+                e,
+            )
+        })?;
+        let mut lines = io::BufReader::new(async_reader).lines();
 
         // Spawn a task that forwards logs from minijail to the rust logger.
         let log_task = task::spawn(async move {
@@ -84,7 +91,7 @@ impl<'a> Minijail<'a> {
             Level::Trace => i32::MAX,
         };
 
-        ::minijail::Minijail::log_to_fd(log_fd, minijail_log_level as i32);
+        ::minijail::Minijail::log_to_fd(log_fd.as_raw_fd(), minijail_log_level as i32);
 
         Ok(Minijail {
             event_tx,
@@ -98,8 +105,10 @@ impl<'a> Minijail<'a> {
     pub(crate) async fn shutdown(self) -> Result<(), Error> {
         // Set minijail logging to stderr before closing the pipe
         ::minijail::Minijail::log_to_fd(2, i32::MAX);
+
         // Close the writing end of the minijail log task. This will make the task break
-        close(self.log_fd).map_err(|e| Error::Os("Failed to close log_fd".into(), e))?;
+        drop(self.log_fd);
+
         // Wait for the log task to exit
         self.log_task
             .await
@@ -237,7 +246,7 @@ impl<'a> Minijail<'a> {
     ) -> Result<((Option<Io>, Option<Io>), Vec<(i32, i32)>), Error> {
         // Add the minijail logging fd to the list of preserved fds to prevent
         // minijail to close it after it execved.
-        let mut fds = vec![(self.log_fd, self.log_fd)];
+        let mut fds = vec![(self.log_fd.as_raw_fd(), self.log_fd.as_raw_fd())];
 
         // stdout
         let stdout = if let Some(io) = manifest.io.as_ref().and_then(|io| io.stdout.as_ref()) {
@@ -246,7 +255,7 @@ impl<'a> Minijail<'a> {
                 None
             } else {
                 let io = Io::new(io).await?;
-                fds.push((io.writefd, 1));
+                fds.push((io.writefd.as_raw_fd(), 1));
                 Some(io)
             }
         } else {
@@ -260,7 +269,7 @@ impl<'a> Minijail<'a> {
                 None
             } else {
                 let io = Io::new(io).await?;
-                fds.push((io.writefd, 2));
+                fds.push((io.writefd.as_raw_fd(), 2));
                 Some(io)
             }
         } else {
@@ -520,84 +529,32 @@ impl Debug {
     }
 }
 
-/// Pipe with async tokio impls
-#[derive(Debug)]
-struct AsyncPipe {
-    non_blocking: AsyncFd<std::fs::File>,
-    blocking: RawFd,
-}
-
-impl AsyncPipe {
-    fn new() -> Result<AsyncPipe, Error> {
-        let (non_blocking, blocking) =
-            pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
-
-        let mut flags =
-            OFlag::from_bits(fcntl(non_blocking, fcntl::FcntlArg::F_GETFL).unwrap()).unwrap();
-        flags.set(OFlag::O_NONBLOCK, true);
-        fcntl(non_blocking, fcntl::FcntlArg::F_SETFL(flags)).expect("Failed to configure pipe fd");
-        let non_blocking = unsafe { std::fs::File::from_raw_fd(non_blocking) };
-        let non_blocking =
-            AsyncFd::new(non_blocking).map_err(|e| Error::Io("Async fd".to_string(), e))?;
-
-        Ok(AsyncPipe {
-            non_blocking,
-            blocking,
-        })
-    }
-
-    fn blocking_fd(&self) -> RawFd {
-        self.blocking
-    }
-}
-
-impl Drop for AsyncPipe {
-    fn drop(&mut self) {
-        unistd::close(self.blocking).ok();
-    }
-}
-
-impl AsyncRead for AsyncPipe {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        loop {
-            let mut guard = futures::ready!(self.non_blocking.poll_read_ready(cx))?;
-            match guard
-                .try_io(|inner| std::io::Read::read(&mut inner.get_ref(), buf.initialized_mut()))
-            {
-                Ok(Ok(n)) => {
-                    buf.advance(n);
-                    break Poll::Ready(Ok(()));
-                }
-                Ok(Err(e)) => break Poll::Ready(Err(e)),
-                Err(_would_block) => continue,
-            }
-        }
-    }
-}
-
 #[derive(Debug)]
 struct Io {
-    writefd: i32,
+    writefd: PipeWriter,
     token: CancellationToken,
 }
 
 impl Io {
     /// Create a new Io handle
     pub async fn new(io: &Output) -> Result<Io, Error> {
-        let mut pipe = AsyncPipe::new()?;
-        let writefd = pipe.blocking_fd();
+        let (reader, writefd) =
+            pipe().map_err(|e| Error::Io("Failed to open pipe".to_string(), e))?;
         let token = CancellationToken::new();
 
         {
             let token = token.clone();
             let mut io = Self::io(io).await?;
 
+            let mut async_reader: AsyncPipeReader = reader.try_into().map_err(|e| {
+                Error::Io(
+                    "Failed to get async handler from pipe reader".to_string(),
+                    e,
+                )
+            })?;
+
             task::spawn(async move {
-                let copy = io::copy(&mut pipe, &mut io);
+                let copy = io::copy(&mut async_reader, &mut io);
                 select! {
                     r = copy => {
                         match r {
@@ -683,7 +640,7 @@ impl AsyncWrite for Log {
 /// is fully setup e.g debugging things like strace or the cgroups setup
 struct ProcessSync {
     /// Parent half
-    parent: RawFd,
+    parent: AsyncPipeWriter,
     /// Childs half
     child: RawFd,
     /// Handle the the Fn passed to minijail which must be freed.
@@ -694,24 +651,27 @@ impl ProcessSync {
     fn with(jail: &mut MinijailHandle) -> Result<ProcessSync, Error> {
         // Sync the parent and child via a pipe. The readfd is owned by child. The writefd
         // is owned by the parent.
-        let (childfd, parentfd) =
-            pipe().map_err(|e| Error::Os("Failed to create pipe".to_string(), e))?;
+        let (mut reader, writer) =
+            pipe().map_err(|e| Error::Io("Failed to create pipe".to_string(), e))?;
+
+        let childfd = reader.as_raw_fd();
+        let async_writer: AsyncPipeWriter = writer
+            .try_into()
+            .map_err(|e| Error::Io("Failed to get async pipe handle".to_string(), e))?;
 
         // Install a hook in libminijail that block on a `read` until two bytes
         // are received. This hook runs as last thing before the execve.
         let execve_hook = move || {
             // Block until a byte is read of the pipe is closed.
-            unistd::read(childfd, &mut [0u8; 1]).ok();
-            // The parent fd is already closed because it's not added to the list of
-            // inheritable fds. But close the child half:
-            unistd::close(childfd).expect("Failed to close sync fd");
+            use std::io::Read;
+            reader.read(&mut [0u8; 1]).ok();
         };
 
         // Keep hook
         let hook_handle = jail.add_hook(execve_hook, minijail::Hook::PreExecve);
 
         Ok(ProcessSync {
-            parent: parentfd,
+            parent: async_writer,
             child: childfd,
             _hook: hook_handle,
         })
@@ -725,16 +685,11 @@ impl ProcessSync {
     }
 
     /// Send a byte to the child that might block in the hook.
-    async fn resume(self) -> Result<(), Error> {
-        unistd::write(self.parent, &[0u8; 1])
-            .map_err(|e| Error::Os("Sync".into(), e))
+    async fn resume(mut self) -> Result<(), Error> {
+        self.parent
+            .write_u8(1)
+            .await
+            .map_err(|e| Error::Io("Sync".into(), e))
             .map(drop)
-    }
-}
-
-impl Drop for ProcessSync {
-    fn drop(&mut self) {
-        unistd::close(self.child).expect("Failed to close child");
-        unistd::close(self.parent).expect("Failed to close parentfd");
     }
 }

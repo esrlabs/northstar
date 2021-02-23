@@ -22,6 +22,7 @@ mod keys;
 mod loopdev;
 mod minijail;
 mod mount;
+mod pipe;
 mod process;
 mod process_debug;
 mod state;
