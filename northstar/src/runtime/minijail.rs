@@ -41,7 +41,9 @@ use std::{
 use tokio::{
     fs,
     io::{self, unix::AsyncFd, AsyncBufReadExt, AsyncRead, AsyncWrite, ReadBuf},
-    select, task, time,
+    select,
+    task::{self, JoinHandle},
+    time,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -50,6 +52,7 @@ pub struct Minijail<'a> {
     log_fd: i32,
     event_tx: EventTx,
     config: &'a Config,
+    log_task: JoinHandle<()>,
 }
 
 impl<'a> Minijail<'a> {
@@ -60,7 +63,7 @@ impl<'a> Minijail<'a> {
         let mut lines = io::BufReader::new(pipe).lines();
 
         // Spawn a task that forwards logs from minijail to the rust logger.
-        task::spawn(async move {
+        let log_task = task::spawn(async move {
             while let Ok(Some(line)) = lines.next_line().await {
                 let l = line.split_whitespace().skip(2).collect::<String>();
                 match line.chars().next() {
@@ -87,12 +90,20 @@ impl<'a> Minijail<'a> {
             event_tx,
             config,
             log_fd,
+            log_task,
         })
     }
 
     /// Shutdown minijail
-    pub(crate) fn shutdown(&self) -> Result<(), Error> {
+    pub(crate) async fn shutdown(self) -> Result<(), Error> {
+        // Set minijail logging to stderr before closing the pipe
+        ::minijail::Minijail::log_to_fd(2, i32::MAX);
+        // Close the writing end of the minijail log task. This will make the task break
         close(self.log_fd).map_err(|e| Error::Os("Failed to close log_fd".into(), e))?;
+        // Wait for the log task to exit
+        self.log_task
+            .await
+            .expect("Failed to stop minijail log task");
         Ok(())
     }
 
