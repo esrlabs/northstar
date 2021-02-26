@@ -40,8 +40,8 @@ mkimage() {
 		set -o pipefail
 
 		# To get rid of odd alignment
-		dd if=/dev/zero of=$initrd bs=1 count=1 seek=32M
-		truncate -s 32M $initrd
+		dd if=/dev/zero of=$initrd bs=1 count=1 seek=256M
+		truncate -s 256M $initrd
 
 		mkfs -t ext4 $initrd
 		exit 0

@@ -62,8 +62,13 @@ add_ssh() {
 	return 0
 }
 
+add_jre() {
+	apk add openjdk11-jre
+}
+
 default_image
 add_ssh
+add_jre
 copy_image
 
 exit 0
