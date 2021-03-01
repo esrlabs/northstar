@@ -22,7 +22,7 @@ fn main() {
     generate_cargo_keys(flags).expect("Unable to generate the cargo keys!");
 
     #[cfg(debug_assertions)]
-    package_hello_example().expect("Failed to package hello_world");
+    package_hello_example().expect("Failed to package hello-world");
 }
 
 #[cfg(debug_assertions)]
@@ -32,7 +32,7 @@ pub fn package_hello_example() -> anyhow::Result<()> {
     use std::{env, fs, path::Path};
     use tokio::runtime;
 
-    const MANIFEST: &str = r#"name: hello_world
+    const MANIFEST: &str = r#"name: hello-world
 version: 0.0.1
 uid: 1000
 gid: 1000
@@ -40,6 +40,8 @@ init: /bin/sh
 args:
   - "-c"
   - "echo Hello World!"
+io:
+  stdout: pipe
 mounts:
   /bin:
     host: /bin
@@ -48,11 +50,13 @@ mounts:
   /lib64:
     host: /lib64"#;
 
-    const MANIFEST_ANDROID: &str = r#"name: hello_world
+    const MANIFEST_ANDROID: &str = r#"name: hello-world
 version: 0.0.1
 uid: 1000
 gid: 1000
 init: /system/bin/sh
+io:
+  stdout: pipe
 args:
   - "-c"
   - "echo Hello World!"
