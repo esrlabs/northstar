@@ -1,6 +1,6 @@
-name: hello
+name: hello-world
 version: 0.0.1
-init: /hello
+init: /hello-world
 uid: 1000
 gid: 1000
 env:
