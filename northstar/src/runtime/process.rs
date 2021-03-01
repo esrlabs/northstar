@@ -12,13 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Event, EventTx};
+use super::{ContainerKey, Event, EventTx, ExitStatus, Pid};
 use futures::{Future, FutureExt};
 use log::debug;
-use nix::{
-    sys::{signal, wait},
-    unistd,
-};
+use nix::{sys::wait, unistd};
 use std::fmt::Debug;
 use thiserror::Error;
 use tokio::{io, task};
@@ -26,17 +23,6 @@ use wait::WaitStatus;
 
 pub(crate) const ENV_NAME: &str = "NAME";
 pub(crate) const ENV_VERSION: &str = "VERSION";
-
-pub type ExitCode = i32;
-pub type Pid = u32;
-
-#[derive(Clone, Debug)]
-pub enum ExitStatus {
-    /// Process exited with exit code
-    Exit(ExitCode),
-    /// Process was terminated by a signal
-    Signaled(signal::Signal),
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -57,11 +43,10 @@ pub enum Error {
 /// Spawn a task that waits for the process to exit. This resolves to the exit status
 /// of `pid`.
 pub(crate) async fn waitpid(
-    name: &str,
+    key: ContainerKey,
     pid: Pid,
     event_handle: EventTx,
 ) -> impl Future<Output = Result<ExitStatus, Error>> {
-    let name = name.to_string();
     task::spawn_blocking(move || {
         let pid = unistd::Pid::from_raw(pid as i32);
         let status = loop {
@@ -109,7 +94,7 @@ pub(crate) async fn waitpid(
 
         // Send notification to main loop
         event_handle
-            .blocking_send(Event::Exit(name.to_string(), status.clone()))
+            .blocking_send(Event::Exit(key, status.clone()))
             .expect("Internal channel error on main event handle");
 
         status

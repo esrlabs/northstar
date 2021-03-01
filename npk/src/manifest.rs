@@ -140,6 +140,7 @@ pub enum Mount {
     Resource {
         name: String,
         version: Version,
+        repository: String,
         dir: PathBuf,
     },
     /// Bind mount of a host dir with flags
@@ -341,10 +342,21 @@ impl MountsSerialization {
                     Mount::Persist => {
                         map.serialize_entry(&target, &MountSource::Persist(Persist::Persist))?
                     }
-                    Mount::Resource { name, version, dir } => map.serialize_entry(
+                    Mount::Resource {
+                        name,
+                        version,
+                        repository,
+                        dir,
+                    } => map.serialize_entry(
                         &target,
                         &MountSource::Resource {
-                            resource: format!("{}:{}{}", name, version, dir.display()),
+                            resource: format!(
+                                "{}:{}:{}{}",
+                                name,
+                                version,
+                                repository,
+                                dir.display()
+                            ),
                         },
                     )?,
                     Mount::Tmpfs { size } => {
@@ -406,7 +418,7 @@ impl MountsSerialization {
                             MountSource::Resource { resource } => {
                                 lazy_static! {
                                     static ref RE: regex::Regex = regex::Regex::new(
-                                        r"(?P<name>((\w|-|\.|_)+)):(?P<version>\d+\.\d+\.\d+)(?P<dir>[\w/]+)"
+                                        r"(?P<name>((\w|-|\.|_)+)):(?P<version>\d+\.\d+\.\d+):(?P<repository>((\w|-|\.|_)+))(?P<dir>[\w/]+)"
                                     )
                                     .expect("Invalid regex");
                                 }
@@ -422,9 +434,16 @@ impl MountsSerialization {
                                 let version =
                                     Version::parse(caps.name("version").unwrap().as_str())
                                         .map_err(serde::de::Error::custom)?;
+                                let repository =
+                                    caps.name("repository").unwrap().as_str().to_string();
                                 let dir = PathBuf::from(caps.name("dir").unwrap().as_str());
 
-                                Mount::Resource { name, version, dir }
+                                Mount::Resource {
+                                    name,
+                                    version,
+                                    repository,
+                                    dir,
+                                }
                             }
                         },
                     };
@@ -456,7 +475,7 @@ impl Manifest {
     pub const VERSION: Version = Version(semver::Version {
         major: 0,
         minor: 0,
-        patch: 2,
+        patch: 3,
         pre: vec![],
         build: vec![],
     });
@@ -535,7 +554,7 @@ mounts:
       - rw
   /data: persist
   /resource:
-    resource: bla-blah.foo:1.0.0/bin/foo
+    resource: bla-blah.foo:1.0.0:default/bin/foo
 autostart: true
 cgroups:
   memory:
@@ -578,6 +597,7 @@ seccomp:
             Mount::Resource {
                 name: "bla-blah.foo".to_string(),
                 version: Version::parse("1.0.0")?,
+                repository: "default".to_string(),
                 dir: PathBuf::from("/bin/foo"),
             },
         );
@@ -713,7 +733,7 @@ uid: 1000
 gid: 1001
 mounts:
   /foo:
-    resource: foo-bar.qwerty12:0.0.1/
+    resource: foo-bar.qwerty12:0.0.1:default/
 ";
         Manifest::from_str(manifest).unwrap();
     }
@@ -738,7 +758,7 @@ mounts:
       - rw
   /data: persist
   /resource:
-    resource: bla-bar.blah1234:1.0.0/bin/foo
+    resource: bla-bar.blah1234:1.0.0:default/bin/foo
   /tmp:
     tmpfs: 42
   /dev: full

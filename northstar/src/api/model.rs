@@ -17,14 +17,37 @@ use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
+use crate::runtime::{ExitStatus as ExitStatusRuntime, Notification as NotificationRuntime};
+
 pub type Name = String;
 pub type RepositoryId = String;
 pub type MessageId = String; // UUID
+pub type ContainerKey = crate::runtime::ContainerKey;
 
 const VERSION: &str = "0.0.1";
 
 pub fn version() -> Version {
     Version::parse(VERSION).unwrap()
+}
+
+pub type ExitCode = i32;
+pub type Signal = u32;
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum ExitStatus {
+    /// Process exited with exit code
+    Exit(ExitCode),
+    /// Process was terminated by a signal
+    Signaled(Signal),
+}
+
+impl From<ExitStatusRuntime> for ExitStatus {
+    fn from(e: ExitStatusRuntime) -> Self {
+        match e {
+            ExitStatusRuntime::Exit(e) => ExitStatus::Exit(e),
+            ExitStatusRuntime::Signaled(s) => ExitStatus::Signaled(s as u32),
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -63,35 +86,53 @@ pub enum Payload {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
-    OutOfMemory(Name),
-    ApplicationExited {
-        id: Name,
-        version: Version,
-        exit_info: String,
+    OutOfMemory(ContainerKey),
+    Exit {
+        key: ContainerKey,
+        status: ExitStatus,
     },
     Install(Name, Version),
     Uninstalled(Name, Version),
-    ApplicationStarted(Name, Version),
-    ApplicationStopped(Name, Version),
+    Started(ContainerKey),
+    Stopped(ContainerKey),
     Shutdown,
+}
+
+impl From<NotificationRuntime> for Notification {
+    fn from(n: NotificationRuntime) -> Self {
+        match n {
+            NotificationRuntime::OutOfMemory(key) => Notification::OutOfMemory(key),
+            NotificationRuntime::Exit { key, status } => Notification::Exit {
+                key,
+                status: status.into(),
+            },
+            NotificationRuntime::Started(key) => Notification::Started(key),
+            NotificationRuntime::Stopped(key) => Notification::Stopped(key),
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Request {
     Containers,
-    Repositories,
-    Start(Name),
-    Stop(Name),
     Install(RepositoryId, u64),
-    Uninstall(Name, Version),
+    Mount(Vec<ContainerKey>),
+    Repositories,
     Shutdown,
+    Start(ContainerKey),
+    /// Stop the given container. If the process does not exit within
+    /// the timeout in seconds it is SIGKILLED
+    Stop(ContainerKey, u64),
+    Umount(ContainerKey),
+    Uninstall(ContainerKey),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Container {
+    pub key: ContainerKey,
     pub manifest: Manifest,
     pub process: Option<Process>,
-    pub repository: RepositoryId,
+    pub mounted: bool,
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -135,13 +176,14 @@ pub enum Response {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
     VersionMismatch(Version),
-    ApplicationNotFound,
-    ApplicationNotRunning,
-    ApplicationRunning(String),
-    ResourceBusy(String),
+    UnknownApplication(ContainerKey),
+    ApplicationNotStarted(ContainerKey),
+    ApplicationRunning(ContainerKey),
+    ApplicationInstalled(ContainerKey),
+    ResourceBusy,
     MissingResource(String),
-    ContainerAlreadyInstalled(String),
-    RepositoryIdUnknown(String, Vec<String>),
+    UnknownRepository(String),
+    UnknownResource(ContainerKey),
 
     Npk(String),
     NpkArchive(String),

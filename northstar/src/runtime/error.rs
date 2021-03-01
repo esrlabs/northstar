@@ -12,26 +12,29 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::ContainerKey;
 use crate::api;
 use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("No application found")]
-    ApplicationNotFound,
-    #[error("Application is not running")]
-    ApplicationNotRunning,
-    #[error("Application {0} is running")]
-    ApplicationRunning(String),
-    #[error("Resource busy: {0}")]
-    ResourceBusy(String),
+    #[error("Application {0} is not started")]
+    ApplicationNotStarted(ContainerKey),
+    #[error("Application {0} is started")]
+    ApplicationStarted(ContainerKey),
+    #[error("Resource busy")]
+    ResourceBusy,
     #[error("Missing resource {0}")]
     MissingResource(String),
-    #[error("Container {0} already installed")]
-    ContainerAlreadyInstalled(String),
-    #[error("Failed to find repository with id {0}, known ids: {1:?}")]
-    RepositoryIdUnknown(String, Vec<String>),
+    #[error("Application is already installed {0}")]
+    ApplicationInstalled(ContainerKey),
+    #[error("Unknown application {0}")]
+    UnknownApplication(ContainerKey),
+    #[error("Unknown repository {0}")]
+    UnknownRepository(String),
+    #[error("Unknown resource {0}")]
+    UnknownResource(ContainerKey),
 
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
@@ -44,7 +47,7 @@ pub enum Error {
     #[error("Mount: {0}")]
     Mount(super::mount::Error),
     #[error("Key: {0}")]
-    Key(super::keys::Error),
+    Key(super::key::Error),
 
     #[error("Io: {0}: {1:?}")]
     Io(String, io::Error),
@@ -57,16 +60,13 @@ pub enum Error {
 impl From<Error> for api::model::Error {
     fn from(error: Error) -> api::model::Error {
         match error {
-            Error::ApplicationNotFound => api::model::Error::ApplicationNotFound,
-            Error::ApplicationNotRunning => api::model::Error::ApplicationNotRunning,
-            Error::ApplicationRunning(name) => api::model::Error::ApplicationRunning(name),
+            Error::UnknownApplication(key) => api::model::Error::UnknownApplication(key),
+            Error::ApplicationNotStarted(key) => api::model::Error::ApplicationNotStarted(key),
+            Error::ApplicationStarted(key) => api::model::Error::ApplicationRunning(key),
+            Error::ApplicationInstalled(key) => api::model::Error::ApplicationInstalled(key),
             Error::MissingResource(resource) => api::model::Error::MissingResource(resource),
-            Error::ContainerAlreadyInstalled(name) => {
-                api::model::Error::ContainerAlreadyInstalled(name)
-            }
-            Error::RepositoryIdUnknown(id, known_ids) => {
-                api::model::Error::RepositoryIdUnknown(id, known_ids)
-            }
+            Error::UnknownRepository(id) => api::model::Error::UnknownRepository(id),
+            Error::UnknownResource(key) => api::model::Error::UnknownResource(key),
             Error::Npk(error) => api::model::Error::Npk(error.to_string()),
             Error::Process(error) => api::model::Error::Process(error.to_string()),
             Error::Console(error) => api::model::Error::Console(error.to_string()),
@@ -76,7 +76,7 @@ impl From<Error> for api::model::Error {
             Error::Io(cause, error) => api::model::Error::Io(format!("{}: {}", cause, error)),
             Error::Os(cause, error) => api::model::Error::Os(format!("{}: {}", cause, error)),
             Error::AsyncRuntime(cause) => api::model::Error::AsyncRuntime(cause),
-            Error::ResourceBusy(cause) => api::model::Error::ResourceBusy(cause),
+            Error::ResourceBusy => api::model::Error::ResourceBusy,
         }
     }
 }

@@ -12,14 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Event, RepositoryId};
+use super::{Event, Notification, RepositoryId};
 use crate::{
     api::{self},
     runtime::EventTx,
 };
 use futures::{sink::SinkExt, StreamExt};
-use log::{debug, error, info, warn};
-use std::{net::ToSocketAddrs, path::PathBuf, unreachable};
+use log::{debug, error, info, trace, warn};
+use std::{path::PathBuf, unreachable};
 use thiserror::Error;
 use tokio::{
     fs,
@@ -31,8 +31,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use url::Url;
-
-type NotificationRx = broadcast::Receiver<api::model::Notification>;
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -47,7 +45,7 @@ pub(crate) enum Request {
 pub(crate) struct Console {
     event_tx: EventTx,
     url: Url,
-    notification_tx: broadcast::Sender<api::model::Notification>,
+    notification_tx: broadcast::Sender<Notification>,
     token: CancellationToken,
 }
 
@@ -80,17 +78,16 @@ impl Console {
 
         match self.url.scheme() {
             "tcp" => {
-                let address = self
+                let addresses = self
                     .url
-                    .to_socket_addrs()
-                    .map_err(|e| Error::Io("Invalid console address".into(), e))?
-                    .next()
-                    .ok_or_else(|| {
-                        Error::Io(
-                            "Invalid console url".into(),
-                            io::Error::new(io::ErrorKind::Other, ""),
-                        )
-                    })?;
+                    .socket_addrs(|| Some(4200))
+                    .map_err(|e| Error::Io("Invalid console address".into(), e))?;
+                let address = addresses.first().ok_or_else(|| {
+                    Error::Io(
+                        "Invalid console url".into(),
+                        io::Error::new(io::ErrorKind::Other, ""),
+                    )
+                })?;
 
                 debug!("Starting console on {}", &address);
 
@@ -123,7 +120,7 @@ impl Console {
                 });
             }
             "unix" => {
-                let address = self.url.path();
+                let address = self.url.path().to_string();
                 debug!("Starting console on {}", &address);
 
                 let listener = UnixListener::bind(&address).map_err(|e| {
@@ -149,7 +146,11 @@ impl Console {
                                     }
                                 }
                             }
-                            _ = token.cancelled() => break,
+                            _ = token.cancelled() => {
+                                debug!("Removing {}", address);
+                                fs::remove_file(address).await.expect("Failed to remove unix socket");
+                                break;
+                            }
                         }
                     }
                 });
@@ -161,7 +162,7 @@ impl Console {
     }
 
     /// Send a notification to the notification broadcast
-    pub async fn notification(&self, notification: api::model::Notification) {
+    pub async fn notification(&self, notification: Notification) {
         self.notification_tx.send(notification).ok();
     }
 
@@ -169,7 +170,7 @@ impl Console {
         stream: T,
         peer: String,
         event_tx: EventTx,
-        mut notification_rx: NotificationRx,
+        mut notification_rx: broadcast::Receiver<Notification>,
     ) -> Result<(), Error> {
         debug!("Client {:?} connected", peer);
 
@@ -182,7 +183,7 @@ impl Console {
                     // Process notifications received via the notification
                     // broadcast channel
                     let notification = match notification {
-                        Ok(notification) => notification,
+                        Ok(notification) => notification.into(),
                         Err(broadcast::error::RecvError::Closed) => break,
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             warn!("Client connection lagged notifications. Closing");
@@ -207,6 +208,8 @@ impl Console {
                     };
                     let message_id = message.id.clone();
 
+                    trace!("{}: --> {:?}", peer, message);
+
                     let mut keep_file = None;
 
                     let request =
@@ -214,7 +217,7 @@ impl Console {
                             api::model::Request::Install(repository, size)) =
                             message.payload
                         {
-                            info!(
+                            debug!(
                                 "{}: Received installation request with size {}",
                                 peer,
                                 bytesize::ByteSize::b(size)
@@ -247,7 +250,7 @@ impl Console {
                             .await
                             {
                                 Ok(n) => {
-                                    info!(
+                                    debug!(
                                         "{}: Received {} in {:?}",
                                         peer,
                                         bytesize::ByteSize::b(n),
@@ -284,11 +287,13 @@ impl Console {
                     keep_file.take();
 
                     // Report result to client
-                    let msg = api::model::Message {
+                    let message = api::model::Message {
                         id: message_id,
                         payload: api::model::Payload::Response(response),
                     };
-                    if let Err(e) = network_stream.send(msg).await {
+
+                    trace!("{}: <-- {:?}", peer, message);
+                    if let Err(e) = network_stream.send(message).await {
                         warn!("{}: Connection error: {}", peer, e);
                         break;
                     }

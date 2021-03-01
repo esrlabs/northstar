@@ -12,30 +12,18 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-mod cgroups;
-pub mod config;
-mod console;
-#[allow(unused)]
-mod device_mapper;
-mod error;
-mod keys;
-mod loopdev;
-mod minijail;
-mod mount;
-mod pipe;
-mod process;
-mod process_debug;
-mod state;
-
-use crate::{api, api::model::Notification};
+use crate::api;
 use config::Config;
+use derive_new::new;
 use error::Error;
-use log::{debug, info};
-use nix::{sys::stat, unistd};
-use npk::manifest::Name;
-use process::ExitStatus;
+use log::debug;
+use nix::{
+    sys::{signal, stat},
+    unistd,
+};
 use state::State;
 use std::{
+    fmt::Display,
     future::Future,
     path::Path,
     pin::Pin,
@@ -48,8 +36,57 @@ use tokio::{
     task,
 };
 
-pub(crate) type EventTx = mpsc::Sender<Event>;
-pub type RepositoryId = String;
+mod cgroups;
+pub mod config;
+mod console;
+mod container_key;
+#[allow(unused)]
+mod device_mapper;
+mod error;
+mod key;
+mod loopdev;
+mod minijail;
+mod mount;
+mod pipe;
+mod process;
+mod process_debug;
+mod repository;
+pub(self) mod state;
+
+pub(self) type EventTx = mpsc::Sender<Event>;
+pub(self) type RepositoryId = String;
+pub use container_key::*;
+pub(self) use npk::manifest::{Name, Version};
+pub(self) use repository::Repository;
+pub(self) use state::Container;
+
+pub type ExitCode = i32;
+pub type Pid = u32;
+
+#[derive(Clone, Debug)]
+pub enum ExitStatus {
+    /// Process exited with exit code
+    Exit(ExitCode),
+    /// Process was terminated by a signal
+    Signaled(signal::Signal),
+}
+
+impl Display for ExitStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(new, Clone, Debug)]
+pub(crate) enum Notification {
+    OutOfMemory(ContainerKey),
+    Exit {
+        key: ContainerKey,
+        status: ExitStatus,
+    },
+    Started(ContainerKey),
+    Stopped(ContainerKey),
+}
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -57,9 +94,9 @@ pub(crate) enum Event {
     /// Incomming command
     Console(console::Request, oneshot::Sender<api::model::Response>),
     /// A instance exited with return code
-    Exit(Name, ExitStatus),
+    Exit(ContainerKey, ExitStatus),
     /// Out of memory event occured
-    Oom(Name),
+    Oom(ContainerKey),
     /// Northstar shall shut down
     Shutdown,
     /// Notification events
@@ -195,15 +232,10 @@ async fn runtime_task(
 ) -> Result<(), Error> {
     let mut state = State::new(config, event_tx.clone()).await?;
 
-    info!(
-        "Mounted {} containers",
-        state.applications().count() + state.resources().count()
-    );
-
     let console = config
         .console
         .clone()
-        .map(|url| console::Console::new(url.into_inner(), &event_tx))
+        .map(|url| console::Console::new(url, &event_tx))
         .map_or(Ok(None), |r| r.map(Some))
         .map_err(Error::Console)?;
 
@@ -211,18 +243,6 @@ async fn runtime_task(
     if let Some(console) = console.as_ref() {
         // Start to listen for incoming connections
         console.listen().await.map_err(Error::Console)?;
-    }
-
-    // Autostart flagged containers. Each container with the `autostart` option
-    // set to true in the manifest is started.
-    let autostart_apps = state
-        .applications()
-        .filter(|app| app.manifest().autostart.unwrap_or_default())
-        .map(|app| app.name().to_string())
-        .collect::<Vec<Name>>();
-    for app in &autostart_apps {
-        info!("Autostarting {}", app);
-        state.start(&app).await.ok();
     }
 
     // Wait for a external shutdown request
@@ -243,9 +263,9 @@ async fn runtime_task(
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
-            Event::Oom(id) => state.on_oom(&id).await,
+            Event::Oom(key) => state.on_oom(&key).await,
             // A container process existed. Check `process::wait_exit` for details.
-            Event::Exit(ref name, ref exit_status) => state.on_exit(name, exit_status).await,
+            Event::Exit(key, exit_status) => state.on_exit(&key, &exit_status).await,
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => break state.shutdown().await,
             // Forward notifications to console
