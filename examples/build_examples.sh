@@ -143,7 +143,7 @@ main() {
     "./examples/container/cpueater"
     "./examples/container/crashing"
     "./examples/container/datarw"
-    "./examples/container/hello"
+    "./examples/container/hello-world"
     "./examples/container/memeater"
     "./examples/container/resource/ferris"
     "./examples/container/resource/ferris_says_hello"
