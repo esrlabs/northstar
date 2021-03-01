@@ -33,6 +33,7 @@ pub const MINIJAIL_ERR_JAIL: _bindgen_ty_1 = _bindgen_ty_1::MINIJAIL_ERR_JAIL;
 pub const MINIJAIL_ERR_INIT: _bindgen_ty_1 = _bindgen_ty_1::MINIJAIL_ERR_INIT;
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum _bindgen_ty_1 {
     MINIJAIL_ERR_NO_ACCESS = 126,
     MINIJAIL_ERR_NO_COMMAND = 127,
@@ -51,6 +52,7 @@ pub type minijail_hook_t = ::std::option::Option<
 >;
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum minijail_hook_event_t {
     MINIJAIL_HOOK_EVENT_PRE_DROP_CAPS = 0,
     MINIJAIL_HOOK_EVENT_PRE_EXECVE = 1,
