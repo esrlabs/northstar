@@ -177,6 +177,7 @@ pub enum Output {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// Name of container
     pub name: Name,
@@ -198,9 +199,6 @@ pub struct Manifest {
     /// Autostart this container upon northstar startup
     #[serde(skip_serializing_if = "Option::is_none")]
     pub autostart: Option<bool>,
-    /// Action on application exit
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_exit: Option<OnExit>,
     /// CGroup config
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cgroups: Option<CGroups>,
