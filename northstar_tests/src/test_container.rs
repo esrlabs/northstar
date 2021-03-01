@@ -16,40 +16,51 @@ use async_once::AsyncOnce;
 use color_eyre::eyre::WrapErr;
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
+use log::debug;
+use northstar::api::model::ContainerKey;
 use npk::npk;
-use std::path::{Path, PathBuf};
+use std::{
+    convert::TryInto,
+    path::{Path, PathBuf},
+};
 use tempfile::TempDir;
+use tokio::fs;
+
+pub const TEST_CONTAINER: &str = "test_container:0.0.1:test";
+pub const TEST_RESOURCE: &str = "test_resource:0.0.1:test";
+const MANIFEST: &str = "northstar_tests/test_container/Cargo.toml";
 
 lazy_static! {
-    static ref REPOSITORIES_DIR: TempDir = TempDir::new().unwrap();
+    static ref REPOSITORY: TempDir = TempDir::new().unwrap();
     static ref TEST_CONTAINER_NPK: AsyncOnce<PathBuf> = AsyncOnce::new(async {
-        let build_dir = TempDir::new().unwrap();
         let package_dir = TempDir::new().unwrap();
         let root = package_dir.path().join("root");
 
+        debug!("Building test container binary");
         let binary_path = CargoBuild::new()
-            .manifest_path("northstar_tests/test_container/Cargo.toml")
-            .target_dir(build_dir.path())
+            .manifest_path(MANIFEST)
             .run()
             .wrap_err("Failed to build the test_container")
             .unwrap()
             .path()
             .to_owned();
 
-        std::fs::create_dir_all(&root).unwrap();
+        debug!("Creating test container binary npk");
+        fs::create_dir_all(&root).await.unwrap();
 
-        fn copy_file(file: &Path, dir: &Path) {
+        async fn copy_file(file: &Path, dir: &Path) {
             assert!(file.is_file());
             assert!(dir.is_dir());
             let filename = file.file_name().unwrap();
-            std::fs::copy(file, dir.join(filename)).unwrap();
+            fs::copy(file, dir.join(filename)).await.unwrap();
         }
 
-        copy_file(&binary_path, &root);
+        copy_file(&binary_path, &root).await;
         copy_file(
             Path::new("northstar_tests/test_container/manifest.yaml"),
             package_dir.path(),
-        );
+        )
+        .await;
 
         npk::pack(
             package_dir
@@ -58,30 +69,38 @@ lazy_static! {
                 .with_extension("yaml")
                 .as_path(),
             package_dir.path().join("root").as_path(),
-            REPOSITORIES_DIR.path(),
+            REPOSITORY.path(),
             Some(Path::new("examples/keys/northstar.key")),
         )
         .await
         .unwrap();
-        REPOSITORIES_DIR.path().join("test_container-0.0.1.npk")
+
+        REPOSITORY.path().join("test_container-0.0.1.npk")
     });
     static ref TEST_RESOURCE_NPK: AsyncOnce<PathBuf> = AsyncOnce::new(async {
         npk::pack(
             Path::new("northstar_tests/test_resource/manifest.yaml"),
             Path::new("northstar_tests/test_resource/root"),
-            REPOSITORIES_DIR.path(),
+            REPOSITORY.path(),
             Some(Path::new("examples/keys/northstar.key")),
         )
         .await
         .unwrap();
-        REPOSITORIES_DIR.path().join("test_resource-0.0.1.npk")
+        REPOSITORY.path().join("test_resource-0.0.1.npk")
     });
 }
 
-pub async fn get_test_container_npk() -> &'static Path {
+/// Path to the test container npk
+pub async fn test_container_npk() -> &'static Path {
     &TEST_CONTAINER_NPK.get().await
 }
 
-pub async fn get_test_resource_npk() -> &'static Path {
+/// Test container key
+pub fn test_container() -> ContainerKey {
+    TEST_CONTAINER.try_into().unwrap()
+}
+
+// Path to the test resource npk
+pub async fn test_resource_npk() -> &'static Path {
     &TEST_RESOURCE_NPK.get().await
 }

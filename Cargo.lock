@@ -1291,9 +1291,11 @@ dependencies = [
  "northstar",
  "npk",
  "regex",
+ "rusty-fork",
  "tempfile",
  "tokio",
  "toml",
+ "url 2.2.1",
 ]
 
 [[package]]
@@ -1326,7 +1328,7 @@ dependencies = [
 
 [[package]]
 name = "nstar"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "colored",
@@ -1342,7 +1344,7 @@ dependencies = [
  "serde_json",
  "structopt",
  "tokio",
- "url 1.7.2",
+ "url 2.2.1",
 ]
 
 [[package]]
@@ -1829,6 +1831,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb5d2a036dc6d2d8fd16fde3498b04306e29bd193bf306a57427019b823d5acd"
 
 [[package]]
+name = "rusty-fork"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3dcc6e454c328bb824492db107ab7c0ae8fcffe4ad210136ef014458c1bc4f"
+dependencies = [
+ "fnv",
+ "quick-error",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
 name = "rustyline"
 version = "7.1.0"
 source = "git+https://github.com/gwenn/rustyline.git?branch=external-print#16c862b8b599d8913e92b87ac62e16988a0cfd98"
@@ -2192,6 +2206,7 @@ dependencies = [
  "anyhow",
  "nix 0.19.1",
  "structopt",
+ "url 1.7.2",
 ]
 
 [[package]]
@@ -2527,6 +2542,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f42f536e22f7fcbb407639765c8fd78707a33109301f834a594758bedd6e8cf"
 dependencies = [
  "utf8parse 0.1.1",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f200f5b12eb75f8c1ed65abd4b2db8a6e1b138a20de009dacee265a2498f3f6"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

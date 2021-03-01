@@ -14,151 +14,205 @@
 
 //! Controls Northstar runtime instances
 
-use color_eyre::eyre::{eyre, Result, WrapErr};
-use northstar::{
-    api,
-    runtime::{self},
+use super::{
+    logger,
+    test_container::{test_container_npk, test_resource_npk},
 };
-use std::{future::Future, path::Path};
+use color_eyre::eyre::{eyre, Result, WrapErr};
+use futures::StreamExt;
+use log::debug;
+use northstar::{
+    api::{client::Client, model::Notification},
+    runtime::{self, config, config::Config, ContainerKey},
+};
+use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
-use tokio::{fs, time, time::timeout};
+use tokio::{fs, select, time};
 
-pub use northstar::runtime::config::{Config, Repository};
-
-/// Returns the default northstar config
-pub async fn default_config() -> Result<Config> {
-    let config_string = fs::read_to_string("northstar.toml")
-        .await
-        .wrap_err("Failed to read northstar.toml")?;
-    toml::from_str::<Config>(&config_string).wrap_err("Failed to parse northstar.toml")
-}
-
-const TIMEOUT: time::Duration = time::Duration::from_secs(3);
-
-#[must_use = "Shoud be checked for expected response"]
-pub struct ApiResponse(pub Result<api::model::Response>);
-
-impl ApiResponse {
-    pub fn expect_ok(self) -> Result<()> {
-        match self.0? {
-            api::model::Response::Ok(()) => Ok(()),
-            unexpected => Err(eyre!("Unexpected response: {:?}", unexpected)),
-        }
-    }
-
-    pub fn expect_err(self, err: api::model::Error) -> Result<()> {
-        match self.0? {
-            api::model::Response::Err(e) if e == err => Ok(()),
-            api::model::Response::Err(e) => {
-                Err(eyre!("Different error {:?}, expected {:?}", e, err))
-            }
-            unexpected => Err(eyre!("Unexpected response: {:?}", unexpected)),
-        }
-    }
-
-    pub fn could_fail(self) {}
-}
-
-pub fn timeout_on<R>(f: impl Future<Output = R>) -> Result<R> {
-    futures::executor::block_on(timeout(TIMEOUT, f)).wrap_err("Future timed out")
-}
-
-/// A running instance of northstar.
-pub struct Runtime {
+pub struct Northstar {
+    client: northstar::api::client::Client,
     runtime: runtime::Runtime,
-    /// Temporal repository for install/uninstall contaienrs in tests.
-    repository: TempDir,
+    tmpdir: TempDir,
 }
 
-impl Runtime {
-    /// Launches an instance of north
-    pub async fn launch() -> Result<Runtime> {
-        Runtime::launch_with_config(default_config().await?).await
+impl std::ops::Deref for Northstar {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
     }
+}
 
-    /// Launches an instance of north with the specified configuration
-    pub async fn launch_with_config(mut config: Config) -> Result<Runtime> {
-        // Test scoped repository
-        let tmp_dir = TempDir::new()?;
-        let repo = Repository {
-            dir: tmp_dir.path().to_owned(),
-            key: None,
+impl Northstar {
+    /// Launches an instance of Northstar
+    pub async fn launch() -> Result<Northstar> {
+        let pid = std::process::id();
+        let tmpdir = tempfile::TempDir::new()?;
+
+        let run_dir = tmpdir.path().join("run");
+        let data_dir = tmpdir.path().join("data");
+        let log_dir = tmpdir.path().join("log");
+        let test_repositority = tmpdir.path().join("test");
+        fs::create_dir(&test_repositority).await?;
+
+        let mut repositories = HashMap::new();
+        repositories.insert(
+            "test".into(),
+            config::Repository {
+                dir: test_repositority,
+                key: None,
+            },
+        );
+
+        let mut cgroups = HashMap::new();
+        cgroups.insert("memory".into(), PathBuf::from(format!("northstar-{}", pid)));
+        cgroups.insert("cpu".into(), PathBuf::from(format!("northstar-{}", pid)));
+
+        let console = format!("unix:///tmp/northstar-{}", std::process::id());
+        let console_url = url::Url::parse(&console)?;
+
+        let config = Config {
+            log_level: log::Level::Debug,
+            console: Some(console_url.clone()),
+            run_dir,
+            data_dir,
+            log_dir,
+            repositories,
+            cgroups,
+            // This sections matches most common x86 Linux distributions
+            devices: config::Devices {
+                unshare_root: PathBuf::from("/"),
+                device_mapper: PathBuf::from("/dev/mapper/control"),
+                device_mapper_dev: "/dev/dm-".into(),
+                loop_control: PathBuf::from("/dev/loop-control"),
+                loop_dev: "/dev/loop".into(),
+            },
+            debug: None,
         };
-        config.repositories.insert("test".to_string(), repo);
 
-        let runtime = timeout(TIMEOUT, runtime::Runtime::start(config))
+        // Start the runtime
+        let runtime = runtime::Runtime::start(config)
             .await
-            .wrap_err("Launching northstar timed out")
-            .and_then(|result| result.wrap_err("Failed to instantiate northstar runtime"))?;
+            .wrap_err("Failed to start runtime")?;
+        // Wait until the console is up and running
+        super::logger::assume("Starting console on", 5u64).await?;
 
-        Ok(Runtime {
+        // Connect to the runtime
+        let client = Client::new(&console_url).await?;
+        // Wait until a successfull connection
+        logger::assume("Client .* connected", 5u64).await?;
+
+        Ok(Northstar {
+            client,
             runtime,
-            repository: tmp_dir,
+            tmpdir,
         })
     }
 
-    pub fn start(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(
-            self.runtime
-                .request(api::model::Request::Start(name.to_string())),
-        )
-        .and_then(|result| result.wrap_err("Failed to start container"));
-        ApiResponse(response)
+    pub async fn shutdown(self) -> Result<()> {
+        // TODO: Stop and disconnect the client
+
+        // Stop the runtime
+        self.runtime
+            .stop_wait()
+            .await
+            .wrap_err("Failed to wait for runtime")?;
+
+        // Remove the tmpdir
+        self.tmpdir.close().wrap_err("Failed to remove tmpdir")
     }
 
-    pub async fn pid(&mut self, name: &str) -> Result<u32> {
-        let response = timeout(
-            TIMEOUT,
-            self.runtime.request(api::model::Request::Containers),
-        )
-        .await
-        .wrap_err("Getting containers status timed out")
-        .and_then(|result| result.wrap_err("Failed to get container status"))?;
+    /// Start a container with key
+    pub async fn start(&self, key: &str) -> Result<()> {
+        let key: ContainerKey = key.try_into().expect("Invalid key");
+        self.client
+            .start(key.name(), key.version(), key.repository())
+            .await
+            .wrap_err("Failed to start")
+    }
 
-        match response {
-            api::model::Response::Containers(containers) => containers
-                .into_iter()
-                .filter(|c| c.manifest.name == name)
-                .filter_map(|c| c.process.map(|p| p.pid))
-                .next()
-                .ok_or_else(|| eyre!("Failed to find PID")),
-            api::model::Response::Err(e) => Err(eyre!("Failed to request containers: {:?}", e)),
-            _ => unreachable!(),
+    /// Stop a container with key
+    pub async fn stop(&self, key: &str, timeout: u64) -> Result<()> {
+        let key: ContainerKey = key.try_into().expect("Invalid key");
+        self.client
+            .stop(
+                key.name(),
+                key.version(),
+                key.repository(),
+                Duration::from_secs(timeout),
+            )
+            .await
+            .wrap_err("Failed to stop")?;
+        Ok(())
+    }
+
+    pub async fn install_test_container(&self) -> Result<()> {
+        self.client
+            .install(test_container_npk().await, "test")
+            .await
+            .wrap_err("Failed to install test container")
+    }
+
+    pub async fn uninstall_test_container(&self) -> Result<()> {
+        self.client
+            .uninstall(
+                "test_container",
+                &npk::manifest::Version::parse("0.0.1").unwrap(),
+                "test",
+            )
+            .await
+            .wrap_err("Failed to uninstall test container")
+    }
+
+    pub async fn install_test_resource(&self) -> Result<()> {
+        self.client
+            .install(test_resource_npk().await, "test")
+            .await
+            .wrap_err("Failed to install test resource")
+    }
+
+    pub async fn uninstall_test_resource(&self) -> Result<()> {
+        self.client
+            .uninstall(
+                "test_resource",
+                &npk::manifest::Version::parse("0.0.1").unwrap(),
+                "test",
+            )
+            .await
+            .wrap_err("Failed to uninstall test resource")
+    }
+
+    // TOOD: Queue the notifications in the runtime struct. Currently there's a race
+    // if the notification is faster.
+    pub async fn assume_notification<F>(&mut self, mut pred: F, timeout: u64) -> Result<()>
+    where
+        F: FnMut(&Notification) -> bool,
+    {
+        let mut timeout = Box::pin(time::sleep(time::Duration::from_secs(timeout)));
+        loop {
+            select! {
+                _ = &mut timeout => break Err(eyre!("Timeout waiting for notification")),
+                notification = self.client.next() => {
+                    debug!("Runtime notification {:?}", notification);
+                    match notification {
+                        Some(Ok(n)) if pred(&n) => break Ok(()),
+                        Some(_) => continue,
+                        None => break Err(eyre!("Client connection closed")),
+                    }
+                }
+            }
         }
     }
 
-    pub fn stop(&mut self, name: &str) -> ApiResponse {
-        let response = timeout_on(
-            self.runtime
-                .request(api::model::Request::Stop(name.to_string())),
-        )
-        .and_then(|result| result.wrap_err("Failed to stop container"));
-        ApiResponse(response)
-    }
-
-    pub fn install(&mut self, npk: &Path) -> ApiResponse {
-        let response = timeout_on(self.runtime.install("test", npk))
-            .and_then(|result| result.wrap_err("Failed to install container"));
-        ApiResponse(response)
-    }
-
-    pub fn uninstall(&mut self, name: &str, version: &str) -> ApiResponse {
-        let uninstall = api::model::Request::Uninstall(
-            name.to_string(),
-            npk::manifest::Version::parse(version).expect("Failed to parse version"),
-        );
-
-        let response = timeout_on(self.runtime.request(uninstall))
-            .and_then(|result| result.wrap_err("Failed to uninstall container"));
-        ApiResponse(response)
-    }
-
-    pub fn shutdown(self) -> Result<()> {
-        timeout_on(self.runtime.stop_wait())
-            .and_then(|result| result.wrap_err("Failed to shutdown runtime"))
-            .map(|_| ())?;
-        self.repository
-            .close()
-            .wrap_err("Failed to remove test repository")
+    /// TODO
+    pub async fn test_cmds(&self, cmd: &str) {
+        let data_dir = self.tmpdir.path().join("data").join("test_container");
+        fs::create_dir_all(&data_dir)
+            .await
+            .expect("Failed to create data dir");
+        let input_file = data_dir.join("input.txt");
+        fs::write(&input_file, &cmd)
+            .await
+            .expect("Failed to write test_container input");
     }
 }

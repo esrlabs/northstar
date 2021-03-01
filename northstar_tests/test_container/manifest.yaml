@@ -3,6 +3,10 @@ version: 0.0.1
 init: /test_container
 uid: 1000
 gid: 1000
+cgroups:
+  memory:
+    limit_in_bytes: 10000000
+    swappiness: 0
 mounts:
   /data: persist
   /lib:
@@ -12,7 +16,7 @@ mounts:
   /tmpfs:
     tmpfs: 20480000
   /resource:
-    resource: test_resource:0.0.1/
+    resource: test_resource:0.0.1:test/
 io:
   stdout:
     log:

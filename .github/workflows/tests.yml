@@ -1,10 +1,10 @@
-name: Integration Tests
+name: Tests
 
 on: [push, pull_request]
 
 jobs:
-  integration-tests:
-    name: Integration Tests
+  tests:
+    name: Tests
     runs-on: ubuntu-latest
     env:
         TERM: xterm-256color
@@ -25,11 +25,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
             toolchain: stable
-      - name: Build containers
-        shell: bash
-        run: |
-            ./examples/build_examples.sh
-      - name: Integration Tests
-        run: cargo test -p northstar_tests -- --test-threads 1 --ignored --color always
+      - name: Tests
+        run: cargo test -- --test-threads 1 --color always
         env:
             CLICOLOR_FORCE: yes

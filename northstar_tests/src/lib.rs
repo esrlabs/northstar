@@ -14,6 +14,5 @@
 
 pub mod logger;
 pub mod macros;
-pub mod process_assert;
 pub mod runtime;
 pub mod test_container;

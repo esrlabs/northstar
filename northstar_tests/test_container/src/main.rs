@@ -18,6 +18,7 @@ use std::{
     io::{self, Write},
     iter,
     path::{Path, PathBuf},
+    thread, time,
 };
 use structopt::StructOpt;
 
@@ -39,29 +40,35 @@ enum TestCommands {
         path: PathBuf,
     },
     Whoami,
-    Loop,
+    LeakMemory,
 }
 
-#[allow(clippy::all)]
 fn main() -> Result<()> {
-    let data = Path::new("/data").join("input.txt");
-    let commands = fs::read_to_string(&data)
-        .with_context(|| format!("Failed to read commands from {}", data.display()))?;
+    let input = Path::new("/data").join("input.txt");
+    if input.exists() {
+        println!("Reading {}", input.display());
+        let commands = fs::read_to_string(&input)?;
 
-    // Execute commands
-    for command in commands.lines() {
-        println!("Executing command \"{}\"", command);
-        let command = iter::once("test_container").chain(command.split_whitespace());
-        match TestCommands::from_iter(command) {
-            TestCommands::Cat { path } => cat(&path)?,
-            TestCommands::Crash => crash(),
-            TestCommands::Echo { message } => echo(&message),
-            TestCommands::Write { message, path } => write(&message, path.as_path())?,
-            TestCommands::Touch { path } => touch(&path)?,
-            TestCommands::Whoami => whoami(),
-            TestCommands::Loop => loop {},
-        };
+        println!("Removing {}", input.display());
+        fs::remove_file(&input)?;
+
+        for line in commands.lines() {
+            println!("Executing \"{}\"", line);
+            let command = iter::once("test_container").chain(line.split_whitespace());
+            match TestCommands::from_iter(command) {
+                TestCommands::Cat { path } => cat(&path)?,
+                TestCommands::Crash => crash(),
+                TestCommands::Echo { message } => echo(&message),
+                TestCommands::Write { message, path } => write(&message, path.as_path())?,
+                TestCommands::Touch { path } => touch(&path)?,
+                TestCommands::Whoami => whoami(),
+                TestCommands::LeakMemory => leak_memory(),
+            };
+        }
     }
+
+    println!("Sleeping...");
+    thread::sleep(time::Duration::from_secs(u64::MAX));
 
     Ok(())
 }
@@ -101,4 +108,13 @@ fn whoami() {
     let uid = nix::unistd::getuid();
     let gid = nix::unistd::getgid();
     println!("uid: {}, gid: {}", uid, gid);
+}
+
+fn leak_memory() {
+    for _ in 0..9_999_999 {
+        println!("Eating a Megabyte...");
+        let chunk: Vec<u8> = (0..1_000_000).map(|n| (n % 8) as u8).collect();
+        std::mem::forget(chunk);
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
 }

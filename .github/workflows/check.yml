@@ -55,33 +55,6 @@ jobs:
         with:
           command: check
 
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-tests
-      - name: Install libcap
-        run: sudo apt install libcap-dev
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - name: Cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
