@@ -12,13 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    config::Config,
-    pipe::{pipe, AsyncPipeReader, AsyncPipeWriter, PipeWriter},
-    process::{waitpid, Error, ENV_NAME, ENV_VERSION},
-    process_debug::{Perf, Strace},
-    Container, ContainerKey, ExitStatus, Pid,
-};
+use super::{Container, ContainerKey, ExitStatus, Pid, config::Config, pipe::{AsyncPipeReader, AsyncPipeWriter, PipeWriter, pipe}, process::{waitpid, Error, ENV_NAME, ENV_VERSION}, process_debug::{Perf, Strace}};
 use crate::runtime::EventTx;
 use bytes::{Buf, BytesMut};
 use futures::Future;
@@ -30,22 +24,8 @@ use nix::{
 };
 use npk::manifest::{Dev, Manifest, Mount, MountFlag, Output};
 use signal::Signal::{SIGKILL, SIGTERM};
-use std::{
-    convert::TryInto,
-    fmt, iter, ops,
-    os::unix::{io::AsRawFd, prelude::*},
-    path::{Path, PathBuf},
-    pin::Pin,
-    task::{Context, Poll},
-    unimplemented,
-};
-use tokio::{
-    fs,
-    io::{self, AsyncBufReadExt, AsyncWrite, AsyncWriteExt},
-    select,
-    task::{self, JoinHandle},
-    time,
-};
+use std::{convert::TryInto, fmt, iter, ops, os::unix::{io::AsRawFd, prelude::*}, path::{Path, PathBuf}, pin::Pin, task::{Context, Poll}, unimplemented};
+use tokio::{fs, io::{self, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt}, select, task::{self, JoinHandle}, time};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
@@ -216,7 +196,8 @@ impl<'a> Minijail<'a> {
         // Create a child sync
         let sync = ProcessSync::with(&mut jail)?;
         // Add the sync fd to the list of preserved fds
-        fds.push((sync.child_fd(), sync.child_fd()));
+        fds.push((sync.resume_fd(), sync.resume_fd()));
+        fds.push((sync.ack_fd(), sync.ack_fd()));
 
         // And finally start it....
         let argv_str = argv.iter().join(" ");
@@ -650,11 +631,13 @@ impl AsyncWrite for Log {
 /// Suspend the execve call withing a minijail child until resume is called.
 /// This is needed in order to not execute any application code before the process
 /// is fully setup e.g debugging things like strace or the cgroups setup
+/// Wait for the child process to processed the resume command.
 struct ProcessSync {
-    /// Parent half
-    parent: AsyncPipeWriter,
-    /// Childs half
-    child: RawFd,
+    resume_writer: AsyncPipeWriter,
+    ack_reader: AsyncPipeReader,
+    resume_reader_fd: RawFd,
+    ack_writer_fd: RawFd,
+
     /// Handle the the Fn passed to minijail which must be freed.
     _hook: ::minijail::HookHandle,
 }
@@ -663,28 +646,42 @@ impl ProcessSync {
     fn with(jail: &mut MinijailHandle) -> Result<ProcessSync, Error> {
         // Sync the parent and child via a pipe. The readfd is owned by child. The writefd
         // is owned by the parent.
-        let (mut reader, writer) =
+        let (mut resume_reader, resume_writer) =
+            pipe().map_err(|e| Error::Io("Failed to create pipe".to_string(), e))?;
+        let (ack_reader, mut ack_writer) =
             pipe().map_err(|e| Error::Io("Failed to create pipe".to_string(), e))?;
 
-        let childfd = reader.as_raw_fd();
-        let async_writer: AsyncPipeWriter = writer
+        let resume_writer: AsyncPipeWriter = resume_writer
+            .try_into()
+            .map_err(|e| Error::Io("Failed to get async pipe handle".to_string(), e))?;
+        let ack_reader: AsyncPipeReader = ack_reader
             .try_into()
             .map_err(|e| Error::Io("Failed to get async pipe handle".to_string(), e))?;
 
-        // Install a hook in libminijail that block on a `read` until two bytes
-        // are received. This hook runs as last thing before the execve.
+        let resume_reader_fd = resume_reader.as_raw_fd();
+        let ack_writer_fd = ack_writer.as_raw_fd();
+
+        // Install a hook in libminijail that block on a `read` until a byte
+        // is received. This hook runs as last thing before the execve.
         let execve_hook = move || {
-            // Block until a byte is read of the pipe is closed.
             use std::io::Read;
-            reader.read(&mut [0u8; 1]).ok();
+            use std::io::Write;
+            resume_reader
+                .read_exact(&mut [0u8; 1])
+                .expect("Failed to read on resume pipe");
+            ack_writer
+                .write(&mut [1])
+                .expect("Failed to write on ack pipe");
         };
 
         // Keep hook
         let hook_handle = jail.add_hook(execve_hook, minijail::Hook::PreExecve);
 
         Ok(ProcessSync {
-            parent: async_writer,
-            child: childfd,
+            resume_reader_fd,
+            resume_writer,
+            ack_reader,
+            ack_writer_fd,
             _hook: hook_handle,
         })
     }
@@ -692,16 +689,29 @@ impl ProcessSync {
     /// Provide access to the childs half because this needs to be added
     /// to the list of fds that minijail shall preserve in the child process
     /// and instead of closing.
-    fn child_fd(&self) -> RawFd {
-        self.child.as_raw_fd()
+    fn resume_fd(&self) -> RawFd {
+        self.resume_reader_fd
+    }
+
+    /// Provide access to the childs half because this needs to be added
+    /// to the list of fds that minijail shall preserve in the child process
+    /// and instead of closing.
+    fn ack_fd(&self) -> RawFd {
+        self.ack_writer_fd
     }
 
     /// Send a byte to the child that might block in the hook.
     async fn resume(mut self) -> Result<(), Error> {
-        self.parent
+        self.resume_writer
             .write_u8(1)
             .await
             .map_err(|e| Error::Io("Sync".into(), e))
+            .map(drop)?;
+        self.ack_reader
+            .read_exact(&mut [0u8; 1])
+            .await
+            .map_err(|e| Error::Io("Sync".into(), e))
             .map(drop)
+        
     }
 }
