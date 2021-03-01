@@ -20,7 +20,6 @@ use super::{
 };
 use color_eyre::eyre::{eyre, Result, WrapErr};
 use futures::StreamExt;
-use log::debug;
 use northstar::{
     api::{client::Client, model::Notification},
     runtime::{self, config, config::Config, ContainerKey},
@@ -193,7 +192,6 @@ impl Northstar {
             select! {
                 _ = &mut timeout => break Err(eyre!("Timeout waiting for notification")),
                 notification = self.client.next() => {
-                    debug!("Runtime notification {:?}", notification);
                     match notification {
                         Some(Ok(n)) if pred(&n) => break Ok(()),
                         Some(_) => continue,

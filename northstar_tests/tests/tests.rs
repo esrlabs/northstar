@@ -64,20 +64,25 @@ test!(start_stop, {
 });
 
 // Start and stop a container without waiting
-// test!(start_stop_no_wait, {
-//     let runtime = Northstar::launch().await?;
+test!(start_stop_no_wait, {
+    let runtime = Northstar::launch().await?;
 
-//     runtime.install_test_container().await?;
-//     runtime.install_test_resource().await?;
+    runtime.install_test_container().await?;
+    runtime.install_test_resource().await?;
 
-//     for i in 0..10 {
-//         info!("Iteration {}", i);
-//         runtime.start(TEST_CONTAINER).await?;
-//         runtime.stop(TEST_CONTAINER, 5).await?;
-//     }
+    for _ in 0..10 {
+        runtime.start(TEST_CONTAINER).await?;
+        runtime.stop(TEST_CONTAINER, 5).await?;
+        logger::assume("Sending SIGTERM", 5u64).await?;
+        logger::assume("exit code is 0", 5).await?;
+        logger::assume("Stopped .* with status Exit\\(0\\)", 5).await?;
+    }
 
-//     runtime.shutdown().await
-// });
+    runtime.uninstall_test_container().await?;
+    runtime.uninstall_test_resource().await?;
+
+    runtime.shutdown().await
+});
 
 // Mount and umount all containers known to the runtime
 test!(mount, {
