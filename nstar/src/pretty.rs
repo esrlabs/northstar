@@ -34,6 +34,7 @@ pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Re
         Cell::new("Version").with_style(Attr::Bold),
         Cell::new("Repository").with_style(Attr::Bold),
         Cell::new("Type").with_style(Attr::Bold),
+        Cell::new("Mounted").with_style(Attr::Bold),
         Cell::new("PID").with_style(Attr::Bold),
         Cell::new("Uptime").with_style(Attr::Bold),
     ]));
@@ -43,9 +44,9 @@ pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Re
         .sorted_by_key(|c| c.manifest.init.is_none())
     {
         table.add_row(Row::new(vec![
-            Cell::new(&container.manifest.name).with_style(Attr::Bold),
-            Cell::new(&container.manifest.version.to_string()),
-            Cell::new(&container.repository),
+            Cell::new(&container.key.name()).with_style(Attr::Bold),
+            Cell::new(&container.key.version().to_string()),
+            Cell::new(&container.key.repository()),
             Cell::new(
                 container
                     .manifest
@@ -54,6 +55,7 @@ pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Re
                     .map(|_| "App")
                     .unwrap_or("Resource"),
             ),
+            Cell::new(if container.mounted { "yes" } else { "no" }),
             Cell::new(
                 &container
                     .process
