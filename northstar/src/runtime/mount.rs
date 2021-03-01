@@ -16,7 +16,6 @@ use super::{
     config::Config,
     device_mapper as dm, device_mapper,
     loopdev::{losetup, LoopControl},
-    state::{Container, Repository},
 };
 use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
@@ -30,7 +29,7 @@ use std::{
     process,
 };
 use thiserror::Error;
-use tokio::{fs, fs::metadata, task, time};
+use tokio::{fs, task, time};
 
 const FS_TYPE: &str = "squashfs";
 
@@ -81,24 +80,17 @@ impl MountControl {
         })
     }
 
-    pub(super) async fn mount_npk(
+    pub(super) async fn mount(
         &self,
-        npk_path: &Path,
-        repository: &Repository,
-        run_dir: &Path,
-    ) -> Result<Container, Error> {
+        npk: Npk,
+        target: &Path,
+        repository_key: Option<&ed25519_dalek::PublicKey>,
+    ) -> Result<PathBuf, Error> {
         let start = time::Instant::now();
 
-        debug!("Mounting {}", npk_path.display());
-        let use_verity = repository.key.is_some();
-
-        if let Ok(meta) = metadata(&npk_path).await {
-            debug!("Mounting NPK with size {}", meta.len());
-        }
-
-        let npk = Npk::from_path(&npk_path, repository.key.as_ref())
-            .await
-            .map_err(Error::Npk)?;
+        let manifest = npk.manifest();
+        debug!("Mounting {}:{}", manifest.name, manifest.version);
+        let use_verity = repository_key.is_some();
 
         if npk.version() != &Manifest::VERSION {
             return Err(Error::NpkVersionMismatch);
@@ -107,53 +99,46 @@ impl MountControl {
 
         debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
-        let root = create_mount_point(run_dir, &manifest).await?;
-        let device = self.setup_and_mount(npk, &root, use_verity).await?;
-        let container = Container {
-            root,
-            manifest,
-            device,
-            repository: repository.id.to_string(),
-        };
+        if !target.exists() {
+            debug!("Creating mount point {}", target.display());
+            fs::create_dir_all(&target).await.map_err(|e| {
+                Error::Io(
+                    format!("Failed to create directory {}", target.display()),
+                    e,
+                )
+            })?;
+        }
+
+        let device = self.setup_and_mount(npk, &target, use_verity).await?;
         let duration = start.elapsed();
 
         info!(
-            "Installed {}:{} Mounting: {:.03}s",
-            container.manifest.name,
-            container.manifest.version,
+            "Mounted {}:{} Mounting: {:.03}s",
+            manifest.name,
+            manifest.version,
             duration.as_fractional_secs(),
         );
 
-        Ok(container)
+        Ok(device)
     }
 
-    pub(super) async fn umount_npk(
+    pub(super) async fn umount(
         &self,
-        container: &Container,
-        wait_for_dm: bool,
+        target: &Path,
+        verity_device: Option<&Path>,
     ) -> Result<(), Error> {
-        info!("Unmounting {}", container.root.display());
-        task::block_in_place(|| nix::mount::umount(&container.root).map_err(Error::Os))?;
+        task::block_in_place(|| nix::mount::umount(target).map_err(Error::Os))?;
 
-        if wait_for_dm {
-            debug!("Waiting for dm device removal");
-            wait_for_file_deleted(&container.device, std::time::Duration::from_secs(5)).await?;
+        if let Some(verity_device) = verity_device {
+            debug!("Waiting for dm device {}", verity_device.display());
+            wait_for_file_deleted(&verity_device, std::time::Duration::from_secs(5)).await?;
         }
 
-        debug!("Removing mountpoint {}", container.root.display());
+        debug!("Removing mountpoint {}", target.display());
         // Root which is the container version
-        fs::remove_dir(&container.root)
+        fs::remove_dir(&target)
             .await
-            .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
-        // Container name
-        fs::remove_dir(
-            container
-                .root
-                .parent()
-                .expect("Failed to get parent dir of container!"),
-        )
-        .await
-        .map_err(|e| Error::Io(format!("Failed to remove {}", container.root.display()), e))?;
+            .map_err(|e| Error::Io(format!("Failed to remove {}", target.display()), e))?;
 
         Ok(())
     }
@@ -272,6 +257,7 @@ impl MountControl {
                     )
                     .await?
                 }
+                // TODO: Is this correct?
                 _ => loop_device.path().await.unwrap(),
             }
         };
@@ -303,7 +289,7 @@ async fn mount(
 ) -> Result<(), Error> {
     let start = time::Instant::now();
     debug!(
-        "Mount {} fs on {} to {}",
+        "Mounting {} fs on {} to {}",
         r#type,
         dev.display(),
         target.display(),
@@ -316,20 +302,6 @@ async fn mount(
     debug!("Mounting took {:.03}s", mount_duration.as_fractional_secs());
 
     Ok(())
-}
-
-/// Creates the mount point directory for the corresponding container
-async fn create_mount_point(run_dir: &Path, manifest: &Manifest) -> Result<PathBuf, Error> {
-    let mnt = run_dir
-        .join(&manifest.name)
-        .join(manifest.version.to_string());
-    if !mnt.exists() {
-        info!("Creating mount point {}", mnt.display());
-        fs::create_dir_all(&mnt)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to create directory {}", mnt.display()), e))?;
-    }
-    Ok(mnt)
 }
 
 async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {

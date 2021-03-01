@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config, Event, EventTx};
+use super::{config, ContainerKey, Event, EventTx};
 use log::{debug, warn};
 use npk::manifest;
 use proc_mounts::MountIter;
@@ -44,7 +44,7 @@ pub struct CGroups {
 impl CGroups {
     pub(crate) async fn new(
         configuration: &config::CGroups,
-        name: &str,
+        key: &ContainerKey,
         cgroups: &manifest::CGroups,
         tx: EventTx,
     ) -> Result<CGroups, Error> {
@@ -55,7 +55,7 @@ impl CGroups {
             let subdir = configuration
                 .get(controller)
                 .ok_or_else(|| Error::UnknownController(controller.into()))?;
-            let path = mount_point.join(subdir).join(name);
+            let path = mount_point.join(subdir).join(key.name());
 
             // Create cgroup
             if !path.exists() {
@@ -74,7 +74,7 @@ impl CGroups {
 
             // Start a monitor for the memory controller
             if controller == "memory" {
-                memory_monitor(name, &path, tx.clone()).await?;
+                memory_monitor(key.clone(), &path, tx.clone()).await?;
             }
 
             groups.push(path);
@@ -105,9 +105,7 @@ impl CGroups {
 
 /// Monitor the oom_control file from memory cgroups and report
 /// a oom condition in case.
-async fn memory_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), Error> {
-    let name = name.to_string();
-
+async fn memory_monitor(key: ContainerKey, path: &Path, tx: EventTx) -> Result<(), Error> {
     // Configure oom
     let oom_control = path.join(OOM_CONTROL);
     write(&oom_control, "1").await?;
@@ -123,14 +121,14 @@ async fn memory_monitor(name: &str, path: &Path, tx: EventTx) -> Result<(), Erro
                     match result {
                         Ok(s) => {
                             if s.lines().any(|l| l == UNDER_OOM) {
-                                warn!("Container {} is under OOM!", name);
+                                warn!("Container {} is under OOM!", key);
                                 // TODO
-                                tx.send(Event::Oom(name)).await.ok();
+                                tx.send(Event::Oom(key)).await.ok();
                                 break;
                             }
                         }
                         Err(_) => {
-                            debug!("Stopping oom monitor of {}", name);
+                            debug!("Stopping oom monitor of {}", key);
                             break;
                         }
                     };

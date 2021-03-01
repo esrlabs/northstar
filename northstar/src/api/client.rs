@@ -17,7 +17,6 @@ use log::info;
 use npk::manifest::Version;
 use std::{
     collections::HashMap,
-    net::ToSocketAddrs,
     path::{Path, PathBuf},
     pin::Pin,
     task::Poll,
@@ -29,14 +28,15 @@ use tokio::{
     net::{TcpStream, UnixStream},
     select,
     sync::{mpsc, oneshot},
-    task,
+    task, time,
 };
 use url::Url;
 
 use super::{
     codec::framed,
     model::{
-        Container, Message, Notification, Payload, Repository, RepositoryId, Request, Response,
+        Container, ContainerKey, Message, Notification, Payload, Repository, RepositoryId, Request,
+        Response,
     },
 };
 
@@ -66,11 +66,12 @@ pub enum Error {
 /// ```no_run
 /// use futures::StreamExt;
 /// use northstar::api::client::Client;
+/// # use npk::manifest::Version;
 ///
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-///     client.start("hello").await.expect("Failed to start \"hello\"");
+///     client.start("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }
@@ -96,9 +97,9 @@ impl Client {
 
         let mut connection = match url.scheme() {
             "tcp" => {
-                let address = url
-                    .to_socket_addrs()?
-                    .next()
+                let addresses = url.socket_addrs(|| Some(4200))?;
+                let address = addresses
+                    .first()
                     .ok_or_else(|| Error::InvalidConsoleAddress(url.to_string()))?;
                 framed(
                     Box::new(TcpStream::connect(address).await.map_err(Error::Io)?)
@@ -126,7 +127,7 @@ impl Client {
                                         break Err(Error::Protocol);
                                     }
                                 }
-                                Payload::Notification(n) => drop(notification_tx.send(Ok(n)).await),
+                                Payload::Notification(n) => drop(notification_tx.try_send(Ok(n))),
                             },
                             Some(Err(e)) => break Err(Error::Io(e)),
                             None => {
@@ -243,17 +244,30 @@ impl Client {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use northstar::api::client::Client;
+    /// # use npk::manifest::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.start("hello").await.expect("Failed to start \"hello\"");
+    /// client.start("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn start(&self, name: &str) -> Result<(), Error> {
-        match self.request(Request::Start(name.to_string())).await? {
+    pub async fn start(
+        &self,
+        name: &str,
+        version: &Version,
+        repository: &str,
+    ) -> Result<(), Error> {
+        match self
+            .request(Request::Start(ContainerKey::new(
+                name.to_string(),
+                version.clone(),
+                repository.to_string(),
+            )))
+            .await?
+        {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
             _ => Err(Error::Protocol),
@@ -265,17 +279,31 @@ impl Client {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use northstar::api::client::Client;
+    /// # use npk::manifest::Version;
+    /// # use std::time::Duration;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.stop("hello").await.expect("Failed to stop \"hello\"");
+    /// client.stop("hello", &Version::parse("0.0.1").unwrap(), "default", Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn stop(&self, name: &str) -> Result<(), Error> {
-        match self.request(Request::Stop(name.to_string())).await? {
+    pub async fn stop(
+        &self,
+        name: &str,
+        version: &Version,
+        repository: &str,
+        timeout: time::Duration,
+    ) -> Result<(), Error> {
+        match self
+            .request(Request::Stop(
+                ContainerKey::new(name.to_string(), version.clone(), repository.to_string()),
+                timeout.as_secs(),
+            ))
+            .await?
+        {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
             _ => Err(Error::Protocol),
@@ -314,22 +342,31 @@ impl Client {
     /// Uninstall a npk
     ///
     /// ```no_run
-    /// # use northstar::api::client::Client;
     /// # use futures::StreamExt;
-    /// # use std::path::Path;
+    /// # use northstar::api::client::Client;
     /// # use npk::manifest::Version;
+    /// # use std::path::Path;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.uninstall("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to uninstal \"hello\"");
+    /// client.uninstall("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn uninstall(&self, name: &str, version: &Version) -> Result<(), Error> {
+    pub async fn uninstall(
+        &self,
+        name: &str,
+        version: &Version,
+        repository: &str,
+    ) -> Result<(), Error> {
         match self
-            .request(Request::Uninstall(name.to_string(), version.clone()))
+            .request(Request::Uninstall(ContainerKey::new(
+                name.to_string(),
+                version.clone(),
+                repository.to_string(),
+            )))
             .await?
         {
             Response::Ok(()) => Ok(()),
@@ -353,11 +390,12 @@ impl Client {
 /// ```no_run
 /// use futures::StreamExt;
 /// use northstar::api::client::Client;
+/// use npk::manifest::Version;
 ///
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-///     client.start("hello").await.expect("Failed to start \"hello\"");
+///     client.start("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }

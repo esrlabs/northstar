@@ -9,7 +9,7 @@ args:
   - /message/hello
 mounts:
     /bin:
-      resource: ferris:0.0.1/
+      resource: ferris:0.0.1:default/
     /lib:
       host: /lib
     /lib64:
@@ -17,7 +17,7 @@ mounts:
     /system:
       host: /system
     /message:
-      resource: hello_message:0.0.1/
+      resource: hello_message:0.0.1:default/
 io:
   stdout:
     log:

@@ -15,9 +15,9 @@
 use super::{
     config::Config,
     pipe::{pipe, AsyncPipeReader, AsyncPipeWriter, PipeWriter},
-    process::{waitpid, Error, ExitStatus, Pid, ENV_NAME, ENV_VERSION},
+    process::{waitpid, Error, ENV_NAME, ENV_VERSION},
     process_debug::{Perf, Strace},
-    state::Container,
+    Container, ContainerKey, ExitStatus, Pid,
 };
 use crate::runtime::EventTx;
 use bytes::{Buf, BytesMut};
@@ -117,7 +117,11 @@ impl<'a> Minijail<'a> {
     }
 
     /// Create a new minijailed process which is forked and blocks before execve. Start it with Process::start.
-    pub(crate) async fn create(&self, container: &Container) -> Result<Process, Error> {
+    pub(super) async fn create(
+        &self,
+        key: &ContainerKey,
+        container: &Container,
+    ) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
         let mut jail = MinijailHandle(::minijail::Minijail::new().map_err(Error::Minijail)?);
@@ -224,7 +228,7 @@ impl<'a> Minijail<'a> {
 
         // Spawn a task thats waits for the child to exit
         let exit_status = Box::new(Box::pin(
-            waitpid(&manifest.name, pid, self.event_tx.clone()).await,
+            waitpid(key.clone(), pid, self.event_tx.clone()).await,
         ));
 
         Ok(Process {
@@ -350,11 +354,18 @@ impl<'a> Minijail<'a> {
                     jail.mount_bind(&dir, &target, true)
                         .map_err(Error::Minijail)?;
                 }
-                Mount::Resource { name, version, dir } => {
+                Mount::Resource {
+                    name,
+                    version,
+                    repository,
+                    dir,
+                } => {
                     let src = {
                         // Join the source of the resource container with the mount dir
-                        let resource_root =
-                            self.config.run_dir.join(&name).join(&version.to_string());
+                        let resource_root = self
+                            .config
+                            .run_dir
+                            .join(format!("{}:{}:{}", name, version, repository));
                         let dir = dir
                             .strip_prefix("/")
                             .map(|d| resource_root.join(d))
@@ -457,9 +468,10 @@ impl Process {
         Ok(())
     }
 
+    /// Send a SIGTERM to the application. If the application does not terminate with a timeout
+    /// it is SIGKILLed.
     pub async fn terminate(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
-        // Send a SIGTERM to the application. If the application does not terminate with a timeout
-        // it is SIGKILLed.
+        debug!("Sending SIGTERM to {}", self.pid);
         signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGTERM))
             .map_err(|e| Error::Os(format!("Failed to SIGTERM {}", self.pid), e))?;
 

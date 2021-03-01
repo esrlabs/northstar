@@ -9,7 +9,7 @@ mounts:
   /lib64:
     host: /lib64
   /message:
-    resource: hello_message:0.0.1/
+    resource: hello_message:0.0.1:default/
   /system:
     host: /system
 io:
