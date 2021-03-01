@@ -19,7 +19,7 @@ use futures::StreamExt;
 use northstar::api::{
     self,
     client::Client,
-    model::{Request, Response},
+    model::{ContainerKey, Request, Response},
 };
 use std::{io::Write, path::Path};
 use structopt::StructOpt;
@@ -32,23 +32,44 @@ mod terminal;
 /// Same stuff but returns a json string
 async fn send_request(
     client: &mut Client,
-    command: &Northstar,
+    command: Northstar,
 ) -> Result<Response, api::client::Error> {
-    let request: Request = match command {
+    let request = match command {
         Northstar::Containers => Request::Containers,
         Northstar::Repositories => Request::Repositories,
-        Northstar::Start { name } => Request::Start(name.to_owned()),
-        Northstar::Stop { name } => Request::Stop(name.to_owned()),
+        Northstar::Mount {
+            name,
+            version,
+            repository,
+        } => Request::Mount(vec![ContainerKey::new(name, version, repository)]),
+        Northstar::Umount {
+            name,
+            version,
+            repository,
+        } => Request::Umount(ContainerKey::new(name, version, repository)),
+        Northstar::Start {
+            name,
+            version,
+            repository,
+        } => Request::Start(ContainerKey::new(name, version, repository)),
+        Northstar::Stop {
+            name,
+            version,
+            repository,
+            timeout,
+        } => Request::Stop(ContainerKey::new(name, version, repository), timeout),
         Northstar::Install { npk, repo_id } => {
             let npk = Path::new(&npk).canonicalize()?;
-            return match client.install(&npk, repo_id).await {
+            return match client.install(&npk, &repo_id).await {
                 Ok(()) => Ok(Response::Ok(())),
                 Err(e) => Ok(Response::Err(api::model::Error::Npk(e.to_string()))),
             };
         }
-        Northstar::Uninstall { name, version } => {
-            Request::Uninstall(name.to_owned(), version.clone())
-        }
+        Northstar::Uninstall {
+            name,
+            version,
+            repository,
+        } => Request::Uninstall(ContainerKey::new(name, version, repository)),
         Northstar::Shutdown => Request::Shutdown,
     };
 
@@ -78,7 +99,7 @@ async fn main() -> Result<()> {
 
     // Execute the provided command and exit
     if let Some(command) = opt.command {
-        let response = send_request(&mut client, &command).await?;
+        let response = send_request(&mut client, command).await?;
         return print_response(&mut std::io::stdout(), response, opt.json).await;
     }
 
@@ -108,7 +129,7 @@ async fn main() -> Result<()> {
                             Prompt::Quit => break 'outer,
                         },
                         Ok(PromptCommand::Northstar(cmd)) => {
-                            match send_request(&mut client, &cmd).await {
+                            match send_request(&mut client, cmd).await {
                                 Ok(response) => print_response(&mut terminal, response, opt.json).await?,
                                 // break the loop and try to reconnect
                                 Err(api::client::Error::Stopped) => break,
