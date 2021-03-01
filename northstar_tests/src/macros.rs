@@ -28,7 +28,7 @@ pub fn init() {
         log::set_max_level(LevelFilter::Debug);
 
         // TODO make the test independent of the workspace structure
-        // set the CWD to the roo
+        // set the CWD to the root
         std::env::set_current_dir("..").unwrap();
 
         // Set the mount propagation of unshare_root to MS_PRIVATE
@@ -50,16 +50,20 @@ pub fn init() {
 #[macro_export]
 macro_rules! test {
     ($name:ident, $e:expr) => {
-        #[ignore]
-        #[test]
-        fn $name() -> Result<()> {
-            ::northstar_tests::macros::init();
-            let tokio = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("$name")
-                .build()?;
-
-            tokio.block_on(async { $e })
+        rusty_fork::rusty_fork_test! {
+            #![rusty_fork(timeout_ms = 300000)]
+            #[test]
+            fn $name() {
+                ::northstar_tests::macros::init();
+                logger::reset();
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .thread_name(stringify!($name))
+                    .build()
+                    .expect("Failed to start runtime")
+                    .block_on(async { $e })
+                    .expect("Test failed");
+            }
         }
     };
 }
