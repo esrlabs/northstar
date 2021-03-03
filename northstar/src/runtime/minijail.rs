@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Container, ContainerKey, ExitStatus, Pid, config::Config, pipe::{AsyncPipeReader, AsyncPipeWriter, PipeWriter, pipe}, process::{waitpid, Error, ENV_NAME, ENV_VERSION}, process_debug::{Perf, Strace}};
+use super::{ExitStatus, MountedContainer as Container, Pid, config::Config, pipe::{AsyncPipeReader, AsyncPipeWriter, PipeWriter, pipe}, process::{waitpid, Error, ENV_NAME, ENV_VERSION}, process_debug::{Perf, Strace}};
 use crate::runtime::EventTx;
 use bytes::{Buf, BytesMut};
 use futures::Future;
@@ -97,11 +97,7 @@ impl<'a> Minijail<'a> {
     }
 
     /// Create a new minijailed process which is forked and blocks before execve. Start it with Process::start.
-    pub(super) async fn create(
-        &self,
-        key: &ContainerKey,
-        container: &Container,
-    ) -> Result<Process, Error> {
+    pub(super) async fn create(&self, container: &Container) -> Result<Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
         let mut jail = MinijailHandle(::minijail::Minijail::new().map_err(Error::Minijail)?);
@@ -209,7 +205,7 @@ impl<'a> Minijail<'a> {
 
         // Spawn a task thats waits for the child to exit
         let exit_status = Box::new(Box::pin(
-            waitpid(key.clone(), pid, self.event_tx.clone()).await,
+            waitpid(container.container.clone(), pid, self.event_tx.clone()).await,
         ));
 
         Ok(Process {

@@ -18,7 +18,7 @@ use std::{
     time::SystemTime,
 };
 
-use super::{error::Error, ContainerKey, Name, RepositoryId, Version};
+use super::{error::Error, Container, Name, RepositoryId, Version};
 use ed25519_dalek::PublicKey;
 use log::debug;
 use npk::npk::Npk;
@@ -54,14 +54,14 @@ impl Repository {
         &self.containers
     }
 
-    pub async fn add(&mut self, key: &ContainerKey, src: &Path) -> Result<(), Error> {
+    pub async fn add(&mut self, container: &Container, src: &Path) -> Result<(), Error> {
         let dest = self
             .dir
-            .join(format!("{}-{}.npk", key.name(), key.version()));
+            .join(format!("{}-{}.npk", container.name(), container.version()));
 
         // Check if the npk already in the repository
         if dest.exists() {
-            return Err(Error::ApplicationInstalled(key.clone()));
+            return Err(Error::ApplicationInstalled(container.clone()));
         }
 
         // Copy the npk to the repository
@@ -69,22 +69,40 @@ impl Repository {
             .await
             .map_err(|e| Error::Io("Failed to copy npk to repository".into(), e))?;
 
-        self.containers
-            .insert((key.name().clone(), key.version().clone()), dest);
+        self.containers.insert(
+            (container.name().clone(), container.version().clone()),
+            dest,
+        );
+
+        self.last_modified = Some(
+            fs::metadata(&self.dir)
+                .await
+                .map_err(|e| Error::Io("Repository metadata".into(), e))?
+                .modified()
+                .map_err(|e| Error::Io("Repository modified".into(), e))?,
+        );
 
         Ok(())
     }
 
-    pub async fn remove(&mut self, key: &ContainerKey) -> Result<(), Error> {
+    pub async fn remove(&mut self, container: &Container) -> Result<(), Error> {
         let npk = self
             .dir
-            .join(format!("{}-{}.npk", key.name(), key.version()));
+            .join(format!("{}-{}.npk", container.name(), container.version()));
         debug!("Removing {}", npk.display());
         fs::remove_file(npk)
             .await
             .map_err(|e| Error::Io("Failed to remove npk".into(), e))?;
         self.containers
-            .remove(&(key.name().clone(), key.version().clone()));
+            .remove(&(container.name().clone(), container.version().clone()));
+
+        self.last_modified = Some(
+            fs::metadata(&self.dir)
+                .await
+                .map_err(|e| Error::Io("Repository metadata".into(), e))?
+                .modified()
+                .map_err(|e| Error::Io("Repository modified".into(), e))?,
+        );
         Ok(())
     }
 

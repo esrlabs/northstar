@@ -22,7 +22,7 @@ use color_eyre::eyre::{eyre, Result, WrapErr};
 use futures::StreamExt;
 use northstar::{
     api::{client::Client, model::Notification},
-    runtime::{self, config, config::Config, ContainerKey},
+    runtime::{self, config, config::Config, Container},
 };
 use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
@@ -121,23 +121,27 @@ impl Northstar {
         self.tmpdir.close().wrap_err("Failed to remove tmpdir")
     }
 
-    /// Start a container with key
-    pub async fn start(&self, key: &str) -> Result<()> {
-        let key: ContainerKey = key.try_into().expect("Invalid key");
+    /// Start a container
+    pub async fn start(&self, container: &str) -> Result<()> {
+        let container: Container = container.try_into().expect("Invalid container str");
         self.client
-            .start(key.name(), key.version(), key.repository())
+            .start(
+                container.name(),
+                container.version(),
+                container.repository(),
+            )
             .await
             .wrap_err("Failed to start")
     }
 
-    /// Stop a container with key
-    pub async fn stop(&self, key: &str, timeout: u64) -> Result<()> {
-        let key: ContainerKey = key.try_into().expect("Invalid key");
+    /// Stop a container
+    pub async fn stop(&self, container: &str, timeout: u64) -> Result<()> {
+        let container: Container = container.try_into().expect("Invalid container str");
         self.client
             .stop(
-                key.name(),
-                key.version(),
-                key.repository(),
+                container.name(),
+                container.version(),
+                container.repository(),
                 Duration::from_secs(timeout),
             )
             .await

@@ -21,7 +21,7 @@ use super::{
     key,
     minijail::{Minijail, Process},
     mount::MountControl,
-    ContainerKey, Event, EventTx, ExitStatus, Notification, Repository, RepositoryId,
+    Container, Event, EventTx, ExitStatus, Notification, Repository, RepositoryId,
 };
 use api::model::Response;
 use log::{debug, error, info, warn};
@@ -44,8 +44,8 @@ pub(super) struct State<'a> {
     mount_control: MountControl,
     events_tx: EventTx,
     repositories: HashMap<RepositoryId, Repository>,
-    npks: HashMap<ContainerKey, PathBuf>,
-    containers: HashMap<ContainerKey, Container>,
+    npks: HashMap<Container, PathBuf>,
+    containers: HashMap<Container, MountedContainer>,
     /// Internal test repository tempdir
     #[cfg(debug_assertions)]
     internal_repository: tempfile::TempDir,
@@ -58,14 +58,15 @@ pub enum BlockDevice {
 }
 
 #[derive(Debug)]
-pub(super) struct Container {
+pub(super) struct MountedContainer {
+    pub(super) container: Container,
     pub(super) manifest: Manifest,
     pub(super) root: PathBuf,
     pub(super) device: BlockDevice,
     pub(super) process: Option<ProcessContext>,
 }
 
-impl fmt::Display for Container {
+impl fmt::Display for MountedContainer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.manifest.name, self.manifest.version)
     }
@@ -120,8 +121,8 @@ impl<'a> State<'a> {
         let mut npks = HashMap::new();
         for (id, repository) in &repositories {
             for ((name, version), npk) in repository.npks() {
-                let key = ContainerKey::new(name.clone(), version.clone(), id.clone());
-                npks.insert(key, npk.clone());
+                let container = Container::new(name.clone(), version.clone(), id.clone());
+                npks.insert(container, npk.clone());
             }
         }
 
@@ -141,41 +142,40 @@ impl<'a> State<'a> {
         })
     }
 
-    /// Mount `key`
-    async fn mount(&self, key: &ContainerKey) -> Result<Container, Error> {
+    /// Mount `container`
+    async fn mount(&self, container: &Container) -> Result<MountedContainer, Error> {
         // Repository key
-        let repository_key = self
+        let key = self
             .repositories
-            .get(key.repository())
+            .get(container.repository())
             .and_then(|r| r.key.as_ref());
         let npk = self
             .npks
-            .get(&key)
-            .ok_or_else(|| Error::UnknownApplication(key.clone()))?;
+            .get(&container)
+            .ok_or_else(|| Error::UnknownApplication(container.clone()))?;
 
         // Load NPK
-        let npk = Npk::from_path(npk, repository_key)
-            .await
-            .map_err(Error::Npk)?;
+        let npk = Npk::from_path(npk, key).await.map_err(Error::Npk)?;
         let manifest = npk.manifest().clone();
 
         // Try to mount the npk found. If this fails return with an error - nothing needs to
         // be cleaned up.
-        let root = self.config.run_dir.join(key.to_string());
+        let root = self.config.run_dir.join(container.to_string());
         let device = self
             .mount_control
-            .mount(npk, &root, repository_key)
+            .mount(npk, &root, key)
             .await
             .map_err(Error::Mount)
             .map(|device| {
-                if repository_key.is_some() {
+                if key.is_some() {
                     BlockDevice::Verity(device)
                 } else {
                     BlockDevice::Loopback(device)
                 }
             })?;
 
-        Ok(Container {
+        Ok(MountedContainer {
+            container: container.clone(),
             manifest,
             root,
             device,
@@ -183,21 +183,21 @@ impl<'a> State<'a> {
         })
     }
 
-    /// Umount a given container key
+    /// Umount a given container
     #[allow(clippy::blocks_in_if_conditions)]
-    async fn umount(&mut self, key: &ContainerKey) -> Result<Container, Error> {
-        if let Some(container) = self.containers.get(key) {
-            info!("Umounting {}", key);
+    async fn umount(&mut self, container: &Container) -> Result<MountedContainer, Error> {
+        if let Some(mounted_container) = self.containers.get(container) {
+            info!("Umounting {}", container);
             // Check if the application is started - if yes it cannot be uninstalled
-            if container.process.is_some() {
-                return Err(Error::ApplicationStarted(key.clone()));
+            if mounted_container.process.is_some() {
+                return Err(Error::ApplicationStarted(container.clone()));
             }
 
             // If this is a resource check if it can be uninstalled or if it's
             // used by any (mounted) container. The not mounted containers are
             // not interesting because the check for all resources is done when
             // it's mounted/started.
-            if container.manifest.init.is_none()
+            if mounted_container.manifest.init.is_none()
                 && self
                     .containers
                     .values()
@@ -215,72 +215,74 @@ impl<'a> State<'a> {
                         _ => None,
                     })
                     .any(|(name, version, repository)| {
-                        name == key.name()
-                            && version == key.version()
-                            && repository == key.repository()
+                        name == container.name()
+                            && version == container.version()
+                            && repository == container.repository()
                     })
             {
-                warn!("Failed to uninstall busy resource container {}", key);
+                warn!("Failed to uninstall busy resource container {}", container);
                 return Err(Error::ResourceBusy);
             }
 
-            let skey = self
+            let key = self
                 .repositories
-                .get(key.repository())
+                .get(container.repository())
                 .and_then(|r| r.key.as_ref());
-            let device = skey.map(|_| &container.device).and_then(|p| match p {
-                BlockDevice::Loopback(_) => None,
-                BlockDevice::Verity(p) => Some(p.as_path()),
-            });
+            let device = key
+                .map(|_| &mounted_container.device)
+                .and_then(|p| match p {
+                    BlockDevice::Loopback(_) => None,
+                    BlockDevice::Verity(p) => Some(p.as_path()),
+                });
 
             self.mount_control
-                .umount(&container.root, device)
+                .umount(&mounted_container.root, device)
                 .await
                 .expect("Failed to umount");
-            Ok(self.containers.remove(key).expect("Internal error"))
+            Ok(self.containers.remove(container).expect("Internal error"))
         } else {
-            panic!("Container {} is not mounted", key)
+            panic!("Container {} is not mounted", container)
         }
     }
 
-    pub(super) async fn start(&mut self, key: &ContainerKey) -> Result<(), Error> {
-        info!("Trying to start {}", key);
+    pub(super) async fn start(&mut self, container: &Container) -> Result<(), Error> {
+        info!("Trying to start {}", container);
 
         let mut mounted = Vec::new();
 
-        let manifest = if let Some(container) = self.containers.get(key) {
+        let manifest = if let Some(mounted_container) = self.containers.get(container) {
             // Check if the container is not a resouce
-            if container.manifest.init.is_none() {
-                warn!("Container {} is a resource", key);
-                return Err(Error::UnknownApplication(key.clone()));
+            if mounted_container.manifest.init.is_none() {
+                warn!("Container {} is a resource", container);
+                return Err(Error::UnknownApplication(container.clone()));
             }
 
             // Check if the container is already started
-            if container.process.is_some() {
-                warn!("Application {} is already running", key);
-                return Err(Error::ApplicationStarted(key.clone()));
+            if mounted_container.process.is_some() {
+                warn!("Application {} is already running", container);
+                return Err(Error::ApplicationStarted(container.clone()));
             }
 
-            container.manifest.clone()
-        } else if self.npks.contains_key(key) {
-            let container = self.mount(&key).await?;
-            let manifest = container.manifest.clone();
-            mounted.push(key.clone());
-            self.containers.insert(key.clone(), container);
+            mounted_container.manifest.clone()
+        } else if self.npks.contains_key(container) {
+            let mounted_container = self.mount(&container).await?;
+            let manifest = mounted_container.manifest.clone();
+            mounted.push(container.clone());
+            self.containers.insert(container.clone(), mounted_container);
             manifest
         } else {
-            warn!("Unknown application {}", key);
-            return Err(Error::UnknownApplication(key.clone()));
+            warn!("Unknown application {}", container);
+            return Err(Error::UnknownApplication(container.clone()));
         };
 
         // Find to be mounted resources
-        for key in manifest.mounts.values().filter_map(|m| match m {
+        for container in manifest.mounts.values().filter_map(|m| match m {
             Mount::Resource {
                 name,
                 version,
                 repository,
                 ..
-            } => Some(ContainerKey::new(
+            } => Some(Container::new(
                 name.clone(),
                 version.clone(),
                 repository.clone(),
@@ -288,62 +290,62 @@ impl<'a> State<'a> {
             _ => None,
         }) {
             // Mount not yet mounted resources
-            if !self.containers.contains_key(&key) {
-                if self.npks.contains_key(&key) {
+            if !self.containers.contains_key(&container) {
+                if self.npks.contains_key(&container) {
                     // Obtain the key from the repo - needed for mounting
-                    match self.mount(&key).await {
-                        Ok(container) => {
+                    match self.mount(&container).await {
+                        Ok(mounted_container) => {
                             // Fine. Add the container to the list of mounted containers
-                            mounted.push(key.clone());
-                            self.containers.insert(key, container);
+                            mounted.push(container.clone());
+                            self.containers.insert(container, mounted_container);
                         }
                         Err(e) => {
-                            warn!("Failed to mount {}", key);
+                            warn!("Failed to mount {}", container);
                             // Umount everything mounted for this particular start operation
-                            for k in mounted.drain(..) {
-                                self.umount(&k).await.ok();
+                            for container in mounted.drain(..) {
+                                self.umount(&container).await.ok();
                             }
                             return Err(e);
                         }
                     }
                 } else {
-                    for k in mounted.drain(..) {
-                        self.umount(&k).await.ok();
+                    for container in mounted.drain(..) {
+                        self.umount(&container).await.ok();
                     }
-                    return Err(Error::UnknownResource(key));
+                    return Err(Error::UnknownResource(container));
                 }
             }
         }
 
         // This must exist
-        let container = self.containers.get(key).unwrap();
+        let mouted_container = self.containers.get(container).unwrap();
 
         // Spawn process
-        info!("Creating {}", key);
+        info!("Creating {}", container);
         let mut process = match self
             .minijail
-            .create(&key, &container)
+            .create(&mouted_container)
             .await
             .map_err(Error::Process)
         {
             Ok(p) => p,
             Err(e) => {
-                warn!("Failed to create process for {}", key);
+                warn!("Failed to create process for {}", container);
                 // Umount everything mounted so far for this start command
-                for k in mounted.drain(..) {
-                    self.umount(&k).await.ok();
+                for container in mounted.drain(..) {
+                    self.umount(&container).await.ok();
                 }
-                warn!("Failed to start {}", key);
+                warn!("Failed to start {}", container);
                 return Err(e);
             }
         };
 
         // CGroups
-        let cgroups = if let Some(ref c) = container.manifest.cgroups {
-            debug!("Configuring CGroups of {}", key);
+        let cgroups = if let Some(ref c) = mouted_container.manifest.cgroups {
+            debug!("Configuring CGroups of {}", container);
             let cgroups =
                 // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
-                super::cgroups::CGroups::new(&self.config.cgroups, &key, c, self.events_tx.clone())
+                super::cgroups::CGroups::new(&self.config.cgroups, &container, c, self.events_tx.clone())
                     .await
                     .map_err(Error::Cgroups).expect("Failed to create cgroup");
 
@@ -361,26 +363,27 @@ impl<'a> State<'a> {
         // Signal the process to continue starting. This can fail because of the container
         // content. In case umount everything mounted so far and return the error.
         if let Err(e) = process.start().await.map_err(Error::Process) {
-            warn!("Failed to resume process of {}", key);
-            for key in mounted.drain(..) {
-                self.umount(&key).await.ok();
+            warn!("Failed to resume process of {}", container);
+            for container in mounted.drain(..) {
+                self.umount(&container).await.ok();
             }
-            warn!("Failed to start {}", key);
+            warn!("Failed to start {}", container);
             return Err(e);
         }
 
-        let container = self.containers.get_mut(&key).unwrap();
+        let mounted_container = self.containers.get_mut(&container).unwrap();
 
         // Add process context to process
-        container.process = Some(ProcessContext {
+        mounted_container.process = Some(ProcessContext {
             process,
             started: time::Instant::now(),
             cgroups,
         });
 
-        info!("Started {}", key);
+        info!("Started {}", container);
 
-        self.notification(Notification::Started(key.clone())).await;
+        self.notification(Notification::Started(container.clone()))
+            .await;
 
         Ok(())
     }
@@ -389,11 +392,15 @@ impl<'a> State<'a> {
     /// SIGKILLed if it doesn't exit when receiving a SIGTERM
     pub(super) async fn stop(
         &mut self,
-        key: &ContainerKey,
+        container: &Container,
         timeout: time::Duration,
     ) -> Result<(), Error> {
-        if let Some(mut context) = self.containers.get_mut(&key).and_then(|c| c.process.take()) {
-            info!("Stopping {}", key);
+        if let Some(mut context) = self
+            .containers
+            .get_mut(&container)
+            .and_then(|c| c.process.take())
+        {
+            info!("Stopping {}", container);
             let status = context
                 .process
                 .terminate(timeout)
@@ -404,13 +411,14 @@ impl<'a> State<'a> {
             context.destroy().await.expect("Failed to destroy context");
 
             // Send notification to main loop
-            self.notification(Notification::Stopped(key.clone())).await;
+            self.notification(Notification::Stopped(container.clone()))
+                .await;
 
-            info!("Stopped {} with status {}", key, status);
+            info!("Stopped {} with status {}", container, status);
 
             Ok(())
         } else {
-            Err(Error::UnknownApplication(key.clone()))
+            Err(Error::UnknownApplication(container.clone()))
         }
     }
 
@@ -420,17 +428,19 @@ impl<'a> State<'a> {
         let started = self
             .containers
             .iter()
-            .filter_map(|(key, container)| container.process.as_ref().map(|_| key))
+            .filter_map(|(container, mounted_container)| {
+                mounted_container.process.as_ref().map(|_| container)
+            })
             .cloned()
             .collect::<Vec<_>>();
         // Stop started applications
-        for key in &started {
-            self.stop(&key, time::Duration::from_secs(5)).await?;
+        for container in &started {
+            self.stop(&container, time::Duration::from_secs(5)).await?;
         }
 
-        let keys = self.containers.keys().cloned().collect::<Vec<_>>();
-        for key in &keys {
-            self.umount(key).await?;
+        let containers = self.containers.keys().cloned().collect::<Vec<_>>();
+        for container in &containers {
+            self.umount(container).await?;
         }
 
         self.minijail.shutdown().await.map_err(Error::Process)
@@ -447,56 +457,56 @@ impl<'a> State<'a> {
             .await
             .map_err(Error::Npk)?;
         let manifest = npk.manifest();
-        let key = ContainerKey::new(
+        let container = Container::new(
             manifest.name.clone(),
             manifest.version.clone(),
             repository_id.to_string(),
         );
 
-        debug!("NPK key is {}", key);
+        debug!("NPK container is {}", container);
 
         // Add the npk to the repository
-        repository.add(&key, src).await?;
+        repository.add(&container, src).await?;
 
         // Add the npk into the list of known npks
-        self.npks.insert(key.clone(), src.into());
+        self.npks.insert(container.clone(), src.into());
 
         // TODO: Optimize this
         for (id, repository) in &self.repositories {
             for ((name, version), npk) in repository.npks() {
-                let key = ContainerKey::new(name.clone(), version.clone(), id.clone());
-                self.npks.insert(key, npk.clone());
+                let container = Container::new(name.clone(), version.clone(), id.clone());
+                self.npks.insert(container, npk.clone());
             }
         }
 
-        debug!("Successfully installed {}", key);
+        debug!("Successfully installed {}", container);
 
         Ok(())
     }
 
     /// Remove and umount a specific app
     #[allow(clippy::blocks_in_if_conditions)]
-    async fn uninstall(&mut self, key: &ContainerKey) -> result::Result<(), Error> {
-        debug!("Trying to uninstall {}", key);
+    async fn uninstall(&mut self, container: &Container) -> result::Result<(), Error> {
+        debug!("Trying to uninstall {}", container);
 
-        if !self.npks.contains_key(key) {
-            warn!("Failed to uninstall unknown container {}", key);
-            return Err(Error::UnknownApplication(key.clone()));
+        if !self.npks.contains_key(container) {
+            warn!("Failed to uninstall unknown container {}", container);
+            return Err(Error::UnknownApplication(container.clone()));
         }
 
-        if self.containers.contains_key(key) {
-            self.umount(key).await?;
+        if self.containers.contains_key(container) {
+            self.umount(container).await?;
         }
 
         let repository = self
             .repositories
-            .get_mut(key.repository())
-            .ok_or_else(|| Error::UnknownRepository(key.repository().clone()))?;
+            .get_mut(container.repository())
+            .ok_or_else(|| Error::UnknownRepository(container.repository().clone()))?;
 
-        repository.remove(key).await?;
-        self.npks.remove(key);
+        repository.remove(container).await?;
+        self.npks.remove(container);
 
-        debug!("Successfully uninstalled {}", key);
+        debug!("Successfully uninstalled {}", container);
 
         Ok(())
     }
@@ -505,11 +515,11 @@ impl<'a> State<'a> {
     /// to be removed and handled externally
     pub(super) async fn on_exit(
         &mut self,
-        key: &ContainerKey,
+        container: &Container,
         status: &ExitStatus,
     ) -> Result<(), Error> {
-        if let Some(container) = self.containers.get_mut(&key) {
-            if let Some(context) = container.process.take() {
+        if let Some(mounted_container) = self.containers.get_mut(&container) {
+            if let Some(context) = mounted_container.process.take() {
                 info!(
                     "Process {} exited after {:?} with status {:?}",
                     container,
@@ -520,7 +530,7 @@ impl<'a> State<'a> {
                 context.destroy().await.expect("Failed to destroy context");
 
                 self.notification(Notification::Exit {
-                    key: key.clone(),
+                    container: container.clone(),
                     status: status.clone(),
                 })
                 .await;
@@ -530,17 +540,17 @@ impl<'a> State<'a> {
     }
 
     /// Handle out of memory conditions for container `name`
-    pub(super) async fn on_oom(&mut self, key: &ContainerKey) -> Result<(), Error> {
+    pub(super) async fn on_oom(&mut self, container: &Container) -> Result<(), Error> {
         if self
             .containers
-            .get(key)
+            .get(container)
             .and_then(|c| c.process.as_ref())
             .is_some()
         {
-            warn!("Process {} is out of memory. Stopping", key);
-            self.notification(Notification::OutOfMemory(key.clone()))
+            warn!("Process {} is out of memory. Stopping", container);
+            self.notification(Notification::OutOfMemory(container.clone()))
                 .await;
-            self.stop(key, time::Duration::from_secs(5)).await?;
+            self.stop(container, time::Duration::from_secs(5)).await?;
         }
         Ok(())
     }
@@ -560,7 +570,7 @@ impl<'a> State<'a> {
                             Response::Containers(self.list_containers().await)
                         }
                         api::model::Request::Install(_, _) => unreachable!(),
-                        api::model::Request::Mount(_keys) => {
+                        api::model::Request::Mount(_containers) => {
                             unimplemented!()
                         }
                         api::model::Request::Repositories => {
@@ -573,39 +583,44 @@ impl<'a> State<'a> {
                                 .expect("Internal channel error on main");
                             Response::Ok(())
                         }
-                        api::model::Request::Start(key) => match self.start(&key).await {
+                        api::model::Request::Start(container) => match self.start(&container).await
+                        {
                             Ok(_) => Response::Ok(()),
                             Err(e) => {
-                                warn!("Failed to start {}: {}", key, e);
+                                warn!("Failed to start {}: {}", container, e);
                                 Response::Err(e.into())
                             }
                         },
-                        api::model::Request::Stop(key, timeout) => {
+                        api::model::Request::Stop(container, timeout) => {
                             match self
-                                .stop(&key, std::time::Duration::from_secs(*timeout))
+                                .stop(&container, std::time::Duration::from_secs(*timeout))
                                 .await
                             {
                                 Ok(_) => Response::Ok(()),
                                 Err(e) => {
-                                    error!("Failed to stop {}: {}", key, e);
+                                    error!("Failed to stop {}: {}", container, e);
                                     Response::Err(e.into())
                                 }
                             }
                         }
-                        api::model::Request::Umount(key) => match self.umount(&key).await {
-                            Ok(_) => api::model::Response::Ok(()),
-                            Err(e) => {
-                                warn!("Failed to unmount{}: {}", key, e);
-                                api::model::Response::Err(e.into())
+                        api::model::Request::Umount(container) => {
+                            match self.umount(&container).await {
+                                Ok(_) => api::model::Response::Ok(()),
+                                Err(e) => {
+                                    warn!("Failed to unmount{}: {}", container, e);
+                                    api::model::Response::Err(e.into())
+                                }
                             }
-                        },
-                        api::model::Request::Uninstall(key) => match self.uninstall(&key).await {
-                            Ok(_) => api::model::Response::Ok(()),
-                            Err(e) => {
-                                warn!("Failed to uninstall {}: {}", key, e);
-                                api::model::Response::Err(e.into())
+                        }
+                        api::model::Request::Uninstall(container) => {
+                            match self.uninstall(&container).await {
+                                Ok(_) => api::model::Response::Ok(()),
+                                Err(e) => {
+                                    warn!("Failed to uninstall {}: {}", container, e);
+                                    api::model::Response::Err(e.into())
+                                }
                             }
-                        },
+                        }
                     };
 
                     // A error on the response_tx means that the connection
@@ -629,20 +644,20 @@ impl<'a> State<'a> {
         Ok(())
     }
 
-    async fn list_containers(&self) -> Vec<api::model::Container> {
+    async fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut containers = Vec::new();
         for repository in self.repositories.values() {
             for ((_, _), npk) in repository.npks() {
                 let npk = Npk::from_path(npk, None).await.expect("Failed");
                 let manifest = npk.manifest();
-                let key = ContainerKey::new(
+                let container = Container::new(
                     manifest.name.clone(),
                     manifest.version.clone(),
                     repository.id.clone(),
                 );
                 let process = self
                     .containers
-                    .get(&key)
+                    .get(&container)
                     .and_then(|c| c.process.as_ref())
                     .map(|f| api::model::Process {
                         pid: f.process.pid(),
@@ -666,8 +681,9 @@ impl<'a> State<'a> {
                             },
                         },
                     });
-                let mounted = self.containers.contains_key(&key);
-                let c = api::model::Container::new(key, manifest.clone(), process, mounted);
+                let mounted = self.containers.contains_key(&container);
+                let c =
+                    api::model::ContainerData::new(container, manifest.clone(), process, mounted);
                 containers.push(c);
             }
         }

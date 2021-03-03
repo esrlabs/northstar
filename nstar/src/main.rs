@@ -19,7 +19,7 @@ use futures::StreamExt;
 use northstar::api::{
     self,
     client::Client,
-    model::{ContainerKey, Request, Response},
+    model::{Container, Request, Response},
 };
 use std::{io::Write, path::Path};
 use structopt::StructOpt;
@@ -41,23 +41,23 @@ async fn send_request(
             name,
             version,
             repository,
-        } => Request::Mount(vec![ContainerKey::new(name, version, repository)]),
+        } => Request::Mount(vec![Container::new(name, version, repository)]),
         Northstar::Umount {
             name,
             version,
             repository,
-        } => Request::Umount(ContainerKey::new(name, version, repository)),
+        } => Request::Umount(Container::new(name, version, repository)),
         Northstar::Start {
             name,
             version,
             repository,
-        } => Request::Start(ContainerKey::new(name, version, repository)),
+        } => Request::Start(Container::new(name, version, repository)),
         Northstar::Stop {
             name,
             version,
             repository,
             timeout,
-        } => Request::Stop(ContainerKey::new(name, version, repository), timeout),
+        } => Request::Stop(Container::new(name, version, repository), timeout),
         Northstar::Install { npk, repo_id } => {
             let npk = Path::new(&npk).canonicalize()?;
             return match client.install(&npk, &repo_id).await {
@@ -69,7 +69,7 @@ async fn send_request(
             name,
             version,
             repository,
-        } => Request::Uninstall(ContainerKey::new(name, version, repository)),
+        } => Request::Uninstall(Container::new(name, version, repository)),
         Northstar::Shutdown => Request::Shutdown,
     };
 

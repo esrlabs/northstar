@@ -22,7 +22,7 @@ use crate::runtime::{ExitStatus as ExitStatusRuntime, Notification as Notificati
 pub type Name = String;
 pub type RepositoryId = String;
 pub type MessageId = String; // UUID
-pub type ContainerKey = crate::runtime::ContainerKey;
+pub type Container = crate::runtime::Container;
 
 const VERSION: &str = "0.0.1";
 
@@ -86,28 +86,28 @@ pub enum Payload {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
-    OutOfMemory(ContainerKey),
+    OutOfMemory(Container),
     Exit {
-        key: ContainerKey,
+        container: Container,
         status: ExitStatus,
     },
     Install(Name, Version),
     Uninstalled(Name, Version),
-    Started(ContainerKey),
-    Stopped(ContainerKey),
+    Started(Container),
+    Stopped(Container),
     Shutdown,
 }
 
 impl From<NotificationRuntime> for Notification {
     fn from(n: NotificationRuntime) -> Self {
         match n {
-            NotificationRuntime::OutOfMemory(key) => Notification::OutOfMemory(key),
-            NotificationRuntime::Exit { key, status } => Notification::Exit {
-                key,
+            NotificationRuntime::OutOfMemory(container) => Notification::OutOfMemory(container),
+            NotificationRuntime::Exit { container, status } => Notification::Exit {
+                container,
                 status: status.into(),
             },
-            NotificationRuntime::Started(key) => Notification::Started(key),
-            NotificationRuntime::Stopped(key) => Notification::Stopped(key),
+            NotificationRuntime::Started(container) => Notification::Started(container),
+            NotificationRuntime::Stopped(container) => Notification::Stopped(container),
         }
     }
 }
@@ -116,20 +116,20 @@ impl From<NotificationRuntime> for Notification {
 pub enum Request {
     Containers,
     Install(RepositoryId, u64),
-    Mount(Vec<ContainerKey>),
+    Mount(Vec<Container>),
     Repositories,
     Shutdown,
-    Start(ContainerKey),
+    Start(Container),
     /// Stop the given container. If the process does not exit within
     /// the timeout in seconds it is SIGKILLED
-    Stop(ContainerKey, u64),
-    Umount(ContainerKey),
-    Uninstall(ContainerKey),
+    Stop(Container, u64),
+    Umount(Container),
+    Uninstall(Container),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Container {
-    pub key: ContainerKey,
+pub struct ContainerData {
+    pub container: Container,
     pub manifest: Manifest,
     pub process: Option<Process>,
     pub mounted: bool,
@@ -168,7 +168,7 @@ pub struct Memory {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Response {
     Ok(()),
-    Containers(Vec<Container>),
+    Containers(Vec<ContainerData>),
     Repositories(HashMap<RepositoryId, Repository>),
     Err(Error),
 }
@@ -176,14 +176,14 @@ pub enum Response {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
     VersionMismatch(Version),
-    UnknownApplication(ContainerKey),
-    ApplicationNotStarted(ContainerKey),
-    ApplicationRunning(ContainerKey),
-    ApplicationInstalled(ContainerKey),
+    UnknownApplication(Container),
+    ApplicationNotStarted(Container),
+    ApplicationRunning(Container),
+    ApplicationInstalled(Container),
     ResourceBusy,
     MissingResource(String),
     UnknownRepository(String),
-    UnknownResource(ContainerKey),
+    UnknownResource(Container),
 
     Npk(String),
     NpkArchive(String),

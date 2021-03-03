@@ -92,9 +92,9 @@ test!(mount, {
     for container in containers {
         info!(
             "Mounting {}:{}:{}",
-            container.key.name(),
-            container.key.version(),
-            container.key.repository()
+            container.container.name(),
+            container.container.version(),
+            container.container.repository()
         );
         // TODO
         // mount
@@ -107,16 +107,16 @@ test!(mount, {
 // Try to stop a not started container and expect an Err
 test!(invalid_stop, {
     let runtime = Northstar::launch().await?;
-    let key = "foo:0.0.1:default";
-    assert!(runtime.stop(key, 5).await.is_err());
+    let container = "foo:0.0.1:default";
+    assert!(runtime.stop(container, 5).await.is_err());
     runtime.shutdown().await
 });
 
 // Try to start a container whic is not installed/known
 test!(unknown_container_start, {
     let runtime = Northstar::launch().await?;
-    let key = "unknown_application:0.0.12:asdf";
-    assert!(runtime.start(key).await.is_err());
+    let container = "unknown_application:0.0.12:asdf";
+    assert!(runtime.start(container).await.is_err());
     runtime.shutdown().await
 });
 
@@ -187,7 +187,7 @@ test!(crashing_container, {
             .assume_notification(
                 |n| {
                     n == &Notification::Exit {
-                        key: TEST_CONTAINER.try_into().unwrap(),
+                        container: TEST_CONTAINER.try_into().unwrap(),
                         status: ExitStatus::Exit(254),
                     }
                 },

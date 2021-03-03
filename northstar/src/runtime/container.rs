@@ -21,14 +21,14 @@ use std::{
 };
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
-pub struct ContainerKey {
+pub struct Container {
     #[serde(flatten)]
     inner: Arc<Inner>,
 }
 
-impl ContainerKey {
-    pub fn new(name: Name, version: Version, repository: RepositoryId) -> ContainerKey {
-        ContainerKey {
+impl Container {
+    pub fn new(name: Name, version: Version, repository: RepositoryId) -> Container {
+        Container {
             inner: Arc::new(Inner {
                 name,
                 version,
@@ -53,7 +53,7 @@ impl ContainerKey {
     }
 }
 
-impl TryFrom<&str> for ContainerKey {
+impl TryFrom<&str> for Container {
     type Error = &'static str;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
@@ -62,11 +62,11 @@ impl TryFrom<&str> for ContainerKey {
         let version = split.next().ok_or("Missing container version")?;
         let version = Version::parse(&version).map_err(|_| "Invalid version")?;
         let repository = split.next().ok_or("Missing container repository")?;
-        Ok(ContainerKey::new(name.into(), version, repository.into()))
+        Ok(Container::new(name.into(), version, repository.into()))
     }
 }
 
-impl Display for ContainerKey {
+impl Display for Container {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
