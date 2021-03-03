@@ -115,6 +115,7 @@ fn main() -> io::Result<()> {
         "../../syscall_wrapper.c",
         "../../system.c",
         "../../util.c",
+        "../../../libnetlink/libnetlink.c",
     ];
 
     let mut build = cc::Build::new();
@@ -124,6 +125,7 @@ fn main() -> io::Result<()> {
         .define("PRELOADPATH", "\"invalid\"")
         .flag("-Wno-implicit-function-declaration")
         .flag("-I../../../libcap-sys")
+        .flag("-I../../../libnetlink")
         .files(sources)
         .file(generate_syscall_constants(&target_os)?)
         .file(generate_syscall_table()?)

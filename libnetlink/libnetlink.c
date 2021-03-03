@@ -1,4 +1,8 @@
 /*
+ * Modified from libnetlink.c to remove exit() calls
+ */
+
+/*
  * libnetlink.c	RTnetlink service routines.
  *
  *		This program is free software; you can redistribute it and/or
@@ -9,6 +13,9 @@
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *
  */
+
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wsign-compare"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +33,7 @@
 #include <linux/if_addrlabel.h>
 #include <linux/if_bridge.h>
 
-#include "libnetlink.h"
+#include <libnetlink.h>
 
 #define __aligned(x)		__attribute__((aligned(x)))
 
@@ -147,7 +154,6 @@ int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, int error)
 	return 0;
 }
 #else
-#warning "libmnl required for error support"
 
 /* No extended error ack without libmnl */
 int nl_dump_ext_ack(const struct nlmsghdr *nlh, nl_ext_ack_fn_t errfn)
@@ -160,18 +166,6 @@ int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, int error)
 	return 0;
 }
 #endif
-
-/* Older kernels may not support strict dump and filtering */
-void rtnl_set_strict_dump(struct rtnl_handle *rth)
-{
-	int one = 1;
-
-	if (setsockopt(rth->fd, SOL_NETLINK, NETLINK_GET_STRICT_CHK,
-		       &one, sizeof(one)) < 0)
-		return;
-
-	rth->flags |= RTNL_HANDLE_F_STRICT_CHK;
-}
 
 int rtnl_add_nl_group(struct rtnl_handle *rth, unsigned int group)
 {
@@ -252,31 +246,6 @@ int rtnl_open(struct rtnl_handle *rth, unsigned int subscriptions)
 	return rtnl_open_byproto(rth, subscriptions, NETLINK_ROUTE);
 }
 
-int rtnl_nexthopdump_req(struct rtnl_handle *rth, int family,
-			 req_filter_fn_t filter_fn)
-{
-	struct {
-		struct nlmsghdr nlh;
-		struct nhmsg nhm;
-		char buf[128];
-	} req = {
-		.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct nhmsg)),
-		.nlh.nlmsg_type = RTM_GETNEXTHOP,
-		.nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST,
-		.nlh.nlmsg_seq = rth->dump = ++rth->seq,
-		.nhm.nh_family = family,
-	};
-
-	if (filter_fn) {
-		int err;
-
-		err = filter_fn(&req.nlh, sizeof(req));
-		if (err)
-			return err;
-	}
-
-	return send(rth->fd, &req, sizeof(req), 0);
-}
 
 int rtnl_addrdump_req(struct rtnl_handle *rth, int family,
 		      req_filter_fn_t filter_fn)
@@ -873,7 +842,7 @@ skip_it:
 		}
 		if (msglen) {
 			fprintf(stderr, "!!!Remnant of size %d\n", msglen);
-			exit(1);
+			return -1;
 		}
 	}
 }
@@ -947,7 +916,8 @@ next:
 			fprintf(stderr,
 				"sender address length == %d\n",
 				msg.msg_namelen);
-			exit(1);
+			free(buf);
+			return -1;
 		}
 		for (h = (struct nlmsghdr *)buf; status >= sizeof(*h); ) {
 			int len = h->nlmsg_len;
@@ -962,7 +932,8 @@ next:
 				fprintf(stderr,
 					"!!!malformed message: len=%d\n",
 					len);
-				exit(1);
+				free(buf);
+				return -1;
 			}
 
 			if (nladdr.nl_pid != 0 ||
@@ -1024,7 +995,7 @@ next:
 
 		if (status) {
 			fprintf(stderr, "!!!Remnant of size %d\n", status);
-			exit(1);
+			return -1;
 		}
 	}
 }
@@ -1119,7 +1090,7 @@ int rtnl_listen(struct rtnl_handle *rtnl,
 			fprintf(stderr,
 				"Sender address length == %d\n",
 				msg.msg_namelen);
-			exit(1);
+			return -1;
 		}
 
 		if (rtnl->flags & RTNL_HANDLE_F_LISTEN_ALL_NSID) {
@@ -1149,7 +1120,7 @@ int rtnl_listen(struct rtnl_handle *rtnl,
 				fprintf(stderr,
 					"!!!malformed message: len=%d\n",
 					len);
-				exit(1);
+				return -1;
 			}
 
 			err = handler(&ctrl, h, jarg);
@@ -1165,7 +1136,7 @@ int rtnl_listen(struct rtnl_handle *rtnl,
 		}
 		if (status) {
 			fprintf(stderr, "!!!Remnant of size %d\n", status);
-			exit(1);
+			return -1;
 		}
 	}
 }
