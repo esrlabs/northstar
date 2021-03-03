@@ -1,0 +1,3 @@
+Based on iproute2-5.9.0/lib/libnetlink.c from kernel.org.
+
+The file has been modified only to remove calls to exit()
