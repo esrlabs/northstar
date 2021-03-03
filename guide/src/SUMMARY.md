@@ -13,4 +13,4 @@
   - [Unpacking an NPK](sextant/unpack.md)
   - [Inspecting an NPK](sextant/inspect.md)
   - [Generating Repository Keys](sextant/gen_repo_keys.md)
-  - [The NPK file format](sextant/npk_format_details.md)
+  - [NPK Format Reference](sextant/npk_format_reference.md)

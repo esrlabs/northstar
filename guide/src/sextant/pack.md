@@ -12,29 +12,11 @@ The manifest is a YAML file that references all necessary data to mount and exec
 An example `manifest.yaml` of the `hello` container (found in `examples/container/hello/manifest.yaml`) looks as follows:
 
 ```yaml
-name: hello
-version: 0.0.1
-init: /hello
-uid: 1000
-gid: 1000
-env:
-  HELLO: northstar
-io:
-  stdout:
-    log:
-      - DEBUG
-      - hello
-mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
+{{#include ./../../../examples/container/hello/manifest.yaml}}
 ```
 
 More details on the manifest format can be found in the chapter
-[The NPK file format](npk_format_details.md).
+[NPK Format Reference](npk_format_reference.md).
 
 ## The `root` Folder
 
@@ -61,7 +43,9 @@ $ ls target/release/hello
 target/release/hello
 ```
 
-Next, we can crate the destination directory if it does not already exist:
+Next, we can crate the destination directory if it does not already exist.
+We will choose `target/northstar/repository` as our destination as it is the default place where northstar looks for NPKs on startup.
+This default is configured in `northstar.toml`.
 
 ```bash
 $ mkdir -p target/northstar/repository

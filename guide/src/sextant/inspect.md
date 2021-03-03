@@ -22,26 +22,7 @@ manifest.yaml
 fs.img
 
 ## manifest.yaml
----
-name: hello
-version: 0.0.1
-init: /hello
-uid: 1000
-gid: 1000
-env:
-  HELLO: northstar
-mounts:
-  /lib:
-    host: /lib
-  /lib64:
-    host: /lib64
-  /system:
-    host: /system
-io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: hello
+{{#include ./../../../examples/container/hello/manifest.yaml}}
 
 
 ## signature.yaml
@@ -77,7 +58,7 @@ It condenses the inspection output into a single line with the following informa
 - Container name
 - Container version
 - NPK format version
-- Whether or not this is a [ressource container](npk_format_details.md#ressource-containers)
+- Whether or not this is a [ressource container](npk_format_reference.md#ressource-containers)
 
 Inspecting the `hello` example container with the `--short` flag gives the following output:
 
