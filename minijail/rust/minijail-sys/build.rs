@@ -116,6 +116,7 @@ fn main() -> io::Result<()> {
         "../../system.c",
         "../../util.c",
         "../../../libnetlink/libnetlink.c",
+        "../../libmj_netlink.c",
     ];
 
     let mut build = cc::Build::new();

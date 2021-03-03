@@ -41,8 +41,11 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <libnetlink.h>
+
 #include "libminijail.h"
 #include "libmj_netns.h"
+#include "libmj_netlink.h"
 #include "util.h"
 
 static char *config_bridge_addr;
@@ -72,17 +75,24 @@ static int	   def_vm_ipaddr_octet = 20;
 #define CMDBUF_SIZE	128
 
 #if defined(__ANDROID__)
-  #define IP_CMD	"/system/bin/ip"
   #define IPTABLES_CMD	"/system/bin/iptables"
-  #define TMPDIR	"/data/local/tmp"
 #else
-  #define IP_CMD	"/sbin/ip"
   #define IPTABLES_CMD	"/sbin/iptables"
-  #define TMPDIR	"/tmp"
 #endif
 
 #define NOFAIL_ON_ERR	0
 #define FAIL_ON_ERR	1
+
+/*
+ * Android bionic has gettid, but older rust linkages do not
+ */
+#ifndef gettid
+#include <sys/syscall.h>
+pid_t gettid(void)
+{
+	return syscall(SYS_gettid);
+}
+#endif /* gettid */
 
 static int validate_macaddr(const char *mac)
 {
@@ -450,53 +460,14 @@ out:
  */
 #define ANDROID_UID_MAX 65535
 
-static int fix_android_iprules(char *brname)
+static int fix_android_iprules(struct rtnl_handle *rth)
 {
-	char cmdbuf[CMDBUF_SIZE];
-	char outfile[PATH_MAX];
-	int error;
-	struct stat sb;
-
-	/*
-	 * This should be executed only a single time, when the bridge is
-	 * created. Otherwise, it will keep adding rules
-	 */
-	setstr(outfile, "%s/%s_uid", TMPDIR, brname);
-	setstr(cmdbuf, "ip rule list uidrange 0-%d > %s", ANDROID_UID_MAX, outfile);
-	exec_shell(cmdbuf);
-
-	error = stat(outfile, &sb);
-	if (error) {
-		error = errno;
-		goto out;
-	}
-	(void)unlink(outfile);
-
-	if (sb.st_size != 0) {
-		error = 0;
-		goto out;
-	}
-
-	setstr(cmdbuf, "ip rule add uidrange 0-%d lookup main", ANDROID_UID_MAX);
-	exec_cmd(IP_CMD, cmdbuf);
-
-	error = 0;
-out:
-	if (error)
-		warn("Can not setup android uid routing, error %d", error);
-
-	return error;
+	return check_add_rule(rth, 0, ANDROID_UID_MAX);
 }
 
-static int del_android_iprule(void)
+static int del_android_iprule(struct rtnl_handle *rth)
 {
-	char cmdbuf[CMDBUF_SIZE];
-	int error;
-
-	setstr(cmdbuf, "ip rule del uidrange 0-%d", ANDROID_UID_MAX);
-	exec_cmd(IP_CMD, cmdbuf);
-out:
-	return error;
+	return del_uidrule(rth, 0, ANDROID_UID_MAX);
 }
 #endif /* ANDROID */
 
@@ -544,66 +515,11 @@ out:
 	return error;
 }
 
-static int delete_net_namespace(char *nsname)
-{
-	char path[PATH_MAX];
-	int error = 0;
-
-	info("Deleting %s", nsname);
-	setstr(path, "ip netns delete %s", nsname);
-	exec_cmd(IP_CMD, path);
-out:
-	return error;
-}
-
-static int open_unlink_net_namespace(char *nsname, int *unlinked_fd)
-{
-	char path[PATH_MAX];
-	int error = 0, fd;
-	struct stat sb;
-
-	setstr(path, "/var/run/netns/%s", nsname);
-	fd = open(path, O_RDONLY);
-	if (fd < 0) {
-		error = errno;
-		warn("failed to open namespace %s, error %d", path, error);
-		goto out;
-	}
-
-	/*
-	 * It is helpful to known the inode number for debug/triage
-	 * to correlate with /proc/pid/ns/net
-	 */
-	error = stat(path, &sb);
-	if (error) {
-		error = errno;
-		warn("Can not stat %s, error %d", path, error);
-		goto out;
-	}
-
-	/*
-	 * Remove the /var/run/netns/<name> entry. We
-	 * can not just unlink the file, that results in EBUSY
-	 * because it is actually an nsfs (name space fs) mount point.
-	 */
-	error = delete_net_namespace(nsname);
-	if (error) {
-		warn("can not delete namespace %s error %d", nsname, error);
-		goto out;
-	}
-
-	info("namespace %s ino %ld unlinked", nsname, sb.st_ino);
-	error = 0;
-	*unlinked_fd = fd;
-
-out:
-	return error;
-}
-
 /*
- * Since namespaces are unlinked when joined, we can not just
- * look in /var/run/netns. We have to look and see if the devices
- * are still connected to the bridge
+ * Since our namespaces have no persistent filesystem entry, 
+ * (we are not using the ip utility nor creating bind mounts)
+ * we can not look in /var/run/netns. We have to look and see
+ * if the devices are still connected to the bridge
  */
 static int check_existing_net_namespace(char *brname, char *devname)
 {
@@ -640,18 +556,30 @@ out:
  */
 static int create_vtap_netdev(char *vethname, char *vtapname, char *vtapmac)
 {
-	char cmdbuf[CMDBUF_SIZE];
-	int error = 0;
+	struct rtnl_handle rth;
+	int veth_index, vtap_index, error;
 
 	info("Creating tapdev %s mac %s", vtapname, vtapmac);
 
-	setstr(cmdbuf, "ip link add link %s %s "
-			"address %s type macvtap mode bridge",
-			vethname, vtapname, vtapmac)
-	exec_cmd(IP_CMD, cmdbuf);
+	error = rtnl_open(&rth, 0);
+        if (error < 0)
+                goto out;
 
-	setstr(cmdbuf, "ip link set %s up", vtapname);
-	exec_cmd(IP_CMD, cmdbuf);
+        error = get_link_index(&rth, vethname, &veth_index);
+        if (error)
+                goto out;
+
+        error = add_vtap_link(&rth, veth_index, vtapname, vtapmac);
+        if (error)
+                goto out;
+
+        error = get_link_index(&rth, vtapname, &vtap_index);
+        if (error)
+                goto out;
+
+        error = set_link_up(&rth, vtap_index);
+        if (error)
+                goto out;
 
 	error = 0;
 out:
@@ -879,14 +807,18 @@ out:
  * cleanup on failure cases, so we make a "best effort" to delete
  * the bridge and cleanup the masq tables
  */
-static int delete_bridging(char *braddr, char *brname)
+static int delete_bridging(struct rtnl_handle *rth, char *braddr, char *brname)
 {
-	char cmdbuf[CMDBUF_SIZE];
 	char *brmasq = NULL;
 	int error = 0;
 
-	setstr(cmdbuf, "ip link del dev %s type bridge", brname);
-	(void)execbuf(IP_CMD, cmdbuf);
+        error = set_link_down(rth, brname);
+        if (error)
+                goto out;
+
+        error = del_link(rth, brname, "bridge");
+        if (error)
+                goto out;
 
 	if (build_ipaddr(braddr, 0, 0, &brmasq) == 0) {
 		(void)delete_iptables(brname, brmasq, NOFAIL_ON_ERR);
@@ -907,6 +839,7 @@ static int teardown_bridging(char *braddr)
 	char *brmac = NULL;
 	char *brname = NULL;
 	int error = 0;
+	struct rtnl_handle rth;
 
 	error = setup_net_brname(&brname);
 	if (error)
@@ -926,12 +859,17 @@ static int teardown_bridging(char *braddr)
 
 	info("start teardown bridge %s", brname);
 
-	setstr(cmdbuf, "ip link set %s down", brname);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = rtnl_open(&rth, 0);
+	if (error)
+		goto out;
 
-	setstr(cmdbuf, "ip link del dev %s type bridge", brname);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = set_link_down(&rth, brname);
+        if (error)
+                goto out;
 
+        error = del_link(&rth, brname, "bridge");
+        if (error)
+                goto out;
 	/*
 	 * Remove IP tables
 	 */
@@ -947,7 +885,7 @@ static int teardown_bridging(char *braddr)
 	exec_shell(cmdbuf);
 
   #if defined(__ANDROID__)
-	error = del_android_iprule();
+	error = del_android_iprule(&rth);
 	if (error)
 		goto out;
   #endif /* ANDROID */
@@ -959,6 +897,8 @@ out:
 
 	if (error)
 		warn("Can not delete bridge %s", brname);
+
+	rtnl_close(&rth);
 
 	if (brmasq)
 		free(brmasq);
@@ -982,6 +922,8 @@ static int create_bridging(char *braddr)
 	char *brname = NULL;
 	char *brip_existing = NULL;
 	int error = 0, created = 0;
+	struct rtnl_handle rth;
+	int bridge_index;
 
 	info("start creating bridge ip %s", braddr);
 
@@ -1013,12 +955,23 @@ static int create_bridging(char *braddr)
 		goto out;
 	}
 
-	setstr(cmdbuf, "ip link add name %s type bridge", brname);
-	exec_cmd(IP_CMD, cmdbuf);
-	created = 1;
+	error = rtnl_open(&rth, 0);
+	if (error) {
+		warn("Can not open netlink socket");
+		goto out;
+	}
 
-	setstr(cmdbuf, "ip link set %s up", brname);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = add_link(&rth, brname, "bridge");
+	if (error)
+		goto out;
+
+        error = get_link_index(&rth, brname, &bridge_index);
+        if (error)
+                goto out;
+
+	error = set_link_up(&rth, bridge_index);
+        if (error)
+                goto out;
 
 	/*
 	 * Very important: Add a MAC address. Without this,
@@ -1027,16 +980,16 @@ static int create_bridging(char *braddr)
 	 * parallel, this causes ARP to get multiple different
 	 * MAC addr resolutions for the address of the bridge. Wannsinn
 	 */
-	setstr(cmdbuf, "ip link set %s address %s",
-		brname, brmac);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = set_link_mac(&rth, bridge_index, brmac);
+        if (error)
+                goto out;
 
 	/*
 	 * broadcast addr with mask used on addr
 	 */
-	setstr(cmdbuf, "ip addr add %s/%d brd + dev %s",
-		braddr, def_bridge_cidr, brname);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = set_link_ip(&rth, bridge_index, braddr, IFLA_BROADCAST, def_bridge_cidr);
+        if (error)
+                goto out;
 
 	error = build_ipaddr(braddr, 0, 0, &brmasq);
 	if (error)
@@ -1074,7 +1027,7 @@ static int create_bridging(char *braddr)
 	exec_shell(cmdbuf);
 
   #if defined(__ANDROID__)
-	error = fix_android_iprules(brname);
+	error = fix_android_iprules(&rth);
 	if (error)
 		goto out;
   #endif
@@ -1085,7 +1038,9 @@ out:
 	info("end creating bridge %s return error %d", braddr, error);
 
 	if (error && created)
-		(void)delete_bridging(braddr, brname);
+		(void)delete_bridging(&rth, braddr, brname);
+
+	rtnl_close(&rth);
 
 	if (brmasq)
 		free(brmasq);
@@ -1102,20 +1057,36 @@ out:
 
 
 /*
- * Create and then unlink a namespace
+ * Create an unlinked namespace (i.e., a namespace without a
+ * filesystem entry)
  */
 int create_unlink_netns(char *braddr, int subnet, int *unlinked_fd)
 {
-	char cmdbuf[CMDBUF_SIZE];
-	char devname[IFNAMSIZ];
+	char peername[IFNAMSIZ];
 	char *vethname = NULL;
 	char *nsname = NULL;
 	char *ipaddr = NULL;
-	char *brname;
-	int error = 0, created = 0;
-
+	char *brname = NULL;
+	int error = 0;
+	int bridge_index, veth_index, peer_index, lo_index;
+        int rootns_netfd = -1, netfd = -1;
+	struct rtnl_handle rth;
+	pid_t tid = gettid();
 
 	info("create_unlink namespace subnet %d", subnet);
+
+	/*
+         * Save the root namespaces so that we can switch back
+         * to it for cleanup. We must always use the same threadid
+	 * to pick up the correct entry in /proc/self/task
+         */
+        error = netns_save(&rootns_netfd, tid);
+        if (error)
+                goto out;
+
+        error = rtnl_open(&rth, 0);
+        if (error < 0)
+                goto out;
 
 	error = setup_net_brname(&brname);
 	if (error)
@@ -1143,62 +1114,100 @@ int create_unlink_netns(char *braddr, int subnet, int *unlinked_fd)
 	if (error)
 		goto out;
 
-	setstr(devname, "%s-peer", vethname);
+	setstr(peername, "%s-peer", vethname);
 
-	error = check_existing_net_namespace(brname, devname);
+	error = check_existing_net_namespace(brname, peername);
 	if (error) {
 		warn("namespace %s already exists", nsname);
 		goto out;
 	}
 	error = 0;
 
-	info("creating namespace %s to subnet %d with %s",
+	info("create namespace start %s to subnet %d with %s",
 		nsname, subnet, ipaddr);
 
-	setstr(cmdbuf, "ip netns add %s", nsname);
-	exec_cmd(IP_CMD, cmdbuf);
-	created = 1;
-
 	/*
-	 * Bring up the loopback, otherwise self ping fails
+	 * Unlink using the IP utility, we do not need persisent
+	 * filesystem state, so mounts are not necessary. Just an
+	 * open fd to the created namespace entry in /proc/tid/ns/net
 	 */
-	setstr(cmdbuf, "ip -n %s link set lo up", nsname);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = netns_create(&netfd, tid);
+        if (error)
+                goto out;
 
-	/*
-	 * Add one end of the veth pair to the namespace
-	 */
-	setstr(cmdbuf, "ip link add %s type veth peer name %s", vethname, devname);
-	exec_cmd(IP_CMD, cmdbuf);
-	setstr(cmdbuf, "ip link set %s netns %s", vethname, nsname);
-	exec_cmd(IP_CMD, cmdbuf);
+        error = add_veth(&rth, vethname, peername);
+        if (error)
+                goto out;
 
-	/*
-	 * Add the other end of the veth pair to the bridge
-	 */
-	setstr(cmdbuf, "ip link set %s master %s", devname, brname);
-	exec_cmd(IP_CMD, cmdbuf);
+	error = get_link_index(&rth, brname, &bridge_index);
+        if (error)
+                goto out;
 
-	setstr(cmdbuf, "ip link set %s up", devname);
-	exec_cmd(IP_CMD, cmdbuf);
+        error = get_link_index(&rth, vethname, &veth_index);
+        if (error)
+                goto out;
 
-	/*
-	 * Add the address and bring up both sides
-	 */
-	setstr(cmdbuf, "ip -n %s addr add %s/%d dev %s", nsname, ipaddr,
-		def_bridge_cidr, vethname);
-	exec_cmd(IP_CMD, cmdbuf);
+        error = get_link_index(&rth, peername, &peer_index);
+        if (error)
+                goto out;
 
-	setstr(cmdbuf, "ip -n %s link set %s up", nsname, vethname);
-	exec_cmd(IP_CMD, cmdbuf);
+        error = set_link_ns(&rth, veth_index, netfd);
+        if (error)
+                goto out;
 
-	/*
-	 * Add default route
-	 */
-	setstr(cmdbuf, "ip -n %s route add default via %s", nsname, braddr);
-	exec_cmd(IP_CMD, cmdbuf);
+        error = set_vethpeer_master(&rth, peer_index, bridge_index);
+        if (error)
+                goto out;
+
+        error = set_link_up(&rth, peer_index);
+        if (error)
+                goto out;
+
+        /*
+         * Now switch to the namespace and update the devices
+         */
+	error = netns_switch(netfd);
+        if (error)
+                goto out;
+
+        /*
+         * Since we are in a new namespace, we have to get
+         * a new handle to the socket so that it is in the
+         * correct namespace
+         */
+        rtnl_close(&rth);
+        error = rtnl_open(&rth, 0);
+        if (error < 0)
+                goto out;
+
+        error = set_link_ip(&rth, veth_index, ipaddr, IFLA_ADDRESS, def_bridge_cidr);
+        if (error)
+                goto out;
+
+        error = set_link_up(&rth, veth_index);
+        if (error)
+                goto out;
+
+        error = set_def_route(&rth, braddr);
+        if (error)
+                goto out;
+
+        error = get_link_index(&rth, "lo", &lo_index);
+        if (error)
+                goto out;
+
+        error = set_link_up(&rth, lo_index);
+        if (error)
+                goto out;
 
 	error = 0;
+
+	/*
+         * Revert back to the original namespace 
+         */
+        error = netns_switch(rootns_netfd);
+        if (error)
+                goto out;
 
 	/*
 	 * Since we (the parent) created the namespace, we can
@@ -1206,17 +1215,19 @@ int create_unlink_netns(char *braddr, int subnet, int *unlinked_fd)
 	 * we keep an FD open that the child will then close
 	 * after joining the namespace
 	 */
-	error = open_unlink_net_namespace(nsname, unlinked_fd);
-	if (error)
-		goto out;
+	*unlinked_fd = netfd;
 
 out:
-	info("end create to subnet %d with %s return error %d",
+	info("create namespace end subnet %d with %s return error %d",
 		subnet, ipaddr ? ipaddr : "<invalid>" , error);
 
-	if (error && created) {
-		(void)delete_net_namespace(nsname);
+	rtnl_close(&rth);
+
+	if (error && (netfd != -1)) {
+		close(netfd);
 	}
+	if (rootns_netfd != -1)
+		close(rootns_netfd);
 
 	if (vethname)
 		free(vethname);

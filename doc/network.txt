@@ -58,3 +58,15 @@ To access the network stack in a container, certain permissions are required. Fo
 Android, the process must be in the inet group (3003). Without group permissions,
 the container must have the CAP_NET_RAW capability to do a ping.
 
+Implementation:
+Early versions used the 'ip' utility to create the the network namespace
+and the devices inside. This resulted in a fork/exec for each invocation,
+plus the overhead of the 'ip' utility creating bind mounts to track
+the namespace. 
+
+By using netlink sockets directly, this overhead can be eliminated. The
+API is not documented, but by referencing the iproute2 source (the base
+of the 'ip' utility), the correct format of the socket messages
+can be determined. This has the added benefit of eliminating the need
+for bind mounts, since the namespace is private to a single process and
+can be referenced via a file descriptor.
