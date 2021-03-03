@@ -22,7 +22,6 @@ use northstar_tests::{
     test_container::{get_test_container_npk, get_test_resource_npk},
 };
 use std::{
-    collections::HashSet,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -269,11 +268,13 @@ test!(mount_containers_without_verity, {
 // any filedescriptor is leaked
 test!(fd_leak, {
     /// Collect a set of files in /proc/$$/fd
-    fn fds() -> Result<HashSet<PathBuf>> {
-        Ok(std::fs::read_dir("/proc/self/fd")?
+    fn fds() -> Result<Vec<PathBuf>> {
+        let mut links = std::fs::read_dir("/proc/self/fd")?
             .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .collect())
+            .flat_map(|entry| entry.path().read_link())
+            .collect::<Vec<_>>();
+        links.sort();
+        Ok(links)
     }
 
     // Collect list of fds
