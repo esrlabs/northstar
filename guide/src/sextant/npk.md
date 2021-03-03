@@ -11,4 +11,4 @@ The following chapters describe how to use `sextant` to work with NPKs and expla
 - [Unpacking an NPK](unpack.md)
 - [Inspecting an NPK](inspect.md)
 - [Generating Repository Keys](gen_repo_keys.md)
-- [The NPK file format](npk_format_details.md)
+- [NPK Format Reference](npk_format_reference.md)

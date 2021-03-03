@@ -1,4 +1,4 @@
-# The NPK File Format
+# NPK Format Reference
 
 NPKs are compressed archives containing both the container's application logic as well as the data files necessary to mount an run the container.
 
@@ -14,27 +14,7 @@ The file `manifest.yaml` references all data necessary to mount and execute the 
 As an example, the `manifest.yaml` of the `memeater` example container looks as follows:
 
 ```yaml
-name: memeater
-version: 0.0.1
-init: /memeater
-uid: 1000
-gid: 1000
-mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
-cgroups:
-  memory:
-    limit_in_bytes: 10000000
-    swappiness: 0
-io:
-  stdout:
-    log:
-      - DEBUG
-      - memeater
+{{#include ./../../../examples/container/memeater/manifest.yaml}}
 ```
 
 ### `name`
