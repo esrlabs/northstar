@@ -39,7 +39,7 @@ use tokio::{
 mod cgroups;
 pub mod config;
 mod console;
-mod container_key;
+mod container;
 #[allow(unused)]
 mod device_mapper;
 mod error;
@@ -55,10 +55,10 @@ pub(self) mod state;
 
 pub(self) type EventTx = mpsc::Sender<Event>;
 pub(self) type RepositoryId = String;
-pub use container_key::*;
+pub use container::*;
 pub(self) use npk::manifest::{Name, Version};
 pub(self) use repository::Repository;
-pub(self) use state::Container;
+pub(self) use state::MountedContainer;
 
 pub type ExitCode = i32;
 pub type Pid = u32;
@@ -79,13 +79,13 @@ impl Display for ExitStatus {
 
 #[derive(new, Clone, Debug)]
 pub(crate) enum Notification {
-    OutOfMemory(ContainerKey),
+    OutOfMemory(Container),
     Exit {
-        key: ContainerKey,
+        container: Container,
         status: ExitStatus,
     },
-    Started(ContainerKey),
-    Stopped(ContainerKey),
+    Started(Container),
+    Stopped(Container),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -94,9 +94,9 @@ pub(crate) enum Event {
     /// Incomming command
     Console(console::Request, oneshot::Sender<api::model::Response>),
     /// A instance exited with return code
-    Exit(ContainerKey, ExitStatus),
+    Exit(Container, ExitStatus),
     /// Out of memory event occured
-    Oom(ContainerKey),
+    Oom(Container),
     /// Northstar shall shut down
     Shutdown,
     /// Notification events
@@ -263,9 +263,9 @@ async fn runtime_task(
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
-            Event::Oom(key) => state.on_oom(&key).await,
+            Event::Oom(container) => state.on_oom(&container).await,
             // A container process existed. Check `process::wait_exit` for details.
-            Event::Exit(key, exit_status) => state.on_exit(&key, &exit_status).await,
+            Event::Exit(container, exit_status) => state.on_exit(&container, &exit_status).await,
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => break state.shutdown().await,
             // Forward notifications to console

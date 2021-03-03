@@ -15,7 +15,7 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use itertools::Itertools;
-use northstar::api::model::{Container, Notification, Repository, RepositoryId, Response};
+use northstar::api::model::{ContainerData, Notification, Repository, RepositoryId, Response};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, io};
 use tokio::time;
@@ -26,7 +26,7 @@ pub(crate) fn notification<W: io::Write>(mut w: W, notification: &Notification) 
     writeln!(w, "{}", msg).ok();
 }
 
-pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Result<()> {
+pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[ContainerData]) -> Result<()> {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -44,9 +44,9 @@ pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[Container]) -> Re
         .sorted_by_key(|c| c.manifest.init.is_none())
     {
         table.add_row(Row::new(vec![
-            Cell::new(&container.key.name()).with_style(Attr::Bold),
-            Cell::new(&container.key.version().to_string()),
-            Cell::new(&container.key.repository()),
+            Cell::new(&container.container.name()).with_style(Attr::Bold),
+            Cell::new(&container.container.version().to_string()),
+            Cell::new(&container.container.repository()),
             Cell::new(
                 container
                     .manifest

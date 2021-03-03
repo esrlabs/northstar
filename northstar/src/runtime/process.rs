@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{ContainerKey, Event, EventTx, ExitStatus, Pid};
+use super::{Container, Event, EventTx, ExitStatus, Pid};
 use futures::{Future, FutureExt};
 use log::debug;
 use nix::{sys::wait, unistd};
@@ -43,7 +43,7 @@ pub enum Error {
 /// Spawn a task that waits for the process to exit. This resolves to the exit status
 /// of `pid`.
 pub(crate) async fn waitpid(
-    key: ContainerKey,
+    container: Container,
     pid: Pid,
     event_handle: EventTx,
 ) -> impl Future<Output = Result<ExitStatus, Error>> {
@@ -94,7 +94,7 @@ pub(crate) async fn waitpid(
 
         // Send notification to main loop
         event_handle
-            .blocking_send(Event::Exit(key, status.clone()))
+            .blocking_send(Event::Exit(container, status.clone()))
             .expect("Internal channel error on main event handle");
 
         status

@@ -17,7 +17,7 @@ use color_eyre::eyre::WrapErr;
 use escargot::CargoBuild;
 use lazy_static::lazy_static;
 use log::debug;
-use northstar::api::model::ContainerKey;
+use northstar::api::model::Container;
 use npk::npk;
 use std::{
     convert::TryInto,
@@ -96,7 +96,7 @@ pub async fn test_container_npk() -> &'static Path {
 }
 
 /// Test container key
-pub fn test_container() -> ContainerKey {
+pub fn test_container() -> Container {
     TEST_CONTAINER.try_into().unwrap()
 }
 

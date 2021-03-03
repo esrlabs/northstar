@@ -35,8 +35,8 @@ use url::Url;
 use super::{
     codec::framed,
     model::{
-        Container, ContainerKey, Message, Notification, Payload, Repository, RepositoryId, Request,
-        Response,
+        Container, ContainerData, Message, Notification, Payload, Repository, RepositoryId,
+        Request, Response,
     },
 };
 
@@ -210,7 +210,7 @@ impl Client {
     /// println!("{:#?}", containers);
     /// # }
     /// ```
-    pub async fn containers(&self) -> Result<Vec<Container>, Error> {
+    pub async fn containers(&self) -> Result<Vec<ContainerData>, Error> {
         match self.request(Request::Containers).await? {
             Response::Containers(containers) => Ok(containers),
             Response::Err(e) => Err(Error::Api(e)),
@@ -261,7 +261,7 @@ impl Client {
         repository: &str,
     ) -> Result<(), Error> {
         match self
-            .request(Request::Start(ContainerKey::new(
+            .request(Request::Start(Container::new(
                 name.to_string(),
                 version.clone(),
                 repository.to_string(),
@@ -299,7 +299,7 @@ impl Client {
     ) -> Result<(), Error> {
         match self
             .request(Request::Stop(
-                ContainerKey::new(name.to_string(), version.clone(), repository.to_string()),
+                Container::new(name.to_string(), version.clone(), repository.to_string()),
                 timeout.as_secs(),
             ))
             .await?
@@ -362,7 +362,7 @@ impl Client {
         repository: &str,
     ) -> Result<(), Error> {
         match self
-            .request(Request::Uninstall(ContainerKey::new(
+            .request(Request::Uninstall(Container::new(
                 name.to_string(),
                 version.clone(),
                 repository.to_string(),

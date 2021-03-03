@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::ContainerKey;
+use super::Container;
 use crate::api;
 use std::io;
 use thiserror::Error;
@@ -20,21 +20,21 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Application {0} is not started")]
-    ApplicationNotStarted(ContainerKey),
+    ApplicationNotStarted(Container),
     #[error("Application {0} is started")]
-    ApplicationStarted(ContainerKey),
+    ApplicationStarted(Container),
     #[error("Resource busy")]
     ResourceBusy,
     #[error("Missing resource {0}")]
     MissingResource(String),
     #[error("Application is already installed {0}")]
-    ApplicationInstalled(ContainerKey),
+    ApplicationInstalled(Container),
     #[error("Unknown application {0}")]
-    UnknownApplication(ContainerKey),
+    UnknownApplication(Container),
     #[error("Unknown repository {0}")]
     UnknownRepository(String),
     #[error("Unknown resource {0}")]
-    UnknownResource(ContainerKey),
+    UnknownResource(Container),
 
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
@@ -60,13 +60,21 @@ pub enum Error {
 impl From<Error> for api::model::Error {
     fn from(error: Error) -> api::model::Error {
         match error {
-            Error::UnknownApplication(key) => api::model::Error::UnknownApplication(key),
-            Error::ApplicationNotStarted(key) => api::model::Error::ApplicationNotStarted(key),
-            Error::ApplicationStarted(key) => api::model::Error::ApplicationRunning(key),
-            Error::ApplicationInstalled(key) => api::model::Error::ApplicationInstalled(key),
+            Error::UnknownApplication(container) => {
+                api::model::Error::UnknownApplication(container)
+            }
+            Error::ApplicationNotStarted(container) => {
+                api::model::Error::ApplicationNotStarted(container)
+            }
+            Error::ApplicationStarted(container) => {
+                api::model::Error::ApplicationRunning(container)
+            }
+            Error::ApplicationInstalled(container) => {
+                api::model::Error::ApplicationInstalled(container)
+            }
             Error::MissingResource(resource) => api::model::Error::MissingResource(resource),
             Error::UnknownRepository(id) => api::model::Error::UnknownRepository(id),
-            Error::UnknownResource(key) => api::model::Error::UnknownResource(key),
+            Error::UnknownResource(container) => api::model::Error::UnknownResource(container),
             Error::Npk(error) => api::model::Error::Npk(error.to_string()),
             Error::Process(error) => api::model::Error::Process(error.to_string()),
             Error::Console(error) => api::model::Error::Console(error.to_string()),
