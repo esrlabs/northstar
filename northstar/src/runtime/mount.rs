@@ -12,11 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    config::Config,
-    device_mapper as dm, device_mapper,
-    loopdev::{losetup, LoopControl},
-};
+use super::{config::Config, device_mapper as dm, device_mapper, loopdev::LoopControl};
 use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
 use log::{debug, info};
@@ -233,20 +229,19 @@ impl MountControl {
             manifest.version
         );
 
-        let loop_device = losetup(&self.lc, npk.as_raw_fd(), fsimg_offset, fsimg_size)
+        let loop_device = self
+            .lc
+            .losetup(npk.as_raw_fd(), fsimg_offset, fsimg_size, true, true)
             .await
             .map_err(Error::LoopDevice)?;
 
         let device = if !verity {
-            loop_device.path().await.unwrap()
+            loop_device.path().to_owned()
         } else {
             match (&verity_header, &npk.hashes()) {
                 (Some(header), Some(hashes)) => {
-                    let loop_device_id = loop_device
-                        .dev_id()
-                        .await
-                        .map(|(major, minor)| format!("{}:{}", major, minor))
-                        .map_err(Error::LoopDevice)?;
+                    let (major, minor) = loop_device.dev_id();
+                    let loop_device_id = format!("{}:{}", major, minor);
 
                     self.verity_setup(
                         &loop_device_id,
@@ -258,7 +253,7 @@ impl MountControl {
                     .await?
                 }
                 // TODO: Is this correct?
-                _ => loop_device.path().await.unwrap(),
+                _ => loop_device.path().to_owned(),
             }
         };
 

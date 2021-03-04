@@ -20,7 +20,7 @@ use northstar_tests::{
     test,
     test_container::{test_container, TEST_CONTAINER},
 };
-use std::{collections::HashSet, convert::TryInto, path::PathBuf};
+use std::{convert::TryInto, path::PathBuf};
 
 // Smoke test the integration test harness
 test!(smoke, {
@@ -225,15 +225,16 @@ test!(check_uid_and_gid, {
 // any filedescriptor is leaked
 test!(fd_leak, {
     /// Collect a set of files in /proc/$$/fd
-    fn fds() -> HashSet<PathBuf> {
-        std::fs::read_dir("/proc/self/fd")
-            .expect("Failed to open proc/$$/fd")
+    fn fds() -> Result<Vec<PathBuf>, std::io::Error> {
+        let mut links = std::fs::read_dir("/proc/self/fd")?
             .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .collect()
+            .flat_map(|entry| entry.path().read_link())
+            .collect::<Vec<_>>();
+        links.sort();
+        Ok(links)
     }
     // Collect list of fds
-    let before = fds();
+    let before = fds()?;
 
     let runtime = Northstar::launch().await?;
     runtime.install_test_container().await?;
@@ -246,7 +247,7 @@ test!(fd_leak, {
     let result = runtime.shutdown().await;
 
     // Compare the list of fds before and after the RT run.
-    assert_eq!(before, fds());
+    assert_eq!(before, fds()?);
 
     result
 });

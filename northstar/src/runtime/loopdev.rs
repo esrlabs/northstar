@@ -21,10 +21,10 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
-use tokio::{fs, io, time};
+use tokio::{fs, io, task, time};
 
 const LOOP_SET_FD: u16 = 0x4C00;
-const LOOP_CLR_FD: u16 = 0x4C01;
+//const LOOP_CLR_FD: u16 = 0x4C01;
 const LOOP_SET_STATUS64: u16 = 0x4C04;
 const LOOP_SET_DIRECT_IO: u16 = 0x4C08;
 const LOOP_FLAG_READ_ONLY: u32 = 0x01;
@@ -48,19 +48,52 @@ pub enum Error {
     #[error("Failed to set direct I/O mode")]
     DirectIo,
     #[error("Failed to dis-associate loop device from file descriptor")]
-    Clear,
+    Detach,
 }
 
 #[derive(Debug)]
 pub(super) struct LoopControl {
-    dev_file: fs::File,
+    control: fs::File,
     dev: String,
+}
+
+struct ControlLock {
+    control_fd: RawFd,
+}
+
+impl ControlLock {
+    pub async fn new(control_fd: RawFd) -> Result<ControlLock, Error> {
+        let result = task::block_in_place(|| {
+            nix::fcntl::flock(control_fd, nix::fcntl::FlockArg::LockExclusive)
+        });
+        match result {
+            Ok(_) => debug!("Got control lock"),
+            Err(e) => {
+                warn!("Failed to lock control {:?}", e);
+                panic!("Failed to lock control");
+            }
+        }
+
+        Ok(ControlLock { control_fd })
+    }
+}
+
+impl Drop for ControlLock {
+    fn drop(&mut self) {
+        match nix::fcntl::flock(self.control_fd, nix::fcntl::FlockArg::Unlock) {
+            Ok(_) => debug!("Released control lock on fd {}", self.control_fd),
+            Err(e) => panic!(
+                "Failed to release control lock on {}: {}",
+                self.control_fd, e
+            ),
+        }
+    }
 }
 
 impl LoopControl {
     pub async fn open(control: &Path, dev: &str) -> Result<LoopControl, Error> {
         Ok(LoopControl {
-            dev_file: fs::OpenOptions::new()
+            control: fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(&control)
@@ -70,24 +103,124 @@ impl LoopControl {
         })
     }
 
-    pub async fn next_free(&self) -> Result<LoopDevice, Error> {
-        let result;
-        unsafe {
-            result = ioctl(self.dev_file.as_raw_fd() as c_int, LOOP_CTL_GET_FREE.into());
-        }
-        if result < 0 {
-            Err(Error::NoFreeDeviceFound)
-        } else {
-            Ok(LoopDevice::open(&format!("{}{}", self.dev, result)).await?)
-        }
+    pub async fn losetup(
+        &self,
+        file_fd: RawFd,
+        offset: u64,
+        sizelimit: u64,
+        read_only: bool,
+        auto_clear: bool,
+    ) -> Result<LoopDevice, Error> {
+        let start = time::Instant::now();
+
+        // Lock the loopback control file via fcntl
+        let lock = ControlLock::new(self.control.as_raw_fd()).await?;
+
+        let loop_device = task::block_in_place(move || {
+            // Get next free loop device
+            let index =
+                unsafe { ioctl(self.control.as_raw_fd() as c_int, LOOP_CTL_GET_FREE.into()) };
+            let loop_device_path = match index {
+                n if n < 0 => return Err(Error::NoFreeDeviceFound),
+                n => PathBuf::from(&format!("{}{}", self.dev, n)),
+            };
+
+            debug!("Using loop dev {}", loop_device_path.display());
+
+            // Open e.g. /dev/loop4
+            let loop_device_file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&loop_device_path)
+                .map_err(Error::Open)?;
+
+            // Attach the file => Associate the loop device with the open file
+            if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_FD.into(), file_fd) } < 0 {
+                return Err(Error::AssociateWithOpenFile);
+            }
+
+            // Set offset and limit for backing_file
+            log::debug!("Setting offset {} and limit {}", offset, sizelimit);
+            let mut info = loop_info64 {
+                lo_offset: offset,
+                lo_sizelimit: sizelimit,
+                ..Default::default()
+            };
+            if read_only {
+                info.lo_flags |= LOOP_FLAG_READ_ONLY;
+            }
+            if auto_clear {
+                info.lo_flags |= LOOP_FLAG_AUTOCLEAR;
+            }
+
+            const MAX_RETRIES: usize = 10;
+
+            for _ in 0..MAX_RETRIES {
+                let code = unsafe {
+                    ioctl(
+                        loop_device_file.as_raw_fd(),
+                        LOOP_SET_STATUS64.into(),
+                        &mut info,
+                    )
+                };
+
+                match Errno::result(code) {
+                    Ok(_) => break,
+                    nix::Result::Err(Sys(Errno::EAGAIN)) => {
+                        warn!("Received a EAGAIN during lo attach");
+                        // this error means the call should be retried
+                        std::thread::sleep(time::Duration::from_millis(50));
+                    }
+                    nix::Result::Err(e) => {
+                        return Err(Error::SetStatusFailed(e));
+                    }
+                }
+            }
+
+            // Unlock the loopback control lock
+            drop(lock);
+
+            // Try to set direct IO
+            if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_DIRECT_IO.into(), 1) } < 0 {
+                warn!(
+                    "Failed to enable direct IO on {}",
+                    loop_device_path.display()
+                );
+            }
+
+            // Get major/minor
+            let attr = loop_device_file.metadata()?;
+            let rdev = attr.rdev();
+            let major = ((rdev >> 32) & 0xFFFF_F000) | ((rdev >> 8) & 0xFFF);
+            let minor = ((rdev >> 12) & 0xFFFF_FF00) | (rdev & 0xFF);
+
+            let loop_device = LoopDevice {
+                device: loop_device_file,
+                path: loop_device_path,
+                major,
+                minor,
+            };
+
+            Ok(loop_device)
+        })?;
+
+        let losetup_duration = start.elapsed();
+        debug!(
+            "Loopback setup took {:.03}s",
+            losetup_duration.as_fractional_secs(),
+        );
+
+        Ok(loop_device)
     }
 }
 
 /// Interface to a loop device ie `/dev/loop0`.
 #[derive(Debug)]
 pub(super) struct LoopDevice {
-    device: fs::File,
+    device: std::fs::File,
     path: PathBuf,
+    major: u64,
+    minor: u64,
 }
 
 impl AsRawFd for LoopDevice {
@@ -97,114 +230,14 @@ impl AsRawFd for LoopDevice {
 }
 
 impl LoopDevice {
-    /// Opens a loop device.
-    pub async fn open<P: AsRef<Path>>(dev: P) -> Result<LoopDevice, Error> {
-        let f = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(dev.as_ref())
-            .await
-            .map_err(Error::Open)?;
-        Ok(LoopDevice {
-            device: f,
-            path: PathBuf::from(dev.as_ref()),
-        })
-    }
-
-    pub fn attach_file(
-        &self,
-        file_fd: RawFd,
-        offset: u64,
-        sizelimit: u64,
-        read_only: bool,
-        auto_clear: bool,
-    ) -> Result<(), Error> {
-        let device_fd = self.device.as_raw_fd() as c_int;
-
-        // Attach the file => Associate the loop device with the open file
-        let code = unsafe { ioctl(device_fd, LOOP_SET_FD.into(), file_fd) };
-
-        if code < 0 {
-            return Err(Error::AssociateWithOpenFile);
-        }
-
-        // Set offset and limit for backing_file
-        log::debug!("Setting offset {} and limit {}", offset, sizelimit);
-        let mut info = loop_info64 {
-            lo_offset: offset,
-            lo_sizelimit: sizelimit,
-            ..Default::default()
-        };
-        if read_only {
-            info.lo_flags |= LOOP_FLAG_READ_ONLY;
-        }
-        if auto_clear {
-            info.lo_flags |= LOOP_FLAG_AUTOCLEAR;
-        }
-
-        const MAX_RETRIES: usize = 3;
-
-        for _ in 0..MAX_RETRIES {
-            let code = unsafe { ioctl(device_fd, LOOP_SET_STATUS64.into(), &mut info) };
-
-            match Errno::result(code) {
-                Ok(_) => {
-                    return Ok(());
-                }
-                nix::Result::Err(Sys(Errno::EAGAIN)) => {
-                    // this error means the call should be retried
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                nix::Result::Err(e) => {
-                    self.detach()?;
-                    return Err(Error::SetStatusFailed(e));
-                }
-            }
-        }
-
-        self.detach()?;
-        Err(Error::StatusWriteBusy(MAX_RETRIES))
-    }
-
-    pub fn detach(&self) -> Result<(), Error> {
-        let fd = self.device.as_raw_fd() as c_int;
-        let code = unsafe { ioctl(fd, LOOP_CLR_FD.into(), 0) };
-        if code < 0 {
-            Err(Error::Clear)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn set_direct_io(&self, enable: bool) -> Result<(), Error> {
-        unsafe {
-            if ioctl(
-                self.device.as_raw_fd() as c_int,
-                LOOP_SET_DIRECT_IO.into(),
-                if enable { 1 } else { 0 },
-            ) < 0
-            {
-                Err(Error::DirectIo)
-            } else {
-                Ok(())
-            }
-        }
-    }
-
     /// Get the path of the loop device.
-    pub async fn path(&self) -> Option<PathBuf> {
-        let mut p = PathBuf::from("/proc/self/fd");
-        p.push(self.device.as_raw_fd().to_string());
-        fs::read_link(&p).await.ok()
+    pub fn path(&self) -> &Path {
+        self.path.as_path()
     }
 
     /// Get major and minor number of device
-    pub async fn dev_id(&self) -> Result<(u64, u64), Error> {
-        let attr = self.device.metadata().await?;
-        let rdev = attr.rdev();
-        let major = ((rdev >> 32) & 0xFFFF_F000) | ((rdev >> 8) & 0xFFF);
-        let minor = ((rdev >> 12) & 0xFFFF_FF00) | (rdev & 0xFF);
-        Ok((major, minor))
+    pub fn dev_id(&self) -> (u64, u64) {
+        (self.major, self.minor)
     }
 }
 
@@ -243,30 +276,4 @@ impl Default for loop_info64 {
             lo_init: [0; 2],
         }
     }
-}
-
-pub(super) async fn losetup(
-    lc: &LoopControl,
-    file_fd: RawFd,
-    fs_offset: u64,
-    lo_size: u64,
-) -> Result<LoopDevice, Error> {
-    let start = time::Instant::now();
-    let loop_device = lc.next_free().await?;
-
-    debug!("Using loop device {:?}", loop_device.path().await);
-
-    loop_device.attach_file(file_fd, fs_offset, lo_size, true, true)?;
-
-    if let Err(error) = loop_device.set_direct_io(true) {
-        warn!("Failed to enable direct io: {:?}", error);
-    }
-
-    let losetup_duration = start.elapsed();
-    debug!(
-        "Loopback setup took {:.03}s",
-        losetup_duration.as_fractional_secs(),
-    );
-
-    Ok(loop_device)
 }
