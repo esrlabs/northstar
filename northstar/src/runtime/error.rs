@@ -53,8 +53,8 @@ pub enum Error {
     Io(String, io::Error),
     #[error("Os: {0}: {1:?}")]
     Os(String, nix::Error),
-    #[error("Async runtime error: {0}")]
-    AsyncRuntime(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 impl From<Error> for api::model::Error {
@@ -83,7 +83,7 @@ impl From<Error> for api::model::Error {
             Error::Key(error) => api::model::Error::Key(error.to_string()),
             Error::Io(cause, error) => api::model::Error::Io(format!("{}: {}", cause, error)),
             Error::Os(cause, error) => api::model::Error::Os(format!("{}: {}", cause, error)),
-            Error::AsyncRuntime(cause) => api::model::Error::AsyncRuntime(cause),
+            Error::Internal(cause) => api::model::Error::Internal(cause),
             Error::ResourceBusy => api::model::Error::ResourceBusy,
         }
     }

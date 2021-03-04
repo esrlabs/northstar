@@ -95,6 +95,8 @@ impl Console {
                     Error::Io(format!("Failed to open tcp listener on {}", &address), e)
                 })?;
 
+                debug!("Started console on {}", &address);
+
                 task::spawn(async move {
                     loop {
                         select! {
@@ -126,6 +128,8 @@ impl Console {
                 let listener = UnixListener::bind(&address).map_err(|e| {
                     Error::Io(format!("Failed to open unix listener on {}", &address), e)
                 })?;
+
+                debug!("Started console on {}", &address);
 
                 task::spawn(async move {
                     loop {

@@ -20,7 +20,7 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct Container {
     #[serde(flatten)]
     inner: Arc<Inner>,
@@ -76,7 +76,7 @@ impl Display for Container {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
 struct Inner {
     name: Name,
     version: Version,

@@ -20,6 +20,7 @@ use super::{
 };
 use color_eyre::eyre::{eyre, Result, WrapErr};
 use futures::StreamExt;
+use log::warn;
 use northstar::{
     api::{client::Client, model::Notification},
     runtime::{self, config, config::Config, Container},
@@ -63,6 +64,18 @@ impl Northstar {
             },
         );
 
+        let target_repository = PathBuf::from("target/northstar/repository");
+        if target_repository.exists() {
+            warn!("Adding repository target/northstar/repository");
+            repositories.insert(
+                "target".into(),
+                config::Repository {
+                    dir: target_repository,
+                    key: Some(PathBuf::from("examples/keys/northstar.pub")),
+                },
+            );
+        }
+
         let mut cgroups = HashMap::new();
         cgroups.insert("memory".into(), PathBuf::from(format!("northstar-{}", pid)));
         cgroups.insert("cpu".into(), PathBuf::from(format!("northstar-{}", pid)));
@@ -94,7 +107,7 @@ impl Northstar {
             .await
             .wrap_err("Failed to start runtime")?;
         // Wait until the console is up and running
-        super::logger::assume("Starting console on", 5u64).await?;
+        super::logger::assume("Started console on", 5u64).await?;
 
         // Connect to the runtime
         let client = Client::new(&console_url).await?;

@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use floating_duration::TimeAsFloat;
-use libc::{c_int, ioctl};
+use libc::ioctl;
 use log::{debug, warn};
 use nix::{errno::Errno, Error::Sys};
 use std::{
@@ -21,7 +21,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
-use tokio::{fs, io, task, time};
+use tokio::{fs, io, sync::Mutex, task, time};
 
 const LOOP_SET_FD: u16 = 0x4C00;
 //const LOOP_CLR_FD: u16 = 0x4C01;
@@ -53,7 +53,7 @@ pub enum Error {
 
 #[derive(Debug)]
 pub(super) struct LoopControl {
-    control: fs::File,
+    control: Mutex<fs::File>,
     dev: String,
 }
 
@@ -67,7 +67,7 @@ impl ControlLock {
             nix::fcntl::flock(control_fd, nix::fcntl::FlockArg::LockExclusive)
         });
         match result {
-            Ok(_) => debug!("Got control lock"),
+            Ok(_) => debug!("Acquired control lock"),
             Err(e) => {
                 warn!("Failed to lock control {:?}", e);
                 panic!("Failed to lock control");
@@ -81,7 +81,7 @@ impl ControlLock {
 impl Drop for ControlLock {
     fn drop(&mut self) {
         match nix::fcntl::flock(self.control_fd, nix::fcntl::FlockArg::Unlock) {
-            Ok(_) => debug!("Released control lock on fd {}", self.control_fd),
+            Ok(_) => debug!("Released control lock"),
             Err(e) => panic!(
                 "Failed to release control lock on {}: {}",
                 self.control_fd, e
@@ -98,7 +98,8 @@ impl LoopControl {
                 .write(true)
                 .open(&control)
                 .await
-                .map_err(Error::Open)?,
+                .map_err(Error::Open)
+                .map(Mutex::new)?,
             dev: dev.into(),
         })
     }
@@ -113,13 +114,15 @@ impl LoopControl {
     ) -> Result<LoopDevice, Error> {
         let start = time::Instant::now();
 
-        // Lock the loopback control file via fcntl
-        let lock = ControlLock::new(self.control.as_raw_fd()).await?;
+        // Lock the fd to avoid races within *this* runtime instance
+        let control_fd = self.control.lock().await;
+
+        // Lock the loopback control file via fcntl. Sync between multiple northstar instances
+        let lock = ControlLock::new(control_fd.as_raw_fd()).await?;
 
         let loop_device = task::block_in_place(move || {
             // Get next free loop device
-            let index =
-                unsafe { ioctl(self.control.as_raw_fd() as c_int, LOOP_CTL_GET_FREE.into()) };
+            let index = unsafe { ioctl(control_fd.as_raw_fd(), LOOP_CTL_GET_FREE.into()) };
             let loop_device_path = match index {
                 n if n < 0 => return Err(Error::NoFreeDeviceFound),
                 n => PathBuf::from(&format!("{}{}", self.dev, n)),
@@ -179,6 +182,7 @@ impl LoopControl {
 
             // Unlock the loopback control lock
             drop(lock);
+            drop(control_fd);
 
             // Try to set direct IO
             if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_DIRECT_IO.into(), 1) } < 0 {

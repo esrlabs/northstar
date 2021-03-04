@@ -88,17 +88,30 @@ test!(start_stop_no_wait, {
 test!(mount, {
     let runtime = Northstar::launch().await?;
 
+    runtime.install_test_container().await?;
+    runtime.install_test_resource().await?;
+
     let containers = &runtime.containers().await?;
-    for container in containers {
-        info!(
-            "Mounting {}:{}:{}",
-            container.container.name(),
-            container.container.version(),
-            container.container.repository()
-        );
-        // TODO
-        // mount
-        // umount
+
+    (*runtime)
+        .mount(containers.iter().map(|c| {
+            (
+                c.container.name().as_str(),
+                c.container.version(),
+                c.container.repository().as_str(),
+            )
+        }))
+        .await?;
+
+    // Umount
+    for c in containers.iter().filter(|c| c.mounted) {
+        (*runtime)
+            .umount(
+                c.container.name().as_str(),
+                c.container.version(),
+                c.container.repository().as_str(),
+            )
+            .await?;
     }
 
     runtime.shutdown().await

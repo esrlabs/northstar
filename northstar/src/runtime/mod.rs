@@ -182,7 +182,7 @@ impl Runtime {
             .ok();
         let response: api::model::Response = response_rx
             .await
-            .map_err(|e| Error::AsyncRuntime(format!("Error receiving from channel {}", e)))?;
+            .map_err(|e| Error::Internal(format!("Error receiving from channel {}", e)))?;
         Ok(response)
     }
 
@@ -204,7 +204,7 @@ impl Runtime {
 
         let response: api::model::Response = response_rx
             .await
-            .map_err(|e| Error::AsyncRuntime(format!("Failed to receive response: {}", e)))?;
+            .map_err(|e| Error::Internal(format!("Failed to receive response: {}", e)))?;
         Ok(response)
     }
 }
