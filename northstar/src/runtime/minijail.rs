@@ -12,7 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{ExitStatus, MountedContainer as Container, Pid, config::Config, pipe::{AsyncPipeReader, AsyncPipeWriter, PipeWriter, pipe}, process::{waitpid, Error, ENV_NAME, ENV_VERSION}, process_debug::{Perf, Strace}};
+use super::{
+    config::Config,
+    pipe::{pipe, AsyncPipeReader, AsyncPipeWriter, PipeWriter},
+    process::{waitpid, Error, ENV_NAME, ENV_VERSION},
+    process_debug::{Perf, Strace},
+    ExitStatus, MountedContainer as Container, Pid,
+};
 use crate::runtime::EventTx;
 use bytes::{Buf, BytesMut};
 use futures::Future;
@@ -24,8 +30,22 @@ use nix::{
 };
 use npk::manifest::{Dev, Manifest, Mount, MountFlag, Output};
 use signal::Signal::{SIGKILL, SIGTERM};
-use std::{convert::TryInto, fmt, iter, ops, os::unix::{io::AsRawFd, prelude::*}, path::{Path, PathBuf}, pin::Pin, task::{Context, Poll}, unimplemented};
-use tokio::{fs, io::{self, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt}, select, task::{self, JoinHandle}, time};
+use std::{
+    convert::TryInto,
+    fmt, iter, ops,
+    os::unix::{io::AsRawFd, prelude::*},
+    path::{Path, PathBuf},
+    pin::Pin,
+    task::{Context, Poll},
+    unimplemented,
+};
+use tokio::{
+    fs,
+    io::{self, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    select,
+    task::{self, JoinHandle},
+    time,
+};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
@@ -660,8 +680,7 @@ impl ProcessSync {
         // Install a hook in libminijail that block on a `read` until a byte
         // is received. This hook runs as last thing before the execve.
         let execve_hook = move || {
-            use std::io::Read;
-            use std::io::Write;
+            use std::io::{Read, Write};
             resume_reader
                 .read_exact(&mut [0u8; 1])
                 .expect("Failed to read on resume pipe");
@@ -708,6 +727,5 @@ impl ProcessSync {
             .await
             .map_err(|e| Error::Io("Sync".into(), e))
             .map(drop)
-        
     }
 }

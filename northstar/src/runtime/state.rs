@@ -126,7 +126,9 @@ impl<'a> State<'a> {
             }
         }
 
-        let minijail = Minijail::new(events_tx.clone(), config).await.map_err(Error::Process)?;
+        let minijail = Minijail::new(events_tx.clone(), config)
+            .await
+            .map_err(Error::Process)?;
         let mount_control = MountControl::new(&config).await.map_err(Error::Mount)?;
 
         Ok(State {
