@@ -685,7 +685,7 @@ impl ProcessSync {
                 .read_exact(&mut [0u8; 1])
                 .expect("Failed to read on resume pipe");
             ack_writer
-                .write(&mut [1])
+                .write_all(&[1])
                 .expect("Failed to write on ack pipe");
         };
 
