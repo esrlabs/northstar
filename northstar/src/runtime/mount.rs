@@ -15,6 +15,7 @@
 use super::{config::Config, device_mapper as dm, device_mapper, loopdev::LoopControl};
 use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
+use futures::{future::ready, Future, FutureExt};
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
 use npk::{dm_verity::VerityHeader, manifest::Manifest, npk::Npk};
@@ -23,9 +24,14 @@ use std::{
     os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     process,
+    sync::Arc,
 };
 use thiserror::Error;
-use tokio::{fs, task, time};
+use tokio::{
+    fs,
+    task::{self, JoinError},
+    time,
+};
 
 const FS_TYPE: &str = "squashfs";
 
@@ -48,7 +54,7 @@ pub enum Error {
     #[error("Inotify timeout error {0}")]
     Timeout(String),
     #[error("Task join error: {0}")]
-    JoinError(tokio::task::JoinError),
+    JoinError(JoinError),
     #[error("Os error: {0}")]
     Os(nix::Error),
     #[error("Repository error: {0:?}")]
@@ -57,8 +63,8 @@ pub enum Error {
 
 #[derive(Debug)]
 pub(super) struct MountControl {
-    dm: dm::Dm,
-    lc: LoopControl,
+    dm: Arc<dm::Dm>,
+    lc: Arc<LoopControl>,
     device_mapper_dev: String,
 }
 
@@ -70,52 +76,57 @@ impl MountControl {
         let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
         let device_mapper_dev = config.devices.device_mapper_dev.clone();
         Ok(MountControl {
-            lc,
-            dm,
+            lc: Arc::new(lc),
+            dm: Arc::new(dm),
             device_mapper_dev,
         })
     }
 
+    /// Mounts the npk root fs to target and returns the device used to mount (loopback or device mapper)
     pub(super) async fn mount(
         &self,
         npk: Npk,
         target: &Path,
         repository_key: Option<&ed25519_dalek::PublicKey>,
-    ) -> Result<PathBuf, Error> {
-        let start = time::Instant::now();
+    ) -> impl Future<Output = Result<PathBuf, Error>> {
+        let repository_key = repository_key.copied();
+        let dm = self.dm.clone();
+        let lc = self.lc.clone();
+        let target = target.to_owned();
+        let device_mapper_dev = self.device_mapper_dev.clone();
 
-        let manifest = npk.manifest();
-        debug!("Mounting {}:{}", manifest.name, manifest.version);
-        let use_verity = repository_key.is_some();
+        task::spawn(async move {
+            let start = time::Instant::now();
 
-        if npk.version() != &Manifest::VERSION {
-            return Err(Error::NpkVersionMismatch);
-        }
-        let manifest = npk.manifest().clone();
+            let manifest = npk.manifest();
+            debug!("Mounting {}:{}", manifest.name, manifest.version);
+            let use_verity = repository_key.is_some();
 
-        debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
+            if npk.version() != &Manifest::VERSION {
+                return Err(Error::NpkVersionMismatch);
+            }
+            let manifest = npk.manifest().clone();
 
-        if !target.exists() {
-            debug!("Creating mount point {}", target.display());
-            fs::create_dir_all(&target).await.map_err(|e| {
-                Error::Io(
-                    format!("Failed to create directory {}", target.display()),
-                    e,
-                )
-            })?;
-        }
+            debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
 
-        let device = self.setup_and_mount(npk, &target, use_verity).await?;
-        let duration = start.elapsed();
+            let device =
+                setup_and_mount(dm, lc, &device_mapper_dev, npk, &target, use_verity).await?;
 
-        info!(
-            "Mounted {}:{} Mounting: {:.03}s",
-            manifest.name,
-            manifest.version,
-            duration.as_fractional_secs(),
-        );
+            let duration = start.elapsed();
 
-        Ok(device)
+            info!(
+                "Mounted {}:{} Mounting: {:.03}s",
+                manifest.name,
+                manifest.version,
+                duration.as_fractional_secs(),
+            );
+
+            Ok(device)
+        })
+        .then(|r| match r {
+            Ok(r) => ready(r),
+            Err(e) => ready(Err(Error::JoinError(e))),
+        })
     }
 
     pub(super) async fn umount(
@@ -138,141 +149,157 @@ impl MountControl {
 
         Ok(())
     }
+}
 
-    async fn create_dm_device(&self, name: &str) -> Result<PathBuf, Error> {
-        let dm_device = self
-            .dm
-            .device_create(
-                &name,
-                &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
-            )
-            .await
-            .map_err(Error::DeviceMapper)?;
+async fn setup_and_mount(
+    dm: Arc<dm::Dm>,
+    lc: Arc<LoopControl>,
+    device_mapper_dev: &str,
+    npk: Npk,
+    target: &Path,
+    verity: bool,
+) -> Result<PathBuf, Error> {
+    let verity_header = npk.verity_header().to_owned();
+    let fsimg_offset = npk.fsimg_offset();
+    let fsimg_size = npk.fsimg_size();
+    let manifest = npk.manifest();
+    let name = format!(
+        "northstar_{}_{}_{}",
+        process::id(),
+        manifest.name,
+        manifest.version
+    );
 
-        Ok(PathBuf::from(format!(
-            "{}{}",
-            self.device_mapper_dev,
-            dm_device.id() & 0xFF
-        )))
-    }
+    // Attach the fs image to a loopback device
+    // 1. Find a free loop dev
+    // 2. Attach
+    let loop_device = lc
+        .losetup(npk.as_raw_fd(), fsimg_offset, fsimg_size, true, true)
+        .await
+        .map_err(Error::LoopDevice)?;
 
-    async fn verity_setup(
-        &self,
-        dev: &str,
-        verity: &VerityHeader,
-        name: &str,
-        verity_hash: &str,
-        size: u64,
-    ) -> Result<PathBuf, Error> {
-        debug!("Creating a read-only verity device (name: {})", &name);
-        let start = time::Instant::now();
+    let device = if !verity {
+        // We're done. Use the loop device path e.g. /dev/loop4
+        loop_device.path().to_owned()
+    } else {
+        match (&verity_header, &npk.hashes()) {
+            (Some(header), Some(hashes)) => {
+                let (major, minor) = loop_device.dev_id();
+                let loop_device_id = format!("{}:{}", major, minor);
 
-        let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
-            .map_err(Error::Utf8Conversion)?;
-        let hex_salt = hex::encode(&verity.salt[..(verity.salt_size as usize)]);
-        let verity_table = format!(
-            "{} {} {} {} {} {} {} {} {} {}",
-            verity.version,
-            dev,
-            dev,
-            verity.data_block_size,
-            verity.hash_block_size,
-            verity.data_blocks,
-            verity.data_blocks + 1,
-            alg_no_pad,
-            verity_hash,
-            hex_salt
-        );
-        let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
+                debug!("Loop device id is {}", loop_device_id);
 
-        let dm_dev = self.create_dm_device(name).await?;
-
-        debug!("Verity-device used: {}", dm_dev.to_string_lossy());
-        self.dm
-            .table_load_flags(
-                name,
-                &table,
-                dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
-            )
-            .await
-            .map_err(Error::DeviceMapper)?;
-
-        debug!("Resuming device");
-        self.dm
-            .device_suspend(&name, &dm::DmOptions::new())
-            .await
-            .map_err(Error::DeviceMapper)?;
-
-        debug!("Waiting for device {}", dm_dev.display());
-        while !dm_dev.exists() {
-            time::sleep(time::Duration::from_millis(1)).await;
-        }
-
-        let veritysetup_duration = start.elapsed();
-        debug!(
-            "Verity setup took {:.03}s",
-            veritysetup_duration.as_fractional_secs()
-        );
-
-        Ok(dm_dev)
-    }
-
-    async fn setup_and_mount(&self, npk: Npk, root: &Path, verity: bool) -> Result<PathBuf, Error> {
-        let verity_header = npk.verity_header().to_owned();
-        let fsimg_offset = npk.fsimg_offset();
-        let fsimg_size = npk.fsimg_size();
-        let manifest = npk.manifest();
-        let name = format!(
-            "north_{}_{}_{}",
-            process::id(),
-            manifest.name,
-            manifest.version
-        );
-
-        let loop_device = self
-            .lc
-            .losetup(npk.as_raw_fd(), fsimg_offset, fsimg_size, true, true)
-            .await
-            .map_err(Error::LoopDevice)?;
-
-        let device = if !verity {
-            loop_device.path().to_owned()
-        } else {
-            match (&verity_header, &npk.hashes()) {
-                (Some(header), Some(hashes)) => {
-                    let (major, minor) = loop_device.dev_id();
-                    let loop_device_id = format!("{}:{}", major, minor);
-
-                    self.verity_setup(
-                        &loop_device_id,
-                        &header,
-                        &name,
-                        hashes.fs_verity_hash.as_str(),
-                        hashes.fs_verity_offset,
-                    )
-                    .await?
-                }
-                // TODO: Is this correct?
-                _ => loop_device.path().to_owned(),
-            }
-        };
-
-        mount(&device, root, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;
-
-        // Set the device to auto-remove once unmounted
-        if verity {
-            self.dm
-                .device_remove(
-                    &name.to_string(),
-                    &device_mapper::DmOptions::new()
-                        .set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
+                let verity_device = verity_setup(
+                    dm.clone(),
+                    device_mapper_dev,
+                    &loop_device_id,
+                    &header,
+                    &name,
+                    hashes.fs_verity_hash.as_str(),
+                    hashes.fs_verity_offset,
                 )
-                .await
-                .map_err(Error::DeviceMapper)?;
+                .await?;
+                verity_device
+            }
+            // TODO: Is this correct? No!
+            _ => loop_device.path().to_owned(),
         }
+    };
 
-        Ok(device)
+    if !target.exists() {
+        debug!("Creating mount point {}", target.display());
+        fs::create_dir_all(&target).await.map_err(|e| {
+            Error::Io(
+                format!("Failed to create directory {}", target.display()),
+                e,
+            )
+        })?;
     }
+
+    // Finally mount
+    mount(&device, target, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;
+
+    // Set the device to auto-remove once unmounted
+    if verity {
+        dm.device_remove(
+            &name.to_string(),
+            &device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
+        )
+        .await
+        .map_err(Error::DeviceMapper)?;
+    }
+
+    Ok(device.to_owned())
+}
+
+async fn verity_setup(
+    dm: Arc<dm::Dm>,
+    device_mapper_dev: &str,
+    dev: &str,
+    verity: &VerityHeader,
+    name: &str,
+    verity_hash: &str,
+    size: u64,
+) -> Result<PathBuf, Error> {
+    debug!("Creating a read-only verity device (name: {})", &name);
+    let start = time::Instant::now();
+
+    let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
+        .map_err(Error::Utf8Conversion)?;
+    let hex_salt = hex::encode(&verity.salt[..(verity.salt_size as usize)]);
+    let verity_table = format!(
+        "{} {} {} {} {} {} {} {} {} {}",
+        verity.version,
+        dev,
+        dev,
+        verity.data_block_size,
+        verity.hash_block_size,
+        verity.data_blocks,
+        verity.data_blocks + 1,
+        alg_no_pad,
+        verity_hash,
+        hex_salt
+    );
+    let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
+
+    debug!("Creating verity device");
+
+    let dm_device = dm
+        .device_create(
+            &name,
+            &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
+        )
+        .await
+        .map_err(Error::DeviceMapper)?;
+    let dm_dev = PathBuf::from(format!("{}{}", device_mapper_dev, dm_device.id() & 0xFF));
+
+    debug!("Using verity device {}", dm_dev.display());
+
+    dm.table_load_flags(
+        name,
+        &table,
+        dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
+    )
+    .await
+    .map_err(Error::DeviceMapper)?;
+
+    debug!("Resuming device");
+    dm.device_suspend(&name, &dm::DmOptions::new())
+        .await
+        .map_err(Error::DeviceMapper)?;
+
+    debug!("Waiting for device {}", dm_dev.display());
+    while !dm_dev.exists() {
+        time::sleep(time::Duration::from_millis(1)).await;
+    }
+
+    let veritysetup_duration = start.elapsed();
+    debug!(
+        "Verity setup took {:.03}s",
+        veritysetup_duration.as_fractional_secs()
+    );
+
+    Ok(dm_dev)
 }
 
 async fn mount(

@@ -15,7 +15,9 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use itertools::Itertools;
-use northstar::api::model::{ContainerData, Notification, Repository, RepositoryId, Response};
+use northstar::api::model::{
+    Container, ContainerData, MountResult, Notification, Repository, RepositoryId, Response,
+};
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::{collections::HashMap, io};
 use tokio::time;
@@ -99,6 +101,29 @@ pub(crate) fn repositories<W: io::Write>(
     print_table(&mut w, &table)
 }
 
+pub(crate) fn mounts<W: io::Write>(mut w: W, mounts: &[(Container, MountResult)]) -> Result<()> {
+    let mut table = Table::new();
+    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+    table.set_titles(Row::new(vec![
+        Cell::new("Name").with_style(Attr::Bold),
+        Cell::new("Path").with_style(Attr::Bold),
+    ]));
+    for (container, result) in mounts
+        .iter()
+        .sorted_by_key(|(container, _)| (*container).to_string())
+    {
+        table.add_row(Row::new(vec![
+            Cell::new(&container.to_string()).with_style(Attr::Bold),
+            Cell::new(match result {
+                MountResult::Ok => "ok",
+                MountResult::Err(_) => "failed",
+            }),
+        ]));
+    }
+
+    print_table(&mut w, &table)
+}
+
 pub(crate) async fn print_response<W: std::io::Write>(
     mut output: &mut W,
     response: Response,
@@ -112,6 +137,7 @@ pub(crate) async fn print_response<W: std::io::Write>(
         Response::Err(e) => {
             writeln!(output, "{}: {:?}", "✗ failed".red(), e).context("Failed to write to stdout")
         }
+        Response::Mount(results) => mounts(&mut output, &results),
     }
 }
 

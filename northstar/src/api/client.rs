@@ -35,8 +35,8 @@ use url::Url;
 use super::{
     codec::framed,
     model::{
-        Container, ContainerData, Message, Notification, Payload, Repository, RepositoryId,
-        Request, Response,
+        Container, ContainerData, Message, MountResult, Notification, Payload, Repository,
+        RepositoryId, Request, Response,
     },
 };
 
@@ -87,7 +87,7 @@ enum ClientRequest {
     Install(PathBuf, String),
 }
 
-impl Client {
+impl<'a> Client {
     /// Create a new northstar client and connect to a runtime instance running on `host`.
     pub async fn new(url: &Url) -> Result<Client, Error> {
         let (notification_tx, notification_rx) = mpsc::channel(10);
@@ -378,6 +378,59 @@ impl Client {
     /// Stop the runtime
     pub async fn shutdown(&self) -> Result<(), Error> {
         match self.request(Request::Shutdown).await? {
+            Response::Ok(()) => Ok(()),
+            Response::Err(e) => Err(Error::Api(e)),
+            _ => Err(Error::Protocol),
+        }
+    }
+
+    /// Mount a list of containers
+    /// TODO
+    pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version, &'a str)>>(
+        &self,
+        containers: I,
+    ) -> Result<Vec<(Container, MountResult)>, Error> {
+        let containers = containers
+            .into_iter()
+            .map(|(name, version, repository)| {
+                Container::new(name.to_string(), version.clone(), repository.to_string())
+            })
+            .collect();
+        match self.request(Request::Mount(containers)).await? {
+            Response::Mount(mounts) => Ok(mounts),
+            Response::Ok(_) => unreachable!(),
+            Response::Err(e) => Err(Error::Api(e)),
+            _ => Err(Error::Protocol),
+        }
+    }
+
+    /// Umount a mounted container
+    ///
+    /// ```no_run
+    /// # use northstar::api::client::Client;
+    /// # use npk::manifest::Version;
+    /// # use std::path::Path;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
+    /// client.umount("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to unmount \"hello\"");
+    /// # }
+    /// ```
+    pub async fn umount(
+        &self,
+        name: &str,
+        version: &Version,
+        repository: &str,
+    ) -> Result<(), Error> {
+        match self
+            .request(Request::Umount(Container::new(
+                name.to_string(),
+                version.clone(),
+                repository.to_string(),
+            )))
+            .await?
+        {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
             _ => Err(Error::Protocol),

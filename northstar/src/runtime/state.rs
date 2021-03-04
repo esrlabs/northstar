@@ -24,6 +24,10 @@ use super::{
     Container, Event, EventTx, ExitStatus, Notification, Repository, RepositoryId,
 };
 use api::model::Response;
+use futures::{
+    future::{join_all, ready},
+    Future, FutureExt,
+};
 use log::{debug, error, info, warn};
 use npk::{
     manifest::{Manifest, Mount},
@@ -34,14 +38,15 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     result,
+    sync::Arc,
 };
-use tokio::{sync::oneshot, time};
+use tokio::{sync::oneshot, task, time};
 
 #[derive(Debug)]
 pub(super) struct State<'a> {
     config: &'a Config,
     minijail: Minijail<'a>,
-    mount_control: MountControl,
+    mount_control: Arc<MountControl>,
     events_tx: EventTx,
     repositories: HashMap<RepositoryId, Repository>,
     npks: HashMap<Container, PathBuf>,
@@ -138,51 +143,66 @@ impl<'a> State<'a> {
             containers: HashMap::new(),
             config,
             minijail,
-            mount_control,
+            mount_control: Arc::new(mount_control),
             #[cfg(debug_assertions)]
             internal_repository,
         })
     }
 
     /// Mount `container`
-    async fn mount(&self, container: &Container) -> Result<MountedContainer, Error> {
+    async fn mount(
+        &self,
+        container: &Container,
+    ) -> Result<impl Future<Output = Result<MountedContainer, Error>>, Error> {
         // Repository key
         let key = self
             .repositories
             .get(container.repository())
-            .and_then(|r| r.key.as_ref());
+            .and_then(|r| r.key);
         let npk = self
             .npks
             .get(&container)
             .ok_or_else(|| Error::UnknownApplication(container.clone()))?;
 
         // Load NPK
-        let npk = Npk::from_path(npk, key).await.map_err(Error::Npk)?;
+        let npk = Npk::from_path(npk, key.as_ref())
+            .await
+            .map_err(Error::Npk)?;
         let manifest = npk.manifest().clone();
 
         // Try to mount the npk found. If this fails return with an error - nothing needs to
         // be cleaned up.
         let root = self.config.run_dir.join(container.to_string());
-        let device = self
-            .mount_control
-            .mount(npk, &root, key)
-            .await
-            .map_err(Error::Mount)
-            .map(|device| {
-                if key.is_some() {
-                    BlockDevice::Verity(device)
-                } else {
-                    BlockDevice::Loopback(device)
-                }
-            })?;
+        let mount_control = self.mount_control.clone();
+        let container = container.clone();
+        let task = task::spawn(async move {
+            let device = mount_control
+                .mount(npk, &root, key.as_ref())
+                .await
+                .await
+                .map_err(Error::Mount)
+                .map(|device| {
+                    if key.is_some() {
+                        BlockDevice::Verity(device)
+                    } else {
+                        BlockDevice::Loopback(device)
+                    }
+                })?;
 
-        Ok(MountedContainer {
-            container: container.clone(),
-            manifest,
-            root,
-            device,
-            process: None,
+            Ok(MountedContainer {
+                container: container.clone(),
+                manifest,
+                root,
+                device,
+                process: None,
+            })
         })
+        .then(|r| match r {
+            Ok(r) => ready(r),
+            Err(e) => ready(Err(Error::Internal(e.to_string()))),
+        });
+
+        Ok(task)
     }
 
     /// Umount a given container
@@ -267,7 +287,9 @@ impl<'a> State<'a> {
 
             mounted_container.manifest.clone()
         } else if self.npks.contains_key(container) {
-            let mounted_container = self.mount(&container).await?;
+            let mount = self.mount(&container).await?;
+            // TODO
+            let mounted_container = mount.await?;
             let manifest = mounted_container.manifest.clone();
             mounted.push(container.clone());
             self.containers.insert(container.clone(), mounted_container);
@@ -295,7 +317,8 @@ impl<'a> State<'a> {
             if !self.containers.contains_key(&container) {
                 if self.npks.contains_key(&container) {
                     // Obtain the key from the repo - needed for mounting
-                    match self.mount(&container).await {
+                    let mount = self.mount(&container).await?;
+                    match mount.await {
                         Ok(mounted_container) => {
                             // Fine. Add the container to the list of mounted containers
                             mounted.push(container.clone());
@@ -572,8 +595,34 @@ impl<'a> State<'a> {
                             Response::Containers(self.list_containers().await)
                         }
                         api::model::Request::Install(_, _) => unreachable!(),
-                        api::model::Request::Mount(_containers) => {
-                            unimplemented!()
+                        api::model::Request::Mount(containers) => {
+                            // Collect mount futures
+                            let mut mounts = vec![];
+                            for container in containers {
+                                mounts.push(self.mount(container).await?);
+                            }
+
+                            // Mount ;-)
+                            let results = join_all(mounts).await;
+
+                            for result in results {
+                                match result {
+                                    Ok(mounted_container) => {
+                                        // Add mounted container to our internal housekeeping
+                                        info!("Mounted {}", mounted_container.container);
+                                        self.containers.insert(
+                                            mounted_container.container.clone(),
+                                            mounted_container,
+                                        );
+                                    }
+                                    Err(_) => {
+                                        warn!(
+                                            "Not yet implemented: error handling for bulk mounts"
+                                        );
+                                    }
+                                }
+                            }
+                            Response::Mount(vec![])
                         }
                         api::model::Request::Repositories => {
                             Response::Repositories(self.list_repositories())

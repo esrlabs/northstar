@@ -166,10 +166,17 @@ pub struct Memory {
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum MountResult {
+    Ok,
+    Err(Error),
+}
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Response {
     Ok(()),
     Containers(Vec<ContainerData>),
     Repositories(HashMap<RepositoryId, Repository>),
+    Mount(Vec<(Container, MountResult)>),
     Err(Error),
 }
 
@@ -195,5 +202,5 @@ pub enum Error {
 
     Io(String),
     Os(String),
-    AsyncRuntime(String),
+    Internal(String),
 }

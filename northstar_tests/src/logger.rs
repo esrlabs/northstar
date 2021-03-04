@@ -19,7 +19,7 @@ use log::{Level, Metadata, Record};
 use regex::Regex;
 use std::{
     sync::{self, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{select, task::spawn_blocking, time};
 
@@ -31,6 +31,7 @@ lazy_static! {
         let (tx, rx) = mpsc::channel::<String>();
         (sync::Mutex::new(tx), sync::Mutex::new(rx))
     };
+    static ref START: Instant = Instant::now();
 }
 
 pub struct LogParser;
@@ -52,8 +53,11 @@ impl log::Log for LogParser {
             .to_string()
         }
 
+        let start = *START;
+
         println!(
-            "{} {}: {}",
+            "{:010} {} {}: {}",
+            Instant::now().duration_since(start).as_millis(),
             level_format(record.level()),
             record.module_path().unwrap_or(""),
             record.args().to_string()
