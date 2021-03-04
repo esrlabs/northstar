@@ -59,7 +59,7 @@ impl Northstar {
             "test".into(),
             config::Repository {
                 dir: test_repositority,
-                key: None,
+                key: Some(PathBuf::from("examples/keys/northstar.pub")),
             },
         );
 
