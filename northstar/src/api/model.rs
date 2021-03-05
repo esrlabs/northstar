@@ -130,6 +130,7 @@ pub enum Request {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ContainerData {
     pub container: Container,
+    pub repository: RepositoryId,
     pub manifest: Manifest,
     pub process: Option<Process>,
     pub mounted: bool,

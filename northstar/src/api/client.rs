@@ -71,7 +71,7 @@ pub enum Error {
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-///     client.start("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to start \"hello\"");
+///     client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }
@@ -249,22 +249,16 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.start("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to start \"hello\"");
+    /// client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn start(
-        &self,
-        name: &str,
-        version: &Version,
-        repository: &str,
-    ) -> Result<(), Error> {
+    pub async fn start(&self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Start(Container::new(
                 name.to_string(),
                 version.clone(),
-                repository.to_string(),
             )))
             .await?
         {
@@ -285,7 +279,7 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.stop("hello", &Version::parse("0.0.1").unwrap(), "default", Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
+    /// client.stop("hello", &Version::parse("0.0.1").unwrap(), Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
@@ -294,12 +288,11 @@ impl<'a> Client {
         &self,
         name: &str,
         version: &Version,
-        repository: &str,
         timeout: time::Duration,
     ) -> Result<(), Error> {
         match self
             .request(Request::Stop(
-                Container::new(name.to_string(), version.clone(), repository.to_string()),
+                Container::new(name.to_string(), version.clone()),
                 timeout.as_secs(),
             ))
             .await?
@@ -350,22 +343,16 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.uninstall("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to uninstall \"hello\"");
+    /// client.uninstall("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn uninstall(
-        &self,
-        name: &str,
-        version: &Version,
-        repository: &str,
-    ) -> Result<(), Error> {
+    pub async fn uninstall(&self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Uninstall(Container::new(
                 name.to_string(),
                 version.clone(),
-                repository.to_string(),
             )))
             .await?
         {
@@ -386,15 +373,13 @@ impl<'a> Client {
 
     /// Mount a list of containers
     /// TODO
-    pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version, &'a str)>>(
+    pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version)>>(
         &self,
         containers: I,
     ) -> Result<Vec<(Container, MountResult)>, Error> {
         let containers = containers
             .into_iter()
-            .map(|(name, version, repository)| {
-                Container::new(name.to_string(), version.clone(), repository.to_string())
-            })
+            .map(|(name, version)| Container::new(name.to_string(), version.clone()))
             .collect();
         match self.request(Request::Mount(containers)).await? {
             Response::Mount(mounts) => Ok(mounts),
@@ -414,20 +399,14 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-    /// client.umount("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to unmount \"hello\"");
+    /// client.umount("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to unmount \"hello\"");
     /// # }
     /// ```
-    pub async fn umount(
-        &self,
-        name: &str,
-        version: &Version,
-        repository: &str,
-    ) -> Result<(), Error> {
+    pub async fn umount(&self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Umount(Container::new(
                 name.to_string(),
                 version.clone(),
-                repository.to_string(),
             )))
             .await?
         {
@@ -448,7 +427,7 @@ impl<'a> Client {
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
-///     client.start("hello", &Version::parse("0.0.1").unwrap(), "default").await.expect("Failed to start \"hello\"");
+///     client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }

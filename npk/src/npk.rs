@@ -146,6 +146,7 @@ impl FromStr for Hashes {
     }
 }
 
+#[derive(Debug)]
 pub struct Npk {
     file: std::fs::File,
     manifest: Manifest,

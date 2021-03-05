@@ -37,27 +37,14 @@ async fn send_request(
     let request = match command {
         Northstar::Containers => Request::Containers,
         Northstar::Repositories => Request::Repositories,
-        Northstar::Mount {
-            name,
-            version,
-            repository,
-        } => Request::Mount(vec![Container::new(name, version, repository)]),
-        Northstar::Umount {
-            name,
-            version,
-            repository,
-        } => Request::Umount(Container::new(name, version, repository)),
-        Northstar::Start {
-            name,
-            version,
-            repository,
-        } => Request::Start(Container::new(name, version, repository)),
+        Northstar::Mount { name, version } => Request::Mount(vec![Container::new(name, version)]),
+        Northstar::Umount { name, version } => Request::Umount(Container::new(name, version)),
+        Northstar::Start { name, version } => Request::Start(Container::new(name, version)),
         Northstar::Stop {
             name,
             version,
-            repository,
             timeout,
-        } => Request::Stop(Container::new(name, version, repository), timeout),
+        } => Request::Stop(Container::new(name, version), timeout),
         Northstar::Install { npk, repo_id } => {
             let npk = Path::new(&npk).canonicalize()?;
             return match client.install(&npk, &repo_id).await {
@@ -65,11 +52,7 @@ async fn send_request(
                 Err(e) => Ok(Response::Err(api::model::Error::Npk(e.to_string()))),
             };
         }
-        Northstar::Uninstall {
-            name,
-            version,
-            repository,
-        } => Request::Uninstall(Container::new(name, version, repository)),
+        Northstar::Uninstall { name, version } => Request::Uninstall(Container::new(name, version)),
         Northstar::Shutdown => Request::Shutdown,
     };
 

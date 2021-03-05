@@ -48,7 +48,7 @@ pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[ContainerData]) -
         table.add_row(Row::new(vec![
             Cell::new(&container.container.name()).with_style(Attr::Bold),
             Cell::new(&container.container.version().to_string()),
-            Cell::new(&container.container.repository()),
+            Cell::new(&container.repository),
             Cell::new(
                 container
                     .manifest

@@ -12,7 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config::Config, device_mapper as dm, device_mapper, loopdev::LoopControl};
+use super::{
+    config::Config, device_mapper as dm, device_mapper, key::PublicKey, loopdev::LoopControl,
+};
 use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
 use futures::{future::ready, Future, FutureExt};
@@ -87,9 +89,9 @@ impl MountControl {
         &self,
         npk: Npk,
         target: &Path,
-        repository_key: Option<&ed25519_dalek::PublicKey>,
+        key: Option<&PublicKey>,
     ) -> impl Future<Output = Result<PathBuf, Error>> {
-        let repository_key = repository_key.copied();
+        let key = key.copied();
         let dm = self.dm.clone();
         let lc = self.lc.clone();
         let target = target.to_owned();
@@ -100,7 +102,7 @@ impl MountControl {
 
             let manifest = npk.manifest();
             debug!("Mounting {}:{}", manifest.name, manifest.version);
-            let use_verity = repository_key.is_some();
+            let use_verity = key.is_some();
 
             if npk.version() != &Manifest::VERSION {
                 return Err(Error::NpkVersionMismatch);

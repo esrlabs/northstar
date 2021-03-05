@@ -12,11 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use ed25519_dalek::*;
+use ed25519_dalek::SignatureError;
 use log::debug;
 use std::path::Path;
 use thiserror::Error;
 use tokio::{fs, io};
+
+pub type PublicKey = ed25519_dalek::PublicKey;
 
 #[derive(Error, Debug)]
 pub enum Error {

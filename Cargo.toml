@@ -7,7 +7,7 @@ members = [
     "examples/container/hello-world",
     "examples/container/memeater",
     "examples/container/resource/ferris",
-    "examples/container/resource/resource_hello",
+    "examples/container/resource/hello-resource",
     "examples/container/seccomp",
     "libcap-sys",
     "minijail/rust/minijail",

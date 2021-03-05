@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use northstar::api::model::RepositoryId;
 use npk::manifest::Version;
 use std::path::PathBuf;
 use structopt::{
@@ -32,24 +31,18 @@ pub enum Northstar {
         name: String,
         #[structopt(help = "Version of the container")]
         version: Version,
-        #[structopt(help = "Repository of the container")]
-        repository: RepositoryId,
     },
     Umount {
         #[structopt(help = "Name of the container")]
         name: String,
         #[structopt(help = "Version of the container")]
         version: Version,
-        #[structopt(help = "Repository of the container")]
-        repository: RepositoryId,
     },
     Start {
         #[structopt(help = "Name of the container")]
         name: String,
         #[structopt(help = "Version of the container")]
         version: Version,
-        #[structopt(help = "Repository of the container")]
-        repository: RepositoryId,
     },
     #[structopt(about = "Stop a container")]
     Stop {
@@ -57,8 +50,6 @@ pub enum Northstar {
         name: String,
         #[structopt(help = "Version of the container")]
         version: Version,
-        #[structopt(help = "Repository of the container")]
-        repository: RepositoryId,
         #[structopt(help = "Timeout", default_value = "5")]
         timeout: u64,
     },
@@ -75,8 +66,6 @@ pub enum Northstar {
         name: String,
         #[structopt(help = "Container version")]
         version: Version,
-        #[structopt(help = "Repository of the container")]
-        repository: RepositoryId,
     },
     #[structopt(about = "Shutdown Northstar")]
     Shutdown,

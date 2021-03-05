@@ -21,7 +21,7 @@ use northstar_tests::{
     logger,
     runtime::Northstar,
     test,
-    test_container::{test_container, TEST_CONTAINER},
+    test_container::{test_container, TEST_CONTAINER, TEST_RESOURCE},
 };
 use std::{convert::TryInto, path::PathBuf};
 
@@ -97,23 +97,17 @@ test!(mount, {
     let containers = &runtime.containers().await?;
 
     (*runtime)
-        .mount(containers.iter().map(|c| {
-            (
-                c.container.name().as_str(),
-                c.container.version(),
-                c.container.repository().as_str(),
-            )
-        }))
+        .mount(
+            containers
+                .iter()
+                .map(|c| (c.container.name().as_str(), c.container.version())),
+        )
         .await?;
 
     // Umount
     for c in containers.iter().filter(|c| c.mounted) {
-        (*runtime)
-            .umount(
-                c.container.name().as_str(),
-                c.container.version(),
-                c.container.repository().as_str(),
-            )
+        runtime
+            .umount(&format!("{}:{}", c.container.name(), c.container.version()))
             .await?;
     }
 
@@ -181,6 +175,28 @@ test!(uninstall_started, {
 
     let result = runtime.uninstall_test_container().await;
     assert!(result.is_err());
+
+    runtime.stop(TEST_CONTAINER, 5).await?;
+
+    runtime.shutdown().await
+});
+
+test!(start_umount_resource_start, {
+    let runtime = Northstar::launch().await?;
+
+    runtime.install_test_container().await?;
+    runtime.install_test_resource().await?;
+
+    // Start a container that depends on a resource.
+    runtime.start(TEST_CONTAINER).await?;
+    logger::assume("test_container: Sleeping...", 5u64).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
+
+    // Umount the resource and start the container again.
+    runtime.umount(TEST_RESOURCE).await?;
+
+    runtime.start(TEST_CONTAINER).await?;
+    logger::assume("test_container: Sleeping...", 5u64).await?;
 
     runtime.stop(TEST_CONTAINER, 5).await?;
 
