@@ -254,7 +254,7 @@ async fn runtime_task(
 
     // Enter main loop
     loop {
-        let result = match event_rx.recv().await.unwrap() {
+        if let Err(e) = match event_rx.recv().await.unwrap() {
             // Debug console commands are handled via the main loop in order to get access
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
@@ -275,13 +275,16 @@ async fn runtime_task(
                 }
                 Ok(())
             }
-        };
-
-        // Break if a error happens in the runtime
-        if result.is_err() {
-            break result;
+        } {
+            break Err(e);
         }
+    }?;
+
+    if let Some(console) = console {
+        console.shutdown().await.map_err(Error::Console)?;
     }
+
+    Ok(())
 }
 
 /// Create path if it does not exist. Ensure that it is

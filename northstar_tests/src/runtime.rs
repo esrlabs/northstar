@@ -30,6 +30,7 @@ use tempfile::TempDir;
 use tokio::{fs, select, time};
 
 pub struct Northstar {
+    config: config::Config,
     client: northstar::api::client::Client,
     runtime: runtime::Runtime,
     tmpdir: TempDir,
@@ -103,7 +104,7 @@ impl Northstar {
         };
 
         // Start the runtime
-        let runtime = runtime::Runtime::start(config)
+        let runtime = runtime::Runtime::start(config.clone())
             .await
             .wrap_err("Failed to start runtime")?;
         // Wait until the console is up and running
@@ -115,6 +116,7 @@ impl Northstar {
         logger::assume("Client .* connected", 5u64).await?;
 
         Ok(Northstar {
+            config,
             client,
             runtime,
             tmpdir,
@@ -130,8 +132,15 @@ impl Northstar {
             .await
             .wrap_err("Failed to wait for runtime")?;
 
+        logger::assume("Closed listener", 5u64).await?;
+
         // Remove the tmpdir
         self.tmpdir.close().wrap_err("Failed to remove tmpdir")
+    }
+
+    /// Return the runtimes configuration
+    pub fn config(&self) -> &config::Config {
+        &self.config
     }
 
     /// Start a container
