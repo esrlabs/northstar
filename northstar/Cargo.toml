@@ -89,6 +89,7 @@ runtime = [
     "url",
     "uuid",
 ]
+hello-world = []
 
 
 [build-dependencies]

@@ -1,6 +1,6 @@
 ---
 # Use the ferris interpreter from the resouce listed below
-name: ferris_says_hello
+name: hello-ferris
 version: 0.0.1
 init: /bin/ferris
 uid: 1000
@@ -9,7 +9,7 @@ args:
   - /message/hello
 mounts:
     /bin:
-      resource: ferris:0.0.1:default/
+      resource: ferris:0.0.1:/
     /lib:
       host: /lib
     /lib64:
@@ -17,7 +17,7 @@ mounts:
     /system:
       host: /system
     /message:
-      resource: hello_message:0.0.1:default/
+      resource: message:0.0.1:/
 io:
   stdout:
     log:

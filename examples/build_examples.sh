@@ -146,9 +146,10 @@ main() {
     "./examples/container/hello-world"
     "./examples/container/memeater"
     "./examples/container/resource/ferris"
-    "./examples/container/resource/ferris_says_hello"
-    "./examples/container/resource/hello_message"
-    "./examples/container/resource/resource_hello"
+    "./examples/container/resource/hello-ferris"
+    "./examples/container/resource/hello-resource"
+    "./examples/container/resource/message-0.0.1"
+    "./examples/container/resource/message-0.0.2"
     "./examples/container/seccomp"
   )
 

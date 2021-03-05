@@ -147,11 +147,7 @@ impl Northstar {
     pub async fn start(&self, container: &str) -> Result<()> {
         let container: Container = container.try_into().expect("Invalid container str");
         self.client
-            .start(
-                container.name(),
-                container.version(),
-                container.repository(),
-            )
+            .start(container.name(), container.version())
             .await
             .wrap_err("Failed to start")
     }
@@ -163,11 +159,20 @@ impl Northstar {
             .stop(
                 container.name(),
                 container.version(),
-                container.repository(),
                 Duration::from_secs(timeout),
             )
             .await
             .wrap_err("Failed to stop")?;
+        Ok(())
+    }
+
+    /// Umount
+    pub async fn umount(&self, container: &str) -> Result<()> {
+        let container: Container = container.try_into().expect("Invalid container str");
+        self.client
+            .umount(container.name(), container.version())
+            .await
+            .wrap_err("Failed to umount")?;
         Ok(())
     }
 
@@ -183,7 +188,6 @@ impl Northstar {
             .uninstall(
                 "test_container",
                 &npk::manifest::Version::parse("0.0.1").unwrap(),
-                "test",
             )
             .await
             .wrap_err("Failed to uninstall test container")
@@ -201,7 +205,6 @@ impl Northstar {
             .uninstall(
                 "test_resource",
                 &npk::manifest::Version::parse("0.0.1").unwrap(),
-                "test",
             )
             .await
             .wrap_err("Failed to uninstall test resource")

@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Name, RepositoryId, Version};
+use super::{Name, Version};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::TryFrom,
@@ -27,13 +27,9 @@ pub struct Container {
 }
 
 impl Container {
-    pub fn new(name: Name, version: Version, repository: RepositoryId) -> Container {
+    pub fn new(name: Name, version: Version) -> Container {
         Container {
-            inner: Arc::new(Inner {
-                name,
-                version,
-                repository,
-            }),
+            inner: Arc::new(Inner { name, version }),
         }
     }
 
@@ -46,11 +42,6 @@ impl Container {
     pub fn version(&self) -> &Version {
         &self.inner.version
     }
-
-    /// Repository id
-    pub fn repository(&self) -> &RepositoryId {
-        &self.inner.repository
-    }
 }
 
 impl TryFrom<&str> for Container {
@@ -61,18 +52,13 @@ impl TryFrom<&str> for Container {
         let name = split.next().ok_or("Missing container name")?;
         let version = split.next().ok_or("Missing container version")?;
         let version = Version::parse(&version).map_err(|_| "Invalid version")?;
-        let repository = split.next().ok_or("Missing container repository")?;
-        Ok(Container::new(name.into(), version, repository.into()))
+        Ok(Container::new(name.into(), version))
     }
 }
 
 impl Display for Container {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}:{}:{}",
-            self.inner.name, self.inner.version, self.inner.repository
-        )
+        write!(f, "{}:{}", self.inner.name, self.inner.version,)
     }
 }
 
@@ -80,5 +66,4 @@ impl Display for Container {
 struct Inner {
     name: Name,
     version: Version,
-    repository: RepositoryId,
 }
