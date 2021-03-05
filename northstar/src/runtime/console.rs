@@ -46,7 +46,8 @@ pub(crate) struct Console {
     event_tx: EventTx,
     url: Url,
     notification_tx: broadcast::Sender<Notification>,
-    token: CancellationToken,
+    stop: CancellationToken,
+    stopped: CancellationToken,
 }
 
 #[derive(Error, Debug)]
@@ -65,7 +66,8 @@ impl Console {
             event_tx: tx.clone(),
             url,
             notification_tx,
-            token: CancellationToken::new(),
+            stop: CancellationToken::new(),
+            stopped: CancellationToken::new(),
         })
     }
 
@@ -74,7 +76,8 @@ impl Console {
     pub(crate) async fn listen(&self) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
-        let token = self.token.clone();
+        let stop = self.stop.clone();
+        let stopped = self.stopped.clone();
 
         match self.url.scheme() {
             "tcp" => {
@@ -82,12 +85,15 @@ impl Console {
                     .url
                     .socket_addrs(|| Some(4200))
                     .map_err(|e| Error::Io("Invalid console address".into(), e))?;
-                let address = addresses.first().ok_or_else(|| {
-                    Error::Io(
-                        "Invalid console url".into(),
-                        io::Error::new(io::ErrorKind::Other, ""),
-                    )
-                })?;
+                let address = addresses
+                    .first()
+                    .ok_or_else(|| {
+                        Error::Io(
+                            "Invalid console url".into(),
+                            io::Error::new(io::ErrorKind::Other, ""),
+                        )
+                    })?
+                    .to_owned();
 
                 debug!("Starting console on {}", &address);
 
@@ -106,6 +112,7 @@ impl Console {
                                         task::spawn(Self::connection(
                                             stream.0,
                                             stream.1.to_string(),
+                                            stop.clone(),
                                             event_tx.clone(),
                                             notification_tx.subscribe(),
                                         ));
@@ -116,20 +123,37 @@ impl Console {
                                     }
                                 }
                             }
-                            _ = token.cancelled() => break,
+                            _ = stop.cancelled() => {
+                                debug!("Closing listener on {}", address);
+                                drop(listener);
+                                // TODO: Wait for all connections to be closed
+                                debug!("Closed listener on {}", address);
+                                stopped.cancel();
+                                break;
+                            }
                         }
                     }
                 });
             }
             "unix" => {
-                let address = self.url.path().to_string();
-                debug!("Starting console on {}", &address);
+                let address = PathBuf::from(self.url.path());
+
+                debug!("Starting console on {}", address.display());
+
+                if address.exists() {
+                    fs::remove_file(&address)
+                        .await
+                        .map_err(|e| Error::Io("Failed to remove unix socket".into(), e))?;
+                }
 
                 let listener = UnixListener::bind(&address).map_err(|e| {
-                    Error::Io(format!("Failed to open unix listener on {}", &address), e)
+                    Error::Io(
+                        format!("Failed to open unix listener on {}", address.display()),
+                        e,
+                    )
                 })?;
 
-                debug!("Started console on {}", &address);
+                debug!("Started console on {}", address.display());
 
                 task::spawn(async move {
                     loop {
@@ -140,6 +164,7 @@ impl Console {
                                         task::spawn(Self::connection(
                                             stream.0,
                                             format!("{:?}", &stream.1),
+                                            stop.clone(),
                                             event_tx.clone(),
                                             notification_tx.subscribe(),
                                         ));
@@ -150,9 +175,16 @@ impl Console {
                                     }
                                 }
                             }
-                            _ = token.cancelled() => {
-                                debug!("Removing {}", address);
-                                fs::remove_file(address).await.expect("Failed to remove unix socket");
+                            _ = stop.cancelled() => {
+                                debug!("Closing listener on {}", address.display());
+                                drop(listener);
+                                if address.exists() {
+                                    fs::remove_file(&address)
+                                        .await.expect("Failed to remove unix socket");
+                                }
+                                // TODO: Wait for all connections to be closed
+                                debug!("Closed listener on {}", address.display());
+                                stopped.cancel();
                                 break;
                             }
                         }
@@ -165,6 +197,13 @@ impl Console {
         Ok(())
     }
 
+    /// Stop the listeners and wait for their shutdown
+    pub async fn shutdown(self) -> Result<(), Error> {
+        self.stop.cancel();
+        self.stopped.cancelled().await;
+        Ok(())
+    }
+
     /// Send a notification to the notification broadcast
     pub async fn notification(&self, notification: Notification) {
         self.notification_tx.send(notification).ok();
@@ -173,6 +212,7 @@ impl Console {
     async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
         stream: T,
         peer: String,
+        stop: CancellationToken,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<Notification>,
     ) -> Result<(), Error> {
@@ -183,6 +223,10 @@ impl Console {
 
         loop {
             select! {
+                _ = stop.cancelled() => {
+                    info!("{}: Closing connection", peer);
+                    break;
+                }
                 notification = notification_rx.recv() => {
                     // Process notifications received via the notification
                     // broadcast channel
@@ -304,14 +348,9 @@ impl Console {
                 }
             }
         }
-        info!("Connection to {} closed", peer);
+
+        info!("{}: Connection closed", peer);
 
         Ok(())
-    }
-}
-
-impl Drop for Console {
-    fn drop(&mut self) {
-        self.token.cancel();
     }
 }

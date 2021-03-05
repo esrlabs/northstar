@@ -13,7 +13,10 @@
 //   limitations under the License.
 
 use log::info;
-use northstar::api::model::{ExitStatus, Notification};
+use northstar::api::{
+    self,
+    model::{ExitStatus, Notification},
+};
 use northstar_tests::{
     logger,
     runtime::Northstar,
@@ -261,6 +264,28 @@ test!(fd_leak, {
 
     // Compare the list of fds before and after the RT run.
     assert_eq!(before, fds()?);
+
+    result
+});
+
+// Open many connections to the runtime
+test!(connections, {
+    let runtime = Northstar::launch().await?;
+
+    let console = runtime.config().console.as_ref().unwrap();
+
+    let mut clients = Vec::new();
+    for _ in 0..10 {
+        let client = api::client::Client::new(&console).await?;
+        clients.push(client);
+    }
+
+    let result = runtime.shutdown().await;
+
+    for client in &clients {
+        assert!(client.containers().await.is_err());
+    }
+    clients.clear();
 
     result
 });
