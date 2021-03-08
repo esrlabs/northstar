@@ -26,7 +26,7 @@ use super::{
 use api::model::Response;
 use floating_duration::TimeAsFloat;
 use futures::{
-    future::{join_all, ready, try_join_all},
+    future::{join_all, ready},
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
@@ -310,18 +310,40 @@ impl<'a> State<'a> {
         // Prepare a list of futures that actually mount
         let mut mounts = Vec::new();
         for to_be_mounted in &need_mount {
-            mounts.push(self.mount(&to_be_mounted).await?);
+            let mount = self
+                .mount(&to_be_mounted)
+                .await?
+                .map(move |r| (to_be_mounted, r)); // Add the container identification to the futures result
+            mounts.push(mount);
         }
 
         // Mount :-)
-        match try_join_all(mounts).await {
-            Ok(mut m) => self
-                .containers
-                .extend(m.drain(..).map(|a| (a.container.clone(), a))),
-            Err(e) => {
-                warn!("Failed to mount");
-                return Err(e);
-            }
+        let mounts = join_all(mounts).await;
+
+        // Split into succesful and failed ones
+        let (ok, mut failed): (Vec<_>, Vec<_>) =
+            mounts.into_iter().partition(|(_, result)| !result.is_err());
+
+        // Log mounts and insert into the list of mounted containers
+        for (container, mounted_container) in ok {
+            debug!("Successfully mounted {}", container);
+            self.containers
+                .insert(container.clone(), mounted_container.unwrap());
+        }
+
+        // Log failures
+        for (container, err) in &failed {
+            debug!(
+                "Failed to mount {}: {}",
+                container,
+                err.as_ref().err().unwrap()
+            );
+        }
+
+        // At least one mount failed. Abort...
+        // TODO: All the errors should be returned
+        if let Some((_, Err(e))) = failed.pop() {
+            return Err(e);
         }
 
         // This must exist
