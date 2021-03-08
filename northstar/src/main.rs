@@ -95,11 +95,11 @@ async fn run(config: Config) -> Result<(), Error> {
     let status = select! {
         _ = sigint.recv() => {
             info!("Received SIGINT. Stopping Northstar runtime");
-            runtime.stop_wait().await
+            runtime.shutdown().await
         }
         _ = sigterm.recv() => {
             info!("Received SIGTERM. Stopping Northstar runtime");
-            runtime.stop_wait().await
+            runtime.shutdown().await
         }
         status = &mut runtime => status,
     };

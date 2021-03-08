@@ -160,7 +160,7 @@ impl<'a> State<'a> {
         // Find npk and optional key
         let (npk, _, key) = self
             .npk(container)
-            .ok_or_else(|| Error::UnknownApplication(container.clone()))?;
+            .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
 
         // TODO: Reuse Npk stored in the repository and do not open again. This changed
         // implies some lifetime changes due to the movement into the mount task.
@@ -196,10 +196,7 @@ impl<'a> State<'a> {
                 process: None,
             })
         })
-        .then(|r| match r {
-            Ok(r) => ready(r),
-            Err(e) => ready(Err(Error::Internal(e.to_string()))),
-        });
+        .then(|r| ready(r.expect("Internal task join error")));
 
         Ok(task)
     }
@@ -207,11 +204,14 @@ impl<'a> State<'a> {
     /// Umount a given container
     #[allow(clippy::blocks_in_if_conditions)]
     async fn umount(&mut self, container: &Container) -> Result<(), Error> {
-        let mounted_container = self.containers.get(container).ok_or(Error::ResourceBusy)?;
+        let mounted_container = self
+            .containers
+            .get(container)
+            .ok_or_else(|| Error::UmountBusy(container.clone()))?;
         info!("Umounting {}", container);
         // Check if the application is started - if yes it cannot be uninstalled
         if mounted_container.process.is_some() {
-            return Err(Error::ApplicationStarted(container.clone()));
+            return Err(Error::UmountBusy(container.clone()));
         }
 
         // If this is a resource check if it can be uninstalled or if it's
@@ -234,8 +234,8 @@ impl<'a> State<'a> {
                 })
                 .any(|c| &c == container)
         {
-            warn!("Failed to uninstall busy resource container {}", container);
-            return Err(Error::ResourceBusy);
+            warn!("Failed to umount busy resource container {}", container);
+            return Err(Error::UmountBusy(container.clone()));
         }
 
         // If the container is mounted with verity this needs to be passed to the umount
@@ -266,13 +266,13 @@ impl<'a> State<'a> {
                 // Check if the container is not a resouce
                 if mounted_container.manifest.init.is_none() {
                     warn!("Container {} is a resource", container);
-                    return Err(Error::UnknownApplication(container.clone()));
+                    return Err(Error::StartContainerResource(container.clone()));
                 }
 
                 // Check if the container is already started
                 if mounted_container.process.is_some() {
                     warn!("Application {} is already running", container);
-                    return Err(Error::ApplicationStarted(container.clone()));
+                    return Err(Error::StartContainerStarted(container.clone()));
                 }
             } else {
                 need_mount.insert(container.clone());
@@ -293,12 +293,15 @@ impl<'a> State<'a> {
             {
                 // Check if the resource is available
                 if self.npk(&resource).is_none() {
-                    return Err(Error::UnknownResource(container.clone()));
+                    return Err(Error::StartContainerMissingResource(
+                        container.clone(),
+                        resource,
+                    ));
                 }
                 need_mount.insert(resource.clone());
             }
         } else {
-            return Err(Error::UnknownApplication(container.clone()));
+            return Err(Error::InvalidContainer(container.clone()));
         }
 
         info!(
@@ -445,7 +448,7 @@ impl<'a> State<'a> {
 
             Ok(())
         } else {
-            Err(Error::UnknownApplication(container.clone()))
+            Err(Error::StopContainerNotStarted(container.clone()))
         }
     }
 
@@ -480,7 +483,7 @@ impl<'a> State<'a> {
         let repository = self
             .repositories
             .get(repository_id)
-            .ok_or_else(|| Error::UnknownRepository(repository_id.to_string()))?;
+            .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
         // Load the npk to indentify name and version
         let npk = Npk::from_path(src, repository.key.as_ref())
             .await
@@ -497,7 +500,7 @@ impl<'a> State<'a> {
             .any(|r| r.containers.contains_key(&container))
         {
             warn!("Container {} is already installed", container);
-            return Err(Error::ApplicationInstalled(container));
+            return Err(Error::InstallDuplicate(container.clone()));
         }
 
         debug!("NPK contains {}", container);

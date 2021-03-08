@@ -87,7 +87,7 @@ impl Repository {
 
         // Check if the npk already in the repository
         if dest.exists() {
-            return Err(Error::ApplicationInstalled(container.clone()));
+            return Err(Error::InstallDuplicate(container.clone()));
         }
 
         // Copy the npk to the repository
@@ -116,7 +116,7 @@ impl Repository {
                 .map_err(|e| Error::Io("Failed to remove npk".into(), e))
                 .map(drop)
         } else {
-            Err(Error::UnknownApplication(container.clone()))
+            Err(Error::InvalidContainer(container.clone()))
         }
     }
 }

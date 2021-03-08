@@ -24,7 +24,7 @@ pub type RepositoryId = String;
 pub type MessageId = String; // UUID
 pub type Container = crate::runtime::Container;
 
-const VERSION: &str = "0.0.1";
+const VERSION: &str = "0.0.2";
 
 pub fn version() -> Version {
     Version::parse(VERSION).unwrap()
@@ -183,15 +183,14 @@ pub enum Response {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
-    VersionMismatch(Version),
-    UnknownApplication(Container),
-    ApplicationNotStarted(Container),
-    ApplicationRunning(Container),
-    ApplicationInstalled(Container),
-    ResourceBusy,
-    MissingResource(String),
-    UnknownRepository(String),
-    UnknownResource(Container),
+    InvalidContainer(Container),
+    UmountBusy(Container),
+    StartContainerStarted(Container),
+    StartContainerResource(Container),
+    StartContainerMissingResource(Container, Container),
+    StopContainerNotStarted(Container),
+    InvalidRepository(RepositoryId),
+    InstallDuplicate(Container),
 
     Npk(String),
     NpkArchive(String),
@@ -203,5 +202,4 @@ pub enum Error {
 
     Io(String),
     Os(String),
-    Internal(String),
 }

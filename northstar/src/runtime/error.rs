@@ -12,29 +12,37 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::Container;
+use super::{Container, RepositoryId};
 use crate::api;
 use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Application {0} is not started")]
-    ApplicationNotStarted(Container),
-    #[error("Application {0} is started")]
-    ApplicationStarted(Container),
-    #[error("Resource busy")]
-    ResourceBusy,
-    #[error("Missing resource {0}")]
-    MissingResource(String),
-    #[error("Application is already installed {0}")]
-    ApplicationInstalled(Container),
-    #[error("Unknown application {0}")]
-    UnknownApplication(Container),
-    #[error("Unknown repository {0}")]
-    UnknownRepository(String),
-    #[error("Unknown resource {0}")]
-    UnknownResource(Container),
+    /// The container is not known to the system
+    #[error("Invalid container {0}")]
+    InvalidContainer(Container),
+    /// The container cannot be started because it's already running
+    #[error("Container {0} cannot be umounted: busy")]
+    UmountBusy(Container),
+    /// The container cannot be started because it's already running
+    #[error("Container {0} failed to start: Already started")]
+    StartContainerStarted(Container),
+    /// The container cannot be started because it's already running
+    #[error("Container {0} failed to start: Resources cannot be started")]
+    StartContainerResource(Container),
+    /// The container cannot be started because it's already running
+    #[error("Container {0} failed to start: Resource {1} is missing")]
+    StartContainerMissingResource(Container, Container),
+    /// The container cannot be started because it's already running
+    #[error("Container {0} failed to stop: Not started")]
+    StopContainerNotStarted(Container),
+    /// The container is not known to the system
+    #[error("Invalid repository {0}")]
+    InvalidRepository(RepositoryId),
+    /// The container is not known to the system
+    #[error("Failed to install {0}: Already installed")]
+    InstallDuplicate(Container),
 
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
@@ -53,28 +61,29 @@ pub enum Error {
     Io(String, io::Error),
     #[error("Os: {0}: {1:?}")]
     Os(String, nix::Error),
-    #[error("Internal error: {0}")]
-    Internal(String),
 }
 
 impl From<Error> for api::model::Error {
     fn from(error: Error) -> api::model::Error {
         match error {
-            Error::UnknownApplication(container) => {
-                api::model::Error::UnknownApplication(container)
+            Error::InvalidContainer(container) => api::model::Error::InvalidContainer(container),
+            Error::UmountBusy(container) => api::model::Error::UmountBusy(container),
+            Error::StartContainerStarted(container) => {
+                api::model::Error::StartContainerStarted(container)
             }
-            Error::ApplicationNotStarted(container) => {
-                api::model::Error::ApplicationNotStarted(container)
+            Error::StartContainerResource(container) => {
+                api::model::Error::StartContainerResource(container)
             }
-            Error::ApplicationStarted(container) => {
-                api::model::Error::ApplicationRunning(container)
+            Error::StartContainerMissingResource(container, resource) => {
+                api::model::Error::StartContainerMissingResource(container, resource)
             }
-            Error::ApplicationInstalled(container) => {
-                api::model::Error::ApplicationInstalled(container)
+            Error::StopContainerNotStarted(container) => {
+                api::model::Error::StopContainerNotStarted(container)
             }
-            Error::MissingResource(resource) => api::model::Error::MissingResource(resource),
-            Error::UnknownRepository(id) => api::model::Error::UnknownRepository(id),
-            Error::UnknownResource(container) => api::model::Error::UnknownResource(container),
+            Error::InvalidRepository(repository) => {
+                api::model::Error::InvalidRepository(repository)
+            }
+            Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate(container),
             Error::Npk(error) => api::model::Error::Npk(error.to_string()),
             Error::Process(error) => api::model::Error::Process(error.to_string()),
             Error::Console(error) => api::model::Error::Console(error.to_string()),
@@ -83,8 +92,6 @@ impl From<Error> for api::model::Error {
             Error::Key(error) => api::model::Error::Key(error.to_string()),
             Error::Io(cause, error) => api::model::Error::Io(format!("{}: {}", cause, error)),
             Error::Os(cause, error) => api::model::Error::Os(format!("{}: {}", cause, error)),
-            Error::Internal(cause) => api::model::Error::Internal(cause),
-            Error::ResourceBusy => api::model::Error::ResourceBusy,
         }
     }
 }
