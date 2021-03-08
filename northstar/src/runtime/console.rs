@@ -60,11 +60,12 @@ pub enum Error {
 
 impl Console {
     /// Construct a new console instance
-    pub fn new(url: Url, tx: &EventTx) -> Result<Self, Error> {
+    pub fn new(url: &Url, event_tx: EventTx) -> Result<Self, Error> {
         let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
+
         Ok(Self {
-            event_tx: tx.clone(),
-            url,
+            event_tx,
+            url: url.clone(),
             notification_tx,
             stop: CancellationToken::new(),
             stopped: CancellationToken::new(),

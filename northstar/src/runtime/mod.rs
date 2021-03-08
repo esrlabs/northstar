@@ -35,6 +35,7 @@ use tokio::{
     sync::{self, oneshot},
     task,
 };
+use tokio_util::sync::CancellationToken;
 
 mod cgroups;
 pub mod config;
@@ -60,11 +61,11 @@ pub(self) use npk::manifest::{Name, Version};
 pub(self) use repository::Repository;
 pub(self) use state::MountedContainer;
 
-pub type ExitCode = i32;
-pub type Pid = u32;
+pub(self) type ExitCode = i32;
+pub(self) type Pid = u32;
 
 #[derive(Clone, Debug)]
-pub enum ExitStatus {
+pub(crate) enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
     /// Process was terminated by a signal
@@ -110,18 +111,17 @@ pub type RuntimeResult = Result<(), Error>;
 pub struct Runtime {
     /// Channel receive a stop signal for the runtime
     /// Drop the tx part to gracefully shutdown the mail loop.
-    stop: Option<oneshot::Sender<()>>,
+    stop: CancellationToken,
     // Channel to signal the runtime exit status to the caller of `start`
     // When the runtime is shut down the result of shutdown is sent to this
     // channel. If a error happens during normal operation the error is also
     // sent to this channel.
     stopped: oneshot::Receiver<RuntimeResult>,
-    event_tx: mpsc::Sender<Event>,
 }
 
 impl Runtime {
     pub async fn start(config: Config) -> Result<Runtime, Error> {
-        let (stop_tx, stop_rx) = oneshot::channel();
+        let stop = CancellationToken::new();
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
         // Ensure the configured run_dir exists
@@ -129,14 +129,11 @@ impl Runtime {
         mkdir_p_rw(&config.run_dir).await?;
         mkdir_p_rw(&config.log_dir).await?;
 
-        // Northstar runs in a event loop. Moduls get a Sender<Event> to the main loop.
-        let (event_tx, event_rx) = mpsc::channel::<Event>(100);
-
         // Start a task that drives the main loop and wait for shutdown results
         {
-            let event_tx = event_tx.clone();
+            let stop = stop.clone();
             task::spawn(async move {
-                match runtime_task(&config, event_tx, event_rx, stop_rx).await {
+                match runtime_task(&config, stop).await {
                     Err(e) => {
                         log::error!("Runtime error: {}", e);
                         stopped_tx.send(Err(e)).ok();
@@ -147,65 +144,15 @@ impl Runtime {
         }
 
         Ok(Runtime {
-            stop: Some(stop_tx),
+            stop,
             stopped: stopped_rx,
-            event_tx,
         })
     }
 
-    /// Stop the runtime
-    pub fn stop(mut self) {
-        // Drop the sending part of the stop handle
-        self.stop.take();
-    }
-
     /// Stop the runtime and wait for the termination
-    pub fn stop_wait(mut self) -> impl Future<Output = RuntimeResult> {
-        self.stop.take();
+    pub fn shutdown(self) -> impl Future<Output = RuntimeResult> {
+        self.stop.cancel();
         self
-    }
-
-    /// Send a request to the runtime directly
-    pub async fn request(
-        &self,
-        request: api::model::Request,
-    ) -> Result<api::model::Response, Error> {
-        let (response_tx, response_rx) = oneshot::channel::<api::model::Response>();
-
-        let request = api::model::Message::new_request(request);
-        self.event_tx
-            .send(Event::Console(
-                console::Request::Message(request),
-                response_tx,
-            ))
-            .await
-            .ok();
-        let response: api::model::Response = response_rx
-            .await
-            .map_err(|e| Error::Internal(format!("Error receiving from channel {}", e)))?;
-        Ok(response)
-    }
-
-    /// Installs a container in the repository
-    pub async fn install(
-        &self,
-        repository: &str,
-        npk: &Path,
-    ) -> Result<api::model::Response, Error> {
-        let (response_tx, response_rx) = oneshot::channel::<api::model::Response>();
-
-        self.event_tx
-            .send(Event::Console(
-                console::Request::Install(repository.to_string(), npk.to_owned()),
-                response_tx,
-            ))
-            .await
-            .ok();
-
-        let response: api::model::Response = response_rx
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to receive response: {}", e)))?;
-        Ok(response)
     }
 }
 
@@ -224,32 +171,26 @@ impl Future for Runtime {
     }
 }
 
-async fn runtime_task(
-    config: &'_ Config,
-    event_tx: mpsc::Sender<Event>,
-    mut event_rx: mpsc::Receiver<Event>,
-    stop: oneshot::Receiver<()>,
-) -> Result<(), Error> {
+async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(), Error> {
+    // Northstar runs in a event loop
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+
     let mut state = State::new(config, event_tx.clone()).await?;
 
-    let console = config
-        .console
-        .clone()
-        .map(|url| console::Console::new(url, &event_tx))
-        .map_or(Ok(None), |r| r.map(Some))
-        .map_err(Error::Console)?;
-
-    // Initialize console
-    if let Some(console) = console.as_ref() {
-        // Start to listen for incoming connections
+    // Inititalize the console if configured
+    let console = if let Some(url) = config.console.as_ref() {
+        let console = console::Console::new(url, event_tx.clone()).map_err(Error::Console)?;
         console.listen().await.map_err(Error::Console)?;
-    }
+
+        Some(console)
+    } else {
+        None
+    };
 
     // Wait for a external shutdown request
-    let shutdown_tx = event_tx.clone();
     task::spawn(async move {
-        stop.await.ok();
-        shutdown_tx.send(Event::Shutdown).await.ok();
+        stop.cancelled().await;
+        event_tx.send(Event::Shutdown).await.ok();
     });
 
     // Enter main loop

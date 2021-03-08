@@ -128,9 +128,9 @@ impl Northstar {
 
         // Stop the runtime
         self.runtime
-            .stop_wait()
+            .shutdown()
             .await
-            .wrap_err("Failed to wait for runtime")?;
+            .wrap_err("Failed to stop the runtime")?;
 
         logger::assume("Closed listener", 5u64).await?;
 
