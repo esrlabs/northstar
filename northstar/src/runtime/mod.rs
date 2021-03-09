@@ -179,7 +179,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
 
     // Inititalize the console if configured
     let console = if let Some(url) = config.console.as_ref() {
-        let console = console::Console::new(url, event_tx.clone()).map_err(Error::Console)?;
+        let mut console = console::Console::new(url, event_tx.clone()).map_err(Error::Console)?;
         console.listen().await.map_err(Error::Console)?;
 
         Some(console)
