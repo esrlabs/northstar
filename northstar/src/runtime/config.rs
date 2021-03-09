@@ -20,6 +20,7 @@ use url::Url;
 use super::RepositoryId;
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Log level: DEBUG, INFO, WARN or ERROR
     pub log_level: Level,
@@ -40,6 +41,16 @@ pub struct Config {
     pub debug: Option<Debug>,
 }
 
+impl Config {
+    pub(crate) fn mount_namespace_disabled(&self) -> bool {
+        if let Some(runtime) = self.debug.as_ref().and_then(|debug| debug.runtime.as_ref()) {
+            runtime.disable_mount_namespace
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
     /// Directory containing images in container format
@@ -55,9 +66,6 @@ pub type CGroups = HashMap<String, PathBuf>;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Devices {
-    /// Parent mountpoint of northstar path. Northstar needs to set private mount propagation
-    /// on the parent mount of the northstar runtime dir. This mountpoint varies.
-    pub unshare_root: PathBuf,
     /// Device mapper control file e.g /dev/mapper/control
     pub device_mapper: PathBuf,
     /// Device mapper dev prefix e.g /dev/mapper/dm-

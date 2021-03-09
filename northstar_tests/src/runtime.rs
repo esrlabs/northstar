@@ -94,7 +94,6 @@ impl Northstar {
             cgroups,
             // This sections matches most common x86 Linux distributions
             devices: config::Devices {
-                unshare_root: PathBuf::from("/"),
                 device_mapper: PathBuf::from("/dev/mapper/control"),
                 device_mapper_dev: "/dev/dm-".into(),
                 loop_control: PathBuf::from("/dev/loop-control"),
