@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+* Synchronize access to the loopback control file (run multiple northstar instances
+  in parallel)
+* Mount container in parallel
+* Fix integration test log assumptions
+* Use `api::client::Client` for interfacing the runtime in integration tests
+* Add `api::client::Client::mount/umount`
+* Remove the `install/uninstall` and `request` from `runtime::Runtime`
 * Add UID and GID setting to the manifest. The values are used for preparing
   the squashfs image and when a container is started.
 * Add a Rust API client that implements the Northstar API protocol. See
