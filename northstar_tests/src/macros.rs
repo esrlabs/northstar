@@ -31,16 +31,6 @@ pub fn init() {
         // set the CWD to the root
         std::env::set_current_dir("..").unwrap();
 
-        // Set the mount propagation of unshare_root to MS_PRIVATE
-        nix::mount::mount(
-            Option::<&'static [u8]>::None,
-            "/",
-            Some("ext4"),
-            nix::mount::MsFlags::MS_PRIVATE,
-            Option::<&'static [u8]>::None,
-        )
-        .unwrap();
-
         // Enter a mount namespace. This needs to be done before spawning
         // the tokio threadpool.
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).unwrap();

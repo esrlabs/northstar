@@ -82,7 +82,7 @@ namespace :test do
 
   desc 'Run integration tests'
   task :run => :prepare do
-    puts `cargo test -p northstar_tests -- --test-threads 1 --ignored`
+    sh `cargo test`
   end
 
   desc 'Test coverage'
