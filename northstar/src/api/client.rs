@@ -372,7 +372,19 @@ impl<'a> Client {
     }
 
     /// Mount a list of containers
-    /// TODO
+    /// ```no_run
+    /// # use northstar::api::client::Client;
+    /// # use npk::manifest::Version;
+    /// # use std::path::Path;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap()).await.unwrap();
+    /// let version = Version::parse("0.0.2").unwrap();
+    /// let to_mount = vec!(("hello", &version), ("test", &version));
+    /// client.mount(to_mount).await.expect("Failed to mount");
+    /// # }
+    /// ```
     pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version)>>(
         &self,
         containers: I,
