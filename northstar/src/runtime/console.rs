@@ -17,7 +17,12 @@ use crate::{
     api::{self},
     runtime::EventTx,
 };
-use futures::{future::join_all, sink::SinkExt, StreamExt};
+use futures::{
+    future::{join_all, pending, Either},
+    sink::SinkExt,
+    stream::FuturesUnordered,
+    StreamExt,
+};
 use log::{debug, error, info, trace, warn};
 use std::{path::PathBuf, unreachable};
 use thiserror::Error;
@@ -84,6 +89,7 @@ impl Console {
     pub(crate) async fn listen(&mut self) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
+        // Stop token for self *and* the connections
         let stop = self.stop.clone();
 
         match self.url.scheme() {
@@ -111,18 +117,26 @@ impl Console {
                 debug!("Started console on {}", &address);
 
                 let task = task::spawn(async move {
+                    // Connection tasks
+                    let mut connections = FuturesUnordered::new();
                     loop {
                         select! {
+                            // Do not poll an FuturesUnordered that is empty
+                            _ = if connections.is_empty() {
+                                Either::Left(pending())
+                            } else {
+                                Either::Right(connections.next())
+                            } => { /* nothing to be done */}
                             stream = listener.accept() => {
                                 match stream {
                                     Ok(stream) => {
-                                        task::spawn(Self::connection(
+                                        connections.push(task::spawn(Self::connection(
                                             stream.0,
                                             stream.1.to_string(),
                                             stop.clone(),
                                             event_tx.clone(),
                                             notification_tx.subscribe(),
-                                        ));
+                                        )));
                                     }
                                     Err(e) => {
                                         warn!("Error listening: {}", e);
@@ -133,8 +147,11 @@ impl Console {
                             _ = stop.cancelled() => {
                                 debug!("Closing listener on {}", address);
                                 drop(listener);
-                                // TODO: Wait for all connections to be closed
                                 debug!("Closed listener on {}", address);
+                                if ! connections.is_empty() {
+                                    debug!("Waiting for connections to be closed");
+                                    while connections.next().await.is_some() {}
+                                }
                                 break;
                             }
                         }
@@ -163,18 +180,26 @@ impl Console {
                 debug!("Started console on {}", address.display());
 
                 let task = task::spawn(async move {
+                    // Connection tasks
+                    let mut connections = FuturesUnordered::new();
                     loop {
                         select! {
+                            // Do not poll an FuturesUnordered that is empty
+                            _ = if connections.is_empty() {
+                                Either::Left(pending())
+                            } else {
+                                Either::Right(connections.next())
+                            } => { /* nothing to be done */}
                             stream = listener.accept() => {
                                 match stream {
                                     Ok(stream) => {
-                                        task::spawn(Self::connection(
+                                        connections.push(task::spawn(Self::connection(
                                             stream.0,
                                             format!("{:?}", &stream.1),
                                             stop.clone(),
                                             event_tx.clone(),
                                             notification_tx.subscribe(),
-                                        ));
+                                        )));
                                     }
                                     Err(e) => {
                                         warn!("Error listening: {}", e);
@@ -189,8 +214,11 @@ impl Console {
                                     fs::remove_file(&address)
                                         .await.expect("Failed to remove unix socket");
                                 }
-                                // TODO: Wait for all connections to be closed
                                 debug!("Closed listener on {}", address.display());
+                                if ! connections.is_empty() {
+                                    debug!("Waiting for connections to be closed");
+                                    while connections.next().await.is_some() {}
+                                }
                                 break;
                             }
                         }
