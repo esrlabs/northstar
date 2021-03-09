@@ -17,7 +17,7 @@ use crate::{
     api::{self},
     runtime::EventTx,
 };
-use futures::{sink::SinkExt, StreamExt};
+use futures::{future::join_all, sink::SinkExt, StreamExt};
 use log::{debug, error, info, trace, warn};
 use std::{path::PathBuf, unreachable};
 use thiserror::Error;
@@ -27,7 +27,8 @@ use tokio::{
     net::{TcpListener, UnixListener},
     select,
     sync::{self, broadcast, oneshot},
-    task, time,
+    task::{self},
+    time,
 };
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -43,11 +44,17 @@ pub(crate) enum Request {
 /// It feeds relevant events back to the runtime and forwards responses and notifications
 /// to connected clients
 pub(crate) struct Console {
+    /// Tx handle to the main loop
     event_tx: EventTx,
+    /// Listening address/url
     url: Url,
+    /// Broadcast channel passed to connections to forward notifications
     notification_tx: broadcast::Sender<Notification>,
+    /// Shutdown the console by canceling this token
     stop: CancellationToken,
-    stopped: CancellationToken,
+    /// Listener tasks. Currently there's just one task but when the console
+    /// is exposed to containers via unix sockets this list will grow
+    tasks: Vec<task::JoinHandle<()>>,
 }
 
 #[derive(Error, Debug)]
@@ -68,17 +75,16 @@ impl Console {
             url: url.clone(),
             notification_tx,
             stop: CancellationToken::new(),
-            stopped: CancellationToken::new(),
+            tasks: Vec::new(),
         })
     }
 
     /// Open a TCP socket and listen for incoming connections
     /// spawn a task for each connection
-    pub(crate) async fn listen(&self) -> Result<(), Error> {
+    pub(crate) async fn listen(&mut self) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
         let stop = self.stop.clone();
-        let stopped = self.stopped.clone();
 
         match self.url.scheme() {
             "tcp" => {
@@ -104,7 +110,7 @@ impl Console {
 
                 debug!("Started console on {}", &address);
 
-                task::spawn(async move {
+                let task = task::spawn(async move {
                     loop {
                         select! {
                             stream = listener.accept() => {
@@ -129,12 +135,12 @@ impl Console {
                                 drop(listener);
                                 // TODO: Wait for all connections to be closed
                                 debug!("Closed listener on {}", address);
-                                stopped.cancel();
                                 break;
                             }
                         }
                     }
                 });
+                self.tasks.push(task);
             }
             "unix" => {
                 let address = PathBuf::from(self.url.path());
@@ -156,7 +162,7 @@ impl Console {
 
                 debug!("Started console on {}", address.display());
 
-                task::spawn(async move {
+                let task = task::spawn(async move {
                     loop {
                         select! {
                             stream = listener.accept() => {
@@ -185,12 +191,12 @@ impl Console {
                                 }
                                 // TODO: Wait for all connections to be closed
                                 debug!("Closed listener on {}", address.display());
-                                stopped.cancel();
                                 break;
                             }
                         }
                     }
                 });
+                self.tasks.push(task);
             }
             _ => unreachable!(),
         }
@@ -201,7 +207,7 @@ impl Console {
     /// Stop the listeners and wait for their shutdown
     pub async fn shutdown(self) -> Result<(), Error> {
         self.stop.cancel();
-        self.stopped.cancelled().await;
+        join_all(self.tasks).await;
         Ok(())
     }
 
