@@ -40,7 +40,6 @@ use tokio_util::sync::CancellationToken;
 mod cgroups;
 pub mod config;
 mod console;
-mod container;
 #[allow(unused)]
 mod device_mapper;
 mod error;
@@ -56,8 +55,7 @@ pub(self) mod state;
 
 pub(self) type EventTx = mpsc::Sender<Event>;
 pub(self) type RepositoryId = String;
-pub use container::*;
-pub(self) use npk::manifest::{Name, Version};
+pub use api::container::*;
 pub(self) use repository::Repository;
 pub(self) use state::MountedContainer;
 

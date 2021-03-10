@@ -14,8 +14,8 @@
 
 use super::{Event, Notification, RepositoryId};
 use crate::{
-    api::{self},
-    runtime::EventTx,
+    api,
+    runtime::{EventTx, ExitStatus},
 };
 use futures::{
     future::{join_all, pending, Either},
@@ -387,5 +387,30 @@ impl Console {
         info!("{}: Connection closed", peer);
 
         Ok(())
+    }
+}
+
+impl From<ExitStatus> for api::model::ExitStatus {
+    fn from(e: ExitStatus) -> Self {
+        match e {
+            ExitStatus::Exit(e) => api::model::ExitStatus::Exit(e),
+            ExitStatus::Signaled(s) => api::model::ExitStatus::Signaled(s as u32),
+        }
+    }
+}
+
+impl From<Notification> for api::model::Notification {
+    fn from(n: Notification) -> Self {
+        match n {
+            Notification::OutOfMemory(container) => {
+                api::model::Notification::OutOfMemory(container)
+            }
+            Notification::Exit { container, status } => api::model::Notification::Exit {
+                container,
+                status: status.into(),
+            },
+            Notification::Started(container) => api::model::Notification::Started(container),
+            Notification::Stopped(container) => api::model::Notification::Stopped(container),
+        }
     }
 }

@@ -17,12 +17,10 @@ use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::runtime::{ExitStatus as ExitStatusRuntime, Notification as NotificationRuntime};
-
 pub type Name = String;
 pub type RepositoryId = String;
 pub type MessageId = String; // UUID
-pub type Container = crate::runtime::Container;
+pub type Container = super::container::Container;
 
 const VERSION: &str = "0.0.2";
 
@@ -39,15 +37,6 @@ pub enum ExitStatus {
     Exit(ExitCode),
     /// Process was terminated by a signal
     Signaled(Signal),
-}
-
-impl From<ExitStatusRuntime> for ExitStatus {
-    fn from(e: ExitStatusRuntime) -> Self {
-        match e {
-            ExitStatusRuntime::Exit(e) => ExitStatus::Exit(e),
-            ExitStatusRuntime::Signaled(s) => ExitStatus::Signaled(s as u32),
-        }
-    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -96,20 +85,6 @@ pub enum Notification {
     Started(Container),
     Stopped(Container),
     Shutdown,
-}
-
-impl From<NotificationRuntime> for Notification {
-    fn from(n: NotificationRuntime) -> Self {
-        match n {
-            NotificationRuntime::OutOfMemory(container) => Notification::OutOfMemory(container),
-            NotificationRuntime::Exit { container, status } => Notification::Exit {
-                container,
-                status: status.into(),
-            },
-            NotificationRuntime::Started(container) => Notification::Started(container),
-            NotificationRuntime::Stopped(container) => Notification::Stopped(container),
-        }
-    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
