@@ -58,6 +58,7 @@ pub struct Minijail {
     event_tx: EventTx,
     config: Config,
     log_task: JoinHandle<()>,
+    stop_token: CancellationToken,
 }
 
 fn into_io_error(e: ::minijail::Error) -> Error {
@@ -82,19 +83,30 @@ impl Launcher for Minijail {
         })?;
         let mut lines = io::BufReader::new(async_reader).lines();
 
-        // Spawn a task that forwards logs from minijail to the rust logger.
-        let log_task = task::spawn(async move {
-            while let Ok(Some(line)) = lines.next_line().await {
-                let l = line.split_whitespace().skip(2).collect::<String>();
-                match line.chars().next() {
-                    Some('D') => debug!("{}", l),
-                    Some('I') => info!("{}", l),
-                    Some('W') => warn!("{}", l),
-                    Some('E') => error!("{}", l),
-                    _ => trace!("{}", line),
+        let stop_token = CancellationToken::new();
+        let log_task = {
+            let stop_token = stop_token.clone();
+
+            // Spawn a task that forwards logs from minijail to the rust logger.
+            task::spawn(async move {
+                loop {
+                    select! {
+                        Ok(Some(line)) = lines.next_line() => {
+                            let l = line.split_whitespace().skip(2).collect::<String>();
+                            match line.chars().next() {
+                                Some('D') => debug!("{}", l),
+                                Some('I') => info!("{}", l),
+                                Some('W') => warn!("{}", l),
+                                Some('E') => error!("{}", l),
+                                _ => trace!("{}", line),
+                            }
+                        }
+                        _ = stop_token.cancelled() => break,
+                        else => break,
+                    }
                 }
-            }
-        });
+            })
+        };
 
         let minijail_log_level = match log::max_level().to_level().unwrap_or(Level::Warn) {
             Level::Error => 3,
@@ -111,23 +123,20 @@ impl Launcher for Minijail {
             event_tx,
             config,
             log_task,
+            stop_token,
         })
     }
 
-    async fn shutdown(self) -> Result<(), Error>
+    async fn shutdown(&mut self) -> Result<(), Error>
     where
         Self: Sized,
     {
         // Set minijail logging to stderr before closing the pipe
         ::minijail::Minijail::log_to_fd(2, i32::MAX);
 
-        // Close the writing end of the minijail log task. This will make the task break
-        drop(self.log_fd);
+        // Stop the task that receives the log from minijail
+        self.stop_token.cancel();
 
-        // Wait for the log task to exit
-        self.log_task
-            .await
-            .expect("Failed to stop minijail log task");
         Ok(())
     }
 

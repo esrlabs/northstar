@@ -445,7 +445,7 @@ impl<'a, L: Launcher> State<'a, L> {
     }
 
     /// Shutdown the runtime: stop running applications and umount npks
-    pub(super) async fn shutdown(mut self) -> Result<(), Error> {
+    pub(super) async fn shutdown(&mut self) -> Result<(), Error> {
         // Stop started containers
         let started = self
             .containers

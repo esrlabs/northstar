@@ -77,7 +77,7 @@ trait Launcher {
     async fn start(event_tx: EventTx, config: Config) -> Result<Self, Error>
     where
         Self: Sized;
-    async fn shutdown(self) -> Result<(), Error>
+    async fn shutdown(&mut self) -> Result<(), Error>
     where
         Self: Sized;
 
@@ -257,7 +257,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
     let mut state = State::<minijail::Minijail>::new(config, event_tx.clone()).await?;
 
     // Inititalize the console if configured
-    let console = if let Some(url) = config.console.as_ref() {
+    let mut console = if let Some(url) = config.console.as_ref() {
         let mut console = console::Console::new(url, event_tx.clone());
         console.listen().await.map_err(Error::Console)?;
 
@@ -272,42 +272,68 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
         event_tx.send(Event::Shutdown).await.ok();
     });
 
+    let mut shutdown_issued = false;
+
     // Enter main loop
     loop {
-        if let Err(e) = match event_rx.recv().await.unwrap() {
+        match event_rx.recv().await {
+            // If a shutdown event was issued, any remaning client request will be responded
+            // with an error message
+            Some(Event::Console(_msg, txr)) if shutdown_issued => {
+                txr.send(api::model::Response::Err(api::model::Error::Console(
+                    "Shutting down".to_string(),
+                )))
+                .ok();
+            }
             // Debug console commands are handled via the main loop in order to get access
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
-            Event::Console(msg, txr) => state.console_request(&msg, txr).await,
+            Some(Event::Console(msg, txr)) => state.console_request(&msg, txr).await?,
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
-            Event::Oom(container) => state.on_oom(&container).await,
+            Some(Event::Oom(container)) => state.on_oom(&container).await?,
             // A container process existed. Check `process::wait_exit` for details.
-            Event::Exit(container, exit_status) => state.on_exit(&container, &exit_status).await,
+            Some(Event::Exit(container, exit_status)) => {
+                state.on_exit(&container, &exit_status).await?;
+            }
             // The runtime os commanded to shut down and exit.
-            Event::Shutdown => break state.shutdown().await,
+            Some(Event::Shutdown) => {
+                shutdown_issued = true;
+
+                // TODO ask what we want to do here
+                // debug!("Stop accepting new connections");
+                // if let Some(console) = &console {
+                //     console.stop_new_connctions();
+                // }
+
+                debug!("Shutting down runtime");
+                state.shutdown().await.unwrap();
+
+                debug!("Closing event loop");
+                event_rx.close();
+            }
             // Forward notifications to console
-            Event::Notification(notification) => {
+            Some(Event::Notification(notification)) => {
                 if let Some(console) = console.as_ref() {
                     console.notification(notification).await;
                 }
-                Ok(())
             }
-        } {
-            break Err(e);
-        }
-    }?;
+            None => {
+                debug!("Event loop is closed");
 
-    task::block_in_place(|| nix::mount::umount(&config.run_dir))
-        .map_err(|e| Error::Mount(mount::Error::Os(e)))?;
+                task::block_in_place(|| nix::mount::umount(&config.run_dir))
+                    .map_err(|e| Error::Mount(mount::Error::Os(e)))?;
 
-    if let Some(console) = console {
-        console.shutdown().await.map_err(Error::Console)?;
+                if let Some(console) = console.take() {
+                    console.shutdown().await.map_err(Error::Console)?;
+                }
+
+                break Ok(());
+            }
+        };
     }
-
-    Ok(())
 }
 
 /// Create path if it does not exist. Ensure that it is
