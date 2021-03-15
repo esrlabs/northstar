@@ -132,18 +132,16 @@ impl Runtime {
         // The reason why the mount propagation is set to MS_PRIVATE is
         // to make the kernel umount everything mounted in this mount namespace
         // when the past process in this namespace exits.
-        if !config.mount_namespace_disabled() {
-            task::block_in_place(|| {
-                nix::mount::mount(
-                    Some(&config.run_dir),
-                    config.run_dir.as_os_str(),
-                    Option::<&str>::None,
-                    nix::mount::MsFlags::MS_PRIVATE | nix::mount::MsFlags::MS_BIND,
-                    Option::<&'static [u8]>::None,
-                )
-                .map_err(|e| Error::Mount(mount::Error::Os(e)))
-            })?;
-        };
+        task::block_in_place(|| {
+            nix::mount::mount(
+                Some(&config.run_dir),
+                config.run_dir.as_os_str(),
+                Option::<&str>::None,
+                nix::mount::MsFlags::MS_PRIVATE | nix::mount::MsFlags::MS_BIND,
+                Option::<&'static [u8]>::None,
+            )
+            .map_err(|e| Error::Mount(mount::Error::Os(e)))
+        })?;
 
         mkdir_p_rw(&config.log_dir).await?;
 
@@ -238,12 +236,6 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             break Err(e);
         }
     }?;
-
-    // Remove bind mount if it was used
-    if !config.mount_namespace_disabled() {
-        task::block_in_place(|| nix::mount::umount(&config.run_dir))
-            .map_err(|e| Error::Mount(mount::Error::Os(e)))?;
-    };
 
     if let Some(console) = console {
         console.shutdown().await.map_err(Error::Console)?;
