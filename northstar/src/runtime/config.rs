@@ -41,16 +41,6 @@ pub struct Config {
     pub debug: Option<Debug>,
 }
 
-impl Config {
-    pub(crate) fn mount_namespace_disabled(&self) -> bool {
-        if let Some(runtime) = self.debug.as_ref().and_then(|debug| debug.runtime.as_ref()) {
-            runtime.disable_mount_namespace
-        } else {
-            false
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
     /// Directory containing images in container format
