@@ -21,7 +21,7 @@ use super::{
 };
 use crate::runtime::EventTx;
 use bytes::{Buf, BytesMut};
-use futures::Future;
+use futures::{future::OptionFuture, Future};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
@@ -497,24 +497,26 @@ impl Debug {
     /// Start configured debug facilities and attach to `pid`
     async fn from(config: &Config, manifest: &Manifest, pid: u32) -> Result<Debug, Error> {
         // Attach a strace instance if configured in the runtime configuration
-        let strace = if let Some(strace) = config
+        let strace: OptionFuture<_> = config
             .debug
             .as_ref()
             .and_then(|debug| debug.strace.as_ref())
-        {
-            Some(Strace::new(strace, manifest, &config.log_dir, pid).await?)
-        } else {
-            None
-        };
+            .map(|strace| Strace::new(strace, manifest, &config.log_dir, pid))
+            .into();
 
         // Attach a perf instance if configured in the runtime configuration
-        let perf = if let Some(perf) = config.debug.as_ref().and_then(|debug| debug.perf.as_ref()) {
-            Some(Perf::new(perf, manifest, &config.log_dir, pid).await?)
-        } else {
-            None
-        };
+        let perf: OptionFuture<_> = config
+            .debug
+            .as_ref()
+            .and_then(|debug| debug.perf.as_ref())
+            .map(|perf| Perf::new(perf, manifest, &config.log_dir, pid))
+            .into();
 
-        Ok(Debug { strace, perf })
+        let (strace, perf) = tokio::join!(strace, perf);
+        Ok(Debug {
+            strace: strace.transpose()?,
+            perf: perf.transpose()?,
+        })
     }
 
     /// Shutdown configured debug facilities and attached to `pid`

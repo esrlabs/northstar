@@ -23,6 +23,7 @@ use super::{
     key::{self, PublicKey},
     Container, RepositoryId,
 };
+use futures::future::OptionFuture;
 use log::debug;
 use npk::npk::Npk;
 use tokio::fs;
@@ -42,12 +43,7 @@ impl Repository {
         dir: PathBuf,
         key: Option<&Path>,
     ) -> Result<Repository, Error> {
-        let key = if let Some(key) = key {
-            Some(key::load(&key).await.map_err(Error::Key)?)
-        } else {
-            None
-        };
-
+        let key: OptionFuture<_> = key.map(|k| key::load(&k)).into();
         let mut containers = HashMap::new();
         let mut npks = HashMap::new();
 
@@ -74,7 +70,7 @@ impl Repository {
         Ok(Repository {
             id,
             dir,
-            key,
+            key: key.await.transpose().map_err(Error::Key)?,
             containers,
             npks,
         })
