@@ -12,10 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use anyhow::Result;
+use colored::Colorize;
 use npk::manifest::Version;
 use std::path::PathBuf;
 use structopt::{
-    clap::{AppSettings, Result},
+    clap::{self, AppSettings},
     StructOpt,
 };
 
@@ -106,33 +108,59 @@ pub enum PromptCommand {
     Prompt(Prompt),
 }
 
-/// Used to parse the input form the interactive prompt
-pub fn parse_prompt(input: &str) -> Result<PromptCommand> {
-    PromptCommand::clap()
-        .settings(&[
-            AppSettings::NoBinaryName,
-            AppSettings::ColoredHelp,
-            AppSettings::SubcommandRequired,
-            AppSettings::DisableHelpFlags,
-            AppSettings::DisableVersion,
-            AppSettings::DisableHelpSubcommand,
-        ])
-        .get_matches_from_safe(input.split_whitespace())
-        .map(|m| PromptCommand::from_clap(&m))
+/// Used  to validate the user input in the interactive mode
+pub struct PromptParser<'a, 'b> {
+    app: clap::App<'a, 'b>,
 }
 
-/// Print prompt command help
-pub fn print_help<W: std::io::Write>(output: &mut W) -> Result<()> {
-    writeln!(output)?;
-    PromptCommand::clap()
-        .settings(&[
-            AppSettings::NoBinaryName,
-            AppSettings::ColoredHelp,
-            AppSettings::SubcommandRequired,
-            AppSettings::DisableHelpFlags,
-            AppSettings::DisableVersion,
-            AppSettings::DisableHelpSubcommand,
-        ])
-        .template("{subcommands}\n")
-        .write_help(output)
+impl<'a, 'b> PromptParser<'a, 'b> {
+    pub fn new() -> Self {
+        Self {
+            app: PromptCommand::clap()
+                .settings(&[
+                    AppSettings::SubcommandRequiredElseHelp,
+                    AppSettings::VersionlessSubcommands,
+                    AppSettings::DisableVersion,
+                    AppSettings::DisableHelpFlags,
+                    AppSettings::ColoredHelp,
+                ])
+                .template("\n{subcommands}\n")
+                .global_settings(&[AppSettings::NoBinaryName, AppSettings::InferSubcommands]),
+        }
+    }
+
+    /// Use to parse the user input
+    pub fn parse(&mut self, input: &str) -> clap::Result<PromptCommand> {
+        let result = self
+            .app
+            .get_matches_from_safe_borrow(input.split_whitespace())
+            .map(|m| PromptCommand::from_clap(&m));
+
+        // Treat specially the top level errors
+        if let Err(ref e) = result {
+            if matches!(
+                e.kind,
+                clap::ErrorKind::InvalidSubcommand
+                    | clap::ErrorKind::UnrecognizedSubcommand
+                    | clap::ErrorKind::UnknownArgument
+            ) {
+                return Err(clap::Error::with_description(
+                    &format!(
+                        "Invalid input, use {} to list the available commands",
+                        "help".blue()
+                    ),
+                    clap::ErrorKind::InvalidSubcommand,
+                ));
+            }
+        }
+
+        result
+    }
+
+    /// Print prompt command help
+    pub fn print_help<W: std::io::Write>(&self, output: &mut W) -> Result<()> {
+        self.app.write_help(output)?;
+        output.flush()?;
+        Ok(())
+    }
 }

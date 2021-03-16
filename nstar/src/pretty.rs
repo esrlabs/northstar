@@ -24,7 +24,7 @@ use tokio::time;
 
 pub(crate) fn notification<W: io::Write>(mut w: W, notification: &Notification) {
     // TODO
-    let msg = format!("📣  {:?}", notification);
+    let msg = format!("{} {:?}", "<!>".yellow(), notification);
     writeln!(w, "{}", msg).ok();
 }
 
@@ -132,10 +132,10 @@ pub(crate) async fn print_response<W: std::io::Write>(
         Response::Containers(cs) => containers(&mut output, &cs),
         Response::Repositories(rs) => repositories(&mut output, &rs),
         Response::Ok(()) => {
-            writeln!(output, "{}", "✔ success".green()).context("Failed to write to stdout")
+            writeln!(output, "{}", "success".green()).context("Failed to write to stdout")
         }
         Response::Err(e) => {
-            writeln!(output, "{}: {:?}", "✗ failed".red(), e).context("Failed to write to stdout")
+            writeln!(output, "{}: {:?}", "failed".red(), e).context("Failed to write to stdout")
         }
         Response::Mount(results) => mounts(&mut output, &results),
     }

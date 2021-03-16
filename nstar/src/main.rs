@@ -14,7 +14,7 @@
 
 use anyhow::{Context, Result};
 use colored::Colorize;
-use commands::{parse_prompt, print_help, Northstar, NstarOpt, Prompt, PromptCommand};
+use commands::{Northstar, NstarOpt, Prompt, PromptCommand};
 use futures::StreamExt;
 use northstar::api::{
     self,
@@ -78,7 +78,9 @@ async fn print_response<W: Write>(mut out: &mut W, response: Response, json: boo
     if json {
         serde_json::to_writer(&mut out, &response)?;
         out.write_all(&[b'\n'])
-            .context("Failed to print json response")
+            .context("Failed to print json response")?;
+        out.flush()?;
+        Ok(())
     } else {
         pretty::print_response(out, response).await
     }
@@ -101,6 +103,7 @@ fn main() -> Result<()> {
 
         // Interactive mode
         let (mut terminal, mut input) = terminal::Terminal::new()?;
+        let mut prompt = commands::PromptParser::new();
         loop {
             writeln!(terminal, "Connected to {}", &url)?;
             loop {
@@ -118,13 +121,10 @@ fn main() -> Result<()> {
                             terminal::UserInput::Eof => return Ok(()),
                         };
 
-                        match parse_prompt(&input) {
+                        match prompt.parse(&input) {
                             Ok(PromptCommand::Prompt(cmd)) => match cmd {
-                                Prompt::Help => print_help(&mut terminal)?,
-                                Prompt::Quit => {
-                                    writeln!(&mut terminal, "bye!")?;
-                                    return Ok(())
-                                },
+                                Prompt::Help => prompt.print_help(&mut terminal)?,
+                                Prompt::Quit => return Ok(()),
                             },
                             Ok(PromptCommand::Northstar(cmd)) => {
                                 match send_request(&mut client, cmd).await {
@@ -136,6 +136,7 @@ fn main() -> Result<()> {
                             },
                             Err(e) => writeln!(terminal, "{}", e.message)?
                         };
+                        terminal.flush()?;
                     }
                     else => break,
                 }

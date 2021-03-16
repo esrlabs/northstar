@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::commands::parse_prompt;
 use anyhow::{Context as _, Result};
 use colored::Colorize;
 use futures::Stream;
@@ -23,7 +22,7 @@ use rustyline::{
     error::ReadlineError,
     highlight::{Highlighter, MatchingBracketHighlighter},
     hint::{Hinter, HistoryHinter},
-    validate::{self, Validator},
+    validate::Validator,
     Cmd, CompletionType, Config, Context, EditMode, ExternalPrinter, KeyEvent, Modifiers,
 };
 use rustyline_derive::Helper;
@@ -35,7 +34,6 @@ use std::{
     io::Write,
     pin,
 };
-use structopt::clap;
 use tokio::{sync::mpsc, task};
 
 #[derive(Debug)]
@@ -87,14 +85,13 @@ impl Terminal {
             buffer: Vec::new(),
         };
 
-        let prompt = "➜ ";
-        rl.helper_mut().expect("No helper").colored_prompt = format!("\x1b[1;32m{}\x1b[0m", prompt);
-
+        let green_arrow = "-> ".green().to_string();
+        rl.helper_mut().expect("No helper").colored_prompt = green_arrow;
         let (tx, rx) = mpsc::channel(10);
 
         task::spawn_blocking(move || {
             loop {
-                let readline = rl.readline(&prompt);
+                let readline = rl.readline(&"-> ".green());
                 match readline {
                     Ok(line) => {
                         if tx.blocking_send(UserInput::Line(line)).is_err() {
@@ -187,40 +184,8 @@ impl Highlighter for NstarHelper {
     }
 }
 
-impl Validator for NstarHelper {
-    fn validate(
-        &self,
-        ctx: &mut validate::ValidationContext,
-    ) -> rustyline::Result<validate::ValidationResult> {
-        use validate::ValidationResult::*;
-
-        match parse_prompt(ctx.input()) {
-            Ok(_) => Ok(Valid(None)),
-            Err(e) => {
-                // Help requested
-                if e.kind == clap::ErrorKind::HelpDisplayed {
-                    return Ok(Valid(None));
-                }
-
-                let message = match e.kind {
-                    clap::ErrorKind::InvalidSubcommand | clap::ErrorKind::UnknownArgument => {
-                        format!("Invalid command, use {}", "help".blue())
-                    }
-                    clap::ErrorKind::MissingRequiredArgument => {
-                        format!("Missing argument, use {} for help", "-h,--help".blue())
-                    }
-                    _ => format!("{:?} {}", e.kind, "Unknown".normal()),
-                };
-
-                Ok(Invalid(Some(format!("    <- ⚠️: {}", message))))
-            }
-        }
-    }
-
-    fn validate_while_typing(&self) -> bool {
-        false
-    }
-}
+// Skip the validation step, this is done with clap
+impl Validator for NstarHelper {}
 
 struct Stdout<T: ExternalPrinter> {
     inner: T,
@@ -231,11 +196,7 @@ impl<T: ExternalPrinter> std::io::Write for Stdout<T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         for c in buf {
             if *c == b'\n' {
-                let msg = String::from_utf8_lossy(&self.buffer).to_string();
-                self.inner
-                    .print(msg)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-                self.buffer.clear();
+                self.flush()?;
             } else {
                 self.buffer.push(*c);
             }
@@ -244,6 +205,11 @@ impl<T: ExternalPrinter> std::io::Write for Stdout<T> {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
+        let msg = String::from_utf8_lossy(&self.buffer).to_string();
+        self.inner
+            .print(msg)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        self.buffer.clear();
         Ok(())
     }
 }
