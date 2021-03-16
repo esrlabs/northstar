@@ -94,9 +94,9 @@ impl<'a> Minijail<'a> {
         ::minijail::Minijail::log_to_fd(log_fd.as_raw_fd(), minijail_log_level as i32);
 
         Ok(Minijail {
+            log_fd,
             event_tx,
             config,
-            log_fd,
             log_task,
         })
     }

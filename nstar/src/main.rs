@@ -62,7 +62,7 @@ async fn send_request(
 async fn create_client(host: &str) -> Result<api::client::Client> {
     api::client::Client::new(&url::Url::parse(host)?)
         .await
-        .context(format!("Failed to stablish connection to {}", host))
+        .context(format!("Failed to establish connection to {}", host))
 }
 
 async fn print_response<W: Write>(mut out: &mut W, response: Response, json: bool) -> Result<()> {

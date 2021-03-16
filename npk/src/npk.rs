@@ -292,10 +292,10 @@ impl Npk {
                 file,
                 manifest,
                 version,
-                hashes,
                 fs_img_offset,
                 fs_img_size,
                 verity_header,
+                hashes,
             })
         })
     }
@@ -725,7 +725,6 @@ async fn create_squashfs_img(
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
-        .arg("-all-root")
         .arg("-no-progress")
         .arg("-comp")
         .arg(compression_algorithm.to_string())
