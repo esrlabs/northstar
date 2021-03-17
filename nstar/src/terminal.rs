@@ -12,10 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use colored::Colorize;
-use futures::Stream;
-use pin::Pin;
 use rustyline::{
     completion::{Completer, FilenameCompleter, Pair},
     config::OutputStreamType,
@@ -26,28 +24,20 @@ use rustyline::{
     Cmd, CompletionType, Config, Context, EditMode, ExternalPrinter, KeyEvent, Modifiers,
 };
 use rustyline_derive::Helper;
-use std::{
-    borrow::{
-        Cow,
-        Cow::{Borrowed, Owned},
-    },
-    io::Write,
-    pin,
+use std::borrow::{
+    Cow,
+    Cow::{Borrowed, Owned},
 };
-use tokio::{sync::mpsc, task};
-
-#[derive(Debug)]
-pub enum UserInput {
-    Line(String),
-    Eof,
-}
 
 pub struct Terminal {
-    rx: mpsc::Receiver<UserInput>,
+    stdout: Box<dyn ExternalPrinter>,
+    buffer: Vec<u8>,
+    line_rx: tokio::sync::mpsc::Receiver<rustyline::Result<String>>,
+    next_line: tokio::sync::mpsc::Sender<bool>,
 }
 
 impl Terminal {
-    pub fn new() -> Result<(impl Write, Terminal)> {
+    pub fn new() -> Result<Terminal> {
         let config = Config::builder()
             .history_ignore_space(true)
             .auto_add_history(true)
@@ -61,6 +51,7 @@ impl Terminal {
             hinter: HistoryHinter {},
             colored_prompt: "".to_owned(),
         };
+
         let mut rl = rustyline::Editor::<NstarHelper>::with_config(config);
         rl.set_helper(Some(h));
 
@@ -80,52 +71,35 @@ impl Terminal {
         }
 
         //let stdout: Box<dyn std::io::Write> = Box::new(stdout);
-        let stdout = Stdout {
-            inner: rl.create_external_printer()?,
-            buffer: Vec::new(),
-        };
+        let ep = Box::new(rl.create_external_printer()?);
+        let buffer = Vec::new();
 
         let green_arrow = "-> ".green().to_string();
         rl.helper_mut().expect("No helper").colored_prompt = green_arrow;
-        let (tx, rx) = mpsc::channel(10);
 
-        task::spawn_blocking(move || {
-            loop {
-                let readline = rl.readline(&"-> ".green());
-                match readline {
-                    Ok(line) => {
-                        if tx.blocking_send(UserInput::Line(line)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
-                        tx.blocking_send(UserInput::Eof).unwrap();
-                        break;
-                    }
-                    Err(err) => {
-                        eprintln!("Error: {:?}", err);
-                        break;
-                    }
-                }
+        let (line_tx, line_rx) = tokio::sync::mpsc::channel(1);
+        let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel(1);
+        tokio::task::spawn(async move {
+            while let Some(true) = ready_rx.recv().await {
+                line_tx
+                    .send(tokio::task::block_in_place(|| rl.readline(&"-> ".green())))
+                    .await
+                    .ok();
             }
-            rl.save_history(&history)
-                .context("Failed to write history")
-                .ok();
+            rl.save_history(&history).ok();
         });
 
-        Ok((stdout, Terminal { rx }))
+        Ok(Terminal {
+            stdout: ep,
+            buffer,
+            line_rx,
+            next_line: ready_tx,
+        })
     }
-}
 
-// Stream of input lines
-impl<'a> Stream for Terminal {
-    type Item = UserInput;
-
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        Pin::new(&mut self.rx).poll_recv(cx)
+    pub async fn readline(&mut self) -> rustyline::Result<String> {
+        self.next_line.send(true).await.unwrap();
+        self.line_rx.recv().await.unwrap()
     }
 }
 
@@ -187,18 +161,12 @@ impl Highlighter for NstarHelper {
 // Skip the validation step, this is done with clap
 impl Validator for NstarHelper {}
 
-struct Stdout<T: ExternalPrinter> {
-    inner: T,
-    buffer: Vec<u8>,
-}
-
-impl<T: ExternalPrinter> std::io::Write for Stdout<T> {
+impl std::io::Write for Terminal {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         for c in buf {
+            self.buffer.push(*c);
             if *c == b'\n' {
                 self.flush()?;
-            } else {
-                self.buffer.push(*c);
             }
         }
         Ok(buf.len())
@@ -206,7 +174,7 @@ impl<T: ExternalPrinter> std::io::Write for Stdout<T> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         let msg = String::from_utf8_lossy(&self.buffer).to_string();
-        self.inner
+        self.stdout
             .print(msg)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         self.buffer.clear();
