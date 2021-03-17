@@ -17,10 +17,12 @@ use config::Config;
 use derive_new::new;
 use error::Error;
 use log::{debug, info};
+
 use nix::{
     sys::{signal, stat},
     unistd,
 };
+use proc_mounts::MountIter;
 use state::State;
 use std::{
     fmt::Display,
@@ -133,17 +135,19 @@ impl Runtime {
         // to make the kernel umount everything mounted in this mount namespace
         // when the past process in this namespace exits.
 
-        // turn the run directory into a mount point
-        task::block_in_place(|| {
-            nix::mount::mount(
-                Some(&config.run_dir),
-                config.run_dir.as_os_str(),
-                Option::<&str>::None,
-                nix::mount::MsFlags::MS_BIND,
-                Option::<&'static [u8]>::None,
-            )
-            .map_err(|e| Error::Mount(mount::Error::Os(e)))
-        })?;
+        if !mount_point_already_exists(&config.run_dir) {
+            // turn the run directory into a mount point
+            task::block_in_place(|| {
+                nix::mount::mount(
+                    Some(&config.run_dir),
+                    config.run_dir.as_os_str(),
+                    Option::<&str>::None,
+                    nix::mount::MsFlags::MS_BIND,
+                    Option::<&'static [u8]>::None,
+                )
+                .map_err(|e| Error::Mount(mount::Error::Os(e)))
+            })?;
+        }
 
         // mark all subsequent mounted directories private
         task::block_in_place(|| {
@@ -184,6 +188,23 @@ impl Runtime {
     pub fn shutdown(self) -> impl Future<Output = RuntimeResult> {
         self.stop.cancel();
         self
+    }
+}
+
+// try to determine if a mount point exists that points
+// to the given path
+fn mount_point_already_exists(run_dir: &Path) -> bool {
+    match (std::fs::canonicalize(&run_dir), MountIter::new()) {
+        (Ok(absolute_run_dir_path), Ok(mount_iter)) => {
+            let mut mount_point_already_exists = false;
+            for mount in mount_iter {
+                if let Ok(mount) = mount {
+                    mount_point_already_exists |= mount.dest == absolute_run_dir_path;
+                }
+            }
+            mount_point_already_exists
+        }
+        _ => false,
     }
 }
 
