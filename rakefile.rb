@@ -109,6 +109,21 @@ task :rustfmt do
   sh 'cargo +nightly fmt'
 end
 
+desc 'display mount info for process with id'
+task :mountinfo, [:id] do |t,args|
+  process_id = args[:id]
+  pid = `ps axf | grep #{process_id} | grep -v grep | grep -v rake | awk '{print $1}'`.strip
+  raise "no running process with id #{process_id} found" if pid == ''
+
+  # pid = `ps axf | grep #{process_id} | grep -v grep | awk '{print $1}'`.strip
+  puts "========= /proc/#{pid} ========"
+  output = `cat /proc/#{pid}/mountinfo`
+  puts output
+  puts '========= findmnt ========'
+  found = `findmnt | grep #{process_id}`
+  puts found
+end
+
 # os detection
 module OS
   def self.windows?
