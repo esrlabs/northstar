@@ -61,7 +61,8 @@ async fn send_request(
 }
 
 /// Tries to connect to northstar indefinitely
-async fn try_connect<W: Write>(output: &mut W, url: &url::Url) -> Result<api::client::Client> {
+async fn try_connect<W: Write>(mut output: W, url: &url::Url) -> Result<api::client::Client> {
+    writeln!(output, "Connecting to {}", url)?;
     loop {
         match api::client::Client::new(url)
             .await
@@ -71,7 +72,6 @@ async fn try_connect<W: Write>(output: &mut W, url: &url::Url) -> Result<api::cl
             client => break client,
         }
         time::sleep(time::Duration::from_secs(1)).await;
-        writeln!(output, "Reconnecting...")?;
     }
 }
 
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
     let url = url::Url::parse(&opt.host)?;
 
     // Open connection to northstar
-    let mut client = try_connect(&mut std::io::stdout(), &url).await?;
+    let mut client = try_connect(std::io::stdout(), &url).await?;
 
     // Execute the provided command and exit
     if let Some(command) = opt.command {
