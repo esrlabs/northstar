@@ -76,6 +76,8 @@ test!(start_stop_no_wait, {
     for _ in 0..10 {
         runtime.start(TEST_CONTAINER).await?;
         runtime.stop(TEST_CONTAINER, 5).await?;
+        logger::assume("Sending SIGTERM", 5u64).await?;
+        logger::assume("Stopped .* with status Signaled\\(SIGTERM\\)", 5).await?;
     }
 
     runtime.uninstall_test_container().await?;
@@ -211,10 +213,12 @@ test!(crashing_container, {
 
     for _ in 0..10 {
         runtime.test_cmds("crash").await;
+
         runtime.start(TEST_CONTAINER).await?;
         runtime
             .assume_notification(
                 |n| {
+                    // Expect the container to call abort when panicking
                     n == &Notification::Exit {
                         container: TEST_CONTAINER.try_into().unwrap(),
                         status: ExitStatus::Signaled(nix::sys::signal::Signal::SIGABRT as u32),

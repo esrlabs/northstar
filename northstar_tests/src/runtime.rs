@@ -27,7 +27,7 @@ use northstar::{
 };
 use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
-use tokio::{fs, select, time};
+use tokio::fs;
 
 pub struct Northstar {
     config: config::Config,
@@ -211,23 +211,19 @@ impl Northstar {
 
     // TOOD: Queue the notifications in the runtime struct. Currently there's a race
     // if the notification is faster.
-    pub async fn assume_notification<F>(&mut self, mut pred: F, timeout: u64) -> Result<()>
+    pub async fn assume_notification<F>(&mut self, mut pred: F, seconds: u64) -> Result<()>
     where
         F: FnMut(&Notification) -> bool,
     {
-        let mut timeout = Box::pin(time::sleep(time::Duration::from_secs(timeout)));
-        loop {
-            select! {
-                _ = &mut timeout => break Err(eyre!("Timeout waiting for notification")),
-                notification = self.client.next() => {
-                    match notification {
-                        Some(Ok(n)) if pred(&n) => break Ok(()),
-                        Some(_) => continue,
-                        None => break Err(eyre!("Client connection closed")),
-                    }
+        tokio::time::timeout(Duration::from_secs(seconds), async {
+            while let Some(notification) = self.client.next().await {
+                if notification.map(|n| pred(&n)).unwrap_or_default() {
+                    return Ok(());
                 }
             }
-        }
+            Err(eyre!("Client connection closed"))
+        })
+        .await?
     }
 
     /// TODO
