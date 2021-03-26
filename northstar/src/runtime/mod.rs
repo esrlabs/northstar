@@ -16,7 +16,7 @@ use crate::api;
 use config::Config;
 use derive_new::new;
 use error::Error;
-use log::{debug, info};
+use log::debug;
 
 use nix::{
     sys::{signal, stat},
@@ -124,19 +124,16 @@ impl Runtime {
         let stop = CancellationToken::new();
         let (stopped_tx, stopped_rx) = oneshot::channel();
 
-        // Ensure the configured run_dir exists
-        mkdir_p_rw(&config.data_dir).await?;
         mkdir_p_rw(&config.run_dir).await?;
 
-        // To avoid setting the mount propagation on the parent root,
-        // we create bind mount from config.run_dir to config.run_dir
-        // and specify the mount propagation here
-        // The reason why the mount propagation is set to MS_PRIVATE is
-        // to make the kernel umount everything mounted in this mount namespace
-        // when the past process in this namespace exits.
-
-        if !mount_point_already_exists(&config.run_dir) {
-            // turn the run directory into a mount point
+        // To avoid setting the mount propagation on the parent mount, we bind
+        // mount config.run_dir to config.run_dir and specify the mount
+        // propagation there. The reason why the mount propagation is set to
+        // MS_PRIVATE is to make the kernel umount everything mounted in this
+        // mount namespace when the past process in this namespace exits.
+        if !is_self_bind_mounted(&config.run_dir).await? {
+            debug!("Bind mounting run dir");
+            // Turn the run directory into a mount point
             task::block_in_place(|| {
                 nix::mount::mount(
                     Some(&config.run_dir),
@@ -149,8 +146,12 @@ impl Runtime {
             })?;
         }
 
-        // mark all subsequent mounted directories private
+        // Mark set the mount propagation on run_dir to MS_PRIVATE
         task::block_in_place(|| {
+            debug!(
+                "Setting mount propagation to MS_PRIVATE on {}",
+                config.run_dir.display()
+            );
             nix::mount::mount(
                 Some(&config.run_dir),
                 config.run_dir.as_os_str(),
@@ -160,8 +161,8 @@ impl Runtime {
             )
             .map_err(|e| Error::Mount(mount::Error::Os(e)))
         })?;
-        info!("done the mount with MS_PRIVATE");
 
+        mkdir_p_rw(&config.data_dir).await?;
         mkdir_p_rw(&config.log_dir).await?;
 
         // Start a task that drives the main loop and wait for shutdown results
@@ -191,21 +192,24 @@ impl Runtime {
     }
 }
 
-// try to determine if a mount point exists that points
-// to the given path
-fn mount_point_already_exists(run_dir: &Path) -> bool {
-    match (std::fs::canonicalize(&run_dir), MountIter::new()) {
-        (Ok(absolute_run_dir_path), Ok(mount_iter)) => {
-            let mut mount_point_already_exists = false;
-            for mount in mount_iter {
-                if let Ok(mount) = mount {
-                    mount_point_already_exists |= mount.dest == absolute_run_dir_path;
-                }
+/// Try to determine if a mount point exists that points to the given path
+/// TODO: It's not needed that the mount in run dir is a bind mount to itself. In
+/// theory any mount can be used.
+async fn is_self_bind_mounted(run_dir: &Path) -> Result<bool, Error> {
+    let mounts =
+        task::block_in_place(MountIter::new).map_err(|e| Error::Io("Mount iter".into(), e))?;
+    let run_dir = fs::canonicalize(&run_dir)
+        .await
+        .map_err(|e| Error::Io("Canonicalize path".into(), e))?;
+    task::block_in_place(|| {
+        for mount in mounts {
+            let mount = mount.map_err(|e| Error::Io("Mount iter".into(), e))?;
+            if mount.dest == run_dir {
+                return Ok(true);
             }
-            mount_point_already_exists
         }
-        _ => false,
-    }
+        Ok(false)
+    })
 }
 
 impl Future for Runtime {
