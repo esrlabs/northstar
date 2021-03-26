@@ -14,7 +14,27 @@ The file `manifest.yaml` references all data necessary to mount and execute the 
 As an example, the `manifest.yaml` of the `memeater` example container looks as follows:
 
 ```yaml
-{{#include ./../../../examples/container/memeater/manifest.yaml}}
+name: memeater
+version: 0.0.1
+init: /memeater
+uid: 1000
+gid: 1000
+mounts:
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system
+cgroups:
+  memory:
+    limit_in_bytes: 10000000
+    swappiness: 0
+io:
+  stdout:
+    log:
+      - DEBUG
+      - memeater
 ```
 
 ### `name`
@@ -23,7 +43,7 @@ The name of the container
 Example:
 
 ```yaml
-name: hello
+name: hello-world
 ```
 
 ### `version`
@@ -41,7 +61,7 @@ The binary executed when the container is run
 Example:
 
 ```yaml
-init: /hello
+init: /hello-world
 ```
 
 ### `args` (optional)
@@ -196,24 +216,24 @@ key: northstar
 signature: aDnKZ8JQ5tegOqKM2TW/ULU2DAlcVG7ieyS0ZaDGnRHT5Yggcgog5QbD0ZnTyGIFY8bo0+lToQu+BcK2XA35BA==
 ```
 
-## Ressource Containers
+## Resource Containers
 
-Containers without an `init` field in their `manifest.yaml` are called **Ressource Containers**.
+Containers without an `init` field in their `manifest.yaml` are called **Resource Containers**.
 They are useful to provide common data to other containers.
 To add a reference to a resources container, we have to add an entry in the `mount` field of manifest of the referencing container.
 
-For example, the `ferris_says_hello` container references the `hello_message` container which provides a required string:
+For example, the `hello-ferris` container references the `message` container which provides a required string:
 
 ```yaml
 mounts:
   /bin:
-    resource: "ferris:0.0.1/"
-  /lib64:
-    host: /lib64
+    resource: ferris:0.0.1:/
   /lib:
     host: /lib
+  /lib64:
+    host: /lib64
   /system:
     host: /system
   /message:
-    resource: "hello_message:0.0.1/"
+    resource: message:0.0.1:/
 ```

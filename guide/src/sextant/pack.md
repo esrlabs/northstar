@@ -9,10 +9,28 @@ The command requires the following input:
 ## The Manifest File
 
 The manifest is a YAML file that references all necessary data to mount and execute the container.
-An example `manifest.yaml` of the `hello` container (found in `examples/container/hello/manifest.yaml`) looks as follows:
+An example `manifest.yaml` of the `hello-world` container (found in `examples/container/hello-world/manifest.yaml`) looks as follows:
 
 ```yaml
-{{#include ./../../../examples/container/hello/manifest.yaml}}
+name: hello-world
+version: 0.0.1
+init: /hello-world
+uid: 1000
+gid: 1000
+env:
+  HELLO: northstar
+io:
+  stdout:
+    log:
+      - DEBUG
+      - hello
+mounts:
+    /lib:
+      host: /lib
+    /lib64:
+      host: /lib64
+    /system:
+      host: /system
 ```
 
 More details on the manifest format can be found in the chapter
@@ -27,20 +45,20 @@ This image file will be mounted by the northstar runtime when the container is r
 
 ## Calling `sextant pack`
 
-Let us `pack` the `hello` example container under Linux.
-First, we build the `hello` binary from the northstar directory using cargo:
+Let us `pack` the `hello-world` example container under Linux.
+First, we build the `hello-world` binary from the northstar directory using cargo:
 
 ```bash
-$ cargo build --release --bin hello
-Compiling hello v0.1.0 (/home/nori/dev/northstar/examples/container/hello)
+$ cargo build --release --bin hello-world
+Compiling hello-world v0.1.0 (/home/nori/dev/northstar/examples/container/hello-world)
 Finished release [optimized] target(s) in 2.77s
 ```
 
 The resulting binary is found in the `target/release` directory:
 
 ```bash
-$ ls target/release/hello
-target/release/hello
+$ ls target/release/hello-world
+target/release/hello-world
 ```
 
 Next, we can crate the destination directory if it does not already exist.
@@ -55,8 +73,8 @@ Finally, we are able to call `sextant` and create the NPK:
 
 ```bash
 $ target/debug/sextant pack \
---manifest examples/container/hello/manifest.yaml \
---root target/release/hello \
+--manifest examples/container/hello-world/manifest.yaml \
+--root target/release/hello-world \
 --out target/northstar/repository
 ```
 
@@ -64,7 +82,7 @@ The resulting file can be found in the output directory:
 
 ```bash
 $ ls target/northstar/repository
-hello-0.0.1.npk
+hello-world-0.0.1.npk
 ```
 
 ## Signing an NPK
@@ -75,8 +93,8 @@ To create a signed version of our container we have to specify the required priv
 
 ```bash
 $ target/debug/sextant pack \
---manifest examples/container/hello/manifest.yaml \
---root target/release/hello \
+--manifest examples/container/hello-world/manifest.yaml \
+--root target/release/hello-world \
 --key ./examples/keys/northstar.key \
 --out target/northstar/repository
 ```
