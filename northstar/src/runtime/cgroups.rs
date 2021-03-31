@@ -19,6 +19,7 @@ use proc_mounts::MountIter;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tokio::{fs, io, select, task, time};
+use tokio_util::sync::CancellationToken;
 
 const OOM_CONTROL: &str = "memory.oom_control";
 const UNDER_OOM: &str = "under_oom 1";
@@ -39,6 +40,7 @@ pub enum Error {
 #[derive(Debug)]
 pub struct CGroups {
     groups: Vec<PathBuf>,
+    stop: CancellationToken,
 }
 
 impl CGroups {
@@ -49,6 +51,7 @@ impl CGroups {
         tx: EventTx,
     ) -> Result<CGroups, Error> {
         let mut groups = Vec::new();
+        let stop = CancellationToken::new();
 
         for (controller, params) in cgroups {
             let mount_point = mount_point(controller)?;
@@ -74,13 +77,13 @@ impl CGroups {
 
             // Start a monitor for the memory controller
             if controller == "memory" {
-                memory_monitor(container.clone(), &path, tx.clone()).await?;
+                memory_monitor(container.clone(), &path, tx.clone(), stop.clone()).await?;
             }
 
             groups.push(path);
         }
 
-        Ok(CGroups { groups })
+        Ok(CGroups { groups, stop })
     }
 
     pub async fn assign(&self, pid: u32) -> Result<(), Error> {
@@ -93,6 +96,7 @@ impl CGroups {
     }
 
     pub async fn destroy(self) -> Result<(), Error> {
+        self.stop.cancel();
         for cgroup_dir in self.groups {
             debug!("Destroying CGroup {}", cgroup_dir.display());
             fs::remove_dir(&cgroup_dir)
@@ -105,7 +109,12 @@ impl CGroups {
 
 /// Monitor the oom_control file from memory cgroups and report
 /// a oom condition in case.
-async fn memory_monitor(container: Container, path: &Path, tx: EventTx) -> Result<(), Error> {
+async fn memory_monitor(
+    container: Container,
+    path: &Path,
+    tx: EventTx,
+    stop: CancellationToken,
+) -> Result<(), Error> {
     // Configure oom
     let oom_control = path.join(OOM_CONTROL);
     write(&oom_control, "1").await?;
@@ -113,16 +122,15 @@ async fn memory_monitor(container: Container, path: &Path, tx: EventTx) -> Resul
     // This task stops when the main loop receiver closes
     task::spawn(async move {
         let mut interval = time::interval(time::Duration::from_millis(500));
-        // TODO: Stop this loop when doing a destroy. With this implementation it's not
-        // possible to distinguish between a read error and a intentional shutdown
         loop {
             select! {
-                result = fs::read_to_string(&oom_control) => {
-                    match result {
+                _ = stop.cancelled() => break,
+                _ = tx.closed() => break,
+                _ = interval.tick() => {
+                    match fs::read_to_string(&oom_control).await {
                         Ok(s) => {
                             if s.lines().any(|l| l == UNDER_OOM) {
                                 warn!("Container {} is under OOM!", container);
-                                // TODO
                                 tx.send(Event::Oom(container)).await.ok();
                                 break;
                             }
@@ -131,11 +139,9 @@ async fn memory_monitor(container: Container, path: &Path, tx: EventTx) -> Resul
                             debug!("Stopping oom monitor of {}", container);
                             break;
                         }
-                    };
-                },
-                _ = tx.closed() => break,
-            };
-            interval.tick().await;
+                    }
+                }
+            }
         }
     });
 
