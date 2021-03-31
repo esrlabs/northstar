@@ -286,7 +286,6 @@ impl Console {
                     let message = if let Some(Ok(msg)) = item {
                         msg
                     } else {
-                        info!("{}: Connection closed", peer);
                         break;
                     };
                     let message_id = message.id.clone();
