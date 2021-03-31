@@ -7,17 +7,17 @@ edition = "2018"
 [dependencies]
 async_once = "0.2.1"
 color-eyre = "0.5.10"
-colored = "2.0.0"
+colored = "2.0"
 escargot = "0.5.1"
 futures = "0.3.8"
-lazy_static = "1.4.0"
+lazy_static = "1.4"
 log = "0.4.11"
 nix = "0.19.1"
 northstar = { path = "../northstar" }
 npk = { path = "../npk" }
-regex = "1.4.2"
+regex = "1.4"
 rusty-fork = "0.3.0"
-tempfile = "3.1.0"
-tokio = { version = "1.0.1", features = ["full"] }
+tempfile = "3.1"
+tokio = { version = "1.4", features = ["full"] }
 toml = "0.5.8"
-url = "2.2.1"
+url = "2.2"

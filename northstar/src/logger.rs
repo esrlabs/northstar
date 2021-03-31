@@ -16,7 +16,7 @@ pub fn init() {
     android_logd_logger::builder()
         .tag("northstar")
         .prepend_module(false)
-        .parse_filters("northstar=trace")
+        .parse_filters("northstar=debug")
         .init();
 }
 
