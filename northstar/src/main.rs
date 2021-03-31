@@ -22,6 +22,8 @@ use std::{env, fs::read_to_string, path::PathBuf, process::exit};
 use structopt::StructOpt;
 use tokio::{select, signal::unix::SignalKind};
 
+mod logger;
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "northstar", about = "Northstar")]
 struct Opt {
@@ -37,13 +39,7 @@ fn main() -> Result<(), Error> {
     let config: Config = toml::from_str(&config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
 
-    logd_logger::builder()
-        .parse_filters(&format!(
-            "northstar={}",
-            config.log_level.to_string().to_lowercase()
-        ))
-        .tag("northstar")
-        .init();
+    logger::init();
 
     info!(
         "Northstar v{} ({})",
