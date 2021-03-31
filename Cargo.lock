@@ -2063,6 +2063,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 
 [[package]]
+name = "stress"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "northstar",
+ "tokio",
+ "url 2.2.1",
+]
+
+[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,12 @@
+[package]
+name = "stress"
+version = "0.1.0"
+authors = ["ESRLabs"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+futures = "0.3.8"
+northstar = { path = "../northstar" }
+tokio = { version = "1.4", features = ["full"] }
+url = "2.2.1"
