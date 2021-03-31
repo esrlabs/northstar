@@ -17,12 +17,7 @@ use crate::{
     api,
     runtime::{EventTx, ExitStatus},
 };
-use futures::{
-    future::{join_all, pending, Either},
-    sink::SinkExt,
-    stream::FuturesUnordered,
-    StreamExt,
-};
+use futures::{future::join_all, sink::SinkExt, stream::FuturesUnordered, StreamExt};
 use log::{debug, error, info, trace, warn};
 use std::{path::PathBuf, unreachable};
 use thiserror::Error;
@@ -121,12 +116,6 @@ impl Console {
                     let mut connections = FuturesUnordered::new();
                     loop {
                         select! {
-                            // Do not poll an FuturesUnordered that is empty
-                            _ = if connections.is_empty() {
-                                Either::Left(pending())
-                            } else {
-                                Either::Right(connections.next())
-                            } => { /* nothing to be done */}
                             stream = listener.accept() => {
                                 match stream {
                                     Ok(stream) => {
@@ -144,8 +133,8 @@ impl Console {
                                     }
                                 }
                             }
+                            _ = connections.next(), if !connections.is_empty() => {},
                             _ = stop.cancelled() => {
-                                debug!("Closing listener on {}", address);
                                 drop(listener);
                                 debug!("Closed listener on {}", address);
                                 if ! connections.is_empty() {
@@ -184,12 +173,6 @@ impl Console {
                     let mut connections = FuturesUnordered::new();
                     loop {
                         select! {
-                            // Do not poll an FuturesUnordered that is empty
-                            _ = if connections.is_empty() {
-                                Either::Left(pending())
-                            } else {
-                                Either::Right(connections.next())
-                            } => { /* nothing to be done */}
                             stream = listener.accept() => {
                                 match stream {
                                     Ok(stream) => {
@@ -207,14 +190,14 @@ impl Console {
                                     }
                                 }
                             }
+                            _ = connections.next(), if !connections.is_empty() => {},
                             _ = stop.cancelled() => {
-                                debug!("Closing listener on {}", address.display());
                                 drop(listener);
+                                debug!("Closed listener on {}", address.display());
                                 if address.exists() {
                                     fs::remove_file(&address)
                                         .await.expect("Failed to remove unix socket");
                                 }
-                                debug!("Closed listener on {}", address.display());
                                 if ! connections.is_empty() {
                                     debug!("Waiting for connections to be closed");
                                     while connections.next().await.is_some() {}
@@ -362,22 +345,26 @@ impl Console {
                         .expect("Internal channel error on main");
 
                     // Wait for the reply from the runtime
-                    let response: api::model::Response = reply_rx
-                        .await
-                        .expect("Internal channel error on client reply");
+                    select! {
+                        // If the runtime shuts down the connection shall be closed and not wait for
+                        // a reply
+                        _ = stop.cancelled() => break,
+                        Ok(response) = reply_rx => {
+                            keep_file.take();
 
-                    keep_file.take();
+                            // Report result to client
+                            let message = api::model::Message {
+                                id: message_id,
+                                payload: api::model::Payload::Response(response),
+                            };
 
-                    // Report result to client
-                    let message = api::model::Message {
-                        id: message_id,
-                        payload: api::model::Payload::Response(response),
-                    };
-
-                    trace!("{}: <-- {:?}", peer, message);
-                    if let Err(e) = network_stream.send(message).await {
-                        warn!("{}: Connection error: {}", peer, e);
-                        break;
+                            trace!("{}: <-- {:?}", peer, message);
+                            if let Err(e) = network_stream.send(message).await {
+                                warn!("{}: Connection error: {}", peer, e);
+                                break;
+                            }
+                        }
+                        else => break,
                     }
                 }
             }
