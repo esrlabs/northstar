@@ -229,9 +229,11 @@ impl<'a> Minijail<'a> {
         let debug = Debug::from(&self.config, &manifest, pid).await?;
 
         // Spawn a task thats waits for the child to exit
-        let exit_status = Box::new(Box::pin(
-            waitpid(container.container.clone(), pid, self.event_tx.clone()).await,
-        ));
+        let exit_status = {
+            let container = container.container.clone();
+            let tx = self.event_tx.clone();
+            Box::new(waitpid(container, pid, tx).await)
+        };
 
         Ok(Process {
             argv: argv_str,
@@ -465,29 +467,38 @@ impl Process {
 
     /// Send a SIGTERM to the application. If the application does not terminate with a timeout
     /// it is SIGKILLed.
-    pub async fn terminate(&mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
-        debug!("Sending SIGTERM to {}", self.pid);
-        signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGTERM))
-            .map_err(|e| Error::Os(format!("Failed to SIGTERM {}", self.pid), e))?;
+    pub async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
+        debug!("Trying to send SIGTERM to {}", self.pid);
+        let exit_status = match signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGTERM))
+        {
+            Ok(_) => {
+                match time::timeout(timeout, &mut self.exit_status).await {
+                    Err(_) => {
+                        warn!(
+                            "Process {} did not exit within {:?}. Sending SIGKILL...",
+                            self.pid, timeout
+                        );
+                        // Send SIGKILL if the process did not terminate before timeout
+                        signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGKILL))
+                            .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
 
-        match time::timeout(timeout, &mut self.exit_status).await {
-            Err(_) => {
-                warn!(
-                    "Process {} did not exit within {:?}. Sending SIGKILL...",
-                    self.pid, timeout
-                );
-                // Send SIGKILL if the process did not terminate before timeout
-                signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGKILL))
-                    .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
-
-                (&mut self.exit_status).await
+                        (&mut self.exit_status).await
+                    }
+                    Ok(exit_status) => exit_status,
+                }
             }
-            Ok(exit_status) => exit_status,
-        }
-    }
+            // The proces is terminated already. Wait for the waittask to do it's job and resolve exit_status
+            Err(nix::Error::Sys(errno)) if errno == nix::errno::Errno::ESRCH => {
+                debug!("Process {} already exited. Waiting for status", self.pid);
+                let exit_status = self.exit_status.await?;
+                Ok(exit_status)
+            }
+            Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", self.pid), e)),
+        }?;
 
-    pub async fn destroy(self) -> Result<(), Error> {
-        self.debug.destroy().await
+        self.debug.destroy().await?;
+
+        Ok(exit_status)
     }
 }
 

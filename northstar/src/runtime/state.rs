@@ -85,13 +85,25 @@ pub(super) struct ProcessContext {
 }
 
 impl ProcessContext {
-    async fn destroy(mut self) -> Result<(), Error> {
+    async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
+        let status = self
+            .process
+            .terminate(timeout)
+            .await
+            .map_err(Error::Process)
+            .expect("Failed to terminate process");
+
         if let Some(cgroups) = self.cgroups.take() {
-            cgroups.destroy().await?;
+            cgroups.destroy().await.expect("Failed to destroy cgroups")
         }
 
-        self.process.destroy().await.map_err(Error::Process)?;
-        Ok(())
+        Ok(status)
+    }
+
+    async fn destroy(mut self) {
+        if let Some(cgroups) = self.cgroups.take() {
+            cgroups.destroy().await.expect("Failed to destroy cgroups")
+        }
     }
 }
 
@@ -425,26 +437,22 @@ impl<'a> State<'a> {
         container: &Container,
         timeout: time::Duration,
     ) -> Result<(), Error> {
-        if let Some(mut context) = self
+        if let Some(context) = self
             .containers
             .get_mut(&container)
             .and_then(|c| c.process.take())
         {
-            info!("Stopping {}", container);
-            let status = context
-                .process
+            info!("Terminating {}", container);
+            let exit_status = context
                 .terminate(timeout)
                 .await
-                .map_err(Error::Process)
-                .expect("Failed to terminate process");
-
-            context.destroy().await.expect("Failed to destroy context");
+                .expect("Failed to destroy context");
 
             // Send notification to main loop
             self.notification(Notification::Stopped(container.clone()))
                 .await;
 
-            info!("Stopped {} with status {}", container, status);
+            info!("Stopped {} with status {}", container, exit_status);
 
             Ok(())
         } else {
@@ -542,22 +550,22 @@ impl<'a> State<'a> {
     pub(super) async fn on_exit(
         &mut self,
         container: &Container,
-        status: &ExitStatus,
+        exit_status: &ExitStatus,
     ) -> Result<(), Error> {
         if let Some(mounted_container) = self.containers.get_mut(&container) {
-            if let Some(context) = mounted_container.process.take() {
+            if let Some(process) = mounted_container.process.take() {
                 info!(
                     "Process {} exited after {:?} with status {:?}",
                     container,
-                    context.started.elapsed(),
-                    status,
+                    process.started.elapsed(),
+                    exit_status,
                 );
 
-                context.destroy().await.expect("Failed to destroy context");
+                process.destroy().await;
 
                 self.notification(Notification::Exit {
                     container: container.clone(),
-                    status: status.clone(),
+                    status: exit_status.clone(),
                 })
                 .await;
             }

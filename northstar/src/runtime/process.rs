@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use super::{Container, Event, EventTx, ExitStatus, Pid};
-use futures::{Future, FutureExt};
+use futures::{Future, TryFutureExt};
 use log::debug;
 use nix::{sys::wait, unistd};
 use std::fmt::Debug;
@@ -99,12 +99,10 @@ pub(crate) async fn waitpid(
 
         status
     })
-    .then(|f| async {
-        f.map_err(|e| {
-            Error::Io(
-                "Task join error".into(),
-                io::Error::new(io::ErrorKind::Other, e),
-            )
-        })
+    .map_err(|e| {
+        Error::Io(
+            "Task join error".into(),
+            io::Error::new(io::ErrorKind::Other, e),
+        )
     })
 }
