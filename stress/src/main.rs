@@ -42,10 +42,11 @@ struct Opt {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let opt = Opt::from_args();
 
     // Get a list of installed applications
-    let client = client::Client::new(&opt.address).await?;
+    let client = client::Client::new(&opt.address, None).await?;
     let apps = client
         .containers()
         .await?
@@ -70,7 +71,7 @@ async fn main() -> Result<()> {
         let umount = opt.umount;
 
         let task = task::spawn(async move {
-            let client = client::Client::new(&url).await?;
+            let client = client::Client::new(&url, None).await?;
             loop {
                 // Start the container
                 client.start(&app, &version).await?;
@@ -86,6 +87,7 @@ async fn main() -> Result<()> {
                     client.umount(&app, &version).await?;
                 }
                 if token.is_cancelled() {
+                    drop(client);
                     break Ok(());
                 }
             }

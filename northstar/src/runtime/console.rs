@@ -17,7 +17,13 @@ use crate::{
     api,
     runtime::{EventTx, ExitStatus},
 };
-use futures::{future::join_all, sink::SinkExt, stream::FuturesUnordered, StreamExt};
+use api::model;
+use futures::{
+    future::join_all,
+    sink::SinkExt,
+    stream::{self, FuturesUnordered},
+    StreamExt,
+};
 use log::{debug, error, info, trace, warn};
 use std::{path::PathBuf, unreachable};
 use thiserror::Error;
@@ -30,13 +36,13 @@ use tokio::{
     task::{self},
     time,
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::{either::Either, sync::CancellationToken};
 use url::Url;
 
 // Request from the main loop to the console
 #[derive(Debug)]
 pub(crate) enum Request {
-    Message(api::model::Message),
+    Message(model::Message),
     Install(RepositoryId, PathBuf),
 }
 
@@ -234,10 +240,79 @@ impl Console {
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<Notification>,
     ) -> Result<(), Error> {
-        debug!("Client {:?} connected", peer);
+        debug!("Client {} connected", peer);
 
         // Get a framed stream and sink interface.
         let mut network_stream = api::codec::framed(stream);
+
+        // Wait for a connect message within timeout
+        let connect = network_stream.next();
+        let connect = time::timeout(time::Duration::from_secs(5), connect);
+        let (protocol_version, notifications, connect_message_id) = match connect.await {
+            Ok(Some(Ok(m))) => match m.payload {
+                model::Payload::Connect(model::Connect::Connect {
+                    version,
+                    subscribe_notifications,
+                }) => (version, subscribe_notifications, m.id),
+                _ => {
+                    warn!("{}: Received {:?} instead of Connect", peer, m.payload);
+                    return Ok(());
+                }
+            },
+            Ok(Some(Err(e))) => {
+                warn!("{}: Connection error: {}", peer, e);
+                return Ok(());
+            }
+            Ok(None) => {
+                info!("{}: Connection closed before connect", peer);
+                return Ok(());
+            }
+            Err(_) => {
+                info!("{}: Connection timed out", peer);
+                return Ok(());
+            }
+        };
+
+        // Check protocol version from connect message against local model version
+        if protocol_version != model::version() {
+            warn!(
+                "{}: Client connected with invalid protocol version {}",
+                peer, protocol_version
+            );
+            // Send a ConnectNack and return -> closes the connection
+            let connack = model::ConnectNack::InvalidProtocolVersion(model::version());
+            let connack = model::Connect::ConnectNack(connack);
+            let message = model::Message {
+                id: connect_message_id,
+                payload: model::Payload::Connect(connack),
+            };
+            network_stream.send(message).await.ok();
+            return Ok(());
+        } else {
+            // Send ConnectAck
+            let conack = model::Connect::ConnectAck;
+            let message = model::Message {
+                id: connect_message_id,
+                payload: model::Payload::Connect(conack),
+            };
+
+            if let Err(e) = network_stream.send(message).await {
+                warn!("{}: Connection error: {}", peer, e);
+                return Ok(());
+            }
+        }
+
+        // Notification input: If the client subscribe create a stream from the broadcast
+        // receiver and otherwise drop it
+        let notifications = if notifications {
+            debug!("Client {} subscribed to notifications", peer);
+            let stream = async_stream::stream! { loop { yield notification_rx.recv().await; } };
+            Either::Left(stream)
+        } else {
+            drop(notification_rx);
+            Either::Right(stream::pending())
+        };
+        tokio::pin!(notifications);
 
         loop {
             select! {
@@ -245,16 +320,17 @@ impl Console {
                     info!("{}: Closing connection", peer);
                     break;
                 }
-                notification = notification_rx.recv() => {
+                notification = notifications.next() => {
                     // Process notifications received via the notification
                     // broadcast channel
                     let notification = match notification {
-                        Ok(notification) => notification.into(),
-                        Err(broadcast::error::RecvError::Closed) => break,
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                        Some(Ok(notification)) => notification.into(),
+                        Some(Err(broadcast::error::RecvError::Closed)) => break,
+                        Some(Err(broadcast::error::RecvError::Lagged(_))) => {
                             warn!("Client connection lagged notifications. Closing");
                             break;
                         }
+                        None => break,
                     };
 
                     if let Err(e) = network_stream
@@ -376,27 +452,25 @@ impl Console {
     }
 }
 
-impl From<ExitStatus> for api::model::ExitStatus {
+impl From<ExitStatus> for model::ExitStatus {
     fn from(e: ExitStatus) -> Self {
         match e {
-            ExitStatus::Exit(e) => api::model::ExitStatus::Exit(e),
-            ExitStatus::Signaled(s) => api::model::ExitStatus::Signaled(s as u32),
+            ExitStatus::Exit(e) => model::ExitStatus::Exit(e),
+            ExitStatus::Signaled(s) => model::ExitStatus::Signaled(s as u32),
         }
     }
 }
 
-impl From<Notification> for api::model::Notification {
+impl From<Notification> for model::Notification {
     fn from(n: Notification) -> Self {
         match n {
-            Notification::OutOfMemory(container) => {
-                api::model::Notification::OutOfMemory(container)
-            }
-            Notification::Exit { container, status } => api::model::Notification::Exit {
+            Notification::OutOfMemory(container) => model::Notification::OutOfMemory(container),
+            Notification::Exit { container, status } => model::Notification::Exit {
                 container,
                 status: status.into(),
             },
-            Notification::Started(container) => api::model::Notification::Started(container),
-            Notification::Stopped(container) => api::model::Notification::Stopped(container),
+            Notification::Started(container) => model::Notification::Started(container),
+            Notification::Stopped(container) => model::Notification::Stopped(container),
         }
     }
 }

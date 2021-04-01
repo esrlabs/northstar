@@ -64,7 +64,7 @@ async fn send_request(
 async fn try_connect<W: Write>(mut output: W, url: &url::Url) -> Result<api::client::Client> {
     writeln!(output, "Connecting to {}", url)?;
     loop {
-        match api::client::Client::new(url)
+        match api::client::Client::new(url, Some(100))
             .await
             .context(format!("Failed to connect to {}", url))
         {

@@ -23,8 +23,10 @@ pub type Name = String;
 pub type Pid = u32;
 pub type RepositoryId = String;
 
-const VERSION: &str = "0.0.2";
+const VERSION: &str = "0.0.3";
 
+/// Protocol version
+/// TODO: Do some static initialization of the version struct
 pub fn version() -> Version {
     Version::parse(VERSION).unwrap()
 }
@@ -54,6 +56,10 @@ impl Message {
         }
     }
 
+    pub fn new_connect(connect: Connect) -> Message {
+        Message::new(Payload::Connect(connect))
+    }
+
     pub fn new_request(request: Request) -> Message {
         Message::new(Payload::Request(request))
     }
@@ -69,6 +75,7 @@ impl Message {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Payload {
+    Connect(Connect),
     Request(Request),
     Response(Response),
     Notification(Notification),
@@ -86,6 +93,22 @@ pub enum Notification {
     Started(Container),
     Stopped(Container),
     Shutdown,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Connect {
+    Connect {
+        version: Version,
+        /// Subscribe this connection to notifications
+        subscribe_notifications: bool,
+    },
+    ConnectAck,
+    ConnectNack(ConnectNack),
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum ConnectNack {
+    InvalidProtocolVersion(Version),
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

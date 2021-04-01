@@ -12,10 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use futures::{SinkExt, StreamExt};
 use log::info;
 use northstar::api::{
     self,
-    model::{ExitStatus, Notification},
+    model::{self, ConnectNack, ExitStatus, Notification},
 };
 use northstar_tests::{
     logger,
@@ -24,6 +25,10 @@ use northstar_tests::{
     test_container::{test_container, TEST_CONTAINER, TEST_RESOURCE},
 };
 use std::{convert::TryInto, path::PathBuf};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::UnixStream,
+};
 
 // Smoke test the integration test harness
 test!(smoke, {
@@ -289,7 +294,7 @@ test!(connections, {
 
     let mut clients = Vec::new();
     for _ in 0..10 {
-        let client = api::client::Client::new(&console).await?;
+        let client = api::client::Client::new(&console, None).await?;
         clients.push(client);
     }
 
@@ -301,6 +306,43 @@ test!(connections, {
     clients.clear();
 
     result
+});
+
+test!(connect_version, {
+    let runtime = Northstar::launch().await?;
+
+    trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
+    impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
+
+    let console = runtime.config().console.as_ref().unwrap();
+    let mut connection = api::codec::framed(UnixStream::connect(console.path()).await?);
+
+    // Send a connect with an version unequal to the one defined in the model
+    let mut version = api::model::version();
+    version.0.patch += 1;
+
+    let connect = api::model::Connect::Connect {
+        version,
+        subscribe_notifications: false,
+    };
+    let connect_message = api::model::Message::new_connect(connect);
+    connection.send(connect_message.clone()).await?;
+
+    // Receive connect nack
+    let connack = connection.next().await.unwrap().unwrap();
+
+    drop(connection);
+
+    let mut expected_message = model::Message::new_connect(model::Connect::ConnectNack(
+        ConnectNack::InvalidProtocolVersion(model::version()),
+    ));
+
+    // The reply shall contain the same uuid as the request
+    expected_message.id = connect_message.id.clone();
+
+    assert_eq!(connack, expected_message);
+
+    runtime.shutdown().await
 });
 
 // test!(cgroups_memory, {

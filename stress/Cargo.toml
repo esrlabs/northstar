@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0"
+env_logger = "0.8.3"
 futures = "0.3.8"
 northstar = { path = "../northstar", features = ["api"], default-features = false }
 structopt = "0.3.21"
