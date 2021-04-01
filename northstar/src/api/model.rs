@@ -17,10 +17,11 @@ use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
-pub type Name = String;
-pub type RepositoryId = String;
-pub type MessageId = String; // UUID
 pub type Container = super::container::Container;
+pub type MessageId = String; // UUID
+pub type Name = String;
+pub type Pid = u32;
+pub type RepositoryId = String;
 
 const VERSION: &str = "0.0.2";
 
@@ -119,7 +120,7 @@ pub struct Repository {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Process {
     /// Process id
-    pub pid: u32,
+    pub pid: Pid,
     /// Process uptime in nanoseconds
     pub uptime: u64,
     /// Resources used and allocated by this process

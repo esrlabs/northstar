@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config::debug, process::Error};
+use super::{config::debug, process::Error, Pid};
 use log::{debug, error, info};
 use npk::manifest::Manifest;
 use std::{
@@ -40,7 +40,7 @@ impl Strace {
         strace: &debug::Strace,
         manifest: &Manifest,
         log_dir: &Path,
-        pid: u32,
+        pid: Pid,
     ) -> Result<Strace, Error> {
         let cmd = if let Some(ref strace) = strace.path {
             strace.as_path()
@@ -160,7 +160,7 @@ impl Perf {
         perf: &debug::Perf,
         manifest: &Manifest,
         log_dir: &Path,
-        pid: u32,
+        pid: Pid,
     ) -> Result<Perf, Error> {
         let mut filename = log_dir.join(format!("perf-{}-{}.perf", pid, manifest.name));
         let mut n = 0u32;

@@ -175,8 +175,10 @@ impl<'a> Minijail<'a> {
                 .map_err(Error::Minijail)?;
         }
 
+        // TODO: Do not use pid namespace because of multithreadding
+        // issues discovered by minijail. See libminijail.c for details.
         // Make the process enter a pid namespace
-        jail.namespace_pids();
+        // jail.namespace_pids();
 
         // Make the process enter a vfs namespace
         jail.namespace_vfs();
@@ -185,6 +187,8 @@ impl<'a> Minijail<'a> {
         jail.no_new_privs();
         // Set chroot dir for process
         jail.enter_chroot(&root.as_path())?;
+        // Make the application the init process
+        jail.run_as_init();
 
         self.setup_mounts(&mut jail, container, uid, gid).await?;
 
@@ -218,7 +222,8 @@ impl<'a> Minijail<'a> {
         // And finally start it....
         let argv_str = argv.iter().join(" ");
         debug!("Preparing \"{}\"", argv_str);
-        let pid = jail.run_remap_env_preload(&init.as_path(), &fds, &argv, &env, false)? as u32;
+        let pid = jail.run_remap_env_preload(&init.as_path(), &fds, &argv, &env, false)?;
+        let pid = pid as u32;
 
         // Attach debug tools if configured in the runtime configuration.
         let debug = Debug::from(&self.config, &manifest, pid).await?;
@@ -495,7 +500,7 @@ struct Debug {
 
 impl Debug {
     /// Start configured debug facilities and attach to `pid`
-    async fn from(config: &Config, manifest: &Manifest, pid: u32) -> Result<Debug, Error> {
+    async fn from(config: &Config, manifest: &Manifest, pid: Pid) -> Result<Debug, Error> {
         // Attach a strace instance if configured in the runtime configuration
         let strace: OptionFuture<_> = config
             .debug

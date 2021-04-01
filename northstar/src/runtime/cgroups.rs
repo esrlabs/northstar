@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config, Container, Event, EventTx};
+use super::{config, Container, Event, EventTx, Pid};
 use log::{debug, warn};
 use npk::manifest;
 use proc_mounts::MountIter;
@@ -86,7 +86,7 @@ impl CGroups {
         Ok(CGroups { groups, stop })
     }
 
-    pub async fn assign(&self, pid: u32) -> Result<(), Error> {
+    pub async fn assign(&self, pid: Pid) -> Result<(), Error> {
         for cgroup_dir in &self.groups {
             let tasks = cgroup_dir.join(TASKS);
             debug!("Assigning {} to {}", pid, tasks.display());
