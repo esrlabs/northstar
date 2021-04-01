@@ -27,7 +27,7 @@ pub fn init() {
     use std::io::Write;
 
     let mut builder = env_logger::Builder::new();
-    builder.parse_filters("northstar=trace");
+    builder.parse_filters("northstar=debug");
 
     builder.format(|buf, record| {
         let mut style = buf.style();
