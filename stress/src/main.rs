@@ -18,17 +18,35 @@ use futures::{
     FutureExt,
 };
 use northstar::api::client;
-use tokio::{task, time};
+use structopt::StructOpt;
+use tokio::{select, task, time};
+use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, StructOpt)]
+#[structopt(
+    name = "stress",
+    about = "Manual stress test the start and stop of Nortstar containers"
+)]
+struct Opt {
+    /// Runtime address
+    #[structopt(short, long, default_value = "tcp://localhost:4200")]
+    address: url::Url,
+    /// Umount container after stopping
+    #[structopt(short, long)]
+    umount: bool,
+
+    /// Duration to run the test for in seconds
+    #[structopt(short, long)]
+    duration: Option<u64>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Umount after each stop
-    let umount = false;
+    let opt = Opt::from_args();
 
     // Get a list of installed applications
-    let url = url::Url::parse("tcp://localhost:4200").unwrap();
-    let client = client::Client::new(&url).await?;
-    let mut apps = client
+    let client = client::Client::new(&opt.address).await?;
+    let apps = client
         .containers()
         .await?
         .iter()
@@ -44,14 +62,21 @@ async fn main() -> Result<()> {
     drop(client);
 
     let mut tasks = Vec::new();
+    let token = CancellationToken::new();
 
-    for (app, version) in apps.drain(..) {
-        let url = url.clone();
+    for (app, version) in apps.clone().drain(..) {
+        let token = token.clone();
+        let url = opt.address.clone();
+        let umount = opt.umount;
+
         let task = task::spawn(async move {
             let client = client::Client::new(&url).await?;
             loop {
+                // Start the container
                 client.start(&app, &version).await?;
 
+                // Ignore errors on stop because some containers just do something and exit
+                // See for example the datarw example container
                 client
                     .stop(&app, &version, time::Duration::from_secs(5))
                     .await
@@ -59,6 +84,9 @@ async fn main() -> Result<()> {
 
                 if umount {
                     client.umount(&app, &version).await?;
+                }
+                if token.is_cancelled() {
+                    break Ok(());
                 }
             }
         })
@@ -69,5 +97,17 @@ async fn main() -> Result<()> {
         tasks.push(task);
     }
 
-    try_join_all(tasks).await.map(drop)
+    let mut tasks = try_join_all(tasks);
+
+    if let Some(duration) = opt.duration {
+        select! {
+            _ = time::sleep(time::Duration::from_secs(duration)) => {
+                token.cancel();
+                tasks.await.map(drop)
+            }
+            r = &mut tasks => r.map(drop),
+        }
+    } else {
+        tasks.await.map(drop)
+    }
 }
