@@ -12,23 +12,35 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{Context, Result};
-use colored::Colorize;
 use itertools::Itertools;
+use model::ExitStatus;
 use northstar::api::model::{
-    Container, ContainerData, MountResult, Notification, Repository, RepositoryId, Response,
+    self, Container, ContainerData, MountResult, Notification, Repository, RepositoryId, Response,
 };
 use prettytable::{format, Attr, Cell, Row, Table};
-use std::{collections::HashMap, io};
+use std::collections::HashMap;
 use tokio::time;
 
-pub(crate) fn notification<W: io::Write>(mut w: W, notification: &Notification) {
-    // TODO
-    let msg = format!("{} {:?}", "<!>".yellow(), notification);
-    writeln!(w, "{}", msg).ok();
+pub(crate) fn notification(notification: &Notification) {
+    match notification {
+        Notification::OutOfMemory(c) => println!("container {} is out of memory", c),
+        Notification::Exit { container, status } => println!(
+            "container {} exited with status {}",
+            container,
+            match status {
+                ExitStatus::Exit(c) => format!("exit code {}", c),
+                ExitStatus::Signaled(s) => format!("signaled {}", s),
+            }
+        ),
+        Notification::Install(c, v) => println!("installed {}:{}", c, v),
+        Notification::Uninstalled(c, v) => println!("uninstalled {}:{}", c, v),
+        Notification::Started(c) => println!("started {}", c),
+        Notification::Stopped(c) => println!("stopped {}", c),
+        Notification::Shutdown => println!("shutting down"),
+    }
 }
 
-pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[ContainerData]) -> Result<()> {
+pub(crate) fn containers(containers: &[ContainerData]) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -76,13 +88,10 @@ pub(crate) fn containers<W: io::Write>(mut w: W, containers: &[ContainerData]) -
         ]));
     }
 
-    print_table(&mut w, &table)
+    table.printstd();
 }
 
-pub(crate) fn repositories<W: io::Write>(
-    mut w: W,
-    repositories: &HashMap<RepositoryId, Repository>,
-) -> Result<()> {
+pub fn repositories(repositories: &HashMap<RepositoryId, Repository>) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -98,10 +107,10 @@ pub(crate) fn repositories<W: io::Write>(
         ]));
     }
 
-    print_table(&mut w, &table)
+    table.printstd();
 }
 
-pub(crate) fn mounts<W: io::Write>(mut w: W, mounts: &[(Container, MountResult)]) -> Result<()> {
+pub fn mounts(mounts: &[(Container, MountResult)]) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
@@ -121,30 +130,58 @@ pub(crate) fn mounts<W: io::Write>(mut w: W, mounts: &[(Container, MountResult)]
         ]));
     }
 
-    print_table(&mut w, &table)
+    table.printstd();
 }
 
-pub(crate) async fn print_response<W: std::io::Write>(
-    mut output: &mut W,
-    response: Response,
-) -> Result<()> {
+pub fn response(response: &Response) -> i32 {
     match response {
-        Response::Containers(cs) => containers(&mut output, &cs),
-        Response::Repositories(rs) => repositories(&mut output, &rs),
+        Response::Containers(cs) => {
+            containers(&cs);
+            0
+        }
+        Response::Repositories(rs) => {
+            repositories(&rs);
+            0
+        }
+        Response::Mount(results) => {
+            mounts(&results);
+            0
+        }
         Response::Ok(()) => {
-            writeln!(output, "{}", "success".green()).context("Failed to write to stdout")
+            println!("ok");
+            0
         }
         Response::Err(e) => {
-            writeln!(output, "{}: {:?}", "failed".red(), e).context("Failed to write to stdout")
+            match e {
+                model::Error::InvalidContainer(c) => eprintln!("invalid container {}", c),
+                model::Error::UmountBusy(c) => eprintln!("failed to umount {}: busy", c),
+                model::Error::StartContainerStarted(c) => {
+                    eprintln!("failed to start container {}: already started", c)
+                }
+                model::Error::StartContainerResource(c) => {
+                    eprintln!("faild to start container {}: resource", c)
+                }
+                model::Error::StartContainerMissingResource(c, r) => {
+                    eprintln!("failed to start container {}: missing resouce {}", c, r)
+                }
+                model::Error::StopContainerNotStarted(c) => {
+                    eprintln!("failed to stop container {}: not started", c)
+                }
+                model::Error::InvalidRepository(r) => eprintln!("invalid repository {}", r),
+                model::Error::InstallDuplicate(c) => {
+                    eprintln!("failed to install {}: installed", c)
+                }
+                model::Error::Npk(e) => eprintln!("npk error: {}", e),
+                model::Error::NpkArchive(e) => eprintln!("npk error: {}", e),
+                model::Error::Process(e) => eprintln!("process error: {}", e),
+                model::Error::Console(e) => eprintln!("console error: {}", e),
+                model::Error::Cgroups(e) => eprintln!("cgroups error: {}", e),
+                model::Error::Mount(e) => eprintln!("mount error: {}", e),
+                model::Error::Key(e) => eprintln!("key error: {}", e),
+                model::Error::Io(e) => eprintln!("io error: {}", e),
+                model::Error::Os(e) => eprintln!("os error: {}", e),
+            };
+            1
         }
-        Response::Mount(results) => mounts(&mut output, &results),
     }
-}
-
-fn print_table<W: std::io::Write>(mut w: W, table: &Table) -> Result<()> {
-    for line in table.to_string().lines() {
-        writeln!(w, "  {}", line)?;
-    }
-    w.flush()?;
-    Ok(())
 }
