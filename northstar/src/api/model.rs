@@ -13,10 +13,10 @@
 //   limitations under the License.
 
 use derive_new::new;
-use npk::manifest::{Manifest, Version};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
+pub use npk::manifest::{Manifest, Version};
 pub type Container = super::container::Container;
 pub type MessageId = String; // UUID
 pub type Name = String;

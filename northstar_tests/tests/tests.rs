@@ -28,6 +28,7 @@ use std::{convert::TryInto, path::PathBuf};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::UnixStream,
+    time,
 };
 
 // Smoke test the integration test harness
@@ -294,7 +295,8 @@ test!(connections, {
 
     let mut clients = Vec::new();
     for _ in 0..10 {
-        let client = api::client::Client::new(&console, None).await?;
+        let client =
+            api::client::Client::new(&console, None, time::Duration::from_secs(30)).await?;
         clients.push(client);
     }
 
