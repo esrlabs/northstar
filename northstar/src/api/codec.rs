@@ -23,21 +23,34 @@ use std::{
 };
 use task::Context;
 use tokio::io::{self, AsyncRead, AsyncWrite};
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder, FramedParts};
 
 /// Newline delimited json codec for api::Message that on top implementes AsyncRead and Write
 pub struct Framed<T> {
-    framed: tokio_util::codec::Framed<T, Codec>,
+    inner: tokio_util::codec::Framed<T, Codec>,
 }
 
+impl<T> Framed<T> {
+    /// Consumes the Framed, returning its underlying I/O stream, the buffer with unprocessed data, and the codec.
+    pub fn into_parts(self) -> FramedParts<T, Codec> {
+        self.inner.into_parts()
+    }
+
+    /// Consumes the Framed, returning its underlying I/O stream.
+    pub fn into_inner(self) -> T {
+        self.inner.into_inner()
+    }
+}
+
+/// Constructs a new Framed with Codec from `io`
 pub fn framed<T: AsyncRead + AsyncWrite>(io: T) -> Framed<T> {
     Framed {
-        framed: tokio_util::codec::Framed::new(io, Codec {}),
+        inner: tokio_util::codec::Framed::new(io, Codec {}),
     }
 }
 
 /// Newline delimited json
-struct Codec;
+pub struct Codec;
 
 impl Decoder for Codec {
     type Item = model::Message;
@@ -79,12 +92,12 @@ impl<T: Unpin + AsyncRead + AsyncWrite> AsyncWrite for Framed<T> {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        let t: &mut T = self.framed.get_mut();
+        let t: &mut T = self.inner.get_mut();
         AsyncWrite::poll_write(Pin::new(t), cx, buf)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        let t: &mut T = self.framed.get_mut();
+        let t: &mut T = self.inner.get_mut();
         AsyncWrite::poll_flush(Pin::new(t), cx)
     }
 
@@ -92,7 +105,7 @@ impl<T: Unpin + AsyncRead + AsyncWrite> AsyncWrite for Framed<T> {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
-        let t: &mut T = self.framed.get_mut();
+        let t: &mut T = self.inner.get_mut();
         AsyncWrite::poll_shutdown(Pin::new(t), cx)
     }
 }
@@ -103,12 +116,12 @@ impl<T: Unpin + AsyncRead + AsyncWrite> AsyncRead for Framed<T> {
         cx: &mut Context<'_>,
         buf: &mut io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        if self.framed.read_buffer().is_empty() {
-            let t: &mut T = self.framed.get_mut();
+        if self.inner.read_buffer().is_empty() {
+            let t: &mut T = self.inner.get_mut();
             AsyncRead::poll_read(Pin::new(t), cx, buf)
         } else {
-            let n = min(buf.remaining(), self.framed.read_buffer().len());
-            buf.put_slice(&self.framed.read_buffer_mut().split_to(n));
+            let n = min(buf.remaining(), self.inner.read_buffer().len());
+            buf.put_slice(&self.inner.read_buffer_mut().split_to(n));
             Poll::Ready(Ok(()))
         }
     }
@@ -118,7 +131,7 @@ impl<T: Unpin + AsyncWrite + AsyncRead> Stream for Framed<T> {
     type Item = Result<model::Message, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let framed = Pin::new(&mut self.framed);
+        let framed = Pin::new(&mut self.inner);
         framed.poll_next(cx)
     }
 }
@@ -127,18 +140,18 @@ impl<T: Unpin + AsyncRead + AsyncWrite> futures::sink::Sink<model::Message> for 
     type Error = io::Error;
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.framed).poll_ready(cx)
+        Pin::new(&mut self.inner).poll_ready(cx)
     }
 
     fn start_send(mut self: Pin<&mut Self>, item: model::Message) -> Result<(), Self::Error> {
-        Pin::new(&mut self.framed).start_send(item)
+        Pin::new(&mut self.inner).start_send(item)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.framed).poll_flush(cx)
+        Pin::new(&mut self.inner).poll_flush(cx)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.framed).poll_close(cx)
+        Pin::new(&mut self.inner).poll_close(cx)
     }
 }

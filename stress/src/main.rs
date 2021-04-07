@@ -44,9 +44,10 @@ struct Opt {
 async fn main() -> Result<()> {
     env_logger::init();
     let opt = Opt::from_args();
+    let timeout = time::Duration::from_secs(30);
 
     // Get a list of installed applications
-    let client = client::Client::new(&opt.address, None).await?;
+    let client = client::Client::new(&opt.address, None, timeout).await?;
     let apps = client
         .containers()
         .await?
@@ -71,7 +72,7 @@ async fn main() -> Result<()> {
         let umount = opt.umount;
 
         let task = task::spawn(async move {
-            let client = client::Client::new(&url, None).await?;
+            let client = client::Client::new(&url, None, timeout).await?;
             loop {
                 // Start the container
                 client.start(&app, &version).await?;

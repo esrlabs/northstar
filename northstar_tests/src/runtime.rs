@@ -110,7 +110,7 @@ impl Northstar {
         super::logger::assume("Started console on", 5u64).await?;
 
         // Connect to the runtime
-        let client = Client::new(&console_url, Some(1000)).await?;
+        let client = Client::new(&console_url, Some(1000), time::Duration::from_secs(30)).await?;
         // Wait until a successfull connection
         logger::assume("Client .* connected", 5u64).await?;
 
