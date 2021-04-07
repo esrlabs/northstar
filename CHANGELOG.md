@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
+* Remove the interactive mode from nstar and extend the CLI interface
+* Add shell completion generation to `nstar`
+* Add notification subscription for client connections
+* Add an API version check handshake on client connections
 * Synchronize access to the loopback control file (run multiple northstar instances
   in parallel)
 * Mount container in parallel

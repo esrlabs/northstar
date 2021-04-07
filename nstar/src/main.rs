@@ -12,141 +12,255 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::{Context, Result};
-use colored::Colorize;
-use commands::{Northstar, NstarOpt, Prompt, PromptCommand};
-use futures::StreamExt;
+use anyhow::{anyhow, Context, Error, Result};
+use api::{client::Client, model::Message};
+use futures::{sink::SinkExt, StreamExt};
 use northstar::api::{
     self,
-    client::Client,
-    model::{Container, Request, Response},
+    model::{Container, Request, Version},
 };
-use rustyline::error::ReadlineError;
-use std::{io::Write, path::Path};
-use structopt::StructOpt;
-use tokio::{select, time};
+use std::{convert::TryFrom, path::PathBuf, process, str::FromStr, time};
+use structopt::{clap, clap::AppSettings, StructOpt};
+use tokio::{
+    fs,
+    io::{copy, AsyncBufReadExt, BufReader},
+};
 
-mod commands;
 mod pretty;
-mod terminal;
 
-/// Same stuff but returns a json string
-async fn send_request(
-    client: &mut Client,
-    command: Northstar,
-) -> Result<Response, api::client::Error> {
-    let request = match command {
-        Northstar::Containers => Request::Containers,
-        Northstar::Repositories => Request::Repositories,
-        Northstar::Mount { name, version } => Request::Mount(vec![Container::new(name, version)]),
-        Northstar::Umount { name, version } => Request::Umount(Container::new(name, version)),
-        Northstar::Start { name, version } => Request::Start(Container::new(name, version)),
-        Northstar::Stop {
-            name,
-            version,
-            timeout,
-        } => Request::Stop(Container::new(name, version), timeout),
-        Northstar::Install { npk, repo_id } => {
-            let npk = Path::new(&npk).canonicalize()?;
-            return match client.install(&npk, &repo_id).await {
-                Ok(()) => Ok(Response::Ok(())),
-                Err(e) => Ok(Response::Err(api::model::Error::Npk(e.to_string()))),
-            };
-        }
-        Northstar::Uninstall { name, version } => Request::Uninstall(Container::new(name, version)),
-        Northstar::Shutdown => Request::Shutdown,
-    };
+/// Default nstar address
+const DEFAULT_HOST: &str = "tcp://localhost:4200";
 
-    client.request(request).await
+/// About string for CLI
+fn about() -> &'static str {
+    Box::leak(Box::new(format!(
+        "Northstar API version {}",
+        api::model::version()
+    )))
 }
 
-/// Tries to connect to northstar indefinitely
-async fn try_connect<W: Write>(mut output: W, url: &url::Url) -> Result<api::client::Client> {
-    writeln!(output, "Connecting to {}", url)?;
-    loop {
-        match api::client::Client::new(url, Some(100))
-            .await
-            .context(format!("Failed to connect to {}", url))
-        {
-            Err(e) => writeln!(output, "{}", e.to_string().red())?,
-            client => break client,
+/// Subcommands
+#[derive(StructOpt, Clone)]
+#[structopt(name = "nstar", author, about = about(), global_setting(AppSettings::ColoredHelp))]
+pub enum Subcommand {
+    /// List available containers
+    #[structopt(alias = "ls", alias = "list")]
+    Containers,
+    /// List configured repositories
+    #[structopt(alias = "repos")]
+    Repositories,
+    /// Mount a container
+    Mount {
+        /// Container name
+        name: String,
+        /// Container version
+        version: Version,
+    },
+    /// Umount a container
+    Umount {
+        /// Container name
+        name: String,
+        /// Container version
+        version: Version,
+    },
+    /// Start a container
+    Start {
+        /// Container name
+        name: String,
+        /// Container version
+        version: Version,
+    },
+    /// Stop a container
+    Stop {
+        /// Container name
+        name: String,
+        /// Container version
+        version: Version,
+        /// Timeout
+        #[structopt(default_value = "5")]
+        timeout: u64,
+    },
+    /// Install a npk
+    Install {
+        /// Path to the .npk file
+        npk: PathBuf,
+        /// Target repository
+        repositoriy: String,
+    },
+    /// Uninstall a container
+    Uninstall {
+        /// Container name
+        name: String,
+        /// Container version
+        version: Version,
+    },
+    /// Shutdown Northstar
+    Shutdown,
+    /// Notifications
+    Notifications {
+        /// Exit after n notifications
+        #[structopt(short, long)]
+        number: Option<usize>,
+    },
+    /// Shell completion script generation
+    Completion {
+        /// Output diretory where to generate completions into
+        #[structopt(short, long)]
+        output: PathBuf,
+        /// Generate completions for shell type
+        #[structopt(short, long)]
+        shell: clap::Shell,
+    },
+}
+
+/// CLI
+#[derive(StructOpt)]
+pub struct Opt {
+    /// Northstar address
+    #[structopt(short, long, default_value = DEFAULT_HOST)]
+    pub host: url::Url,
+    /// Output json
+    #[structopt(short, long)]
+    pub json: bool,
+    /// Connect timeout in seconds
+    #[structopt(short, long, default_value = "10", parse(try_from_str = parse_secs))]
+    pub timeout: time::Duration,
+    /// Command
+    #[structopt(subcommand)]
+    pub command: Subcommand,
+}
+
+/// Parse a str containing a u64 into a `std::time::Duration` and take the value
+/// as seconds
+fn parse_secs(src: &str) -> Result<time::Duration, anyhow::Error> {
+    u64::from_str(src)
+        .map(time::Duration::from_secs)
+        .map_err(Into::into)
+}
+
+impl TryFrom<Subcommand> for Request {
+    type Error = Error;
+
+    fn try_from(command: Subcommand) -> Result<Self, Self::Error> {
+        match command {
+            Subcommand::Containers => Ok(Request::Containers),
+            Subcommand::Repositories => Ok(Request::Repositories),
+            Subcommand::Mount { name, version } => {
+                Ok(Request::Mount(vec![Container::new(name, version)]))
+            }
+            Subcommand::Umount { name, version } => {
+                Ok(Request::Umount(Container::new(name, version)))
+            }
+            Subcommand::Start { name, version } => {
+                Ok(Request::Start(Container::new(name, version)))
+            }
+            Subcommand::Stop {
+                name,
+                version,
+                timeout,
+            } => Ok(Request::Stop(Container::new(name, version), timeout)),
+            Subcommand::Install {
+                npk,
+                repositoriy: repo_id,
+            } => {
+                let size = npk.metadata().map(|m| m.len())?;
+                Ok(Request::Install(repo_id, size))
+            }
+            Subcommand::Uninstall { name, version } => {
+                Ok(Request::Uninstall(Container::new(name, version)))
+            }
+            Subcommand::Shutdown => Ok(Request::Shutdown),
+            Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
         }
-        time::sleep(time::Duration::from_secs(1)).await;
     }
 }
 
-async fn print_response<W: Write>(mut out: &mut W, response: Response, json: bool) -> Result<()> {
-    if json {
-        serde_json::to_writer(&mut out, &response)?;
-        out.write_all(&[b'\n'])
-            .context("Failed to print json response")?;
-        out.flush()?;
-        Ok(())
-    } else {
-        pretty::print_response(out, response).await
-    }
-}
-
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let opt = NstarOpt::from_args();
-    let url = url::Url::parse(&opt.host)?;
+    let opt = Opt::from_args();
+    let host = opt.host.clone();
+    match opt.command {
+        // Generate shell completions and exit on give subcommand
+        Subcommand::Completion { output, shell } => {
+            println!("Generating {} completions to {}", shell, output.display());
+            Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
+            process::exit(0);
+        }
+        // Subscribe to notifications and print them
+        Subcommand::Notifications { number } => {
+            if opt.json {
+                let framed = Client::connect(&host, Some(100), opt.timeout)
+                    .await
+                    .with_context(|| format!("Failed to connect to {}", opt.host))?;
 
-    // Open connection to northstar
-    let mut client = try_connect(std::io::stdout(), &url).await?;
-
-    // Execute the provided command and exit
-    if let Some(command) = opt.command {
-        let response = send_request(&mut client, command).await?;
-        return print_response(&mut std::io::stdout(), response, opt.json).await;
-    }
-
-    // Interactive mode
-    let mut terminal = terminal::Terminal::new()?;
-    let mut prompt = commands::PromptParser::new();
-    loop {
-        writeln!(terminal, "Connected to {}", &url)?;
-        loop {
-            select! {
-                notification = client.next() => {
-                    if let Some(Ok(n)) = notification {
-                        pretty::notification(&mut terminal, &n);
-                    } else {
-                        break;
+                let mut lines = BufReader::new(framed).lines();
+                for _ in 0..number.unwrap_or(usize::MAX) {
+                    match lines.next_line().await.context("Failed to read stream")? {
+                        Some(line) => println!("{}", line),
+                        None => break,
                     }
-                },
-                input = terminal.readline() => {
-                    let input: String = match input {
-                        Ok(line) => line,
-                        Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => return Ok(()),
-                        Err(e) => {
-                            writeln!(terminal, "{}", e.to_string().red())?;
-                            break
-                        },
-                    };
-
-                    match prompt.parse(&input) {
-                        Ok(PromptCommand::Prompt(cmd)) => match cmd {
-                            Prompt::Help => prompt.print_help(&mut terminal)?,
-                            Prompt::Quit => return Ok(()),
-                        },
-                        Ok(PromptCommand::Northstar(cmd)) => {
-                            match send_request(&mut client, cmd).await {
-                                Ok(response) => print_response(&mut terminal, response, opt.json).await?,
-                                // break the loop and try to reconnect
-                                Err(api::client::Error::Stopped) => break,
-                                Err(e) => writeln!(terminal, "{}: {}", "client error".red(), e)?,
-                            };
-                        },
-                        Err(e) => writeln!(terminal, "{}", e.message)?
-                    };
-                    terminal.flush()?;
                 }
+            } else {
+                let client = Client::new(&opt.host, Some(100), opt.timeout)
+                    .await
+                    .with_context(|| format!("Failed to connect to {}", opt.host))?;
+                let mut notifications = client.take(number.unwrap_or(usize::MAX));
+                while let Some(notification) = notifications.next().await {
+                    let notification = notification.context("Failed to receive notificaiton")?;
+                    pretty::notification(&notification);
+                }
+                process::exit(0);
             }
         }
+        // Request response mode
+        command => {
+            // Connect
+            let mut framed = Client::connect(&host, None, opt.timeout)
+                .await
+                .with_context(|| format!("Failed to connect to {}", &host))?;
 
-        // Try to reconnect
-        writeln!(terminal, "Disconnected, trying to reconnect")?;
-        client = try_connect(&mut terminal, &url).await?;
-    }
+            // Request
+            let request = Request::try_from(command.clone())
+                .context("Failed to convert command into request")?;
+            framed
+                .send(Message::new_request(request))
+                .await
+                .context("Failed to send request")?;
+
+            // Extra file transfer for install hack
+            if let Subcommand::Install { npk, .. } = command {
+                copy(
+                    &mut fs::File::open(npk).await.context("Failed to open npk")?,
+                    &mut framed,
+                )
+                .await
+                .context("Failed to stream npk")?;
+            }
+
+            if opt.json {
+                let response = BufReader::new(framed)
+                    .lines()
+                    .next_line()
+                    .await
+                    .context("Failed to receive response")?
+                    .ok_or_else(|| anyhow!("Failed to receive response"))?;
+                println!("{}", response);
+                process::exit(0);
+            } else {
+                // Read next deserialized response and pretty print
+                let exit = match framed
+                    .next()
+                    .await
+                    .ok_or_else(|| anyhow!("Failed to receive response"))??
+                    .payload
+                {
+                    api::model::Payload::Response(response) => pretty::response(&response),
+                    _ => unreachable!(),
+                };
+                process::exit(exit);
+            }
+        }
+    };
+
+    Ok(())
 }
