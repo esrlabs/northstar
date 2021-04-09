@@ -2761,6 +2761,41 @@ pid_t API minijail_fork(struct minijail *j)
 	return minijail_run_config_internal(j, &config);
 }
 
+/*
+ * As commented in minijail_run_internal(), mixing the clone system
+ * call directly with calls to the library fork wrapper can cause deadlocks.
+ * This is because the library wrappers use a futex internally to synchronize
+ * calls to the pthread_atfork() handlers. Why the original minijail did not use
+ * the clone library wrapper is a mystery, but possibly it was not available in
+ * the version of chromium when first developed.
+ *
+ * On Android, the library wrapper for clone(2) allows a null pointer for
+ * both the stack and function. Glibc does not, so we have to directly
+ * invoke the system call. Since we don't use the fork() wrapper, we
+ * "should" be ok.
+ */
+#if defined (__ANDROID__)
+static int mjfork(int flags)
+{
+	int result = clone(NULL,
+			   NULL,
+			   flags,
+			   NULL,
+			   NULL,
+			   NULL,
+			   NULL);
+
+       return result;
+}
+#else
+static int mjfork(int flags)
+{
+	int result = syscall(SYS_clone, flags, NULL, 0L, 0L, 0L);
+
+	return result;
+}
+#endif /* __ANDROID__ */
+
 static int minijail_run_internal(struct minijail *j,
 				 const struct minijail_run_config *config,
 				 struct minijail_run_state *state_out)
@@ -2878,7 +2913,7 @@ static int minijail_run_internal(struct minijail *j,
 		if (j->flags.userns)
 			clone_flags |= CLONE_NEWUSER;
 
-		child_pid = syscall(SYS_clone, clone_flags, NULL, 0L, 0L, 0L);
+		child_pid = mjfork(clone_flags);
 
 		if (child_pid < 0) {
 			if (errno == EPERM)
@@ -2887,7 +2922,7 @@ static int minijail_run_internal(struct minijail *j,
 			pdie("clone(CLONE_NEWPID | ...) failed");
 		}
 	} else {
-		child_pid = fork();
+		child_pid = mjfork(SIGCHLD);
 
 		if (child_pid < 0)
 			pdie("fork failed");
@@ -3084,7 +3119,7 @@ static int minijail_run_internal(struct minijail *j,
 		 * If we're multithreaded, we'll probably deadlock here. See
 		 * WARNING above.
 		 */
-		child_pid = fork();
+		child_pid = mjfork(SIGCHLD);
 		if (child_pid < 0) {
 			_exit(child_pid);
 		} else if (child_pid > 0) {
