@@ -175,10 +175,8 @@ impl<'a> Minijail<'a> {
                 .map_err(Error::Minijail)?;
         }
 
-        // TODO: Do not use pid namespace because of multithreadding
-        // issues discovered by minijail. See libminijail.c for details.
         // Make the process enter a pid namespace
-        // jail.namespace_pids();
+        jail.namespace_pids();
 
         // Make the process enter a vfs namespace
         jail.namespace_vfs();
@@ -187,8 +185,6 @@ impl<'a> Minijail<'a> {
         jail.no_new_privs();
         // Set chroot dir for process
         jail.enter_chroot(&root.as_path())?;
-        // Make the application the init process
-        jail.run_as_init();
 
         self.setup_mounts(&mut jail, container, uid, gid).await?;
 
