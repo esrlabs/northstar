@@ -223,7 +223,7 @@ test!(crashing_container, {
                 |n| {
                     n == &Notification::Exit {
                         container: TEST_CONTAINER.try_into().unwrap(),
-                        status: ExitStatus::Signaled(nix::sys::signal::Signal::SIGABRT as u32),
+                        status: ExitStatus::Exit(254),
                     }
                 },
                 15,
