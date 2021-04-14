@@ -18,6 +18,7 @@ use derive_new::new;
 use error::Error;
 use log::debug;
 
+use async_trait::async_trait;
 use nix::{
     sys::{signal, stat},
     unistd,
@@ -35,7 +36,7 @@ use sync::mpsc;
 use tokio::{
     fs, io,
     sync::{self, oneshot},
-    task,
+    task, time,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -50,19 +51,41 @@ mod loopdev;
 mod minijail;
 mod mount;
 mod pipe;
-mod process;
 mod process_debug;
 mod repository;
-pub(self) mod state;
+mod state;
 
-pub(self) type EventTx = mpsc::Sender<Event>;
-pub(self) type RepositoryId = String;
+type EventTx = mpsc::Sender<Event>;
+type RepositoryId = String;
 pub use api::container::*;
-pub(self) use repository::Repository;
-pub(self) use state::MountedContainer;
+use repository::Repository;
+use state::MountedContainer;
+type ExitCode = i32;
+type Pid = u32;
 
-pub(self) type ExitCode = i32;
-pub(self) type Pid = u32;
+#[async_trait]
+trait Process {
+    fn pid(&self) -> Pid;
+    async fn start(&mut self) -> Result<(), Error>;
+    async fn stop(mut self, timeout: time::Duration) -> Result<ExitStatus, Error>;
+}
+
+#[async_trait]
+trait Launcher {
+    type Process: Process + Send + 'static;
+
+    async fn start(event_tx: EventTx, config: Config) -> Result<Self, Error>
+    where
+        Self: Sized;
+    async fn shutdown(self) -> Result<(), Error>
+    where
+        Self: Sized;
+
+    async fn create(
+        &self,
+        container: &MountedContainer<Self::Process>,
+    ) -> Result<Self::Process, Error>;
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum ExitStatus {
@@ -91,7 +114,7 @@ pub(crate) enum Notification {
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
-pub(crate) enum Event {
+enum Event {
     /// Incomming command
     Console(console::Request, oneshot::Sender<api::model::Response>),
     /// A instance exited with return code
@@ -231,11 +254,11 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
 
-    let mut state = State::new(config, event_tx.clone()).await?;
+    let mut state = State::<minijail::Minijail>::new(config, event_tx.clone()).await?;
 
     // Inititalize the console if configured
     let console = if let Some(url) = config.console.as_ref() {
-        let mut console = console::Console::new(url, event_tx.clone()).map_err(Error::Console)?;
+        let mut console = console::Console::new(url, event_tx.clone());
         console.listen().await.map_err(Error::Console)?;
 
         Some(console)

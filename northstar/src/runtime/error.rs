@@ -35,6 +35,9 @@ pub enum Error {
     #[error("Container {0} failed to start: Resource {1} is missing")]
     StartContainerMissingResource(Container, Container),
     /// The container cannot be started because it's already running
+    #[error("Container {0} failed to start: {1}")]
+    StartContainerFailed(Container, String),
+    /// The container cannot be started because it's already running
     #[error("Container {0} failed to stop: Not started")]
     StopContainerNotStarted(Container),
     /// The container is not known to the system
@@ -46,8 +49,6 @@ pub enum Error {
 
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
-    #[error("Process: {0:?}")]
-    Process(super::process::Error),
     #[error("Console: {0:?}")]
     Console(super::console::Error),
     #[error("Cgroups: {0}")]
@@ -61,6 +62,12 @@ pub enum Error {
     Io(String, io::Error),
     #[error("Os: {0}: {1:?}")]
     Os(String, nix::Error),
+}
+
+impl Error {
+    pub(crate) fn io<T: ToString>(m: T, e: io::Error) -> Error {
+        Error::Io(m.to_string(), e)
+    }
 }
 
 impl From<Error> for api::model::Error {
@@ -77,6 +84,9 @@ impl From<Error> for api::model::Error {
             Error::StartContainerMissingResource(container, resource) => {
                 api::model::Error::StartContainerMissingResource(container, resource)
             }
+            Error::StartContainerFailed(container, reason) => {
+                api::model::Error::StartContainerFailed(container, reason)
+            }
             Error::StopContainerNotStarted(container) => {
                 api::model::Error::StopContainerNotStarted(container)
             }
@@ -85,7 +95,6 @@ impl From<Error> for api::model::Error {
             }
             Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate(container),
             Error::Npk(error) => api::model::Error::Npk(error.to_string()),
-            Error::Process(error) => api::model::Error::Process(error.to_string()),
             Error::Console(error) => api::model::Error::Console(error.to_string()),
             Error::Cgroups(error) => api::model::Error::Cgroups(error.to_string()),
             Error::Mount(error) => api::model::Error::Mount(error.to_string()),

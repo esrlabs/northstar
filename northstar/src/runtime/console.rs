@@ -73,16 +73,16 @@ pub enum Error {
 
 impl Console {
     /// Construct a new console instance
-    pub fn new(url: &Url, event_tx: EventTx) -> Result<Self, Error> {
+    pub(super) fn new(url: &Url, event_tx: EventTx) -> Console {
         let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
 
-        Ok(Self {
+        Self {
             event_tx,
             url: url.clone(),
             notification_tx,
             stop: CancellationToken::new(),
             tasks: Vec::new(),
-        })
+        }
     }
 
     /// Open a TCP socket and listen for incoming connections

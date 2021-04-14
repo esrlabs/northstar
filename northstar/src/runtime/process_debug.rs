@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config::debug, process::Error, Pid};
+use super::{config::debug, error::Error, Pid};
 use log::{debug, error, info};
 use npk::manifest::Manifest;
 use std::{
@@ -60,23 +60,17 @@ impl Strace {
             )
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| Error::Io("Failed to spawn strace".into(), e))?;
+            .map_err(|e| Error::io("Failed to spawn strace", e))?;
 
         let token = CancellationToken::new();
-
-        let stderr = child.stderr.take().ok_or_else(|| {
-            Error::Io(
-                "Failed to get stderr or strace".into(),
-                io::Error::new(io::ErrorKind::Other, ""),
-            )
-        })?;
+        let stderr = child.stderr.take().expect("Failed to get stderr of strace");
 
         // Wait for strace to inform us that it's attached.
         let mut stderr = io::BufReader::new(stderr).lines();
         stderr
             .next_line()
             .await
-            .map_err(|e| Error::Io("Reading strace stderr".into(), e))?;
+            .map_err(|e| Error::io("Reading strace stderr", e))?;
         let mut stderr = stderr.into_inner();
 
         match strace.output {
@@ -92,7 +86,7 @@ impl Strace {
 
                 let mut file = fs::File::create(&filename)
                     .await
-                    .map_err(|e| Error::Io("Failed to create strace log file".into(), e))?;
+                    .map_err(|e| Error::io("Failed to create strace log file", e))?;
 
                 let token = token.clone();
                 task::spawn(async move {
@@ -143,7 +137,7 @@ impl Strace {
         self.child
             .wait()
             .await
-            .map_err(|e| Error::Io("Failed to join strace".into(), e))?;
+            .map_err(|e| Error::io("Failed to join strace", e))?;
 
         Ok(())
     }
@@ -190,7 +184,7 @@ impl Perf {
                     .split_whitespace(),
             )
             .spawn()
-            .map_err(|e| Error::Io("Failed to spawn strace".into(), e))?;
+            .map_err(|e| Error::io("Failed to spawn strace", e))?;
         Ok(Perf {
             child,
             output: filename,
@@ -203,7 +197,7 @@ impl Perf {
         self.child
             .wait()
             .await
-            .map_err(|e| Error::Io("Failed to join perf".into(), e))?;
+            .map_err(|e| Error::io("Failed to join perf", e))?;
 
         Ok(())
     }
