@@ -12,17 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::api;
-
 use super::{
-    config::Config,
-    console::Request,
-    error::Error,
-    key::PublicKey,
-    minijail::{Minijail, Process},
-    mount::MountControl,
-    Container, Event, EventTx, ExitStatus, Notification, Repository, RepositoryId,
+    config::Config, console::Request, error::Error, key::PublicKey, mount::MountControl, Container,
+    Event, EventTx, ExitStatus, Launcher, Notification, Process, Repository, RepositoryId,
 };
+use crate::api;
 use api::model::Response;
 use floating_duration::TimeAsFloat;
 use futures::{
@@ -36,7 +30,6 @@ use npk::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    fmt,
     path::{Path, PathBuf},
     result,
     sync::Arc,
@@ -44,53 +37,49 @@ use std::{
 use tokio::{sync::oneshot, task, time};
 
 #[derive(Debug)]
-pub(super) struct State<'a> {
+pub(super) struct State<'a, L>
+where
+    L: Launcher,
+{
     config: &'a Config,
-    minijail: Minijail<'a>,
+    launcher: L,
     mount_control: Arc<MountControl>,
     events_tx: EventTx,
     repositories: HashMap<RepositoryId, Repository>,
-    containers: HashMap<Container, MountedContainer>,
+    containers: HashMap<Container, MountedContainer<L::Process>>,
     /// Internal test repository tempdir
     #[cfg(feature = "hello")]
     internal_repository: tempfile::TempDir,
 }
 
 #[derive(Debug)]
-pub enum BlockDevice {
+pub(super) enum BlockDevice {
     Loopback(PathBuf),
     Verity(PathBuf),
 }
 
 #[derive(Debug)]
-pub(super) struct MountedContainer {
+pub(super) struct MountedContainer<P> {
     pub(super) container: Container,
     pub(super) manifest: Manifest,
     pub(super) root: PathBuf,
     pub(super) device: BlockDevice,
-    pub(super) process: Option<ProcessContext>,
-}
-
-impl fmt::Display for MountedContainer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.manifest.name, self.manifest.version)
-    }
+    pub(super) process: Option<ProcessContext<P>>,
 }
 
 #[derive(Debug)]
-pub(super) struct ProcessContext {
+pub(super) struct ProcessContext<P> {
+    process: P,
     started: time::Instant,
-    process: Process,
     cgroups: Option<super::cgroups::CGroups>,
 }
 
-impl ProcessContext {
+impl<P: Process> ProcessContext<P> {
     async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
         let status = self
             .process
-            .terminate(timeout)
+            .stop(timeout)
             .await
-            .map_err(Error::Process)
             .expect("Failed to terminate process");
 
         if let Some(cgroups) = self.cgroups.take() {
@@ -107,9 +96,9 @@ impl ProcessContext {
     }
 }
 
-impl<'a> State<'a> {
+impl<'a, L: Launcher> State<'a, L> {
     /// Create a new empty State instance
-    pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
+    pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a, L>, Error> {
         let mut repositories = HashMap::new();
 
         // Internal test repository
@@ -137,9 +126,9 @@ impl<'a> State<'a> {
 
         // TODO: Verify that the containers in all repositories are unique with name and version
 
-        let minijail = Minijail::new(events_tx.clone(), config)
+        let launcher = L::start(events_tx.clone(), config.clone())
             .await
-            .map_err(Error::Process)?;
+            .expect("Failed to start launcher");
         let mount_control = MountControl::new(&config).await.map_err(Error::Mount)?;
 
         Ok(State {
@@ -147,7 +136,7 @@ impl<'a> State<'a> {
             repositories,
             containers: HashMap::new(),
             config,
-            minijail,
+            launcher,
             mount_control: Arc::new(mount_control),
             #[cfg(feature = "hello-world")]
             internal_repository,
@@ -168,7 +157,7 @@ impl<'a> State<'a> {
     async fn mount(
         &self,
         container: &Container,
-    ) -> Result<impl Future<Output = Result<MountedContainer, Error>>, Error> {
+    ) -> Result<impl Future<Output = Result<MountedContainer<L::Process>, Error>>, Error> {
         // Find npk and optional key
         let (npk, _, key) = self
             .npk(container)
@@ -366,12 +355,7 @@ impl<'a> State<'a> {
 
         // Spawn process
         info!("Creating {}", container);
-        let mut process = match self
-            .minijail
-            .create(&mouted_container)
-            .await
-            .map_err(Error::Process)
-        {
+        let mut process = match self.launcher.create(&mouted_container).await {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -403,7 +387,7 @@ impl<'a> State<'a> {
 
         // Signal the process to continue starting. This can fail because of the container
         // content. In case umount everything mounted so far and return the error.
-        if let Err(e) = process.start().await.map_err(Error::Process) {
+        if let Err(e) = process.start().await {
             warn!("Failed to resume process of {}", container);
             warn!("Failed to start {}", container);
             return Err(e);
@@ -481,7 +465,7 @@ impl<'a> State<'a> {
             self.umount(container).await?;
         }
 
-        self.minijail.shutdown().await.map_err(Error::Process)
+        self.launcher.shutdown().await
     }
 
     /// Install an NPK

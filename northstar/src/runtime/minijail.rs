@@ -14,18 +14,18 @@
 
 use super::{
     config::Config,
+    error::Error,
     pipe::{pipe, AsyncPipeRead, AsyncPipeWrite, PipeWrite},
-    process::{waitpid, Error, ENV_NAME, ENV_VERSION},
-    process_debug::{Perf, Strace},
-    ExitStatus, MountedContainer as Container, Pid,
+    process_debug, Container, Event, ExitStatus, Launcher, MountedContainer, Pid, Process,
 };
 use crate::runtime::EventTx;
+use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
-use futures::{future::OptionFuture, Future};
+use futures::{future::OptionFuture, Future, TryFutureExt};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
-    sys::signal,
+    sys::{signal, wait},
     unistd::{self, chown},
 };
 use npk::manifest::{Dev, Manifest, Mount, MountFlag, Output};
@@ -47,18 +47,31 @@ use tokio::{
     time,
 };
 use tokio_util::sync::CancellationToken;
+use wait::WaitStatus;
+
+const ENV_NAME: &str = "NAME";
+const ENV_VERSION: &str = "VERSION";
 
 #[derive(Debug)]
-pub struct Minijail<'a> {
+pub struct Minijail {
     log_fd: PipeWrite,
     event_tx: EventTx,
-    config: &'a Config,
+    config: Config,
     log_task: JoinHandle<()>,
 }
 
-impl<'a> Minijail<'a> {
-    /// Initialize minijail
-    pub(crate) async fn new(event_tx: EventTx, config: &'a Config) -> Result<Minijail<'a>, Error> {
+fn into_io_error(e: ::minijail::Error) -> Error {
+    Error::io("minijail", io::Error::new(io::ErrorKind::Other, e))
+}
+
+#[async_trait]
+impl Launcher for Minijail {
+    type Process = MinijailProcess;
+
+    async fn start(event_tx: EventTx, config: Config) -> Result<Self, Error>
+    where
+        Self: Sized,
+    {
         let (reader, log_fd) =
             pipe().map_err(|e| Error::Io("Failed to open pipe".to_string(), e))?;
         let async_reader: AsyncPipeRead = reader.try_into().map_err(|e| {
@@ -101,8 +114,10 @@ impl<'a> Minijail<'a> {
         })
     }
 
-    /// Shutdown minijail
-    pub(crate) async fn shutdown(self) -> Result<(), Error> {
+    async fn shutdown(self) -> Result<(), Error>
+    where
+        Self: Sized,
+    {
         // Set minijail logging to stderr before closing the pipe
         ::minijail::Minijail::log_to_fd(2, i32::MAX);
 
@@ -116,16 +131,16 @@ impl<'a> Minijail<'a> {
         Ok(())
     }
 
-    /// Create a new minijailed process which is forked and blocks before execve. Start it with Process::start.
-    pub(super) async fn create(&self, container: &Container) -> Result<Process, Error> {
+    async fn create(
+        &self,
+        container: &MountedContainer<Self::Process>,
+    ) -> Result<Self::Process, Error> {
         let root = &container.root;
         let manifest = &container.manifest;
-        let mut jail = MinijailHandle(::minijail::Minijail::new().map_err(Error::Minijail)?);
+        let mut jail =
+            MinijailHandle(::minijail::Minijail::new().expect("Failed to create minijail handle"));
 
-        let init = manifest
-            .init
-            .as_ref()
-            .ok_or_else(|| Error::Start("Cannot start a resource".to_string()))?;
+        let init = manifest.init.as_ref().expect("Cannot start a resource");
 
         let uid = manifest.uid;
         let gid = manifest.gid;
@@ -165,14 +180,14 @@ impl<'a> Minijail<'a> {
         if let Some(capabilities) = &manifest.capabilities {
             // TODO: the capabilities should be passed as an array
             jail.update_caps(&capabilities.join(" "))
-                .map_err(Error::Minijail)?;
+                .map_err(into_io_error)?;
         }
 
         // Update the supplementary group list if specified
         if let Some(suppl_groups) = &manifest.suppl_groups {
             // TODO: the groups should be passed an array
             jail.update_suppl_groups(&suppl_groups.join(" "))
-                .map_err(Error::Minijail)?;
+                .map_err(into_io_error)?;
         }
 
         // Make the process enter a pid namespace
@@ -184,9 +199,9 @@ impl<'a> Minijail<'a> {
         // in the kernel source tree for an explanation of the parameters.
         jail.no_new_privs();
         // Set chroot dir for process
-        jail.enter_chroot(&root.as_path())?;
+        jail.enter_chroot(&root.as_path()).map_err(into_io_error)?;
 
-        self.setup_mounts(&mut jail, container, uid, gid).await?;
+        Self::setup_mounts(&self.config, &mut jail, container, uid, gid).await?;
 
         // Arguments
         let args = manifest.args.clone().unwrap_or_default();
@@ -218,7 +233,9 @@ impl<'a> Minijail<'a> {
         // And finally start it....
         let argv_str = argv.iter().join(" ");
         debug!("Preparing \"{}\"", argv_str);
-        let pid = jail.run_remap_env_preload(&init.as_path(), &fds, &argv, &env, false)?;
+        let pid = jail
+            .run_remap_env_preload(&init.as_path(), &fds, &argv, &env, false)
+            .map_err(into_io_error)?;
         let pid = pid as u32;
 
         // Attach debug tools if configured in the runtime configuration.
@@ -228,10 +245,10 @@ impl<'a> Minijail<'a> {
         let exit_status = {
             let container = container.container.clone();
             let tx = self.event_tx.clone();
-            Box::new(waitpid(container, pid, tx).await)
+            Box::new(Self::waitpid(container, pid, tx).await)
         };
 
-        Ok(Process {
+        Ok(MinijailProcess {
             argv: argv_str,
             pid,
             _jail: jail,
@@ -241,7 +258,9 @@ impl<'a> Minijail<'a> {
             sync: Some(sync),
         })
     }
+}
 
+impl Minijail {
     /// Configure stdout/stderr as declared in the manifest and return list of fds that
     /// shall be preserved by minijail for the spanwed process
     async fn inheritable_fds(
@@ -286,15 +305,15 @@ impl<'a> Minijail<'a> {
     }
 
     async fn setup_mounts(
-        &self,
+        config: &Config,
         jail: &mut MinijailHandle,
-        container: &Container,
+        container: &MountedContainer<MinijailProcess>,
         uid: u32,
         gid: u32,
     ) -> Result<(), Error> {
         let proc = Path::new("/proc");
         jail.mount_bind(&proc, &proc, false)
-            .map_err(Error::Minijail)?;
+            .map_err(into_io_error)?;
         jail.remount_proc_readonly();
 
         // If there's no explicit mount for /dev add a minimal variant
@@ -325,11 +344,10 @@ impl<'a> Minijail<'a> {
                         target.display(),
                         if rw { " (rw)" } else { "" }
                     );
-                    jail.mount_bind(&host, &target, rw)
-                        .map_err(Error::Minijail)?;
+                    jail.mount_bind(&host, &target, rw).map_err(into_io_error)?;
                 }
                 Mount::Persist => {
-                    let dir = self.config.data_dir.join(&container.manifest.name);
+                    let dir = config.data_dir.join(&container.manifest.name);
                     if !dir.exists() {
                         debug!("Creating {}", dir.display());
                         fs::create_dir_all(&dir).await.map_err(|e| {
@@ -352,23 +370,22 @@ impl<'a> Minijail<'a> {
 
                     debug!("Mounting {} on {}", dir.display(), target.display(),);
                     jail.mount_bind(&dir, &target, true)
-                        .map_err(Error::Minijail)?;
+                        .map_err(into_io_error)?;
                 }
                 Mount::Resource { name, version, dir } => {
                     let src = {
                         // Join the source of the resource container with the mount dir
-                        let resource_root =
-                            self.config.run_dir.join(format!("{}:{}", name, version));
+                        let resource_root = config.run_dir.join(format!("{}:{}", name, version));
                         let dir = dir
                             .strip_prefix("/")
                             .map(|d| resource_root.join(d))
                             .unwrap_or(resource_root);
 
                         if !dir.exists() {
-                            return Err(Error::Start(format!(
-                                "Resource folder {} is missing",
-                                dir.display()
-                            )));
+                            return Err(Error::StartContainerFailed(
+                                container.container.clone(),
+                                format!("Resource folder {} is missing", dir.display()),
+                            ));
                         }
 
                         dir
@@ -377,7 +394,7 @@ impl<'a> Minijail<'a> {
                     debug!("Mounting {} on {}", src.display(), target.display());
 
                     jail.mount_bind(&src, &target, false)
-                        .map_err(Error::Minijail)?;
+                        .map_err(into_io_error)?;
                 }
                 Mount::Tmpfs { size } => {
                     debug!(
@@ -387,20 +404,87 @@ impl<'a> Minijail<'a> {
                     );
                     let data = format!("size={},mode=1777", size);
                     jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
-                        .map_err(Error::Minijail)?;
+                        .map_err(into_io_error)?;
                 }
                 Mount::Dev { r#type } => {
                     match r#type {
                         // The Full mount of /dev is a simple rw bind mount of /dev
                         Dev::Full => {
                             let dev = Path::new("/dev");
-                            jail.mount_bind(&dev, &dev, true).map_err(Error::Minijail)?;
+                            jail.mount_bind(&dev, &dev, true).map_err(into_io_error)?;
                         }
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    /// Spawn a task that waits for the process to exit. This resolves to the exit status
+    /// of `pid`.
+    async fn waitpid(
+        container: Container,
+        pid: Pid,
+        event_handle: EventTx,
+    ) -> impl Future<Output = Result<ExitStatus, Error>> {
+        task::spawn_blocking(move || {
+            let pid = unistd::Pid::from_raw(pid as i32);
+            let status = loop {
+                match wait::waitpid(Some(pid), None) {
+                    // The process exited normally (as with exit() or returning from main) with the given exit code.
+                    // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
+                    Ok(WaitStatus::Exited(pid, code)) => {
+                        debug!("Process {} exit code is {}", pid, code);
+                        break ExitStatus::Exit(code);
+                    }
+
+                    // The process was killed by the given signal.
+                    // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
+                    Ok(WaitStatus::Signaled(pid, signal, _dump)) => {
+                        debug!("Process {} exit status is signal {}", pid, signal);
+                        break ExitStatus::Signaled(signal);
+                    }
+
+                    // The process is alive, but was stopped by the given signal.
+                    // This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
+                    Ok(WaitStatus::Stopped(_pid, _signal)) => continue,
+
+                    // The traced process was stopped by a PTRACE_EVENT_* event.
+                    // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    Ok(WaitStatus::PtraceEvent(_pid, _signal, _)) => continue,
+
+                    // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
+                    // See ptrace(2) for more information.
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    Ok(WaitStatus::PtraceSyscall(_pid)) => continue,
+
+                    // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
+                    // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
+                    Ok(WaitStatus::Continued(_pid)) => continue,
+
+                    // There are currently no state changes to report in any awaited child process.
+                    // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
+                    Ok(WaitStatus::StillAlive) => continue,
+                    // Retry the waitpid call if waitpid fails with EINTR
+                    Err(e) if e == nix::Error::Sys(nix::errno::Errno::EINTR) => continue,
+                    Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
+                }
+            };
+
+            // Send notification to main loop
+            event_handle
+                .blocking_send(Event::Exit(container, status.clone()))
+                .expect("Internal channel error on main event handle");
+
+            status
+        })
+        .map_err(|e| {
+            Error::Io(
+                "Task join error".into(),
+                io::Error::new(io::ErrorKind::Other, e),
+            )
+        })
     }
 }
 
@@ -425,12 +509,13 @@ impl ops::DerefMut for MinijailHandle {
 }
 
 /// A started minijailed process
-pub(crate) struct Process {
+pub(crate) struct MinijailProcess {
     argv: String,
     /// PID of this process
     pid: Pid,
     /// Exit handle of this process
-    exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
+    exit_status:
+        Box<dyn Future<Output = Result<ExitStatus, super::error::Error>> + Unpin + Send + Sync>,
     /// Handle to a libminijail configuration
     _jail: MinijailHandle,
     /// Captured stdout output
@@ -441,19 +526,16 @@ pub(crate) struct Process {
     sync: Option<ProcessSync>,
 }
 
-impl fmt::Debug for Process {
+impl fmt::Debug for MinijailProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Process").field("pid", &self.pid).finish()
     }
 }
 
-impl Process {
-    pub fn pid(&self) -> Pid {
-        self.pid
-    }
-
+#[async_trait]
+impl Process for MinijailProcess {
     /// Resume the process
-    pub async fn start(&mut self) -> Result<(), Error> {
+    async fn start(&mut self) -> Result<(), Error> {
         debug!("Starting \"{}\"", self.argv);
         if let Some(sync) = self.sync.take() {
             sync.resume().await?;
@@ -463,7 +545,7 @@ impl Process {
 
     /// Send a SIGTERM to the application. If the application does not terminate with a timeout
     /// it is SIGKILLed.
-    pub async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
+    async fn stop(mut self, timeout: time::Duration) -> Result<ExitStatus, super::error::Error> {
         debug!("Trying to send SIGTERM to {}", self.pid);
         let exit_status = match signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGTERM))
         {
@@ -496,13 +578,17 @@ impl Process {
 
         Ok(exit_status)
     }
+
+    fn pid(&self) -> Pid {
+        self.pid
+    }
 }
 
 /// Debugging facilities attached to a started container
 #[derive(Debug)]
 struct Debug {
-    strace: Option<Strace>,
-    perf: Option<Perf>,
+    strace: Option<process_debug::Strace>,
+    perf: Option<process_debug::Perf>,
 }
 
 impl Debug {
@@ -513,7 +599,7 @@ impl Debug {
             .debug
             .as_ref()
             .and_then(|debug| debug.strace.as_ref())
-            .map(|strace| Strace::new(strace, manifest, &config.log_dir, pid))
+            .map(|strace| process_debug::Strace::new(strace, manifest, &config.log_dir, pid))
             .into();
 
         // Attach a perf instance if configured in the runtime configuration
@@ -521,7 +607,7 @@ impl Debug {
             .debug
             .as_ref()
             .and_then(|debug| debug.perf.as_ref())
-            .map(|perf| Perf::new(perf, manifest, &config.log_dir, pid))
+            .map(|perf| process_debug::Perf::new(perf, manifest, &config.log_dir, pid))
             .into();
 
         let (strace, perf) = tokio::join!(strace, perf);
@@ -532,7 +618,7 @@ impl Debug {
     }
 
     /// Shutdown configured debug facilities and attached to `pid`
-    async fn destroy(self) -> Result<(), Error> {
+    async fn destroy(self) -> Result<(), super::error::Error> {
         if let Some(strace) = self.strace {
             strace.destroy().await?;
         }

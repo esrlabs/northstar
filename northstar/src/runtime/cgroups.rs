@@ -44,7 +44,7 @@ pub struct CGroups {
 }
 
 impl CGroups {
-    pub(crate) async fn new(
+    pub(super) async fn new(
         configuration: &config::CGroups,
         container: &Container,
         cgroups: &manifest::CGroups,

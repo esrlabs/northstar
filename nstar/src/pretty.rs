@@ -164,6 +164,9 @@ pub fn response(response: &Response) -> i32 {
                 model::Error::StartContainerMissingResource(c, r) => {
                     eprintln!("failed to start container {}: missing resouce {}", c, r)
                 }
+                model::Error::StartContainerFailed(c, r) => {
+                    eprintln!("failed to start container {}: {}", c, r)
+                }
                 model::Error::StopContainerNotStarted(c) => {
                     eprintln!("failed to stop container {}: not started", c)
                 }

@@ -187,6 +187,7 @@ pub enum Error {
     StartContainerStarted(Container),
     StartContainerResource(Container),
     StartContainerMissingResource(Container, Container),
+    StartContainerFailed(Container, String),
     StopContainerNotStarted(Container),
     InvalidRepository(RepositoryId),
     InstallDuplicate(Container),
