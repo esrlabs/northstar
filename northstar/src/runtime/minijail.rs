@@ -14,7 +14,7 @@
 
 use super::{
     config::Config,
-    pipe::{pipe, AsyncPipeReader, AsyncPipeWriter, PipeWriter},
+    pipe::{pipe, AsyncPipeRead, AsyncPipeWrite, PipeWrite},
     process::{waitpid, Error, ENV_NAME, ENV_VERSION},
     process_debug::{Perf, Strace},
     ExitStatus, MountedContainer as Container, Pid,
@@ -50,7 +50,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug)]
 pub struct Minijail<'a> {
-    log_fd: PipeWriter,
+    log_fd: PipeWrite,
     event_tx: EventTx,
     config: &'a Config,
     log_task: JoinHandle<()>,
@@ -61,7 +61,7 @@ impl<'a> Minijail<'a> {
     pub(crate) async fn new(event_tx: EventTx, config: &'a Config) -> Result<Minijail<'a>, Error> {
         let (reader, log_fd) =
             pipe().map_err(|e| Error::Io("Failed to open pipe".to_string(), e))?;
-        let async_reader: AsyncPipeReader = reader.try_into().map_err(|e| {
+        let async_reader: AsyncPipeRead = reader.try_into().map_err(|e| {
             Error::Io(
                 "Failed to get async handler from pipe reader".to_string(),
                 e,
@@ -547,7 +547,7 @@ impl Debug {
 
 #[derive(Debug)]
 struct Io {
-    writefd: PipeWriter,
+    writefd: PipeWrite,
     token: CancellationToken,
 }
 
@@ -562,7 +562,7 @@ impl Io {
             let token = token.clone();
             let mut io = Self::io(io).await?;
 
-            let mut async_reader: AsyncPipeReader = reader.try_into().map_err(|e| {
+            let mut async_reader: AsyncPipeRead = reader.try_into().map_err(|e| {
                 Error::Io(
                     "Failed to get async handler from pipe reader".to_string(),
                     e,
@@ -656,8 +656,8 @@ impl AsyncWrite for Log {
 /// is fully setup e.g debugging things like strace or the cgroups setup
 /// Wait for the child process to processed the resume command.
 struct ProcessSync {
-    resume_writer: AsyncPipeWriter,
-    ack_reader: AsyncPipeReader,
+    resume_writer: AsyncPipeWrite,
+    ack_reader: AsyncPipeRead,
     resume_reader_fd: RawFd,
     ack_writer_fd: RawFd,
 
@@ -674,10 +674,10 @@ impl ProcessSync {
         let (ack_reader, mut ack_writer) =
             pipe().map_err(|e| Error::Io("Failed to create pipe".to_string(), e))?;
 
-        let resume_writer: AsyncPipeWriter = resume_writer
+        let resume_writer: AsyncPipeWrite = resume_writer
             .try_into()
             .map_err(|e| Error::Io("Failed to get async pipe handle".to_string(), e))?;
-        let ack_reader: AsyncPipeReader = ack_reader
+        let ack_reader: AsyncPipeRead = ack_reader
             .try_into()
             .map_err(|e| Error::Io("Failed to get async pipe handle".to_string(), e))?;
 
