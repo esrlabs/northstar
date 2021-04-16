@@ -13,7 +13,7 @@ futures = "0.3.8"
 lazy_static = "1.4"
 log = "0.4.11"
 nix = "0.20.0"
-northstar = { path = "../northstar" }
+northstar = { path = "../northstar", features = ["runtime", "api"] }
 npk = { path = "../npk" }
 regex = "1.4"
 rusty-fork = "0.3.0"

@@ -8,7 +8,7 @@ edition = "2018"
 anyhow = "1.0"
 env_logger = "0.8.3"
 futures = "0.3.8"
-northstar = { path = "../northstar", features = ["api"], default-features = false }
+northstar = { path = "../../northstar", features = ["api"], default-features = false }
 structopt = "0.3.21"
 tokio = { version = "1.4", features = ["full"] }
 tokio-util = "0.6.5"

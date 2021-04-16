@@ -8,11 +8,11 @@ edition = "2018"
 anyhow = "1.0"
 base64 = "0.13.0"
 colored = "2.0"
-ed25519-dalek = "1.0.1"
+ed25519-dalek = "1.0"
 env_logger = "0.8.2"
 log = "0.4.11"
-npk = { path = "../npk" }
+npk = { path = "../../npk" }
 structopt = "0.3.21"
 tempfile = "3.1"
-tokio = { version = "1.4", features = ["full"] }
+tokio = { version = "1.4", features = ["macros", "rt"] }
 which = "4.0"

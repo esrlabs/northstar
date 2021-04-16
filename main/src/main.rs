@@ -18,7 +18,7 @@ use anyhow::{Context, Error};
 use log::{debug, info, warn};
 use northstar::runtime;
 use runtime::config::Config;
-use std::{env, fs::read_to_string, path::PathBuf, process::exit};
+use std::{fs::read_to_string, path::PathBuf, process::exit};
 use structopt::StructOpt;
 use tokio::{select, signal::unix::SignalKind};
 
@@ -40,12 +40,6 @@ fn main() -> Result<(), Error> {
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
 
     logger::init();
-
-    info!(
-        "Northstar v{} ({})",
-        env!("VERGEN_SEMVER"),
-        env!("VERGEN_SHA_SHORT")
-    );
 
     // Skip mount namespace setup in case it's disabled for debugging purposes
     if !config

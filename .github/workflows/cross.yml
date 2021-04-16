@@ -13,10 +13,12 @@ jobs:
           - aarch64-unknown-linux-gnu
           - aarch64-unknown-linux-musl
         package:
+          - capabilities
           - cpueater
           - crashing
           - datarw
           - ferris
+          - hello-world
           - memeater
           - minijail
           - northstar
@@ -43,4 +45,4 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --target=${{ matrix.target }} -p ${{ matrix.package }}
+          args: --target=${{ matrix.target }} -p ${{ matrix.package }} --all-features

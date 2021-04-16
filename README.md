@@ -100,7 +100,7 @@ A file system image of a Nortstar package is attached to a loopback device. The 
 
 ## Creating Northstar Packages
 
-In order to use an application in a northstar container, it needs to be packaged in a northstar package (NPK). The `sextant` tool can be used to create and package npk files
+In order to use an application in a northstar container, it needs to be packaged in a northstar package (NPK). The `sextant` tool can be used to create and package npk files. Install `sextant` with `cargo install --path tools/sextant`.
 
 ```shell
 Northstar CLI

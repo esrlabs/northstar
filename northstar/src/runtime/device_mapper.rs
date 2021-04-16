@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use nix::libc::{c_ulong, ioctl as nix_ioctl};
+use nix::{libc, libc::ioctl as nix_ioctl};
 use std::{borrow::Cow, cmp, fmt, mem::size_of, path::Path, slice};
 use thiserror::Error;
 use tokio::{io, task};
@@ -22,24 +22,24 @@ const MIN_BUF_SIZE: usize = 16 * 1024;
 /// Name max length
 pub const DM_NAME_LEN: usize = 128;
 
-pub const DM_VERSION_CMD: ::libc::c_uint = 0;
-pub const DM_REMOVE_ALL_CMD: ::libc::c_uint = 1;
-pub const DM_LIST_DEVICES_CMD: ::libc::c_uint = 2;
-pub const DM_DEV_CREATE_CMD: ::libc::c_uint = 3;
-pub const DM_DEV_REMOVE_CMD: ::libc::c_uint = 4;
-pub const DM_DEV_RENAME_CMD: ::libc::c_uint = 5;
-pub const DM_DEV_SUSPEND_CMD: ::libc::c_uint = 6;
-pub const DM_DEV_STATUS_CMD: ::libc::c_uint = 7;
-pub const DM_DEV_WAIT_CMD: ::libc::c_uint = 8;
-pub const DM_TABLE_LOAD_CMD: ::libc::c_uint = 9;
-pub const DM_TABLE_CLEAR_CMD: ::libc::c_uint = 10;
-pub const DM_TABLE_DEPS_CMD: ::libc::c_uint = 11;
-pub const DM_TABLE_STATUS_CMD: ::libc::c_uint = 12;
-pub const DM_LIST_VERSIONS_CMD: ::libc::c_uint = 13;
-pub const DM_TARGET_MSG_CMD: ::libc::c_uint = 14;
+pub const DM_VERSION_CMD: libc::c_uint = 0;
+pub const DM_REMOVE_ALL_CMD: libc::c_uint = 1;
+pub const DM_LIST_DEVICES_CMD: libc::c_uint = 2;
+pub const DM_DEV_CREATE_CMD: libc::c_uint = 3;
+pub const DM_DEV_REMOVE_CMD: libc::c_uint = 4;
+pub const DM_DEV_RENAME_CMD: libc::c_uint = 5;
+pub const DM_DEV_SUSPEND_CMD: libc::c_uint = 6;
+pub const DM_DEV_STATUS_CMD: libc::c_uint = 7;
+pub const DM_DEV_WAIT_CMD: libc::c_uint = 8;
+pub const DM_TABLE_LOAD_CMD: libc::c_uint = 9;
+pub const DM_TABLE_CLEAR_CMD: libc::c_uint = 10;
+pub const DM_TABLE_DEPS_CMD: libc::c_uint = 11;
+pub const DM_TABLE_STATUS_CMD: libc::c_uint = 12;
+pub const DM_LIST_VERSIONS_CMD: libc::c_uint = 13;
+pub const DM_TARGET_MSG_CMD: libc::c_uint = 14;
 // We don't support this
-// pub const DM_DEV_SET_GEOMETRY_CMD: ::libc::c_uint = 15;
-// pub const DM_DEV_ARM_POLL_CMD: ::libc::c_uint = 16;
+// pub const DM_DEV_SET_GEOMETRY_CMD: libc::c_uint = 15;
+// pub const DM_DEV_ARM_POLL_CMD: libc::c_uint = 16;
 
 /// Indicator to send IOCTL to DM
 const DM_IOCTL: u8 = 0xfd;
@@ -51,21 +51,21 @@ const DM_VERSION_MINOR: u32 = 0;
 const DM_VERSION_PATCHLEVEL: u32 = 0;
 
 #[allow(non_camel_case_types)]
-type __s8 = ::libc::c_char;
+type __s8 = libc::c_char;
 #[allow(non_camel_case_types)]
-type __u8 = ::libc::c_uchar;
+type __u8 = libc::c_uchar;
 #[allow(non_camel_case_types)]
-type __s16 = ::libc::c_short;
+type __s16 = libc::c_short;
 #[allow(non_camel_case_types)]
-type __u16 = ::libc::c_ushort;
+type __u16 = libc::c_ushort;
 #[allow(non_camel_case_types)]
-type __s32 = ::libc::c_int;
+type __s32 = libc::c_int;
 #[allow(non_camel_case_types)]
-type __u32 = ::libc::c_uint;
+type __u32 = libc::c_uint;
 #[allow(non_camel_case_types)]
-type __s64 = ::libc::c_longlong;
+type __s64 = libc::c_longlong;
 #[allow(non_camel_case_types)]
-type __u64 = ::libc::c_ulonglong;
+type __u64 = libc::c_ulonglong;
 
 #[repr(C)]
 pub struct Struct_dm_ioctl {
@@ -354,8 +354,8 @@ impl Dm {
                 .as_mut()
                 .expect("pointer to own structure v can not be NULL")
         };
-        let op =
-            nix::request_code_readwrite!(DM_IOCTL, ioctl, size_of::<Struct_dm_ioctl>()) as c_ulong;
+        let op = nix::request_code_readwrite!(DM_IOCTL, ioctl, size_of::<Struct_dm_ioctl>())
+            as libc::c_ulong;
 
         use std::os::unix::io::AsRawFd;
         let fd = self.file.as_raw_fd();

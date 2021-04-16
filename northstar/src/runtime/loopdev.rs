@@ -13,9 +13,8 @@
 //   limitations under the License.
 
 use floating_duration::TimeAsFloat;
-use libc::ioctl;
 use log::{debug, warn};
-use nix::{errno::Errno, Error::Sys};
+use nix::{errno::Errno, libc::ioctl, Error::Sys};
 use std::{
     os::unix::prelude::*,
     path::{Path, PathBuf},

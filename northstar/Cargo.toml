@@ -4,104 +4,67 @@ version = "0.6.3"
 authors = ["ESRLabs"]
 edition = "2018"
 build = "build.rs"
-default-run = "northstar"
 license-file = "LICENSE.md"
 
-[[bin]]
-name = "northstar"
-
-[lib]
-name = "northstar"
-
 [dependencies]
-anyhow = "1.0"
 async-stream = { version = "0.3.0", optional = true }
 async-trait = { version = "0.1.42", optional = true }
-base64 = { version = "0.13.0", optional = true }
 bincode = { version = "1.3", optional = true }
 bitflags = { version = "1.2", optional = true }
-byteorder = { version = "1.3", optional = true }
 bytes = { version = "1.0", optional = true }
 bytesize = { version = "1.0", optional = true }
 derive-new = { version = "0.5.8", optional = true }
 ed25519-dalek = { version = "1.0", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
-futures = { version = "0.3.8", optional = true }
+futures = "0.3.8"
 hex = { version = "0.4.2", optional = true }
 itertools = { version = "0.10.0", optional = true }
 lazy_static = { version = "1.4", optional = true }
-libc = { version = "0.2.81", optional = true }
 log = { version = "0.4.11", features = [ "serde"] }
 minijail = { path = "../minijail/rust/minijail", optional = true }
 nix = { version = "0.19.1", optional = true }
-npk = { path = "../npk" }
+npk = { path = "../npk", optional = true }
 page_size = { version = "0.4.2", optional = true }
 proc-mounts = { version = "0.2.4", optional = true }
 procinfo = { version = "0.4.2", optional = true }
-regex = { version = "1.4", optional = true }
-semver = { version = "0.11.0", optional = true }
-serde = { version = "1.0", features = ["derive", "rc"], optional = true }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", optional = true }
-serde_yaml = { version = "0.8.15", optional = true }
-sha2 = { version = "0.9.2", optional = true }
-structopt = { version = "0.3.21", optional = true }
 tempfile = { version = "3.1", optional = true }
-thiserror = { version = "1.0", optional = true }
-tokio = { version = "1.4", features = ["full"], optional = true }
+thiserror = "1.0"
+tokio = { version = "1.4", features = ["full"] }
 tokio-util = { version = "0.6.0", features = ["codec"], optional = true }
-toml = { version = "0.5.8", optional = true }
-url = { version = "2.2", features = ["serde"], optional = true }
-uuid = { version = "0.8.1", features = ["v4"], optional = true }
+url = { version = "2.2", features = ["serde"] }
+uuid = { version = "0.8.1", features = ["v4"] }
 
 [dev-dependencies]
 anyhow = "1.0"
 
 [features]
-default = ["api", "runtime"]
-api = ["bytes", "futures", "serde", "serde_json", "tokio", "derive-new", "url", "uuid", "tokio-util", "thiserror"]
+default = ["runtime"]
+api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util"]
 runtime = [
     "api",
     "async-stream",
     "async-trait",
-    "base64",
     "bitflags",
     "bincode",
-    "byteorder",
     "bytesize",
     "ed25519-dalek",
     "floating-duration",
-    "futures",
     "hex",
     "itertools",
     "lazy_static",
-    "libc",
     "minijail",
     "nix",
+    "npk",
     "page_size",
     "proc-mounts",
     "procinfo",
-    "serde",
-    "serde_json",
-    "serde_yaml",
-    "sha2",
-    "structopt",
     "tempfile",
-    "thiserror",
-    "tokio",
-    "toml",
-    "url",
-    "uuid",
 ]
 hello-world = []
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
-env_logger = "0.8.3"
-
-[target.'cfg(target_os = "android")'.dependencies]
-android-logd-logger = "0.1.3"
-
 [build-dependencies]
 anyhow = "1.0"
-vergen = "3.1"
 npk = { path = "../npk" }
 tokio = { version = "1.4", features = ["rt"] }
