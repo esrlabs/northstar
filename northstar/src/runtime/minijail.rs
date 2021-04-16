@@ -16,12 +16,12 @@ use super::{
     config::Config,
     error::Error,
     pipe::{pipe, AsyncPipeRead, AsyncPipeWrite, PipeWrite},
-    process_debug, Container, Event, ExitStatus, Launcher, MountedContainer, Pid, Process,
+    Container, Event, ExitStatus, Launcher, MountedContainer, Pid, Process,
 };
 use crate::runtime::EventTx;
 use async_trait::async_trait;
 use bytes::{Buf, BytesMut};
-use futures::{future::OptionFuture, Future, TryFutureExt};
+use futures::{Future, TryFutureExt};
 use itertools::Itertools;
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
@@ -247,9 +247,6 @@ impl Launcher for Minijail {
             .map_err(into_io_error)?;
         let pid = pid as u32;
 
-        // Attach debug tools if configured in the runtime configuration.
-        let debug = Debug::from(&self.config, &manifest, pid).await?;
-
         // Spawn a task thats waits for the child to exit
         let exit_status = {
             let container = container.container.clone();
@@ -263,7 +260,6 @@ impl Launcher for Minijail {
             _jail: jail,
             _io: io,
             exit_status,
-            debug,
             sync: Some(sync),
         })
     }
@@ -530,8 +526,6 @@ pub(crate) struct MinijailProcess {
     _jail: MinijailHandle,
     /// Captured stdout output
     _io: (Option<Io>, Option<Io>),
-    /// Debugging facilities
-    debug: Debug,
     /// Sync childs execve
     sync: Option<ProcessSync>,
 }
@@ -544,6 +538,10 @@ impl fmt::Debug for MinijailProcess {
 
 #[async_trait]
 impl Process for MinijailProcess {
+    fn pid(&self) -> Pid {
+        self.pid
+    }
+
     /// Resume the process
     async fn start(&mut self) -> Result<(), Error> {
         debug!("Starting \"{}\"", self.argv);
@@ -568,7 +566,7 @@ impl Process for MinijailProcess {
                         );
                         // Send SIGKILL if the process did not terminate before timeout
                         signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGKILL))
-                            .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
+                            .map_err(|e| Error::os("Failed to kill process", e))?;
 
                         (&mut self.exit_status).await
                     }
@@ -589,55 +587,8 @@ impl Process for MinijailProcess {
         Ok(exit_status)
     }
 
-    fn pid(&self) -> Pid {
-        self.pid
-    }
-}
-
-/// Debugging facilities attached to a started container
-#[derive(Debug)]
-struct Debug {
-    strace: Option<process_debug::Strace>,
-    perf: Option<process_debug::Perf>,
-}
-
-impl Debug {
-    /// Start configured debug facilities and attach to `pid`
-    async fn from(config: &Config, manifest: &Manifest, pid: Pid) -> Result<Debug, Error> {
-        // Attach a strace instance if configured in the runtime configuration
-        let strace: OptionFuture<_> = config
-            .debug
-            .as_ref()
-            .and_then(|debug| debug.strace.as_ref())
-            .map(|strace| process_debug::Strace::new(strace, manifest, &config.log_dir, pid))
-            .into();
-
-        // Attach a perf instance if configured in the runtime configuration
-        let perf: OptionFuture<_> = config
-            .debug
-            .as_ref()
-            .and_then(|debug| debug.perf.as_ref())
-            .map(|perf| process_debug::Perf::new(perf, manifest, &config.log_dir, pid))
-            .into();
-
-        let (strace, perf) = tokio::join!(strace, perf);
-        Ok(Debug {
-            strace: strace.transpose()?,
-            perf: perf.transpose()?,
-        })
-    }
-
-    /// Shutdown configured debug facilities and attached to `pid`
-    async fn destroy(self) -> Result<(), super::error::Error> {
-        if let Some(strace) = self.strace {
-            strace.destroy().await?;
-        }
-
-        if let Some(perf) = self.perf {
-            perf.destroy().await?;
-        }
-
-        Ok(())
+    async fn destroy(mut self) -> Result<(), Error> {
+        self.debug.destroy().await
     }
 }
 

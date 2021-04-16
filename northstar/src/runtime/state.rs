@@ -71,6 +71,7 @@ pub(super) struct MountedContainer<P> {
 pub(super) struct ProcessContext<P> {
     process: P,
     started: time::Instant,
+    debug: super::debug::Debug,
     cgroups: Option<super::cgroups::CGroups>,
 }
 
@@ -82,6 +83,8 @@ impl<P: Process> ProcessContext<P> {
             .await
             .expect("Failed to terminate process");
 
+        self.debug.destroy().await?;
+
         if let Some(cgroups) = self.cgroups.take() {
             cgroups.destroy().await.expect("Failed to destroy cgroups")
         }
@@ -90,6 +93,11 @@ impl<P: Process> ProcessContext<P> {
     }
 
     async fn destroy(mut self) {
+        self.debug
+            .destroy()
+            .await
+            .expect("Failed to destroy debug utilities");
+
         if let Some(cgroups) = self.cgroups.take() {
             cgroups.destroy().await.expect("Failed to destroy cgroups")
         }
@@ -351,11 +359,11 @@ impl<'a, L: Launcher> State<'a, L> {
         }
 
         // This must exist
-        let mouted_container = self.containers.get(container).expect("Internal error");
+        let mounted_container = self.containers.get(container).expect("Internal error");
 
         // Spawn process
         info!("Creating {}", container);
-        let mut process = match self.launcher.create(&mouted_container).await {
+        let mut process = match self.launcher.create(&mounted_container).await {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -365,8 +373,13 @@ impl<'a, L: Launcher> State<'a, L> {
             }
         };
 
+        // Debug
+        let debug =
+            super::debug::Debug::new(&self.config, &mounted_container.manifest, process.pid())
+                .await?;
+
         // CGroups
-        let cgroups = if let Some(ref c) = mouted_container.manifest.cgroups {
+        let cgroups = if let Some(ref c) = mounted_container.manifest.cgroups {
             debug!("Configuring CGroups of {}", container);
             let cgroups =
                 // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
@@ -399,6 +412,7 @@ impl<'a, L: Launcher> State<'a, L> {
         mounted_container.process = Some(ProcessContext {
             process,
             started: time::Instant::now(),
+            debug,
             cgroups,
         });
 

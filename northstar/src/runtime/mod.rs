@@ -43,15 +43,18 @@ use tokio_util::sync::CancellationToken;
 mod cgroups;
 pub mod config;
 mod console;
+mod debug;
 #[allow(unused)]
 mod device_mapper;
 mod error;
+#[cfg(feature = "rt-island")]
+mod island;
 mod key;
 mod loopdev;
+#[cfg(feature = "rt-minijail")]
 mod minijail;
 mod mount;
 mod pipe;
-mod process_debug;
 mod repository;
 mod state;
 
@@ -63,11 +66,18 @@ use state::MountedContainer;
 type ExitCode = i32;
 type Pid = u32;
 
+#[cfg(feature = "rt-island")]
+type RuntimeLauncher = island::Island;
+
+#[cfg(feature = "rt-minijail")]
+type RuntimeLauncher = minijail::Minijail;
+
 #[async_trait]
 trait Process {
     fn pid(&self) -> Pid;
     async fn start(&mut self) -> Result<(), Error>;
     async fn stop(mut self, timeout: time::Duration) -> Result<ExitStatus, Error>;
+    async fn destroy(mut self) -> Result<(), Error>;
 }
 
 #[async_trait]
@@ -191,7 +201,7 @@ impl Runtime {
         {
             let stop = stop.clone();
             task::spawn(async move {
-                match runtime_task(&config, stop).await {
+                match runtime_task::<RuntimeLauncher>(&config, stop).await {
                     Err(e) => {
                         log::error!("Runtime error: {}", e);
                         stopped_tx.send(Err(e)).ok();
@@ -249,11 +259,14 @@ impl Future for Runtime {
     }
 }
 
-async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(), Error> {
+async fn runtime_task<L: Launcher>(
+    config: &'_ Config,
+    stop: CancellationToken,
+) -> Result<(), Error> {
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
 
-    let mut state = State::<minijail::Minijail>::new(config, event_tx.clone()).await?;
+    let mut state = State::<L>::new(config, event_tx.clone()).await?;
 
     // Inititalize the console if configured
     let console = if let Some(url) = config.console.as_ref() {

@@ -12,7 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config::debug, error::Error, Pid};
+use super::{
+    config::{debug, Config},
+    error::Error,
+    Pid,
+};
+use futures::future::OptionFuture;
 use log::{debug, error, info};
 use npk::manifest::Manifest;
 use std::{
@@ -31,6 +36,57 @@ use tokio_util::sync::CancellationToken;
 pub struct Strace {
     child: Child,
     token: CancellationToken,
+}
+
+/// Debugging facilities attached to a started container
+#[derive(Debug)]
+pub(crate) struct Debug {
+    strace: Option<Strace>,
+    perf: Option<Perf>,
+}
+
+impl Debug {
+    /// Start configured debug facilities and attach to `pid`
+    pub(crate) async fn new(
+        config: &Config,
+        manifest: &Manifest,
+        pid: Pid,
+    ) -> Result<Debug, Error> {
+        // Attach a strace instance if configured in the runtime configuration
+        let strace: OptionFuture<_> = config
+            .debug
+            .as_ref()
+            .and_then(|debug| debug.strace.as_ref())
+            .map(|strace| Strace::new(strace, manifest, &config.log_dir, pid))
+            .into();
+
+        // Attach a perf instance if configured in the runtime configuration
+        let perf: OptionFuture<_> = config
+            .debug
+            .as_ref()
+            .and_then(|debug| debug.perf.as_ref())
+            .map(|perf| Perf::new(perf, manifest, &config.log_dir, pid))
+            .into();
+
+        let (strace, perf) = tokio::join!(strace, perf);
+        Ok(Debug {
+            strace: strace.transpose()?,
+            perf: perf.transpose()?,
+        })
+    }
+
+    /// Shutdown configured debug facilities and attached to `pid`
+    pub(crate) async fn destroy(mut self) -> Result<(), super::error::Error> {
+        if let Some(strace) = self.strace.take() {
+            strace.destroy().await?;
+        }
+
+        if let Some(perf) = self.perf.take() {
+            perf.destroy().await?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Strace {
@@ -131,9 +187,9 @@ impl Strace {
         self.token.cancel();
 
         // Stop strace - if not already existed - irgnore any error
+        let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
-        // Join strace
-        debug!("Joining strace");
+        debug!("Joining strace pid {}", pid);
         self.child
             .wait()
             .await
@@ -192,8 +248,9 @@ impl Perf {
     }
 
     pub async fn destroy(mut self) -> Result<(), Error> {
+        let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
-        debug!("Joining perf");
+        debug!("Joining perf pid {}", pid);
         self.child
             .wait()
             .await

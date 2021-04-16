@@ -41,4 +41,4 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --target=${{ matrix.target }} -p ${{ matrix.package }} --all-features
+          args: --target=${{ matrix.target }} -p ${{ matrix.package }}

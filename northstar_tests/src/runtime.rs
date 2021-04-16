@@ -82,7 +82,6 @@ impl Northstar {
         let console_url = url::Url::parse(&console)?;
 
         let config = Config {
-            log_level: log::Level::Debug,
             console: Some(console_url.clone()),
             run_dir,
             data_dir,

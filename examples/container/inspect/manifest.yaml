@@ -1,0 +1,15 @@
+name: inspect 
+version: 0.0.1
+init: /inspect
+uid: 1000
+gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+    /lib:
+      host: /lib
+    /lib64:
+      host: /lib64
+    /system:
+      host: /system
