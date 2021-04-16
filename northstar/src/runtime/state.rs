@@ -47,8 +47,8 @@ where
     events_tx: EventTx,
     repositories: HashMap<RepositoryId, Repository>,
     containers: HashMap<Container, MountedContainer<L::Process>>,
-    /// Internal test repository tempdir
-    #[cfg(feature = "hello")]
+    /// hello-world demo repository tempdir
+    #[cfg(feature = "hello-world")]
     internal_repository: tempfile::TempDir,
 }
 
