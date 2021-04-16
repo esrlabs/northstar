@@ -21,11 +21,11 @@ fn main() {
         | ConstantsFlags::SEMVER_FROM_CARGO_PKG;
     generate_cargo_keys(flags).expect("Unable to generate the cargo keys!");
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "hello-world")]
 pub fn package_hello_example() -> anyhow::Result<()> {
     use anyhow::Context;
     use npk::npk;
