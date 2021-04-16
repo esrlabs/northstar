@@ -12,21 +12,16 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use vergen::{generate_cargo_keys, ConstantsFlags};
+#[cfg(feature = "hello-world")]
+use anyhow::Result;
 
 fn main() {
-    let flags = ConstantsFlags::BUILD_TIMESTAMP
-        | ConstantsFlags::TARGET_TRIPLE
-        | ConstantsFlags::SHA_SHORT
-        | ConstantsFlags::SEMVER_FROM_CARGO_PKG;
-    generate_cargo_keys(flags).expect("Unable to generate the cargo keys!");
-
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
 #[cfg(feature = "hello-world")]
-pub fn package_hello_example() -> anyhow::Result<()> {
+pub fn package_hello_example() -> Result<()> {
     use anyhow::Context;
     use npk::npk;
     use std::{env, fs, path::Path};
