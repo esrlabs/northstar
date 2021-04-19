@@ -9,22 +9,16 @@ jobs:
     env:
         TERM: xterm-256color
     steps:
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-integration-tests
       - name: Install libcap
         run: sudo apt install libcap-dev
-      - name: Checkout
-        uses: actions/checkout@v2
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
             toolchain: stable
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
       - name: Tests
         run: cargo test -- --color always
         env:
