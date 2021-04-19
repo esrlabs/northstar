@@ -22,22 +22,16 @@ jobs:
           - northstar
           - test_container
     steps:
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ matrix.target }}
-      - name: Checkout
-        uses: actions/checkout@v2
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: ${{ matrix.target }}
           override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
       - name: Build
         uses: actions-rs/cargo@v1
         with:

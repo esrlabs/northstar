@@ -7,21 +7,16 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: nightly
           override: true
           components: rustfmt
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
       - name: Cargo fmt --check
         uses: actions-rs/cargo@v1
         with:
@@ -32,24 +27,18 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-check
       - name: Install libcap
         run: sudo apt install libcap-dev
-      - name: Checkout
-        uses: actions/checkout@v2
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
           override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
       - name: Cargo check
         uses: actions-rs/cargo@v1
         with:
@@ -59,24 +48,18 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-clippy
       - name: Install libcap
         run: sudo apt install libcap-dev
-      - name: Checkout
-        uses: actions/checkout@v2
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
             toolchain: stable
             components: clippy
             override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
       - name: Clippy
         uses: actions-rs/clippy-check@v1
         with:
