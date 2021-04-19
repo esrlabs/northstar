@@ -36,7 +36,8 @@ init: /hello
 uid: 0
 gid: 1
 env:
-  HELLO: north";
+  HELLO: north
+";
 
     async fn create_test_npk(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
         let src = create_tmp_dir().await;
