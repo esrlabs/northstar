@@ -22,7 +22,7 @@ use futures::{
     future::join_all,
     sink::SinkExt,
     stream::{self, FuturesUnordered},
-    StreamExt,
+    Future, StreamExt, TryFutureExt,
 };
 use log::{debug, error, info, trace, warn};
 use std::{path::PathBuf, unreachable};
@@ -69,6 +69,8 @@ pub enum Error {
     Protocol(String),
     #[error("IO error: {0} ({1})")]
     Io(String, #[source] io::Error),
+    #[error("Event loop closed, request cannot be processed")]
+    EventLoopClosed,
 }
 
 impl Console {
@@ -93,130 +95,18 @@ impl Console {
         // Stop token for self *and* the connections
         let stop = self.stop.clone();
 
-        match self.url.scheme() {
-            "tcp" => {
-                let addresses = self
-                    .url
-                    .socket_addrs(|| Some(4200))
-                    .map_err(|e| Error::Io("Invalid console address".into(), e))?;
-                let address = addresses
-                    .first()
-                    .ok_or_else(|| {
-                        Error::Io(
-                            "Invalid console url".into(),
-                            io::Error::new(io::ErrorKind::Other, ""),
-                        )
-                    })?
-                    .to_owned();
-
-                debug!("Starting console on {}", &address);
-
-                let listener = TcpListener::bind(&address).await.map_err(|e| {
-                    Error::Io(format!("Failed to open tcp listener on {}", &address), e)
-                })?;
-
-                debug!("Started console on {}", &address);
-
-                let task = task::spawn(async move {
-                    // Connection tasks
-                    let mut connections = FuturesUnordered::new();
-                    loop {
-                        select! {
-                            stream = listener.accept() => {
-                                match stream {
-                                    Ok(stream) => {
-                                        connections.push(task::spawn(Self::connection(
-                                            stream.0,
-                                            stream.1.to_string(),
-                                            stop.clone(),
-                                            event_tx.clone(),
-                                            notification_tx.subscribe(),
-                                        )));
-                                    }
-                                    Err(e) => {
-                                        warn!("Error listening: {}", e);
-                                        break;
-                                    }
-                                }
-                            }
-                            _ = connections.next(), if !connections.is_empty() => {},
-                            _ = stop.cancelled() => {
-                                drop(listener);
-                                debug!("Closed listener on {}", address);
-                                if ! connections.is_empty() {
-                                    debug!("Waiting for connections to be closed");
-                                    while connections.next().await.is_some() {}
-                                }
-                                break;
-                            }
-                        }
-                    }
-                });
-                self.tasks.push(task);
-            }
-            "unix" => {
-                let address = PathBuf::from(self.url.path());
-
-                debug!("Starting console on {}", address.display());
-
-                if address.exists() {
-                    fs::remove_file(&address)
-                        .await
-                        .map_err(|e| Error::Io("Failed to remove unix socket".into(), e))?;
-                }
-
-                let listener = UnixListener::bind(&address).map_err(|e| {
-                    Error::Io(
-                        format!("Failed to open unix listener on {}", address.display()),
-                        e,
-                    )
-                })?;
-
-                debug!("Started console on {}", address.display());
-
-                let task = task::spawn(async move {
-                    // Connection tasks
-                    let mut connections = FuturesUnordered::new();
-                    loop {
-                        select! {
-                            stream = listener.accept() => {
-                                match stream {
-                                    Ok(stream) => {
-                                        connections.push(task::spawn(Self::connection(
-                                            stream.0,
-                                            format!("{:?}", &stream.1),
-                                            stop.clone(),
-                                            event_tx.clone(),
-                                            notification_tx.subscribe(),
-                                        )));
-                                    }
-                                    Err(e) => {
-                                        warn!("Error listening: {}", e);
-                                        break;
-                                    }
-                                }
-                            }
-                            _ = connections.next(), if !connections.is_empty() => {},
-                            _ = stop.cancelled() => {
-                                drop(listener);
-                                debug!("Closed listener on {}", address.display());
-                                if address.exists() {
-                                    fs::remove_file(&address)
-                                        .await.expect("Failed to remove unix socket");
-                                }
-                                if ! connections.is_empty() {
-                                    debug!("Waiting for connections to be closed");
-                                    while connections.next().await.is_some() {}
-                                }
-                                break;
-                            }
-                        }
-                    }
-                });
-                self.tasks.push(task);
-            }
-            _ => unreachable!(),
-        }
+        let task = match Listener::new(&self.url)
+            .await
+            .map_err(|e| Error::Io("Failed to remove unix socket".into(), e))?
+        {
+            Listener::Tcp(listener) => task::spawn(async move {
+                handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
+            }),
+            Listener::Unix(listener) => task::spawn(async move {
+                handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
+            }),
+        };
+        self.tasks.push(task);
 
         Ok(())
     }
@@ -235,7 +125,7 @@ impl Console {
 
     async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
         stream: T,
-        peer: String,
+        peer: ClientId,
         stop: CancellationToken,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<Notification>,
@@ -347,100 +237,20 @@ impl Console {
                     } else {
                         break;
                     };
-                    let message_id = message.id.clone();
 
                     trace!("{}: --> {:?}", peer, message);
-
-                    let mut keep_file = None;
-
-                    let request =
-                        if let api::model::Payload::Request(
-                            api::model::Request::Install(repository, size)) =
-                            message.payload
-                        {
-                            debug!(
-                                "{}: Received installation request with size {}",
-                                peer,
-                                bytesize::ByteSize::b(size)
-                            );
-                            info!("{}: Using repository \"{}\"", peer, repository);
-                            // Get a tmpfile name
-                            let tmpfile = match tempfile::NamedTempFile::new() {
-                                Ok(f) => f,
-                                Err(e) => {
-                                    warn!("Failed to create tempfile: {}", e);
-                                    break;
-                                }
-                            };
-
-                            // Create a tmpfile
-                            let mut file = match fs::File::create(&tmpfile.path()).await {
-                                Ok(f) => f,
-                                Err(e) => {
-                                    warn!("Failed to open tempfile: {}", e);
-                                    break;
-                                }
-                            };
-
-                            // Receive size bytes and dump to the tempfile
-                            let start = time::Instant::now();
-                            match io::copy(
-                                &mut io::AsyncReadExt::take(&mut network_stream, size),
-                                &mut file,
-                            )
-                            .await
-                            {
-                                Ok(n) => {
-                                    debug!(
-                                        "{}: Received {} in {:?}",
-                                        peer,
-                                        bytesize::ByteSize::b(n),
-                                        start.elapsed()
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!("{}: Connection error: {}", peer, e);
-                                    break;
-                                }
-                            }
-
-                            let tmpfile_path = tmpfile.path().to_owned();
-                            keep_file = Some(tmpfile);
-                            Request::Install(repository, tmpfile_path)
-                        } else {
-                            Request::Message(message)
-                        };
-
-                    // Create a oneshot channel for the runtimes reply
-                    let (reply_tx, reply_rx) = oneshot::channel();
-
-                    // Send the request to the runtime
-                    event_tx
-                        .send(Event::Console(request, reply_tx))
-                        .await
-                        .expect("Internal channel error on main");
-
-                    // Wait for the reply from the runtime
-                    select! {
-                        // If the runtime shuts down the connection shall be closed and not wait for
-                        // a reply
-                        _ = stop.cancelled() => break,
-                        Ok(response) = reply_rx => {
-                            keep_file.take();
-
-                            // Report result to client
-                            let message = api::model::Message {
-                                id: message_id,
-                                payload: api::model::Payload::Response(response),
-                            };
-
-                            trace!("{}: <-- {:?}", peer, message);
-                            if let Err(e) = network_stream.send(message).await {
-                                warn!("{}: Connection error: {}", peer, e);
-                                break;
-                            }
+                    let response = match process_request(&peer, &mut network_stream, &event_tx, message).await {
+                        Ok(response) => response,
+                        Err(e) => {
+                            warn!("Failed to process request: {}", e);
+                            break;
                         }
-                        else => break,
+                    };
+                    trace!("{}: <-- {:?}", peer, response);
+
+                    if let Err(e) = network_stream.send(response).await {
+                        warn!("{}: Connection error: {}", peer, e);
+                        break;
                     }
                 }
             }
@@ -449,6 +259,202 @@ impl Console {
         info!("{}: Connection closed", peer);
 
         Ok(())
+    }
+}
+
+/// Process a request
+///
+/// # Errors
+///
+/// Installing requests will cause this function to create a temporary file where to copy the
+/// incoming npk file. It can potentially produce an `Error::Io`.
+///
+/// If the event loop is closed due to shutdown, this function will return `Error::EventLoopClosed`.
+///
+async fn process_request<S>(
+    client_id: &ClientId,
+    stream: &mut S,
+    event_loop: &EventTx,
+    message: api::model::Message,
+) -> Result<api::model::Message, Error>
+where
+    S: AsyncRead + Unpin,
+{
+    let message_id = message.id.clone();
+    let response =
+        if let api::model::Payload::Request(api::model::Request::Install(repository, size)) =
+            message.payload
+        {
+            debug!(
+                "{}: Received installation request with size {}",
+                client_id,
+                bytesize::ByteSize::b(size)
+            );
+            info!("{}: Using repository \"{}\"", client_id, repository);
+            let tmpfile = copy_to_tempfile(stream, size)
+                .await
+                .map_err(|e| Error::Io("Failed to receive bytes".to_string(), e))?;
+            let path = tmpfile.path().to_owned();
+
+            send_event(&event_loop, Request::Install(repository, path)).await?
+        } else {
+            send_event(&event_loop, Request::Message(message)).await?
+        };
+
+    Ok(api::model::Message {
+        id: message_id,
+        payload: api::model::Payload::Response(response),
+    })
+}
+
+/// Copies size bytes to a named tempfile
+async fn copy_to_tempfile<Stream>(
+    stream: Stream,
+    size: u64,
+) -> std::io::Result<tempfile::NamedTempFile>
+where
+    Stream: AsyncRead + Unpin,
+{
+    let tmpfile = tempfile::NamedTempFile::new()?;
+    let mut file = fs::File::create(&tmpfile.path()).await?;
+
+    // Receive size bytes into tmpfile
+    let start = time::Instant::now();
+    let bytes = io::copy(&mut io::AsyncReadExt::take(stream, size), &mut file).await?;
+    debug!(
+        "Received {} in {:?}",
+        bytesize::ByteSize::b(bytes),
+        start.elapsed()
+    );
+
+    Ok(tmpfile)
+}
+
+/// Sends an `Event::Console` to the event loop and await its response
+async fn send_event(event_loop: &EventTx, request: Request) -> Result<api::model::Response, Error> {
+    trace!("{:?} -> event loop", request);
+    let (reply_tx, reply_rx) = oneshot::channel();
+    let response = event_loop
+        .send(Event::Console(request, reply_tx))
+        .map_err(|_| Error::EventLoopClosed)
+        .and_then(|_| reply_rx.map_err(|_| Error::EventLoopClosed))
+        .await;
+    trace!("{:?} <- event loop", response);
+    response
+}
+
+/// Types of listeners for console connections
+enum Listener {
+    Tcp(TcpListener),
+    Unix(UnixListener),
+}
+
+impl Listener {
+    async fn new(url: &Url) -> std::io::Result<Listener> {
+        let listener = match url.scheme() {
+            "tcp" => {
+                let address = url.socket_addrs(|| Some(4200))?.first().unwrap().to_owned();
+                debug!("Starting console on {}", &address);
+                let listener = TcpListener::bind(&address).await?;
+                debug!("Started console on {}", &address);
+
+                Listener::Tcp(listener)
+            }
+            "unix" => {
+                let path = PathBuf::from(url.path());
+                debug!("Starting console on {}", path.display());
+
+                // TODO this file should not be deleted here
+                if path.exists() {
+                    fs::remove_file(&path).await?
+                }
+
+                let listener = UnixListener::bind(&path)?;
+
+                debug!("Started console on {}", path.display());
+                Listener::Unix(listener)
+            }
+            _ => unreachable!(),
+        };
+        Ok(listener)
+    }
+}
+
+/// Function to handle connections
+///
+/// Generic handling of connections. The first parameter is a function that when called awaits for
+/// a new connection. The connections are represented as a pair of a stream and some client
+/// identifier.
+///
+/// All the connections container stored the tasks corresponding to each active connection. As
+/// these tasks terminate, they are removed from the connections container. Once a stop is issued,
+/// the termination of the remaining connections will be awaited.
+///
+async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
+    accept: AcceptConnection,
+    event_tx: EventTx,
+    notification_tx: broadcast::Sender<Notification>,
+    stop: CancellationToken,
+) where
+    AcceptConnection: Fn() -> Connection,
+    Connection: Future<Output = Result<(Stream, Client), E>>,
+    Stream: AsyncWrite + AsyncRead + Unpin + Send + 'static,
+    Client: Into<ClientId>,
+    E: std::fmt::Debug,
+{
+    let mut connections = FuturesUnordered::new();
+    loop {
+        select! {
+            _ = connections.next() => {/* removes closed connections */},
+            // If event_tx is closed then the runtime is shutting down therefore no new connections
+            // are accepted
+            connection = accept(), if !event_tx.is_closed() && !stop.is_cancelled() => {
+                match connection {
+                    Ok((stream, client)) => {
+                        connections.push(
+                        task::spawn(Console::connection(
+                            stream,
+                            client.into(),
+                            stop.clone(),
+                            event_tx.clone(),
+                            notification_tx.subscribe(),
+                        )));
+                    }
+                    Err(e) => {
+                        warn!("Error listening: {:?}", e);
+                        break;
+                    }
+                }
+            }
+            _ = stop.cancelled() => {
+                if !connections.is_empty() {
+                    debug!("Waiting for open connections");
+                    while connections.next().await.is_some() {};
+                }
+                break;
+            }
+        }
+    }
+    debug!("Closed listener");
+}
+
+struct ClientId(String);
+
+impl From<std::net::SocketAddr> for ClientId {
+    fn from(socket: std::net::SocketAddr) -> Self {
+        ClientId(socket.to_string())
+    }
+}
+
+impl From<tokio::net::unix::SocketAddr> for ClientId {
+    fn from(socket: tokio::net::unix::SocketAddr) -> Self {
+        ClientId(format!("{:?}", socket))
+    }
+}
+
+impl std::fmt::Display for ClientId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

@@ -77,7 +77,7 @@ trait Launcher {
     async fn start(event_tx: EventTx, config: Config) -> Result<Self, Error>
     where
         Self: Sized;
-    async fn shutdown(self) -> Result<(), Error>
+    async fn shutdown(&mut self) -> Result<(), Error>
     where
         Self: Sized;
 
@@ -112,7 +112,6 @@ pub(crate) enum Notification {
     Stopped(Container),
 }
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum Event {
     /// Incomming command
@@ -287,7 +286,16 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             // A container process existed. Check `process::wait_exit` for details.
             Event::Exit(container, exit_status) => state.on_exit(&container, &exit_status).await,
             // The runtime os commanded to shut down and exit.
-            Event::Shutdown => break state.shutdown().await,
+            Event::Shutdown => {
+                log::debug!("Shutting down Northstar runtime");
+                log::debug!("Dropping queued events");
+                drop(event_rx);
+                if let Some(console) = console {
+                    log::debug!("Shutting down console");
+                    console.shutdown().await.map_err(Error::Console)?;
+                }
+                break state.shutdown().await;
+            }
             // Forward notifications to console
             Event::Notification(notification) => {
                 if let Some(console) = console.as_ref() {
@@ -302,10 +310,6 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
 
     task::block_in_place(|| nix::mount::umount(&config.run_dir))
         .map_err(|e| Error::Mount(mount::Error::Os(e)))?;
-
-    if let Some(console) = console {
-        console.shutdown().await.map_err(Error::Console)?;
-    }
 
     Ok(())
 }

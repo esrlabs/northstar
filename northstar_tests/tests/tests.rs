@@ -24,6 +24,7 @@ use northstar_tests::{
     test,
     test_container::{test_container, TEST_CONTAINER, TEST_RESOURCE},
 };
+use npk::manifest::Version;
 use std::{convert::TryInto, path::PathBuf};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -345,6 +346,53 @@ test!(connect_version, {
     assert_eq!(connack, expected_message);
 
     runtime.shutdown().await
+});
+
+test!(connections_during_shutdown_are_ignored, {
+    let runtime = Northstar::launch().await?;
+    let console = runtime.config().console.as_ref().unwrap();
+
+    runtime.install_test_container().await?;
+    runtime.install_test_resource().await?;
+
+    let console_url = console.clone();
+    let start_container = tokio::task::spawn(async move {
+        let name = "test_container";
+        let version: Version = Version::parse("0.0.1").unwrap();
+        loop {
+            match api::client::Client::new(&console_url, None, time::Duration::from_secs(30)).await
+            {
+                Ok(client) => client.start(&name, &version).await.ok(),
+                Err(_) => break,
+            };
+        }
+    });
+
+    let console_url = console.clone();
+    let stop_container = tokio::task::spawn(async move {
+        let name = "test_container";
+        let version: Version = Version::parse("0.0.1").unwrap();
+        loop {
+            match api::client::Client::new(&console_url, None, time::Duration::from_secs(30)).await
+            {
+                Ok(client) => client
+                    .stop(&name, &version, std::time::Duration::from_secs(1))
+                    .await
+                    .ok(),
+                Err(_) => break,
+            };
+        }
+    });
+
+    // Wait to make sure that the client tasks started before calling shutdown
+    logger::assume("Started test_container", 30).await?;
+
+    let result = runtime.shutdown().await;
+
+    let (fst, snd) = tokio::join!(start_container, stop_container);
+    assert!(fst.is_ok() && snd.is_ok());
+
+    result
 });
 
 // test!(cgroups_memory, {
