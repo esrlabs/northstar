@@ -4,7 +4,7 @@ init: /capabilities
 uid: 1000
 gid: 1000
 capabilities:
-  - cap_net_raw
+  - CAP_NET_RAW
 suppl_groups:
   - inet
 mounts:

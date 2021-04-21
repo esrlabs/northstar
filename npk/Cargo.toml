@@ -1,12 +1,13 @@
 [package]
 name = "npk"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
 base64 = "0.13.0"
 byteorder = "1.4"
+caps = "0.5.1"
 ed25519-dalek = "1.0"
 fs_extra = "1.2"
 hex = "0.4.3"

@@ -31,6 +31,7 @@ use thiserror::Error;
 pub struct Version(pub semver::Version);
 
 pub type Name = String;
+pub type Capability = caps::Capability;
 pub type CGroup = HashMap<String, String>;
 pub type CGroups = HashMap<String, CGroup>;
 
@@ -214,8 +215,8 @@ pub struct Manifest {
     pub mounts: HashMap<PathBuf, Mount>,
     /// String containing capability names to give to
     /// new container
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capabilities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none", default, with = "serde_caps")]
+    pub capabilities: Option<HashSet<Capability>>,
     /// String containing group names to give to new container
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suppl_groups: Option<Vec<String>>,
@@ -443,6 +444,53 @@ impl MountsSerialization {
     }
 }
 
+mod serde_caps {
+    use super::Capability;
+    use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serializer};
+    use std::{collections::HashSet, str::FromStr};
+
+    pub(super) fn serialize<S>(
+        caps: &Option<HashSet<Capability>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(caps) = caps {
+            let mut seq = serializer.serialize_seq(Some(caps.len()))?;
+            for cap in caps {
+                seq.serialize_element(&cap.to_string())?;
+            }
+            seq.end()
+        } else {
+            serializer.serialize_none()
+        }
+    }
+
+    pub(super) fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<HashSet<Capability>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: Option<HashSet<String>> = Option::deserialize(deserializer)?;
+        if let Some(s) = s {
+            if s.is_empty() {
+                Ok(None)
+            } else {
+                let mut result = HashSet::with_capacity(s.len());
+                for cap in s {
+                    let cap = Capability::from_str(&cap).map_err(serde::de::Error::custom)?;
+                    result.insert(cap);
+                }
+                Ok(Some(result))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Invalid manifest: {0}")]
@@ -476,6 +524,11 @@ impl Manifest {
                 "Arguments not allowed in resource container".to_string(),
             ));
         }
+
+        // Check for invalid uid 0
+        if self.uid == 0 {
+            return Err(Error::Invalid("Invalid uid 0".to_string()));
+        }
         Ok(())
     }
 }
@@ -504,6 +557,7 @@ impl ToString for Manifest {
 mod tests {
     use crate::manifest::*;
     use anyhow::{anyhow, Result};
+    use std::iter::FromIterator;
 
     #[test]
     fn parse() -> Result<()> {
@@ -522,9 +576,9 @@ suppl_groups:
   - inet
   - log
 capabilities:
-  - cap_net_raw
-  - cap_mknod
-  - cap_sys_time
+  - CAP_NET_RAW
+  - CAP_MKNOD
+  - CAP_SYS_TIME
 mounts:
   /tmp:
     tmpfs: 42
@@ -602,10 +656,13 @@ seccomp:
 
         assert_eq!(
             manifest.capabilities,
-            Some(vec!(
-                "cap_net_raw".to_string(),
-                "cap_mknod".to_string(),
-                "cap_sys_time".to_string()
+            Some(HashSet::from_iter(
+                vec!(
+                    caps::Capability::CAP_NET_RAW,
+                    caps::Capability::CAP_MKNOD,
+                    caps::Capability::CAP_SYS_TIME,
+                )
+                .drain(..)
             ))
         );
         assert_eq!(
@@ -751,6 +808,8 @@ cgroups:
 seccomp:
   fork: 1
   waitpid: 1
+capabilities:
+  - CAP_NET_ADMIN
 io:
   stdin: pipe
   stdout: 

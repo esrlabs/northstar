@@ -21,11 +21,15 @@ use super::{
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
+use libc::{PR_SET_KEEPCAPS, PR_SET_NO_NEW_PRIVS};
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
-    libc,
+    errno::Errno,
+    libc::{self, c_ulong},
     mount::{self, MsFlags},
-    sched, sys, unistd,
+    sched,
+    sys::{self, signal},
+    unistd,
 };
 use npk::manifest::{Mount, MountFlag};
 use serde::{Deserialize, Serialize};
@@ -185,7 +189,7 @@ impl Island {
         stderr: Option<Log>,
         mut intercom: Intercom,
     ) -> Result<IslandProcess, Error> {
-        let exit_status = Box::new(Self::parent_waitpid(container, pid, self.tx.clone()).await);
+        let exit_status = Box::new(parent_waitpid(container, pid, self.tx.clone()).await);
 
         // Signal the child that we're ready. The child will prepare it's start.
         intercom
@@ -255,9 +259,9 @@ impl Island {
         // Unshare
         cdebug!("Unsharing CLONE_NEWNS");
         sched::unshare(sched::CloneFlags::CLONE_NEWNS).context("Failed to unshare CLONE_NEWNS")?;
-        cdebug!("Unsharing CLONE_NEWPID");
-        sched::unshare(sched::CloneFlags::CLONE_NEWPID)
-            .context("Failed to unshare CLONE_NEWPID")?;
+        // cdebug!("Unsharing CLONE_NEWPID");
+        // sched::unshare(sched::CloneFlags::CLONE_NEWPID)
+        //     .context("Failed to unshare CLONE_NEWPID")?;
 
         // Mount
         self.child_mount(&container).context("Failed to mount")?;
@@ -271,16 +275,19 @@ impl Island {
         env::set_current_dir("/").context("Failed to set cwd to /")?;
 
         // UID / GID
-        cdebug!("Using GID {}", manifest.gid);
-        unistd::setgid(unistd::Gid::from_raw(manifest.gid)).context("Failed to set gid")?;
-        cdebug!("Using UID {}", manifest.uid);
-        unistd::setuid(unistd::Uid::from_raw(manifest.uid)).context("Failed to set uid")?;
+        child_setid(manifest.uid, manifest.gid).context("Failed to setuid/gid")?;
+
+        cdebug!("Setting no new privs");
+        set_no_new_privs(true)?;
+
+        // Capabilities
+        child_cap_drop(manifest.capabilities.as_ref()).context("Failed to drop privs")?;
 
         // Set the parent process death signal of the calling process to arg2
         // (either a signal value in the range 1..maxsig, or 0 to clear).
-        unsafe { libc::prctl(1, PR_SET_PDEATHSIG) };
+        set_pdeath_signal(signal::SIGKILL)?;
 
-        Self::child_fds(fds)?;
+        child_fds(fds)?;
 
         // We cannot use log after here because the fd to logd is closed on Android
 
@@ -307,98 +314,6 @@ impl Island {
             .collect::<Vec<CString>>();
 
         (init, argv, env)
-    }
-
-    // Child context
-    // TODO: Do not close the namespace fds?
-    fn child_fds(map: HashMap<i32, i32>) -> anyhow::Result<()> {
-        let keep: HashSet<i32> = map.keys().cloned().collect();
-        for (k, v) in map.iter().filter(|(k, v)| k != v) {
-            // If the fd is mappped to a different fd create a copy
-            cdebug!("Using fd {} mapped as fd {}", v, k);
-            unistd::dup2(*v, *k).context("Failed to dup2")?;
-        }
-
-        // Close open fds which are not mapped
-        let fd = Path::new("/proc")
-            .join(unistd::getpid().to_string())
-            .join("fd");
-
-        let fds = std::fs::read_dir(&fd)
-            .expect("Failed to read list of fds")
-            .map(|e| e.unwrap().path())
-            .map(|e| e.file_name().unwrap().to_str().unwrap().parse().unwrap())
-            .filter(|fd| !keep.contains(fd))
-            .collect::<Vec<_>>();
-
-        cdebug!("Closing file descriptors");
-        for fd in fds.iter() {
-            unistd::close(*fd).ok();
-        }
-
-        Ok(())
-    }
-
-    /// Spawn a task that waits for the process to exit. This resolves to the exit status
-    /// of `pid`.
-    async fn parent_waitpid(
-        container: &Container<IslandProcess>,
-        pid: Pid,
-        tx: EventTx,
-    ) -> impl Future<Output = Result<ExitStatus, Error>> {
-        let container = container.container.clone();
-        task::spawn_blocking(move || {
-            let pid = unistd::Pid::from_raw(pid as i32);
-            let status = loop {
-                match sys::wait::waitpid(Some(pid), None) {
-                    // The process exited normally (as with exit() or returning from main) with the given exit code.
-                    // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
-                    Ok(sys::wait::WaitStatus::Exited(pid, code)) => {
-                        debug!("Process {} exit code is {}", pid, code);
-                        break ExitStatus::Exit(code);
-                    }
-
-                    // The process was killed by the given signal.
-                    // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
-                    Ok(sys::wait::WaitStatus::Signaled(pid, signal, _dump)) => {
-                        debug!("Process {} exit status is signal {}", pid, signal);
-                        break ExitStatus::Signaled(signal);
-                    }
-
-                    // The process is alive, but was stopped by the given signal.
-                    // This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
-                    Ok(sys::wait::WaitStatus::Stopped(_pid, _signal)) => continue,
-
-                    // The traced process was stopped by a PTRACE_EVENT_* event.
-                    // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
-                    #[cfg(any(target_os = "linux", target_os = "android"))]
-                    Ok(sys::wait::WaitStatus::PtraceEvent(_pid, _signal, _)) => continue,
-
-                    // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
-                    // See ptrace(2) for more information.
-                    #[cfg(any(target_os = "linux", target_os = "android"))]
-                    Ok(sys::wait::WaitStatus::PtraceSyscall(_pid)) => continue,
-
-                    // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
-                    // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
-                    Ok(sys::wait::WaitStatus::Continued(_pid)) => continue,
-
-                    // There are currently no state changes to report in any awaited child process.
-                    // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
-                    Ok(sys::wait::WaitStatus::StillAlive) => continue,
-                    // Retry the waitpid call if waitpid fails with EINTR
-                    Err(e) if e == nix::Error::Sys(nix::errno::Errno::EINTR) => continue,
-                    Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
-                }
-            };
-
-            // Send notification to main loop
-            tx.blocking_send(Event::Exit(container, status.clone()))
-                .expect("Internal channel error on main event handle");
-
-            status
-        })
-        .map_err(|e| Error::io("Task join error", io::Error::new(io::ErrorKind::Other, e)))
     }
 }
 
@@ -646,4 +561,168 @@ impl Log {
 
         Ok(Log { writer, token })
     }
+}
+
+// Child context
+fn child_reset_effective() -> anyhow::Result<()> {
+    cdebug!("Resetting effective capabilities");
+    caps::set(None, caps::CapSet::Effective, &caps::all())
+        .context("Failed to reset effective caps")?;
+    Ok(())
+}
+
+// Child context
+fn child_setid(uid: u32, gid: u32) -> anyhow::Result<()> {
+    set_keep_caps(true)?;
+
+    let gid = unistd::Gid::from_raw(gid);
+    unistd::setresgid(gid, gid, gid).context("Failed to set resgid")?;
+
+    let uid = unistd::Uid::from_raw(uid);
+    unistd::setresuid(uid, uid, uid).context("Failed to set resuid")?;
+
+    child_reset_effective()?;
+
+    // TODO: This flag is cleared on execve - maybe we can skip to reset it
+    set_keep_caps(false)?;
+
+    Ok(())
+}
+
+// Child context
+fn child_cap_drop(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> {
+    let mut bounded = caps::read(None, caps::CapSet::Bounding)?;
+    if let Some(caps) = cs {
+        bounded.retain(|c| !caps.contains(c));
+    }
+
+    cdebug!("Dropping capabilities");
+    for cap in bounded {
+        // caps::set cannot be called for for bounded
+        caps::drop(None, caps::CapSet::Bounding, cap)?;
+    }
+
+    if let Some(caps) = cs {
+        debug!("Settings capabilities to {:?}", caps);
+        caps::set(None, caps::CapSet::Effective, caps)?;
+        caps::set(None, caps::CapSet::Permitted, caps)?;
+        caps::set(None, caps::CapSet::Inheritable, caps)?;
+        caps::set(None, caps::CapSet::Ambient, caps)?;
+    }
+
+    Ok(())
+}
+
+// Child context
+// TODO: Do not close the namespace fds?
+fn child_fds(map: HashMap<i32, i32>) -> anyhow::Result<()> {
+    let keep: HashSet<i32> = map.keys().cloned().collect();
+    for (k, v) in map.iter().filter(|(k, v)| k != v) {
+        // If the fd is mappped to a different fd create a copy
+        cdebug!("Using fd {} mapped as fd {}", v, k);
+        unistd::dup2(*v, *k).context("Failed to dup2")?;
+    }
+
+    // Close open fds which are not mapped
+    let fd = Path::new("/proc")
+        .join(unistd::getpid().to_string())
+        .join("fd");
+
+    let fds = std::fs::read_dir(&fd)
+        .expect("Failed to read list of fds")
+        .map(|e| e.unwrap().path())
+        .map(|e| e.file_name().unwrap().to_str().unwrap().parse().unwrap())
+        .filter(|fd| !keep.contains(fd))
+        .collect::<Vec<_>>();
+
+    cdebug!("Closing file descriptors");
+    for fd in fds.iter() {
+        unistd::close(*fd).ok();
+    }
+
+    Ok(())
+}
+
+/// Spawn a task that waits for the process to exit. This resolves to the exit status
+/// of `pid`.
+async fn parent_waitpid(
+    container: &Container<IslandProcess>,
+    pid: Pid,
+    tx: EventTx,
+) -> impl Future<Output = Result<ExitStatus, Error>> {
+    let container = container.container.clone();
+    task::spawn_blocking(move || {
+        let pid = unistd::Pid::from_raw(pid as i32);
+        let status = loop {
+            match sys::wait::waitpid(Some(pid), None) {
+                // The process exited normally (as with exit() or returning from main) with the given exit code.
+                // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
+                Ok(sys::wait::WaitStatus::Exited(pid, code)) => {
+                    debug!("Process {} exit code is {}", pid, code);
+                    break ExitStatus::Exit(code);
+                }
+
+                // The process was killed by the given signal.
+                // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
+                Ok(sys::wait::WaitStatus::Signaled(pid, signal, _dump)) => {
+                    debug!("Process {} exit status is signal {}", pid, signal);
+                    break ExitStatus::Signaled(signal);
+                }
+
+                // The process is alive, but was stopped by the given signal.
+                // This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
+                Ok(sys::wait::WaitStatus::Stopped(_pid, _signal)) => continue,
+
+                // The traced process was stopped by a PTRACE_EVENT_* event.
+                // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                Ok(sys::wait::WaitStatus::PtraceEvent(_pid, _signal, _)) => continue,
+
+                // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
+                // See ptrace(2) for more information.
+                #[cfg(any(target_os = "linux", target_os = "android"))]
+                Ok(sys::wait::WaitStatus::PtraceSyscall(_pid)) => continue,
+
+                // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
+                // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
+                Ok(sys::wait::WaitStatus::Continued(_pid)) => continue,
+
+                // There are currently no state changes to report in any awaited child process.
+                // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
+                Ok(sys::wait::WaitStatus::StillAlive) => continue,
+                // Retry the waitpid call if waitpid fails with EINTR
+                Err(e) if e == nix::Error::Sys(nix::errno::Errno::EINTR) => continue,
+                Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
+            }
+        };
+
+        // Send notification to main loop
+        tx.blocking_send(Event::Exit(container, status.clone()))
+            .expect("Internal channel error on main event handle");
+
+        status
+    })
+    .map_err(|e| Error::io("Task join error", io::Error::new(io::ErrorKind::Other, e)))
+}
+
+fn set_pdeath_signal(signal: signal::Signal) -> anyhow::Result<()> {
+    let result = unsafe { nix::libc::prctl(PR_SET_PDEATHSIG, signal, 0, 0, 0) };
+    Errno::result(result)
+        .map(drop)
+        .context("Failed to set PR_SET_PDEATHSIG")
+}
+
+fn set_no_new_privs(value: bool) -> anyhow::Result<()> {
+    let result = unsafe { nix::libc::prctl(PR_SET_NO_NEW_PRIVS, value as c_ulong, 0, 0, 0) };
+    Errno::result(result)
+        .map(drop)
+        .context("Failed to set PR_SET_NO_NEW_PRIVS")
+}
+
+fn set_keep_caps(keep_capabilities: bool) -> anyhow::Result<()> {
+    let result =
+        unsafe { nix::libc::prctl(PR_SET_KEEPCAPS, keep_capabilities as c_ulong, 0, 0, 0) };
+    Errno::result(result)
+        .map(drop)
+        .context("Failed to set PR_SET_KEEPCAPS")
 }

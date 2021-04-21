@@ -188,8 +188,14 @@ impl Launcher for Minijail {
         // Update the capability mask if specified
         if let Some(capabilities) = &manifest.capabilities {
             // TODO: the capabilities should be passed as an array
-            jail.update_caps(&capabilities.join(" "))
-                .map_err(into_io_error)?;
+            jail.update_caps(
+                &capabilities
+                    .iter()
+                    .map(ToString::to_string)
+                    .map(|s| s.as_str().to_lowercase())
+                    .join(" "),
+            )
+            .map_err(into_io_error)?;
         }
 
         // Update the supplementary group list if specified
@@ -582,13 +588,11 @@ impl Process for MinijailProcess {
             Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", self.pid), e)),
         }?;
 
-        self.debug.destroy().await?;
-
         Ok(exit_status)
     }
 
     async fn destroy(mut self) -> Result<(), Error> {
-        self.debug.destroy().await
+        Ok(())
     }
 }
 

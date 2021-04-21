@@ -14,6 +14,7 @@ bincode = { version = "1.3", optional = true }
 bitflags = { version = "1.2", optional = true }
 bytes = { version = "1.0", optional = true }
 bytesize = { version = "1.0", optional = true }
+caps = { version = "0.5.1", optional = true }
 derive-new = { version = "0.5.9", optional = true }
 ed25519-dalek = { version = "1.0", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
@@ -46,7 +47,7 @@ proptest = "1.0"
 default = []
 api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util"]
 hello-world = []
-rt-island = ["anyhow", "runtime"]
+rt-island = ["anyhow", "caps", "runtime"]
 rt-minijail = ["runtime", "minijail"]
 runtime = [
     "api",

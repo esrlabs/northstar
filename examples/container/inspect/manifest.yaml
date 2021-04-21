@@ -13,3 +13,5 @@ mounts:
       host: /lib64
     /system:
       host: /system
+capabilities:
+  - CAP_KILL
