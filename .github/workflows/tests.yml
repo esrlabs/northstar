@@ -9,8 +9,6 @@ jobs:
     env:
         TERM: xterm-256color
     steps:
-      - name: Install libcap
-        run: sudo apt install libcap-dev
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
