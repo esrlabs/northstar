@@ -34,7 +34,7 @@ use nix::{
             SIGKILL,
         },
     },
-    unistd::{self, ForkResult},
+    unistd::{self, ForkResult, Uid},
 };
 use npk::manifest::{Mount, MountFlag};
 use sched::CloneFlags;
@@ -692,7 +692,12 @@ fn reset_effective_caps() -> anyhow::Result<()> {
 
 /// Set uid/gid
 fn setid(uid: u32, gid: u32) -> anyhow::Result<()> {
-    set_keep_caps(true)?;
+    let rt_priveleged = unistd::geteuid() == Uid::from_raw(0);
+
+    // If running as uid 0 safe our caps across the uid/gid drop
+    if rt_priveleged {
+        caps::securebits::set_keepcaps(true).context("Failed to set keep caps")?;
+    }
 
     let gid = unistd::Gid::from_raw(gid);
     unistd::setresgid(gid, gid, gid).context("Failed to set resgid")?;
@@ -700,10 +705,10 @@ fn setid(uid: u32, gid: u32) -> anyhow::Result<()> {
     let uid = unistd::Uid::from_raw(uid);
     unistd::setresuid(uid, uid, uid).context("Failed to set resuid")?;
 
-    reset_effective_caps()?;
-
-    // TODO: This flag is cleared on execve - maybe we can skip to reset it
-    set_keep_caps(false)?;
+    if rt_priveleged {
+        reset_effective_caps()?;
+        caps::securebits::set_keepcaps(false).context("Failed to set keep caps")?;
+    }
 
     Ok(())
 }
@@ -829,19 +834,6 @@ fn set_no_new_privs(value: bool) -> anyhow::Result<()> {
 }
 
 #[cfg(target_os = "android")]
-pub const PR_SET_KEEPCAPS: c_int = 8;
-#[cfg(not(target_os = "android"))]
-use libc::PR_SET_KEEPCAPS;
-
-fn set_keep_caps(keep_capabilities: bool) -> anyhow::Result<()> {
-    let result =
-        unsafe { nix::libc::prctl(PR_SET_KEEPCAPS, keep_capabilities as c_ulong, 0, 0, 0) };
-    Errno::result(result)
-        .map(drop)
-        .context("Failed to set PR_SET_KEEPCAPS")
-}
-
-#[cfg(target_os = "android")]
 pub const PR_SET_NAME: c_int = 15;
 #[cfg(not(target_os = "android"))]
 use libc::PR_SET_NAME;
@@ -886,20 +878,21 @@ fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
 }
 
 #[cfg(target_os = "android")]
+#[allow(invalid_value)]
 fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
+    use std::mem::transmute;
+    use std::ptr::null_mut;
     let combined = flags.bits() | signal.unwrap_or(0);
-    let null: *mut c_void = std::ptr::null_mut();
     let res = unsafe {
         libc::clone(
-            std::mem::transmute::<*const c_void, extern "C" fn(*mut c_void) -> c_int>(
-                std::ptr::null(),
-            ),
-            null,
+            transmute::<u64, extern "C" fn(*mut c_void) -> c_int>(0u64),
+            null_mut(),
             combined,
-            null,
-            null,
-            null,
-            null,
+            null_mut(),
+            0u64,
+            0u64,
+            0u64,
+            0u64,
         )
     };
 
