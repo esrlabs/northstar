@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -e
+
+BIN=`basename $1`
+
+adb remount
+
+if [[ $BIN == "northstar" ]]; then
+    set -x
+    adb shell stop northstar
+    adb push $1 /system/bin/northstar
+    adb shell start northstar
+else
+    set -x
+    adb push $1 /data
+    adb shell /data/$BIN ${@:2}
+    adb shell rm /data/$BIN
+fi

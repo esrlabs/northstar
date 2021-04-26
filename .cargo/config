@@ -1,8 +1,6 @@
-[target.arm-linux-androideabi]
-linker = "arm-linux-androideabi-g++"
-
 [target.aarch64-linux-android]
-linker = "aarch64-linux-android-clang++"
+linker = "aarch64-linux-android28-clang++"
+runner = '.cargo/runner-aarch64-linux-android'
 
 [target.x86_64-unknown-linux-gnu]
-runner = '.cargo/linux_runner_wrapper.sh'
+runner = '.cargo/runner-x86_64-unknown-linux-gnu'
