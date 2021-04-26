@@ -20,7 +20,6 @@ use super::{
 };
 use color_eyre::eyre::{eyre, Result, WrapErr};
 use futures::StreamExt;
-use log::warn;
 use northstar::{
     api::{client::Client, model::Notification},
     runtime::{self, config, config::Config, Container},
@@ -54,34 +53,32 @@ impl Northstar {
         let data_dir = tmpdir.path().join("data");
         let log_dir = tmpdir.path().join("log");
         let test_repositority = tmpdir.path().join("test");
+        let example_key = tmpdir.path().join("key.pub");
         fs::create_dir(&test_repositority).await?;
+        fs::write(
+            &example_key,
+            include_bytes!("../../examples/keys/northstar.pub"),
+        )
+        .await?;
 
         let mut repositories = HashMap::new();
         repositories.insert(
             "test".into(),
             config::Repository {
                 dir: test_repositority,
-                key: Some(PathBuf::from("examples/keys/northstar.pub")),
+                key: Some(example_key.clone()),
             },
         );
-
-        let target_repository = PathBuf::from("target/northstar/repository");
-        if target_repository.exists() {
-            warn!("Adding repository target/northstar/repository");
-            repositories.insert(
-                "target".into(),
-                config::Repository {
-                    dir: target_repository,
-                    key: Some(PathBuf::from("examples/keys/northstar.pub")),
-                },
-            );
-        }
 
         let mut cgroups = HashMap::new();
         cgroups.insert("memory".into(), PathBuf::from(format!("northstar-{}", pid)));
         cgroups.insert("cpu".into(), PathBuf::from(format!("northstar-{}", pid)));
 
-        let console = format!("unix:///tmp/northstar-{}", std::process::id());
+        let console = format!(
+            "unix://{}/northstar-{}",
+            tmpdir.path().display(),
+            std::process::id()
+        );
         let console_url = url::Url::parse(&console)?;
 
         let config = Config {
@@ -92,7 +89,14 @@ impl Northstar {
             log_dir,
             repositories,
             cgroups,
-            // This sections matches most common x86 Linux distributions
+            #[cfg(target_os = "android")]
+            devices: config::Devices {
+                device_mapper: PathBuf::from("/dev/device-mapper"),
+                device_mapper_dev: "/dev/block/dm-".into(),
+                loop_control: PathBuf::from("/dev/loop-control"),
+                loop_dev: "/dev/block/loop".into(),
+            },
+            #[cfg(not(target_os = "android"))]
             devices: config::Devices {
                 device_mapper: PathBuf::from("/dev/mapper/control"),
                 device_mapper_dev: "/dev/dm-".into(),
