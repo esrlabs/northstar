@@ -77,11 +77,13 @@ pub(super) struct ProcessContext<P> {
 
 impl<P: Process> ProcessContext<P> {
     async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
-        let status = self
+        let (process, status) = self
             .process
             .stop(timeout)
             .await
             .expect("Failed to terminate process");
+
+        process.destroy().await.expect("Failed to destroy process");
 
         self.debug.destroy().await?;
 
@@ -93,6 +95,11 @@ impl<P: Process> ProcessContext<P> {
     }
 
     async fn destroy(mut self) {
+        self.process
+            .destroy()
+            .await
+            .expect("Failed to destroy process");
+
         self.debug
             .destroy()
             .await
@@ -363,7 +370,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         // Spawn process
         info!("Creating {}", container);
-        let mut process = match self.launcher.create(&mounted_container).await {
+        let process = match self.launcher.create(&mounted_container).await {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -400,11 +407,17 @@ impl<'a, L: Launcher> State<'a, L> {
 
         // Signal the process to continue starting. This can fail because of the container
         // content. In case umount everything mounted so far and return the error.
-        if let Err(e) = process.start().await {
-            warn!("Failed to resume process of {}", container);
-            warn!("Failed to start {}", container);
-            return Err(e);
-        }
+        let process = match process.start().await {
+            result::Result::Ok(process) => process,
+            result::Result::Err(e) => {
+                warn!("Failed to start {}: {}", container, e);
+                debug.destroy().await.expect("Failed to destroy debug");
+                if let Some(cgroups) = cgroups {
+                    cgroups.destroy().await.expect("Failed to destroy cgroups");
+                }
+                return Err(e);
+            }
+        };
 
         let mounted_container = self.containers.get_mut(&container).unwrap();
 

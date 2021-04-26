@@ -73,10 +73,10 @@ type RuntimeLauncher = island::Island;
 type RuntimeLauncher = minijail::Minijail;
 
 #[async_trait]
-trait Process {
+trait Process: Sized {
     fn pid(&self) -> Pid;
-    async fn start(&mut self) -> Result<(), Error>;
-    async fn stop(mut self, timeout: time::Duration) -> Result<ExitStatus, Error>;
+    async fn start(mut self) -> Result<Self, Error>;
+    async fn stop(mut self, timeout: time::Duration) -> Result<(Self, ExitStatus), Error>;
     async fn destroy(mut self) -> Result<(), Error>;
 }
 

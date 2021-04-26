@@ -265,7 +265,7 @@ impl Launcher for Minijail {
             pid,
             _jail: jail,
             _io: io,
-            exit_status,
+            exit_status: Some(exit_status),
             sync: Some(sync),
         })
     }
@@ -526,8 +526,9 @@ pub(crate) struct MinijailProcess {
     /// PID of this process
     pid: Pid,
     /// Exit handle of this process
-    exit_status:
+    exit_status: Option<
         Box<dyn Future<Output = Result<ExitStatus, super::error::Error>> + Unpin + Send + Sync>,
+    >,
     /// Handle to a libminijail configuration
     _jail: MinijailHandle,
     /// Captured stdout output
@@ -549,22 +550,26 @@ impl Process for MinijailProcess {
     }
 
     /// Resume the process
-    async fn start(&mut self) -> Result<(), Error> {
+    async fn start(mut self) -> Result<Self, Error> {
         debug!("Starting \"{}\"", self.argv);
         if let Some(sync) = self.sync.take() {
             sync.resume().await?;
         }
-        Ok(())
+        Ok(self)
     }
 
     /// Send a SIGTERM to the application. If the application does not terminate with a timeout
     /// it is SIGKILLed.
-    async fn stop(mut self, timeout: time::Duration) -> Result<ExitStatus, super::error::Error> {
+    async fn stop(
+        mut self,
+        timeout: time::Duration,
+    ) -> Result<(Self, ExitStatus), super::error::Error> {
         debug!("Trying to send SIGTERM to {}", self.pid);
+        let mut exit_status = self.exit_status.take().expect("Internal error");
         let exit_status = match signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGTERM))
         {
             Ok(_) => {
-                match time::timeout(timeout, &mut self.exit_status).await {
+                match time::timeout(timeout, &mut exit_status).await {
                     Err(_) => {
                         warn!(
                             "Process {} did not exit within {:?}. Sending SIGKILL...",
@@ -574,7 +579,7 @@ impl Process for MinijailProcess {
                         signal::kill(unistd::Pid::from_raw(self.pid as i32), Some(SIGKILL))
                             .map_err(|e| Error::os("Failed to kill process", e))?;
 
-                        (&mut self.exit_status).await
+                        (&mut exit_status).await
                     }
                     Ok(exit_status) => exit_status,
                 }
@@ -582,13 +587,13 @@ impl Process for MinijailProcess {
             // The proces is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == nix::errno::Errno::ESRCH => {
                 debug!("Process {} already exited. Waiting for status", self.pid);
-                let exit_status = self.exit_status.await?;
+                let exit_status = exit_status.await?;
                 Ok(exit_status)
             }
             Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", self.pid), e)),
         }?;
 
-        Ok(exit_status)
+        Ok((self, exit_status))
     }
 
     async fn destroy(mut self) -> Result<(), Error> {

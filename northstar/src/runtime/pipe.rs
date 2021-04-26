@@ -270,6 +270,39 @@ fn from_nix(error: nix::Error) -> io::Error {
     }
 }
 
+#[allow(unused)]
+pub(crate) struct Condition {
+    read: PipeRead,
+    write: PipeWrite,
+}
+
+#[allow(unused)]
+impl Condition {
+    pub(crate) fn new() -> Result<Condition> {
+        let (rfd, wfd) = pipe()?;
+        Ok(Condition {
+            read: rfd,
+            write: wfd,
+        })
+    }
+
+    pub(crate) fn wait(mut self) {
+        drop(self.write);
+        let buf: &mut [u8] = &mut [0u8; 1];
+        use std::io::Read;
+        loop {
+            match self.read.read(buf) {
+                Ok(n) if n == 0 => break,
+                Ok(_) => continue,
+                Err(e) => break,
+            }
+        }
+        drop(self.read)
+    }
+
+    pub(crate) fn notify(self) {}
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

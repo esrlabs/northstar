@@ -15,45 +15,47 @@
 use super::{
     config::Config,
     error::Error,
-    pipe::{pipe, AsyncPipeRead, PipeRead, PipeSendRecv, PipeWrite},
+    pipe::{pipe, pipe_duplex, AsyncPipeRead, Condition, PipeRead, PipeSendRecv, PipeWrite},
     Event, EventTx, ExitStatus, Launcher, MountedContainer as Container, Pid, Process,
 };
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
-use libc::{PR_SET_KEEPCAPS, PR_SET_NO_NEW_PRIVS};
 use log::{debug, error, info, trace, warn, Level};
 use nix::{
     errno::Errno,
-    libc::{self, c_ulong},
+    libc::{self, c_int, c_ulong, siginfo_t},
     mount::{self, MsFlags},
     sched,
-    sys::{self, signal},
-    unistd,
+    sys::{
+        self,
+        signal::{
+            kill, sigaction, signal, SaFlags, SigAction, SigHandler, SigSet, Signal, SIGCHLD,
+            SIGKILL,
+        },
+    },
+    unistd::{self, ForkResult},
 };
 use npk::manifest::{Mount, MountFlag};
+use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     env,
-    ffi::CString,
+    ffi::{c_void, CString},
     fmt,
     os::unix::io::AsRawFd,
     path::{Path, PathBuf},
+    process::exit,
 };
+use sys::wait::{waitpid, WaitStatus};
 use tokio::{io, io::AsyncBufReadExt, select, task, time};
 use tokio_util::sync::CancellationToken;
 
 const ENV_NAME: &str = "NAME";
 const ENV_VERSION: &str = "VERSION";
-
-// libc doesn't specificy PR_SET_PDEATHSIG for android but
-// the bionic header include it
-#[cfg(target_os = "android")]
-const PR_SET_PDEATHSIG: libc::c_int = 1;
-#[cfg(not(target_os = "android"))]
-const PR_SET_PDEATHSIG: libc::c_int = libc::PR_SET_PDEATHSIG;
+const SIGNAL_OFFSET: i32 = 128;
 
 type Intercom = (PipeRead, PipeWrite);
 
@@ -69,29 +71,51 @@ macro_rules! cwarn { ($($arg:tt)+) => ( log::warn!("{}: {}", std::process::id(),
 macro_rules! cerror { ($($arg:tt)+) => ( log::error!("{}: {}", std::process::id(), format!($($arg)+))) }
 
 #[derive(Serialize, Deserialize)]
-enum Sequence {
+enum LaunchProtocol {
     Error(String),
-    ParentReady,
+    InitReady,
     Go,
 }
 
 #[derive(Debug)]
-pub struct Island {
+pub(super) struct Island {
     tx: EventTx,
     config: Config,
 }
 
-pub struct IslandProcess {
-    pid: Pid,
-    /// Exit handle of this process
-    exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
-    intercom: Option<Intercom>,
-    _io: (Option<Log>, Option<Log>),
+pub(super) enum IslandProcess {
+    Created {
+        pid: Pid,
+        intercom: Intercom,
+        exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
+        io: (Option<Log>, Option<Log>),
+    },
+    Started {
+        pid: Pid,
+        exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
+        io: (Option<Log>, Option<Log>),
+    },
+    Stopped {
+        pid: Pid,
+    },
 }
 
 impl fmt::Debug for IslandProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Process").field("pid", &self.pid).finish()
+        match self {
+            IslandProcess::Created { pid, .. } => f
+                .debug_struct("IslandProcess::Created")
+                .field("pid", &pid)
+                .finish(),
+            IslandProcess::Started { pid, .. } => f
+                .debug_struct("IslandProcess::Started")
+                .field("pid", &pid)
+                .finish(),
+            IslandProcess::Stopped { pid } => f
+                .debug_struct("IslandProcess::Stoped")
+                .field("pid", &pid)
+                .finish(),
+        }
     }
 }
 
@@ -129,7 +153,7 @@ impl Launcher for Island {
 
     async fn create(&self, container: &Container<Self::Process>) -> Result<Self::Process, Error> {
         // Intercom
-        let (parent_com, child_com) = super::pipe::pipe_duplex::<PipeRead, PipeWrite>()
+        let (intercom_runtime, intercom_init) = pipe_duplex::<PipeRead, PipeWrite>()
             .map_err(|e| Error::io("Failed to create duplex", e))?;
 
         // Setup childs io
@@ -166,348 +190,110 @@ impl Launcher for Island {
             (None, None)
         };
 
-        match unsafe { unistd::fork() } {
+        // Clone init
+        let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
+        match clone(flags, Some(SIGCHLD as i32)) {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
                     let pid = child.as_raw() as Pid;
-                    self.parent(container, pid, stdout, stderr, parent_com)
-                        .await
+                    let exit_status = Box::new(wait(container, pid, self.tx.clone()).await);
+
+                    Ok(IslandProcess::Created {
+                        pid,
+                        exit_status,
+                        intercom: intercom_runtime,
+                        io: (stdout, stderr),
+                    })
                 }
-                unistd::ForkResult::Child => self.child(container, child_fd_map, child_com),
+                unistd::ForkResult::Child => {
+                    init(&self.config, container, child_fd_map, intercom_init)
+                }
             },
             Err(e) => panic!("Fork error: {}", e),
         }
     }
 }
 
-impl Island {
-    async fn parent(
-        &self,
-        container: &Container<IslandProcess>,
-        pid: Pid,
-        stdout: Option<Log>,
-        stderr: Option<Log>,
-        mut intercom: Intercom,
-    ) -> Result<IslandProcess, Error> {
-        let exit_status = Box::new(parent_waitpid(container, pid, self.tx.clone()).await);
-
-        // Signal the child that we're ready. The child will prepare it's start.
-        intercom
-            .send(Sequence::ParentReady)
-            .expect("Intercom error");
-
-        Ok(IslandProcess {
-            pid,
-            exit_status,
-            _io: (stdout, stderr),
-            intercom: Some(intercom),
-        })
-    }
-
-    fn child(
-        &self,
-        container: &Container<IslandProcess>,
-        mut fds: HashMap<i32, i32>,
-        mut intercom: Intercom,
-    ) -> ! {
-        // Wait until parent is fully set up
-        match intercom.recv::<Sequence>().expect("intercom error") {
-            Sequence::ParentReady => (),
-            _ => unreachable!(),
-        }
-        cdebug!("Parent is ready");
-
-        // Add intercom to list of fds to preserve
-        fds.insert(intercom.0.as_raw_fd(), intercom.0.as_raw_fd());
-        fds.insert(intercom.1.as_raw_fd(), intercom.1.as_raw_fd());
-
-        match self.child_init(container, fds) {
-            Ok(_) => {
-                let pid = std::process::id();
-                // execve
-                println!("{}: Waiting for go", pid);
-                intercom.recv::<Sequence>().expect("intercom error");
-
-                // Make sure to close the intercom fds
-                drop(intercom);
-
-                let (init, argv, env) = Self::child_env(&container.manifest);
-
-                println!("{} init: {:?}", pid, init);
-                println!("{} argv: {:#?}", pid, argv);
-                println!("{} env: {:#?}", pid, env);
-                panic!("{}: {:?}", pid, unistd::execve(&init, &argv, &env))
-            }
-            Err(e) => {
-                warn!("Child init error: {:?}", e);
-                intercom
-                    .send(Sequence::Error(e.to_string()))
-                    .expect("intercom error");
-                panic!("Child init error: {}", e);
-            }
-        };
-    }
-
-    fn child_init(
-        &self,
-        container: &Container<IslandProcess>,
-        fds: HashMap<i32, i32>,
-    ) -> anyhow::Result<()> {
-        let manifest = &container.manifest;
-        let root = container.root.canonicalize()?;
-
-        // Unshare
-        cdebug!("Unsharing CLONE_NEWNS");
-        sched::unshare(sched::CloneFlags::CLONE_NEWNS).context("Failed to unshare CLONE_NEWNS")?;
-        // cdebug!("Unsharing CLONE_NEWPID");
-        // sched::unshare(sched::CloneFlags::CLONE_NEWPID)
-        //     .context("Failed to unshare CLONE_NEWPID")?;
-
-        // Mount
-        self.child_mount(&container).context("Failed to mount")?;
-
-        // Chroot
-        cdebug!("Using chroot {}", root.display());
-        unistd::chroot(&root).context("Failed to chroot")?;
-
-        // Pwd
-        cdebug!("Setting pwd to /");
-        env::set_current_dir("/").context("Failed to set cwd to /")?;
-
-        // UID / GID
-        child_setid(manifest.uid, manifest.gid).context("Failed to setuid/gid")?;
-
-        cdebug!("Setting no new privs");
-        set_no_new_privs(true)?;
-
-        // Capabilities
-        child_cap_drop(manifest.capabilities.as_ref()).context("Failed to drop privs")?;
-
-        // Set the parent process death signal of the calling process to arg2
-        // (either a signal value in the range 1..maxsig, or 0 to clear).
-        set_pdeath_signal(signal::SIGKILL)?;
-
-        child_fds(fds)?;
-
-        // We cannot use log after here because the fd to logd is closed on Android
-
-        Ok(())
-    }
-
-    // Child context
-    fn child_env(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CString>) {
-        let init = CString::new(manifest.init.as_ref().unwrap().to_str().unwrap()).unwrap();
-        let mut argv = vec![init.clone()];
-        if let Some(ref args) = manifest.args {
-            for arg in args {
-                argv.push(CString::new(arg.as_bytes()).unwrap());
-            }
-        }
-
-        let mut env = manifest.env.clone().unwrap_or_default();
-        env.insert(ENV_NAME.to_string(), manifest.name.to_string());
-        env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
-        let env = env
-            .iter()
-            .map(|(k, v)| CString::new(format!("{}={}", k, v)))
-            .map(Result::unwrap)
-            .collect::<Vec<CString>>();
-
-        (init, argv, env)
-    }
-}
-
-impl Island {
-    // TODO: The container could be malformed and the mountpoint might be
-    // missing. This is not a fault of the RT so don't expect it.
-    // TODO: mount flags: nosuid etc....
-    // TODO: /dev mounts from manifest: full or minimal
-    fn child_mount(&self, container: &Container<IslandProcess>) -> Result<(), Error> {
-        let none = Option::<&str>::None;
-        let root = container
-            .root
-            .canonicalize()
-            .map_err(|e| Error::io("Failed to canonicalize root", e))?;
-        let uid = container.manifest.uid;
-        let gid = container.manifest.gid;
-
-        // /proc
-        let source = "/proc";
-        let target = root.join("proc");
-        let flags = MsFlags::MS_BIND;
-        mount::mount(Some(source), &target, none, flags, none)
-            .map_err(|e| Error::os("Failed to mount /proc", e))?;
-        let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-        mount::mount(Some(source), &target, none, flags, none)
-            .map_err(|e| Error::os("Failed to remount /proc ro", e))?;
-
-        // /dev
-        let source = "/dev/";
-        let target = root.join("dev");
-        mount::mount(Some(source), &target, none, MsFlags::MS_BIND, none)
-            .map_err(|e| Error::os("Failed to mount /dev", e))?;
-
-        for (target, mount) in &container.manifest.mounts {
-            match &mount {
-                Mount::Bind { host, flags } => {
-                    if !&host.exists() {
-                        cwarn!(
-                            "Cannot bind mount nonexitent source {} to {}",
-                            host.display(),
-                            target.display()
-                        );
-                        continue;
-                    }
-                    let rw = flags.contains(&MountFlag::Rw);
-                    cdebug!(
-                        "Mounting {} on {}{}",
-                        host.display(),
-                        target.display(),
-                        if rw { " (rw)" } else { "" }
-                    );
-                    let target = root.join_strip(target);
-                    mount::mount(Some(host), &target, none, MsFlags::MS_BIND, none).map_err(
-                        |e| Error::os(format!("Failed to bind mount {}", target.display()), e),
-                    )?;
-
-                    if !rw {
-                        let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-                        mount::mount(Some(host), &target, none, flags, none).map_err(|e| {
-                            Error::os(format!("Failed to remount mount {}", target.display()), e)
-                        })?;
-                    }
-                }
-                Mount::Persist => {
-                    let dir = self.config.data_dir.join(&container.manifest.name);
-                    if !dir.exists() {
-                        cdebug!("Creating {}", dir.display());
-                        std::fs::create_dir_all(&dir).map_err(|e| {
-                            Error::Io(format!("Failed to create {}", dir.display()), e)
-                        })?;
-                    }
-
-                    cdebug!("Chowning {} to {}:{}", dir.display(), uid, gid);
-                    unistd::chown(
-                        dir.as_os_str(),
-                        Some(unistd::Uid::from_raw(uid)),
-                        Some(unistd::Gid::from_raw(gid)),
-                    )
-                    .map_err(|e| {
-                        Error::os(
-                            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-                            e,
-                        )
-                    })?;
-
-                    cdebug!("Mounting {} on {}", dir.display(), target.display(),);
-
-                    let target = root.join_strip(target);
-                    mount::mount(Some(&dir), &target, none, MsFlags::MS_BIND, none).map_err(
-                        |e| Error::os(format!("Failed to bind mount {}", target.display()), e),
-                    )?;
-                }
-                Mount::Resource { name, version, dir } => {
-                    let src = {
-                        // Join the source of the resource container with the mount dir
-                        let resource_root =
-                            self.config.run_dir.join(format!("{}:{}", name, version));
-                        let dir = dir
-                            .strip_prefix("/")
-                            .map(|d| resource_root.join(d))
-                            .unwrap_or(resource_root);
-
-                        if !dir.exists() {
-                            return Err(Error::StartContainerFailed(
-                                container.container.clone(),
-                                format!("Resource folder {} is missing", dir.display()),
-                            ));
-                        }
-
-                        dir
-                    };
-
-                    cdebug!("Mounting {} on {}", src.display(), target.display());
-
-                    let target = root.join_strip(target);
-                    mount::mount(Some(&src), &target, none, MsFlags::MS_BIND, none).map_err(
-                        |e| Error::os(format!("Failed to mount {}", target.display()), e),
-                    )?;
-
-                    // Remount ro
-                    let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-                    mount::mount(Some(&src), &target, none, flags, none).map_err(|e| {
-                        Error::os(format!("Failed to remount {}", target.display()), e)
-                    })?;
-                }
-                Mount::Tmpfs { size } => {
-                    cdebug!(
-                        "Mounting tmpfs with size {} on {}",
-                        bytesize::ByteSize::b(*size),
-                        target.display()
-                    );
-                    let target = root.join_strip(target);
-                    let data = format!("size={},mode=1777", size);
-                    let flags = MsFlags::empty();
-                    mount::mount(none, &target, Some("tmpfs"), flags, Some(data.as_str()))
-                        .map_err(|e| {
-                            Error::os(format!("Failed to bind mount {}", target.display()), e)
-                        })?;
-                }
-                _ => (),
-            }
-        }
-        Ok(())
-    }
-}
-
 #[async_trait]
 impl Process for IslandProcess {
     fn pid(&self) -> Pid {
-        self.pid
+        match self {
+            IslandProcess::Created { pid, .. } => *pid,
+            IslandProcess::Started { pid, .. } => *pid,
+            IslandProcess::Stopped { pid } => *pid,
+        }
     }
 
-    async fn start(&mut self) -> Result<(), Error> {
+    async fn start(mut self) -> Result<Self, Error> {
         info!("Starting {}", self.pid());
-        let mut intercom = self.intercom.take().expect("Start called twice");
-        intercom.send(Sequence::Go).ok();
-
-        Ok(())
+        match self {
+            IslandProcess::Created {
+                pid,
+                exit_status,
+                mut intercom,
+                io: _io,
+            } => {
+                intercom.send(LaunchProtocol::Go).ok();
+                intercom.recv::<LaunchProtocol>().ok();
+                Ok(IslandProcess::Started {
+                    pid,
+                    exit_status,
+                    io: _io,
+                })
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Send a SIGTERM to the application. If the application does not terminate with a timeout
     /// it is SIGKILLed.
-    async fn stop(mut self, timeout: time::Duration) -> Result<ExitStatus, super::error::Error> {
-        debug!("Trying to send SIGTERM to {}", self.pid);
-        let pid = unistd::Pid::from_raw(self.pid as i32);
+    async fn stop(
+        mut self,
+        timeout: time::Duration,
+    ) -> Result<(Self, ExitStatus), super::error::Error> {
+        let (pid, mut exit_status) = match self {
+            IslandProcess::Created {
+                pid, exit_status, ..
+            } => (pid, exit_status),
+            IslandProcess::Started {
+                pid,
+                exit_status,
+                io: _io,
+            } => (pid, exit_status),
+            IslandProcess::Stopped { .. } => unreachable!(),
+        };
+        debug!("Trying to send SIGTERM to {}", pid);
+        let pid = unistd::Pid::from_raw(pid as i32);
         let sigterm = Some(sys::signal::SIGTERM);
         let exit_status = match sys::signal::kill(pid, sigterm) {
             Ok(_) => {
-                match time::timeout(timeout, &mut self.exit_status).await {
+                match time::timeout(timeout, &mut exit_status).await {
                     Err(_) => {
                         warn!(
                             "Process {} did not exit within {:?}. Sending SIGKILL...",
-                            self.pid, timeout
+                            pid, timeout
                         );
                         // Send SIGKILL if the process did not terminate before timeout
                         let sigkill = Some(sys::signal::SIGKILL);
-                        sys::signal::kill(unistd::Pid::from_raw(self.pid as i32), sigkill)
+                        sys::signal::kill(pid, sigkill)
                             .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
 
-                        (&mut self.exit_status).await
+                        (&mut exit_status).await
                     }
                     Ok(exit_status) => exit_status,
                 }
             }
             // The proces is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == nix::errno::Errno::ESRCH => {
-                debug!("Process {} already exited. Waiting for status", self.pid);
-                let exit_status = self.exit_status.await?;
+                debug!("Process {} already exited. Waiting for status", pid);
+                let exit_status = exit_status.await?;
                 Ok(exit_status)
             }
-            Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", self.pid), e)),
+            Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", pid), e)),
         }?;
 
-        Ok(exit_status)
+        let pid = pid.as_raw() as u32;
+        Ok((IslandProcess::Stopped { pid }, exit_status))
     }
 
     async fn destroy(mut self) -> Result<(), Error> {
@@ -515,8 +301,341 @@ impl Process for IslandProcess {
     }
 }
 
+/// Init
+fn init(
+    config: &Config,
+    container: &Container<IslandProcess>,
+    mut fds: HashMap<i32, i32>,
+    mut intercom: Intercom,
+) -> ! {
+    pr_set_name("init").expect("Failed to set init process name");
+
+    // Add intercom to list of fds to preserve
+    fds.insert(intercom.0.as_raw_fd(), intercom.0.as_raw_fd());
+    fds.insert(intercom.1.as_raw_fd(), intercom.1.as_raw_fd());
+
+    match init_prepare(&config, container, fds) {
+        Ok(_) => {
+            let id = format!("init-{}", container.manifest.name);
+
+            // Synchronize parent and child startup since we have to rely on a global mut
+            // because unix signal handler suck.
+            let cond = Condition::new().expect("Failed to create pipe");
+
+            match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
+                Ok(result) => match result {
+                    unistd::ForkResult::Parent { child } => {
+                        // Update global CHILD_PID
+                        unsafe {
+                            CHILD_PID = child.as_raw();
+                        }
+                        // Signal the child it can go
+                        cond.notify();
+
+                        //println!("{}: Waiting for go", id);
+                        intercom.recv::<LaunchProtocol>().expect("intercom error");
+                        intercom
+                            .send(LaunchProtocol::InitReady)
+                            .expect("intercom error");
+
+                        drop(intercom);
+
+                        // TODO: Anything we can do here to free stuff before waiting forever?
+
+                        // If the child dies before we waitpid here it becomes a zombie and is catched
+
+                        // Wait for the child to exit
+                        //println!("{}: waiting for {} to exit", id, child);
+                        let result = waitpid(Some(child), None).expect("waitpid");
+                        //println!("{}: waitpid result of {}: {:?}", id, child, result);
+                        match result {
+                            WaitStatus::Exited(_pid, status) => exit(status),
+                            WaitStatus::Signaled(_pid, status, _) => {
+                                // Encode the signal number in the process exit status. It's not possible to raise a
+                                // a signal in this "init" process that is received by our parent
+                                let code = SIGNAL_OFFSET + status as i32;
+                                //println!("{}: exiting with {} (signaled {})", id, code, status);
+                                exit(code);
+                            }
+                            // TODO: Other waitpid results
+                            _ => panic!("abnormal exit of child process"),
+                        };
+                    }
+                    unistd::ForkResult::Child => {
+                        cond.wait();
+                        drop(intercom);
+                        reset_signal_handlers();
+                        set_pdeath_signal(SIGKILL).expect("Failed to set parent death signal");
+
+                        let (init, argv, env) = init_args(&container.manifest);
+                        println!("{} init: {:?}", id, init);
+                        println!("{} argv: {:#?}", id, argv);
+                        println!("{} env: {:#?}", id, env);
+
+                        panic!("{}: {:?}", id, unistd::execve(&init, &argv, &env))
+                    }
+                },
+                Err(e) => panic!("Fork error: {}", e),
+            }
+        }
+        Err(e) => {
+            warn!("Child init error: {:?}", e);
+            intercom
+                .send(LaunchProtocol::Error(e.to_string()))
+                .expect("intercom error");
+            panic!("Init error: {}", e);
+        }
+    };
+}
+
+fn init_prepare(
+    config: &Config,
+    container: &Container<IslandProcess>,
+    fds: HashMap<i32, i32>,
+) -> anyhow::Result<()> {
+    let manifest = &container.manifest;
+    let root = container.root.canonicalize()?;
+
+    // Install signal handlers that forward every signal to our child
+    init_signal_handlers();
+
+    // Mount
+    init_rootfs(&config, &container).context("Failed to mount")?;
+
+    // Chroot
+    cdebug!("Using chroot {}", root.display());
+    unistd::chroot(&root).context("Failed to chroot")?;
+
+    // Pwd
+    cdebug!("Setting pwd to /");
+    env::set_current_dir("/").context("Failed to set cwd to /")?;
+
+    // UID / GID
+    setid(manifest.uid, manifest.gid).context("Failed to setuid/gid")?;
+
+    cdebug!("Setting no new privs");
+    set_no_new_privs(true)?;
+
+    // Set the parent process death signal of the calling process to arg2
+    // (either a signal value in the range 1..maxsig, or 0 to clear).
+    set_pdeath_signal(SIGKILL)?;
+
+    init_close_fds(fds)?;
+
+    // Capabilities
+    drop_cap(manifest.capabilities.as_ref()).context("Failed to drop privs")?;
+
+    // We cannot use log after here because the fd to logd is closed on Android
+
+    Ok(())
+}
+
+// TODO: The container could be malformed and the mountpoint might be
+// missing. This is not a fault of the RT so don't expect it.
+// TODO: mount flags: nosuid etc....
+// TODO: /dev mounts from manifest: full or minimal
+fn init_rootfs(config: &Config, container: &Container<IslandProcess>) -> Result<(), Error> {
+    let none = Option::<&str>::None;
+    let root = container
+        .root
+        .canonicalize()
+        .map_err(|e| Error::io("Failed to canonicalize root", e))?;
+    let uid = container.manifest.uid;
+    let gid = container.manifest.gid;
+
+    // /proc
+    let source = "/proc";
+    let target = root.join("proc");
+    mount::mount(none, &target, Some("proc"), MsFlags::empty(), none)
+        .map_err(|e| Error::os("Failed to mount /proc", e))?;
+    // Remount /proc ro
+    let flags = MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
+    mount::mount(Some(source), &target, none, flags, none)
+        .map_err(|e| Error::os("Failed to remount /proc ro", e))?;
+
+    // /dev
+    let source = "/dev/";
+    let target = root.join("dev");
+    mount::mount(Some(source), &target, none, MsFlags::MS_BIND, none)
+        .map_err(|e| Error::os("Failed to mount /dev", e))?;
+
+    for (target, mount) in &container.manifest.mounts {
+        match &mount {
+            Mount::Bind { host, flags } => {
+                if !&host.exists() {
+                    cwarn!(
+                        "Cannot bind mount nonexitent source {} to {}",
+                        host.display(),
+                        target.display()
+                    );
+                    continue;
+                }
+                let rw = flags.contains(&MountFlag::Rw);
+                cdebug!(
+                    "Mounting {} on {}{}",
+                    host.display(),
+                    target.display(),
+                    if rw { " (rw)" } else { "" }
+                );
+                let target = root.join_strip(target);
+                mount::mount(Some(host), &target, none, MsFlags::MS_BIND, none).map_err(|e| {
+                    Error::os(format!("Failed to bind mount {}", target.display()), e)
+                })?;
+
+                if !rw {
+                    let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
+                    mount::mount(Some(host), &target, none, flags, none).map_err(|e| {
+                        Error::os(format!("Failed to remount mount {}", target.display()), e)
+                    })?;
+                }
+            }
+            Mount::Persist => {
+                let dir = config.data_dir.join(&container.manifest.name);
+                if !dir.exists() {
+                    cdebug!("Creating {}", dir.display());
+                    std::fs::create_dir_all(&dir)
+                        .map_err(|e| Error::Io(format!("Failed to create {}", dir.display()), e))?;
+                }
+
+                cdebug!("Chowning {} to {}:{}", dir.display(), uid, gid);
+                unistd::chown(
+                    dir.as_os_str(),
+                    Some(unistd::Uid::from_raw(uid)),
+                    Some(unistd::Gid::from_raw(gid)),
+                )
+                .map_err(|e| {
+                    Error::os(
+                        format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
+                        e,
+                    )
+                })?;
+
+                cdebug!("Mounting {} on {}", dir.display(), target.display(),);
+
+                let target = root.join_strip(target);
+                mount::mount(Some(&dir), &target, none, MsFlags::MS_BIND, none).map_err(|e| {
+                    Error::os(format!("Failed to bind mount {}", target.display()), e)
+                })?;
+            }
+            Mount::Resource { name, version, dir } => {
+                let src = {
+                    // Join the source of the resource container with the mount dir
+                    let resource_root = config.run_dir.join(format!("{}:{}", name, version));
+                    let dir = dir
+                        .strip_prefix("/")
+                        .map(|d| resource_root.join(d))
+                        .unwrap_or(resource_root);
+
+                    if !dir.exists() {
+                        return Err(Error::StartContainerFailed(
+                            container.container.clone(),
+                            format!("Resource folder {} is missing", dir.display()),
+                        ));
+                    }
+
+                    dir
+                };
+
+                cdebug!("Mounting {} on {}", src.display(), target.display());
+
+                let target = root.join_strip(target);
+                mount::mount(Some(&src), &target, none, MsFlags::MS_BIND, none)
+                    .map_err(|e| Error::os(format!("Failed to mount {}", target.display()), e))?;
+
+                // Remount ro
+                let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
+                mount::mount(Some(&src), &target, none, flags, none)
+                    .map_err(|e| Error::os(format!("Failed to remount {}", target.display()), e))?;
+            }
+            Mount::Tmpfs { size } => {
+                cdebug!(
+                    "Mounting tmpfs with size {} on {}",
+                    bytesize::ByteSize::b(*size),
+                    target.display()
+                );
+                let target = root.join_strip(target);
+                let data = format!("size={},mode=1777", size);
+                let flags = MsFlags::empty();
+                mount::mount(none, &target, Some("tmpfs"), flags, Some(data.as_str())).map_err(
+                    |e| Error::os(format!("Failed to bind mount {}", target.display()), e),
+                )?;
+            }
+            _ => (),
+        }
+    }
+    Ok(())
+}
+
+// TODO: Do not close the namespace fds?
+fn init_close_fds(map: HashMap<i32, i32>) -> anyhow::Result<()> {
+    let keep: HashSet<i32> = map.keys().cloned().collect();
+    for (k, v) in map.iter().filter(|(k, v)| k != v) {
+        // If the fd is mappped to a different fd create a copy
+        cdebug!("Using fd {} mapped as fd {}", v, k);
+        unistd::dup2(*v, *k).context("Failed to dup2")?;
+    }
+
+    // Close open fds which are not mapped
+    let fd = Path::new("/proc")
+        .join(unistd::getpid().to_string())
+        .join("fd");
+
+    let fds = std::fs::read_dir(&fd)
+        .expect("Failed to read list of fds")
+        .map(|e| e.unwrap().path())
+        .map(|e| e.file_name().unwrap().to_str().unwrap().parse().unwrap())
+        .filter(|fd| !keep.contains(fd))
+        .collect::<Vec<_>>();
+
+    cdebug!("Closing file descriptors");
+    for fd in fds.iter() {
+        unistd::close(*fd).ok();
+    }
+
+    Ok(())
+}
+
+fn init_args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CString>) {
+    let init = CString::new(manifest.init.as_ref().unwrap().to_str().unwrap()).unwrap();
+    let mut argv = vec![init.clone()];
+    if let Some(ref args) = manifest.args {
+        for arg in args {
+            argv.push(CString::new(arg.as_bytes()).unwrap());
+        }
+    }
+
+    let mut env = manifest.env.clone().unwrap_or_default();
+    env.insert(ENV_NAME.to_string(), manifest.name.to_string());
+    env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
+    let env = env
+        .iter()
+        .map(|(k, v)| CString::new(format!("{}={}", k, v)))
+        .map(Result::unwrap)
+        .collect::<Vec<CString>>();
+
+    (init, argv, env)
+}
+
+fn init_signal_handlers() {
+    for sig in Signal::iterator()
+        .filter(|s| *s != Signal::SIGCHLD)
+        .filter(|s| *s != Signal::SIGKILL)
+        .filter(|s| *s != Signal::SIGSTOP)
+    {
+        unsafe {
+            let handler = SigHandler::SigAction(forward_signal_to_child);
+            let action = SigAction::new(
+                handler,
+                SaFlags::SA_SIGINFO | SaFlags::SA_RESTART,
+                SigSet::empty(),
+            );
+            sigaction(sig, &action).expect("failed to install sigaction");
+        }
+    }
+}
+
 /// Wrap the Rust log into a AsyncWrite
-struct Log {
+pub(super) struct Log {
     token: CancellationToken,
     writer: PipeWrite,
 }
@@ -563,16 +682,16 @@ impl Log {
     }
 }
 
-// Child context
-fn child_reset_effective() -> anyhow::Result<()> {
+// Reset effective caps to the most possible set
+fn reset_effective_caps() -> anyhow::Result<()> {
     cdebug!("Resetting effective capabilities");
     caps::set(None, caps::CapSet::Effective, &caps::all())
         .context("Failed to reset effective caps")?;
     Ok(())
 }
 
-// Child context
-fn child_setid(uid: u32, gid: u32) -> anyhow::Result<()> {
+/// Set uid/gid
+fn setid(uid: u32, gid: u32) -> anyhow::Result<()> {
     set_keep_caps(true)?;
 
     let gid = unistd::Gid::from_raw(gid);
@@ -581,7 +700,7 @@ fn child_setid(uid: u32, gid: u32) -> anyhow::Result<()> {
     let uid = unistd::Uid::from_raw(uid);
     unistd::setresuid(uid, uid, uid).context("Failed to set resuid")?;
 
-    child_reset_effective()?;
+    reset_effective_caps()?;
 
     // TODO: This flag is cleared on execve - maybe we can skip to reset it
     set_keep_caps(false)?;
@@ -589,21 +708,21 @@ fn child_setid(uid: u32, gid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-// Child context
-fn child_cap_drop(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> {
+/// Drop capabilities
+fn drop_cap(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> {
     let mut bounded = caps::read(None, caps::CapSet::Bounding)?;
     if let Some(caps) = cs {
         bounded.retain(|c| !caps.contains(c));
     }
 
-    cdebug!("Dropping capabilities");
+    println!("Dropping capabilities");
     for cap in bounded {
         // caps::set cannot be called for for bounded
         caps::drop(None, caps::CapSet::Bounding, cap)?;
     }
 
     if let Some(caps) = cs {
-        debug!("Settings capabilities to {:?}", caps);
+        println!("Settings capabilities to {:?}", caps);
         caps::set(None, caps::CapSet::Effective, caps)?;
         caps::set(None, caps::CapSet::Permitted, caps)?;
         caps::set(None, caps::CapSet::Inheritable, caps)?;
@@ -613,39 +732,9 @@ fn child_cap_drop(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> 
     Ok(())
 }
 
-// Child context
-// TODO: Do not close the namespace fds?
-fn child_fds(map: HashMap<i32, i32>) -> anyhow::Result<()> {
-    let keep: HashSet<i32> = map.keys().cloned().collect();
-    for (k, v) in map.iter().filter(|(k, v)| k != v) {
-        // If the fd is mappped to a different fd create a copy
-        cdebug!("Using fd {} mapped as fd {}", v, k);
-        unistd::dup2(*v, *k).context("Failed to dup2")?;
-    }
-
-    // Close open fds which are not mapped
-    let fd = Path::new("/proc")
-        .join(unistd::getpid().to_string())
-        .join("fd");
-
-    let fds = std::fs::read_dir(&fd)
-        .expect("Failed to read list of fds")
-        .map(|e| e.unwrap().path())
-        .map(|e| e.file_name().unwrap().to_str().unwrap().parse().unwrap())
-        .filter(|fd| !keep.contains(fd))
-        .collect::<Vec<_>>();
-
-    cdebug!("Closing file descriptors");
-    for fd in fds.iter() {
-        unistd::close(*fd).ok();
-    }
-
-    Ok(())
-}
-
 /// Spawn a task that waits for the process to exit. This resolves to the exit status
 /// of `pid`.
-async fn parent_waitpid(
+async fn wait(
     container: &Container<IslandProcess>,
     pid: Pid,
     tx: EventTx,
@@ -658,8 +747,18 @@ async fn parent_waitpid(
                 // The process exited normally (as with exit() or returning from main) with the given exit code.
                 // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
                 Ok(sys::wait::WaitStatus::Exited(pid, code)) => {
-                    debug!("Process {} exit code is {}", pid, code);
-                    break ExitStatus::Exit(code);
+                    // There is no way to make the "init" exit with a signal status. Use a defined
+                    // offset to get the original signal. This is the sad way everyone does it...
+                    if SIGNAL_OFFSET <= code {
+                        println!("signal: {}", code - SIGNAL_OFFSET);
+                        let signal =
+                            Signal::try_from(code - SIGNAL_OFFSET).expect("Invalid signal offset");
+                        debug!("Process {} exit status is signal {}", pid, signal);
+                        break ExitStatus::Signaled(signal);
+                    } else {
+                        debug!("Process {} exit code is {}", pid, code);
+                        break ExitStatus::Exit(code);
+                    }
                 }
 
                 // The process was killed by the given signal.
@@ -705,7 +804,12 @@ async fn parent_waitpid(
     .map_err(|e| Error::io("Task join error", io::Error::new(io::ErrorKind::Other, e)))
 }
 
-fn set_pdeath_signal(signal: signal::Signal) -> anyhow::Result<()> {
+fn set_pdeath_signal(signal: Signal) -> anyhow::Result<()> {
+    #[cfg(target_os = "android")]
+    const PR_SET_PDEATHSIG: c_int = 1;
+    #[cfg(not(target_os = "android"))]
+    use libc::PR_SET_PDEATHSIG;
+
     let result = unsafe { nix::libc::prctl(PR_SET_PDEATHSIG, signal, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
@@ -713,11 +817,21 @@ fn set_pdeath_signal(signal: signal::Signal) -> anyhow::Result<()> {
 }
 
 fn set_no_new_privs(value: bool) -> anyhow::Result<()> {
+    #[cfg(target_os = "android")]
+    pub const PR_SET_NO_NEW_PRIVS: c_int = 38;
+    #[cfg(not(target_os = "android"))]
+    use libc::PR_SET_NO_NEW_PRIVS;
+
     let result = unsafe { nix::libc::prctl(PR_SET_NO_NEW_PRIVS, value as c_ulong, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
         .context("Failed to set PR_SET_NO_NEW_PRIVS")
 }
+
+#[cfg(target_os = "android")]
+pub const PR_SET_KEEPCAPS: c_int = 8;
+#[cfg(not(target_os = "android"))]
+use libc::PR_SET_KEEPCAPS;
 
 fn set_keep_caps(keep_capabilities: bool) -> anyhow::Result<()> {
     let result =
@@ -725,4 +839,90 @@ fn set_keep_caps(keep_capabilities: bool) -> anyhow::Result<()> {
     Errno::result(result)
         .map(drop)
         .context("Failed to set PR_SET_KEEPCAPS")
+}
+
+#[cfg(target_os = "android")]
+pub const PR_SET_NAME: c_int = 15;
+#[cfg(not(target_os = "android"))]
+use libc::PR_SET_NAME;
+
+fn pr_set_name(name: &str) -> anyhow::Result<()> {
+    let cname = CString::new(name).unwrap();
+    let result = unsafe { libc::prctl(PR_SET_NAME, cname.as_ptr() as c_ulong, 0, 0, 0) };
+    Errno::result(result)
+        .map(drop)
+        .context("Failed to set PR_SET_KEEPCAPS")
+}
+
+fn reset_signal_handlers() {
+    Signal::iterator()
+        .filter(|s| *s != Signal::SIGCHLD)
+        .filter(|s| *s != Signal::SIGKILL)
+        .filter(|s| *s != Signal::SIGSTOP)
+        .try_for_each(|s| unsafe { signal(s, SigHandler::SigDfl) }.map(drop))
+        .expect("failed to signal");
+}
+
+#[cfg(not(target_os = "android"))]
+fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
+    let combined = flags.bits() | signal.unwrap_or(0);
+    let res = unsafe {
+        libc::syscall(
+            libc::SYS_clone,
+            combined,
+            std::ptr::null() as *const c_void,
+            0u64,
+            0u64,
+            0u64,
+        )
+    };
+
+    Errno::result(res).map(|res| match res {
+        0 => ForkResult::Child,
+        res => ForkResult::Parent {
+            child: unistd::Pid::from_raw(res as i32),
+        },
+    })
+}
+
+#[cfg(target_os = "android")]
+fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
+    let combined = flags.bits() | signal.unwrap_or(0);
+    let null: *mut c_void = std::ptr::null_mut();
+    let res = unsafe {
+        libc::clone(
+            std::mem::transmute::<*const c_void, extern "C" fn(*mut c_void) -> c_int>(
+                std::ptr::null(),
+            ),
+            null,
+            combined,
+            null,
+            null,
+            null,
+            null,
+        )
+    };
+
+    Errno::result(res).map(|res| match res {
+        0 => ForkResult::Child,
+        res => ForkResult::Parent {
+            child: unistd::Pid::from_raw(res as i32),
+        },
+    })
+}
+
+static mut CHILD_PID: i32 = -1;
+
+extern "C" fn forward_signal_to_child(signal: c_int, _: *mut siginfo_t, _: *mut c_void) {
+    let child_pid = unsafe { CHILD_PID };
+    if child_pid >= 0 {
+        let child = nix::unistd::Pid::from_raw(child_pid);
+        let signal = Signal::try_from(signal).unwrap();
+        // Writing to stdout in signal handler is bad. Just left this here
+        // for debugging.
+        // println!("{}: forwarding {} to {}", getpid(), signal, child);
+        kill(child, Some(signal)).expect("failed to kill child");
+    } else {
+        panic!("CHILD_PID is not set");
+    }
 }
