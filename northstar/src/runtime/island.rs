@@ -36,7 +36,7 @@ use nix::{
     },
     unistd::{self, ForkResult, Uid},
 };
-use npk::manifest::{Mount, MountFlag};
+use npk::manifest::{Dev, Mount, MountFlag};
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -434,7 +434,7 @@ fn init_prepare(
 // missing. This is not a fault of the RT so don't expect it.
 // TODO: mount flags: nosuid etc....
 // TODO: /dev mounts from manifest: full or minimal
-fn init_rootfs(config: &Config, container: &Container<IslandProcess>) -> Result<(), Error> {
+fn init_rootfs(config: &Config, container: &Container<IslandProcess>) -> anyhow::Result<()> {
     let none = Option::<&str>::None;
     let root = container
         .root
@@ -444,125 +444,145 @@ fn init_rootfs(config: &Config, container: &Container<IslandProcess>) -> Result<
     let gid = container.manifest.gid;
 
     // /proc
+    cdebug!("Mounting /proc");
     let source = "/proc";
     let target = root.join("proc");
     mount::mount(none, &target, Some("proc"), MsFlags::empty(), none)
-        .map_err(|e| Error::os("Failed to mount /proc", e))?;
+        .context("Failed to mount /proc")?;
     // Remount /proc ro
+    cdebug!("Remount /proc read only");
     let flags = MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-    mount::mount(Some(source), &target, none, flags, none)
-        .map_err(|e| Error::os("Failed to remount /proc ro", e))?;
+    mount::mount(Some(source), &target, none, flags, none).context("Failed to remount /proc")?;
 
-    // /dev
-    let source = "/dev/";
-    let target = root.join("dev");
-    mount::mount(Some(source), &target, none, MsFlags::MS_BIND, none)
-        .map_err(|e| Error::os("Failed to mount /dev", e))?;
+    fn mount_dev(root: &Path, _type: &Dev) -> anyhow::Result<()> {
+        // TODO: Dev mount type
+        cdebug!("Mounting /dev");
+        let source = "/dev/";
+        let target = root.join("dev");
+        mount::mount(
+            Some(source),
+            &target,
+            Option::<&str>::None,
+            MsFlags::MS_BIND,
+            Option::<&str>::None,
+        )
+        .context("Failed to mount /dev")
+    }
 
-    for (target, mount) in &container.manifest.mounts {
-        match &mount {
-            Mount::Bind { host, flags } => {
-                if !&host.exists() {
-                    cwarn!(
-                        "Cannot bind mount nonexitent source {} to {}",
+    // TODO
+    if !container
+        .manifest
+        .mounts
+        .iter()
+        .any(|(_, mount)| matches!(mount, Mount::Dev { .. }))
+    {
+        mount_dev(&root, &Dev::Full)?;
+    }
+
+    container
+        .manifest
+        .mounts
+        .iter()
+        .try_for_each(|(target, mount)| {
+            match &mount {
+                Mount::Bind { host, flags } => {
+                    if !&host.exists() {
+                        cwarn!(
+                            "Cannot bind mount nonexitent source {} to {}",
+                            host.display(),
+                            target.display()
+                        );
+                        return Ok(());
+                    }
+                    let rw = flags.contains(&MountFlag::Rw);
+                    cdebug!(
+                        "Mounting {} on {}{}",
                         host.display(),
-                        target.display()
+                        target.display(),
+                        if rw { " (rw)" } else { "" }
                     );
-                    continue;
+                    let target = root.join_strip(target);
+                    mount::mount(Some(host), &target, none, MsFlags::MS_BIND, none)
+                        .with_context(|| format!("Failed to bind mount {}", target.display()))?;
+
+                    if !rw {
+                        let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
+                        mount::mount(Some(host), &target, none, flags, none)
+                            .with_context(|| format!("Failed to remount {}", target.display()))?;
+                    }
                 }
-                let rw = flags.contains(&MountFlag::Rw);
-                cdebug!(
-                    "Mounting {} on {}{}",
-                    host.display(),
-                    target.display(),
-                    if rw { " (rw)" } else { "" }
-                );
-                let target = root.join_strip(target);
-                mount::mount(Some(host), &target, none, MsFlags::MS_BIND, none).map_err(|e| {
-                    Error::os(format!("Failed to bind mount {}", target.display()), e)
-                })?;
-
-                if !rw {
-                    let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-                    mount::mount(Some(host), &target, none, flags, none).map_err(|e| {
-                        Error::os(format!("Failed to remount mount {}", target.display()), e)
-                    })?;
-                }
-            }
-            Mount::Persist => {
-                let dir = config.data_dir.join(&container.manifest.name);
-                if !dir.exists() {
-                    cdebug!("Creating {}", dir.display());
-                    std::fs::create_dir_all(&dir)
-                        .map_err(|e| Error::Io(format!("Failed to create {}", dir.display()), e))?;
-                }
-
-                cdebug!("Chowning {} to {}:{}", dir.display(), uid, gid);
-                unistd::chown(
-                    dir.as_os_str(),
-                    Some(unistd::Uid::from_raw(uid)),
-                    Some(unistd::Gid::from_raw(gid)),
-                )
-                .map_err(|e| {
-                    Error::os(
-                        format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-                        e,
-                    )
-                })?;
-
-                cdebug!("Mounting {} on {}", dir.display(), target.display(),);
-
-                let target = root.join_strip(target);
-                mount::mount(Some(&dir), &target, none, MsFlags::MS_BIND, none).map_err(|e| {
-                    Error::os(format!("Failed to bind mount {}", target.display()), e)
-                })?;
-            }
-            Mount::Resource { name, version, dir } => {
-                let src = {
-                    // Join the source of the resource container with the mount dir
-                    let resource_root = config.run_dir.join(format!("{}:{}", name, version));
-                    let dir = dir
-                        .strip_prefix("/")
-                        .map(|d| resource_root.join(d))
-                        .unwrap_or(resource_root);
-
+                Mount::Persist => {
+                    let dir = config.data_dir.join(&container.manifest.name);
                     if !dir.exists() {
-                        return Err(Error::StartContainerFailed(
-                            container.container.clone(),
-                            format!("Resource folder {} is missing", dir.display()),
-                        ));
+                        cdebug!("Creating {}", dir.display());
+                        std::fs::create_dir_all(&dir).map_err(|e| {
+                            Error::Io(format!("Failed to create {}", dir.display()), e)
+                        })?;
                     }
 
-                    dir
-                };
+                    cdebug!("Chowning {} to {}:{}", dir.display(), uid, gid);
+                    unistd::chown(
+                        dir.as_os_str(),
+                        Some(unistd::Uid::from_raw(uid)),
+                        Some(unistd::Gid::from_raw(gid)),
+                    )
+                    .map_err(|e| {
+                        Error::os(
+                            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
+                            e,
+                        )
+                    })?;
 
-                cdebug!("Mounting {} on {}", src.display(), target.display());
+                    cdebug!("Mounting {} on {}", dir.display(), target.display(),);
 
-                let target = root.join_strip(target);
-                mount::mount(Some(&src), &target, none, MsFlags::MS_BIND, none)
-                    .map_err(|e| Error::os(format!("Failed to mount {}", target.display()), e))?;
+                    let target = root.join_strip(target);
+                    mount::mount(Some(&dir), &target, none, MsFlags::MS_BIND, none)
+                        .with_context(|| format!("Failed to bind mount {}", target.display()))?;
+                }
+                Mount::Resource { name, version, dir } => {
+                    let src = {
+                        // Join the source of the resource container with the mount dir
+                        let resource_root = config.run_dir.join(format!("{}:{}", name, version));
+                        let dir = dir
+                            .strip_prefix("/")
+                            .map(|d| resource_root.join(d))
+                            .unwrap_or(resource_root);
 
-                // Remount ro
-                let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-                mount::mount(Some(&src), &target, none, flags, none)
-                    .map_err(|e| Error::os(format!("Failed to remount {}", target.display()), e))?;
+                        if !dir.exists() {
+                            return Err(anyhow::anyhow!("Missing resource {}", dir.display()));
+                        }
+
+                        dir
+                    };
+
+                    cdebug!("Mounting {} on {}", src.display(), target.display());
+
+                    let target = root.join_strip(target);
+                    mount::mount(Some(&src), &target, none, MsFlags::MS_BIND, none)
+                        .with_context(|| format!("Failed to mount {}", target.display()))?;
+
+                    // Remount ro
+                    let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
+                    mount::mount(Some(&src), &target, none, flags, none)
+                        .with_context(|| format!("Failed to remount {}", target.display()))?;
+                }
+                Mount::Tmpfs { size } => {
+                    cdebug!(
+                        "Mounting tmpfs with size {} on {}",
+                        bytesize::ByteSize::b(*size),
+                        target.display()
+                    );
+                    let target = root.join_strip(target);
+                    let data = format!("size={},mode=1777", size);
+                    let flags = MsFlags::empty();
+                    mount::mount(none, &target, Some("tmpfs"), flags, Some(data.as_str()))
+                        .with_context(|| format!("Failed to bind mount {}", target.display()))?;
+                }
+                Mount::Dev { r#type } => mount_dev(&root, r#type)?,
             }
-            Mount::Tmpfs { size } => {
-                cdebug!(
-                    "Mounting tmpfs with size {} on {}",
-                    bytesize::ByteSize::b(*size),
-                    target.display()
-                );
-                let target = root.join_strip(target);
-                let data = format!("size={},mode=1777", size);
-                let flags = MsFlags::empty();
-                mount::mount(none, &target, Some("tmpfs"), flags, Some(data.as_str())).map_err(
-                    |e| Error::os(format!("Failed to bind mount {}", target.display()), e),
-                )?;
-            }
-            _ => (),
-        }
-    }
+            Ok(())
+        })?;
+
     Ok(())
 }
 
@@ -880,8 +900,7 @@ fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
 #[cfg(target_os = "android")]
 #[allow(invalid_value)]
 fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
-    use std::mem::transmute;
-    use std::ptr::null_mut;
+    use std::{mem::transmute, ptr::null_mut};
     let combined = flags.bits() | signal.unwrap_or(0);
     let res = unsafe {
         libc::clone(
