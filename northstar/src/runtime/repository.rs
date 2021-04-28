@@ -94,7 +94,7 @@ impl Repository {
         let version = npk.manifest().version.clone();
         let container = Container::new(name, version);
         self.containers
-            .insert(container.clone(), (dest.to_owned(), npk.manifest().clone()));
+            .insert(container, (dest.to_owned(), npk.manifest().clone()));
 
         Ok(())
     }

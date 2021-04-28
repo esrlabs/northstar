@@ -74,7 +74,7 @@ pub(super) fn init(
     fds.insert(intercom.1.as_raw_fd(), intercom.1.as_raw_fd());
 
     if let Err(e) = prepare(&config, container, fds) {
-        cwarn!("Init error: {:?}", e);
+        println!("Init error: {:?}", e);
         intercom
             .send(LaunchProtocol::Error(e.to_string()))
             .expect("intercom error");
@@ -132,7 +132,7 @@ pub(super) fn init(
                 cond.wait();
                 drop(intercom);
                 reset_signal_handlers();
-                set_pdeath_signal(SIGKILL).expect("Failed to set parent death signal");
+                set_parent_death_signal(SIGKILL).expect("Failed to set parent death signal");
 
                 let (init, argv, env) = args(&container.manifest);
                 println!("{} init: {:?}", id, init);
@@ -162,7 +162,7 @@ fn prepare(
     rootfs(&config, &container).context("Failed to mount")?;
 
     // Chroot
-    cdebug!("Using chroot {}", root.display());
+    cdebug!("Setting chroot to {}", root.display());
     unistd::chroot(&root).context("Failed to chroot")?;
 
     // Pwd
@@ -176,16 +176,18 @@ fn prepare(
     set_no_new_privs(true)?;
 
     // Become a subreaper for orphans in this namespace
+    cdebug!("Setting child subreaper flag");
     set_child_subreaper(true)?;
 
     // Set the parent process death signal of the calling process to arg2
     // (either a signal value in the range 1..maxsig, or 0 to clear).
-    set_pdeath_signal(SIGKILL)?;
-
-    close_fds(fds)?;
+    cdebug!("Setting parent death signal to SIGKILL");
+    set_parent_death_signal(SIGKILL)?;
 
     // Capabilities
-    drop_cap(manifest.capabilities.as_ref()).context("Failed to drop privs")?;
+    drop_capabilities(manifest.capabilities.as_ref()).context("Failed to drop privs")?;
+
+    close_file_descriptors(fds)?;
 
     // We cannot use log after here because the fd to logd is closed on Android
 
@@ -246,8 +248,8 @@ fn rootfs(config: &Config, container: &Container<IslandProcess>) -> anyhow::Resu
             match &mount {
                 Mount::Bind { host, flags } => {
                     if !&host.exists() {
-                        cwarn!(
-                            "Cannot bind mount nonexitent source {} to {}",
+                        cdebug!(
+                            "Skipping bind mount of nonexitent source {} to {}",
                             host.display(),
                             target.display()
                         );
@@ -346,8 +348,9 @@ fn rootfs(config: &Config, container: &Container<IslandProcess>) -> anyhow::Resu
 }
 
 // TODO: Do not close the namespace fds?
-fn close_fds(map: HashMap<i32, i32>) -> anyhow::Result<()> {
+fn close_file_descriptors(map: HashMap<i32, i32>) -> anyhow::Result<()> {
     let keep: HashSet<i32> = map.keys().cloned().collect();
+
     for (k, v) in map.iter().filter(|(k, v)| k != v) {
         // If the fd is mappped to a different fd create a copy
         cdebug!("Using fd {} mapped as fd {}", v, k);
@@ -355,12 +358,8 @@ fn close_fds(map: HashMap<i32, i32>) -> anyhow::Result<()> {
     }
 
     // Close open fds which are not mapped
-    let fd = Path::new("/proc")
-        .join(unistd::getpid().to_string())
-        .join("fd");
-
-    let fds = std::fs::read_dir(&fd)
-        .expect("Failed to read list of fds")
+    let fds = std::fs::read_dir("/proc/self/fd")
+        .context("Readdir of /proc/self/fd")?
         .map(|e| e.unwrap().path())
         .map(|e| e.file_name().unwrap().to_str().unwrap().parse().unwrap())
         .filter(|fd| !keep.contains(fd))
@@ -425,7 +424,8 @@ extern "C" fn forward_signal_to_child(signal: c_int, _: *mut siginfo_t, _: *mut 
         // println!("{}: forwarding {} to {}", getpid(), signal, child);
         kill(child, Some(signal)).expect("failed to kill child");
     } else {
-        panic!("CHILD_PID is not set");
+        // The signal happened before forking the child process or the forking
+        // of the child raised this signal. Safe to ignore.
     }
 }
 
@@ -443,7 +443,7 @@ fn set_child_subreaper(value: bool) -> anyhow::Result<()> {
         .context("Failed to set PR_SET_PDEATHSIG")
 }
 
-fn set_pdeath_signal(signal: Signal) -> anyhow::Result<()> {
+fn set_parent_death_signal(signal: Signal) -> anyhow::Result<()> {
     #[cfg(target_os = "android")]
     const PR_SET_PDEATHSIG: c_int = 1;
     #[cfg(not(target_os = "android"))]
@@ -521,20 +521,20 @@ fn setid(uid: u32, gid: u32) -> anyhow::Result<()> {
 }
 
 /// Drop capabilities
-fn drop_cap(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> {
+fn drop_capabilities(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> {
     let mut bounded = caps::read(None, caps::CapSet::Bounding)?;
     if let Some(caps) = cs {
         bounded.retain(|c| !caps.contains(c));
     }
 
-    println!("Dropping capabilities");
+    cdebug!("Dropping capabilities");
     for cap in bounded {
         // caps::set cannot be called for for bounded
         caps::drop(None, caps::CapSet::Bounding, cap)?;
     }
 
     if let Some(caps) = cs {
-        println!("Settings capabilities to {:?}", caps);
+        cdebug!("Settings capabilities to {:?}", caps);
         caps::set(None, caps::CapSet::Effective, caps)?;
         caps::set(None, caps::CapSet::Permitted, caps)?;
         caps::set(None, caps::CapSet::Inheritable, caps)?;
