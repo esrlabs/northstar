@@ -129,10 +129,11 @@ pub(super) fn init(
                 };
             }
             unistd::ForkResult::Child => {
-                cond.wait();
                 drop(intercom);
                 reset_signal_handlers();
                 set_parent_death_signal(SIGKILL).expect("Failed to set parent death signal");
+
+                cond.wait();
 
                 let (init, argv, env) = args(&container.manifest);
                 println!("{} init: {:?}", id, init);
