@@ -176,6 +176,9 @@ fn prepare(
     cdebug!("Setting no new privs");
     set_no_new_privs(true)?;
 
+    // Become a subreaper for orphans in this namespace
+    set_child_subreaper(true)?;
+
     // Set the parent process death signal of the calling process to arg2
     // (either a signal value in the range 1..maxsig, or 0 to clear).
     set_pdeath_signal(SIGKILL)?;
@@ -425,6 +428,20 @@ extern "C" fn forward_signal_to_child(signal: c_int, _: *mut siginfo_t, _: *mut 
     } else {
         panic!("CHILD_PID is not set");
     }
+}
+
+fn set_child_subreaper(value: bool) -> anyhow::Result<()> {
+    #[cfg(target_os = "android")]
+    const PR_SET_CHILD_SUBREAPER: c_int = 36;
+    #[cfg(not(target_os = "android"))]
+    use libc::PR_SET_CHILD_SUBREAPER;
+
+    let value = if value { 1u64 } else { 0u64 };
+
+    let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
+    Errno::result(result)
+        .map(drop)
+        .context("Failed to set PR_SET_PDEATHSIG")
 }
 
 fn set_pdeath_signal(signal: Signal) -> anyhow::Result<()> {
