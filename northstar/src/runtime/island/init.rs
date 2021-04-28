@@ -73,78 +73,77 @@ pub(super) fn init(
     fds.insert(intercom.0.as_raw_fd(), intercom.0.as_raw_fd());
     fds.insert(intercom.1.as_raw_fd(), intercom.1.as_raw_fd());
 
-    match prepare(&config, container, fds) {
-        Ok(_) => {
-            let id = format!("init-{}", container.manifest.name);
+    if let Err(e) = prepare(&config, container, fds) {
+        cwarn!("Init error: {:?}", e);
+        intercom
+            .send(LaunchProtocol::Error(e.to_string()))
+            .expect("intercom error");
+        panic!("Init error: {}", e);
+    }
 
-            // Synchronize parent and child startup since we have to rely on a global mut
-            // because unix signal handler suck.
-            let cond = Condition::new().expect("Failed to create pipe");
+    let id = format!("init-{}", container.manifest.name);
 
-            match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
-                Ok(result) => match result {
-                    unistd::ForkResult::Parent { child } => {
-                        // Update global CHILD_PID
-                        unsafe {
-                            CHILD_PID = child.as_raw();
-                        }
-                        // Signal the child it can go
-                        cond.notify();
+    // Synchronize parent and child startup since we have to rely on a global mut
+    // because unix signal handler suck.
+    let cond = Condition::new().expect("Failed to create pipe");
 
-                        //println!("{}: Waiting for go", id);
-                        intercom.recv::<LaunchProtocol>().expect("intercom error");
-                        intercom
-                            .send(LaunchProtocol::InitReady)
-                            .expect("intercom error");
+    match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
+        Ok(result) => match result {
+            unistd::ForkResult::Parent { child } => {
+                // Update global CHILD_PID
+                unsafe {
+                    CHILD_PID = child.as_raw();
+                }
 
-                        drop(intercom);
+                //println!("{}: Waiting for go", id);
+                intercom.recv::<LaunchProtocol>().expect("intercom error");
 
-                        // TODO: Anything we can do here to free stuff before waiting forever?
+                // Signal the child it can go
+                cond.notify();
 
-                        // If the child dies before we waitpid here it becomes a zombie and is catched
+                intercom
+                    .send(LaunchProtocol::InitReady)
+                    .expect("intercom error");
 
-                        // Wait for the child to exit
-                        //println!("{}: waiting for {} to exit", id, child);
-                        let result = waitpid(Some(child), None).expect("waitpid");
-                        //println!("{}: waitpid result of {}: {:?}", id, child, result);
-                        match result {
-                            WaitStatus::Exited(_pid, status) => exit(status),
-                            WaitStatus::Signaled(_pid, status, _) => {
-                                // Encode the signal number in the process exit status. It's not possible to raise a
-                                // a signal in this "init" process that is received by our parent
-                                let code = SIGNAL_OFFSET + status as i32;
-                                //println!("{}: exiting with {} (signaled {})", id, code, status);
-                                exit(code);
-                            }
-                            // TODO: Other waitpid results
-                            _ => panic!("abnormal exit of child process"),
-                        };
+                drop(intercom);
+
+                // TODO: Anything we can do here to free stuff before waiting forever?
+
+                // If the child dies before we waitpid here it becomes a zombie and is catched
+
+                // Wait for the child to exit
+                //println!("{}: waiting for {} to exit", id, child);
+                let result = waitpid(Some(child), None).expect("waitpid");
+                //println!("{}: waitpid result of {}: {:?}", id, child, result);
+                match result {
+                    WaitStatus::Exited(_pid, status) => exit(status),
+                    WaitStatus::Signaled(_pid, status, _) => {
+                        // Encode the signal number in the process exit status. It's not possible to raise a
+                        // a signal in this "init" process that is received by our parent
+                        let code = SIGNAL_OFFSET + status as i32;
+                        //println!("{}: exiting with {} (signaled {})", id, code, status);
+                        exit(code);
                     }
-                    unistd::ForkResult::Child => {
-                        cond.wait();
-                        drop(intercom);
-                        reset_signal_handlers();
-                        set_pdeath_signal(SIGKILL).expect("Failed to set parent death signal");
-
-                        let (init, argv, env) = args(&container.manifest);
-                        println!("{} init: {:?}", id, init);
-                        println!("{} argv: {:#?}", id, argv);
-                        println!("{} env: {:#?}", id, env);
-
-                        panic!("{}: {:?}", id, unistd::execve(&init, &argv, &env))
-                    }
-                },
-                Err(e) => panic!("Fork error: {}", e),
+                    // TODO: Other waitpid results
+                    _ => panic!("abnormal exit of child process"),
+                };
             }
-        }
-        Err(e) => {
-            cwarn!("Child init error: {:?}", e);
-            intercom
-                .send(LaunchProtocol::Error(e.to_string()))
-                .expect("intercom error");
-            panic!("Init error: {}", e);
-        }
-    };
+            unistd::ForkResult::Child => {
+                cond.wait();
+                drop(intercom);
+                reset_signal_handlers();
+                set_pdeath_signal(SIGKILL).expect("Failed to set parent death signal");
+
+                let (init, argv, env) = args(&container.manifest);
+                println!("{} init: {:?}", id, init);
+                println!("{} argv: {:#?}", id, argv);
+                println!("{} env: {:#?}", id, env);
+
+                panic!("{}: {:?}", id, unistd::execve(&init, &argv, &env))
+            }
+        },
+        Err(e) => panic!("Fork error: {}", e),
+    }
 }
 
 /// Prepare the environment in init

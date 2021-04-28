@@ -12,13 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::pipe::PipeRead;
 use super::{
     config::Config,
     error::Error,
     pipe::{pipe_duplex, PipeSendRecv, PipeWrite},
     Event, EventTx, ExitStatus, Launcher, MountedContainer as Container, Pid, Process,
 };
+use crate::runtime::pipe::PipeRead;
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
 use log::{debug, info, warn};
