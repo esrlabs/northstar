@@ -13,5 +13,7 @@ mounts:
       host: /lib64
     /system:
       host: /system
+    /tmp:
+      tmpfs: 20480000
 capabilities:
   - CAP_KILL
