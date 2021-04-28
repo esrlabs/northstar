@@ -158,11 +158,10 @@ impl<'a, L: Launcher> State<'a, L> {
         })
     }
 
-    fn npk(&self, container: &Container) -> Option<(&Path, &Npk, Option<&PublicKey>)> {
+    fn npk(&self, container: &Container) -> Option<(&Path, &Manifest, Option<&PublicKey>)> {
         for repository in self.repositories.values() {
-            if let Some(path) = repository.containers.get(container) {
-                let npk = repository.npks.get(container)?;
-                return Some((path, npk, repository.key.as_ref()));
+            if let Some((path, manifest)) = repository.containers.get(container) {
+                return Some((path, manifest, repository.key.as_ref()));
             }
         }
         None
@@ -274,9 +273,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         let mut need_mount = HashSet::new();
 
-        if let Some((_, npk, _)) = self.npk(container) {
-            let manifest = npk.manifest();
-
+        if let Some((_, manifest, _)) = self.npk(container) {
             // The the to be started container
             if let Some(mounted_container) = self.containers.get(container) {
                 // Check if the container is not a resouce
@@ -718,7 +715,7 @@ impl<'a, L: Launcher> State<'a, L> {
     async fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut containers = Vec::new();
         for (repository_name, repository) in &self.repositories {
-            for npk in repository.containers.values() {
+            for (npk, _) in repository.containers.values() {
                 let npk = Npk::from_path(npk, None).await.expect("Failed to read npk");
                 let manifest = npk.manifest();
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
