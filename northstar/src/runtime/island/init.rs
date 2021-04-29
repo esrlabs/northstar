@@ -544,11 +544,11 @@ fn setgroups(gid: u32, supplementary_groups: &[(String, Option<Gid>)]) -> anyhow
     );
 
     cdebug!("Setting groups {:?}", groups);
-    unsafe {
-        nix::libc::setgroups(groups.len(), groups.as_ptr());
-    }
+    let result = unsafe { nix::libc::setgroups(groups.len(), groups.as_ptr()) };
 
-    Ok(())
+    Errno::result(result)
+        .map(drop)
+        .context("Failed to set PR_SET_PDEATHSIG")
 }
 
 /// Drop capabilities
