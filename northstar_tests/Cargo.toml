@@ -5,8 +5,10 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0"
 color-eyre = "0.5.11"
-colored = "2.0"
+env_logger = "0.8.3"
+flume = { version = "0.10.5", features = ["async"] }
 futures = "0.3.14"
 lazy_static = "1.4"
 log = "0.4.14"

@@ -12,89 +12,84 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use color_eyre::eyre::{eyre, Result};
-use colored::Colorize;
+use anyhow::{anyhow, Context, Result};
 use lazy_static::lazy_static;
-use log::{Level, Metadata, Record};
+use log::{debug, warn};
 use regex::Regex;
 use std::{
-    sync::{self, mpsc},
+    fmt,
+    io::Write,
     time::{Duration, Instant},
 };
-use tokio::{select, task::spawn_blocking, time};
+use tokio::{pin, select, time};
 
 lazy_static! {
     static ref QUEUE: (
-        sync::Mutex<mpsc::Sender<String>>,
-        sync::Mutex<mpsc::Receiver<String>>
+        std::sync::Mutex<flume::Sender<String>>,
+        tokio::sync::Mutex<flume::Receiver<String>>
     ) = {
-        let (tx, rx) = mpsc::channel::<String>();
-        (sync::Mutex::new(tx), sync::Mutex::new(rx))
+        let (tx, rx) = flume::unbounded();
+        (std::sync::Mutex::new(tx), tokio::sync::Mutex::new(rx))
     };
     static ref START: Instant = Instant::now();
 }
 
-pub struct LogParser;
+pub fn init() {
+    let mut builder = env_logger::Builder::new();
+    builder.parse_filters("debug");
 
-impl log::Log for LogParser {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
+    builder.format(|buf, record| {
+        let tx = QUEUE.0.lock().unwrap();
+        tx.send(record.args().to_string()).expect("Channel error");
 
-    fn log(&self, record: &Record) {
-        fn level_format(level: Level) -> String {
-            match level {
-                Level::Error => "E".red(),
-                Level::Warn => "W".truecolor(255, 69, 0),
-                Level::Info => "I".normal(),
-                Level::Debug => "D".green(),
-                Level::Trace => "T".yellow(),
-            }
-            .to_string()
+        let timestamp = buf.timestamp_millis();
+        let level = buf.default_styled_level(record.metadata().level());
+
+        if let Some(module_path) = record
+            .module_path()
+            .and_then(|module_path| module_path.find(&"::").map(|p| &module_path[p + 2..]))
+        {
+            writeln!(
+                buf,
+                "{}: {:<5}: {} {}",
+                timestamp,
+                level,
+                module_path,
+                record.args(),
+            )
+        } else {
+            writeln!(buf, "{}: {:<5}: {}", timestamp, level, record.args(),)
         }
+    });
 
-        let start = *START;
-
-        println!(
-            "{:010} {} {}: {}",
-            Instant::now().duration_since(start).as_millis(),
-            level_format(record.level()),
-            record.module_path().unwrap_or(""),
-            record.args().to_string()
-        );
-
-        QUEUE
-            .0
-            .lock()
-            .unwrap()
-            .send(record.args().to_string())
-            .expect("Logger queue error")
-    }
-
-    fn flush(&self) {}
-}
-
-/// Clear the logger queue prior to each test run
-pub fn reset() {
-    let queue = QUEUE.1.lock().expect("Failed to lock log queue");
-    while queue.try_recv().is_ok() {}
+    builder.init()
 }
 
 /// Assume the runtime to log a line matching `pattern` within
 /// `timeout` seconds.
-pub async fn assume(pattern: &'static str, timeout: u64) -> Result<()> {
-    let assumption = spawn_blocking(move || loop {
-        let regex = Regex::new(&pattern).expect("Invalid regex");
-        match QUEUE.1.lock().unwrap().recv() {
-            Ok(n) if regex.is_match(&n) => break Ok(()),
-            Ok(_) => continue,
-            Err(e) => break Err(e),
-        }
-    });
-
+pub async fn assume<T: ToString + fmt::Display>(pattern: T, timeout: u64) -> Result<()> {
+    let regex = Regex::new(&pattern.to_string()).context("Invalid regex")?;
     let timeout = time::sleep(Duration::from_secs(timeout));
-    select! {
-        _ = timeout => Err(eyre!("Timeout waiting for {}", pattern)),
-        _ = assumption => Ok(()),
+    pin!(timeout);
+
+    let rx = QUEUE.1.lock().await;
+
+    loop {
+        select! {
+            _ = &mut timeout => {
+                warn!("Log assumption \"{}\" timeout", pattern);
+                return Err(anyhow!("Timeout waiting for \"{}\"", pattern));
+            }
+            log = rx.recv_async() => {
+                match log {
+                    Ok(n) if regex.is_match(&n) => {
+                        debug!("Log assumption \"{}\" success", pattern);
+                        break Ok(());
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break Err(anyhow!("Internal error")),
+                }
+            }
+        }
     }
 }
