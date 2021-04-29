@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use super::model;
-use bytes::{Buf, BufMut};
 use futures::Stream;
 use std::{
     cmp::min,
@@ -45,29 +44,28 @@ impl<T> Framed<T> {
 /// Constructs a new Framed with Codec from `io`
 pub fn framed<T: AsyncRead + AsyncWrite>(io: T) -> Framed<T> {
     Framed {
-        inner: tokio_util::codec::Framed::new(io, Codec {}),
+        inner: tokio_util::codec::Framed::new(io, Codec::default()),
     }
 }
 
 /// Newline delimited json
-pub struct Codec;
+#[derive(Default)]
+pub struct Codec {
+    lines: tokio_util::codec::LinesCodec,
+}
 
 impl Decoder for Codec {
     type Item = model::Message;
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if let Some(position) = src.iter().position(|b| *b == b'\n') {
-            let buf = src.split_to(position);
-            // Consume the newline
-            src.advance(1);
-            match serde_json::from_slice::<model::Message>(&buf) {
-                Ok(message) => Ok(Some(message)),
-                Err(e) => Err(io::Error::new(ErrorKind::InvalidData, e)),
-            }
-        } else {
-            Ok(None)
-        }
+        self.lines
+            .decode(src)
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))? // See LinesCodecError.
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))
     }
 }
 
@@ -79,10 +77,9 @@ impl Encoder<model::Message> for Codec {
         item: model::Message,
         dst: &mut bytes::BytesMut,
     ) -> Result<(), Self::Error> {
-        dst.extend_from_slice(serde_json::to_string(&item)?.as_bytes());
-        dst.reserve(1);
-        dst.put_u8(b'\n');
-        Ok(())
+        self.lines
+            .encode(serde_json::to_string(&item)?.as_str(), dst)
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))
     }
 }
 
@@ -169,7 +166,7 @@ mod tests {
             let mut message_as_bytes = BytesMut::default();
 
             // Action.
-            let mut codec = Codec {};
+            let mut codec = Codec::default();
 
             codec.encode(initial_message.clone(), &mut message_as_bytes)?;
             let message = codec.decode(&mut message_as_bytes)?;
