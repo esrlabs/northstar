@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use futures::ready;
-use nix::unistd;
+use nix::{fcntl, unistd};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     convert::TryFrom,
@@ -280,10 +280,29 @@ pub(crate) struct Condition {
 impl Condition {
     pub(crate) fn new() -> Result<Condition> {
         let (rfd, wfd) = pipe()?;
+
         Ok(Condition {
             read: rfd,
             write: wfd,
         })
+    }
+
+    pub(crate) fn set_cloexec(&self) -> Result<()> {
+        let mut flags = fcntl::fcntl(self.read.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
+        flags.set(fcntl::FdFlag::FD_CLOEXEC, true);
+        fcntl::fcntl(self.read.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let mut flags = fcntl::fcntl(self.write.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
+        flags.set(fcntl::FdFlag::FD_CLOEXEC, true);
+        fcntl::fcntl(self.write.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        Ok(())
     }
 
     pub(crate) fn wait(mut self) {
