@@ -29,11 +29,16 @@ use nix::{
         self,
         signal::{Signal, SIGCHLD},
     },
-    unistd,
+    unistd::{self, Gid},
 };
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, fmt};
+use std::{
+    convert::TryFrom,
+    ffi::{c_void, CString},
+    fmt,
+    ptr::null,
+};
 use tokio::{task, time};
 
 mod clone;
@@ -121,6 +126,8 @@ impl Launcher for Island {
 
         let (stdout, stderr, child_fd_map) = io::from_manifest(&container.manifest).await?;
 
+        let groups = groups(&container.manifest);
+
         // Clone init
         let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
         match clone::clone(flags, Some(SIGCHLD as i32)) {
@@ -136,9 +143,13 @@ impl Launcher for Island {
                         io: (stdout, stderr),
                     })
                 }
-                unistd::ForkResult::Child => {
-                    init::init(&self.config, container, child_fd_map, intercom_init)
-                }
+                unistd::ForkResult::Child => init::init(
+                    &self.config,
+                    container,
+                    child_fd_map,
+                    &groups,
+                    intercom_init,
+                ),
             },
             Err(e) => panic!("Fork error: {}", e),
         }
@@ -307,4 +318,28 @@ async fn wait(
             std::io::Error::new(std::io::ErrorKind::Other, e),
         )
     })
+}
+
+/// Generate a list of supplementary gids if the groups info can be retrieved. This
+/// must happen before the init `clone` because the group information cannot be gathered
+/// without `/etc` etc...
+fn groups(manifest: &npk::manifest::Manifest) -> Vec<(String, Option<Gid>)> {
+    if let Some(groups) = manifest.suppl_groups.as_ref() {
+        let mut result = Vec::with_capacity(groups.len());
+        for group in groups {
+            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+            let group_info =
+                unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
+            if group_info == (null::<c_void>() as *mut nix::libc::group) {
+                result.push((group.clone(), None));
+            } else {
+                let gid = unsafe { (*group_info).gr_gid };
+                // TODO: Are there gids cannot use?
+                result.push((group.clone(), Some(Gid::from_raw(gid))))
+            }
+        }
+        result
+    } else {
+        Vec::with_capacity(0)
+    }
 }

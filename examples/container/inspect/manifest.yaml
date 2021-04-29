@@ -17,3 +17,6 @@ mounts:
       tmpfs: 20480000
 capabilities:
   - CAP_KILL
+suppl_groups:
+  - src
+  - inet

@@ -13,7 +13,10 @@
 //   limitations under the License.
 
 use caps::CapSet;
-use nix::{libc::c_int, unistd};
+use nix::{
+    libc::c_int,
+    unistd::{self, Gid},
+};
 use signal_hook::{consts::signal::*, low_level};
 use std::{env, fs};
 
@@ -39,6 +42,15 @@ fn main() {
     println!("getppid: {}", unistd::getppid());
     println!("getuid: {}", unistd::getuid());
     println!("getgid: {}", unistd::getgid());
+    println!(
+        "getgroups: {:?}",
+        unistd::getgroups()
+            .expect("getgroups")
+            .iter()
+            .cloned()
+            .map(Gid::as_raw)
+            .collect::<Vec<_>>()
+    );
     let pwd = env::current_dir().expect("current_dir");
     println!("pwd: {}", pwd.display());
     let exe = env::current_exe().expect("current_exe");
@@ -88,7 +100,7 @@ fn main() {
             .unwrap()
             .trim_start_matches('(')
             .trim_end_matches(')');
-        println!("    {:>10}: {:<10}: {}", pid, name, cmdline);
+        println!("{:>8}: {:>10}: {}", pid, name, cmdline);
     }
 
     let mut sigs = Signals::new(SIGNALS).expect("install signal handler");

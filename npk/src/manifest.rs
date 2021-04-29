@@ -510,7 +510,9 @@ impl Manifest {
     });
 
     pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
-        serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)
+        let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)?;
+        manifest.verify()?;
+        Ok(manifest)
     }
 
     pub fn to_writer<W: io::Write>(&self, writer: W) -> Result<(), Error> {
@@ -529,6 +531,20 @@ impl Manifest {
         if self.uid == 0 {
             return Err(Error::Invalid("Invalid uid 0".to_string()));
         }
+
+        // Check for null bytes in suppl groups. Rust Strings allow null bytes in Strings.
+        // For passing the group names to getgrnam they need to be C string compliant.
+        if let Some(suppl_groups) = self.suppl_groups.as_ref() {
+            for suppl_group in suppl_groups {
+                if suppl_group.contains('\0') {
+                    return Err(Error::Invalid(format!(
+                        "Null byte in suppl group {}",
+                        suppl_group
+                    )));
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -536,11 +552,9 @@ impl Manifest {
 impl FromStr for Manifest {
     type Err = Error;
     fn from_str(s: &str) -> Result<Manifest, Error> {
-        let parse_res: Result<Manifest, Error> = serde_yaml::from_str(s).map_err(Error::SerdeYaml);
-        if let Ok(manifest) = &parse_res {
-            manifest.verify()?;
-        }
-        parse_res
+        let manifest: Self = serde_yaml::from_str(s).map_err(Error::SerdeYaml)?;
+        manifest.verify()?;
+        Ok(manifest)
     }
 }
 

@@ -32,7 +32,7 @@ use nix::{
             SIGKILL,
         },
     },
-    unistd::{self, Uid},
+    unistd::{self, Gid, Uid},
 };
 use npk::manifest::{Dev, Mount, MountFlag};
 use sched::CloneFlags;
@@ -65,6 +65,7 @@ pub(super) fn init(
     config: &Config,
     container: &Container<IslandProcess>,
     mut fds: HashMap<i32, i32>,
+    groups: &[(String, Option<Gid>)],
     mut intercom: Intercom,
 ) -> ! {
     pr_set_name("init").expect("Failed to set init process name");
@@ -73,7 +74,7 @@ pub(super) fn init(
     fds.insert(intercom.0.as_raw_fd(), intercom.0.as_raw_fd());
     fds.insert(intercom.1.as_raw_fd(), intercom.1.as_raw_fd());
 
-    if let Err(e) = prepare(&config, container, fds) {
+    if let Err(e) = prepare(&config, container, fds, &groups) {
         println!("Init error: {:?}", e);
         intercom
             .send(LaunchProtocol::Error(e.to_string()))
@@ -152,6 +153,7 @@ fn prepare(
     config: &Config,
     container: &Container<IslandProcess>,
     fds: HashMap<i32, i32>,
+    supplementary_groups: &[(String, Option<Gid>)],
 ) -> anyhow::Result<()> {
     let manifest = &container.manifest;
     let root = container.root.canonicalize()?;
@@ -172,6 +174,9 @@ fn prepare(
 
     // UID / GID
     setid(manifest.uid, manifest.gid).context("Failed to setuid/gid")?;
+
+    // Supplementary groups
+    setgroups(manifest.gid, &supplementary_groups)?;
 
     cdebug!("Setting no new privs");
     set_no_new_privs(true)?;
@@ -507,15 +512,40 @@ fn setid(uid: u32, gid: u32) -> anyhow::Result<()> {
         caps::securebits::set_keepcaps(true).context("Failed to set keep caps")?;
     }
 
+    cdebug!("Setting gid to {}", gid);
     let gid = unistd::Gid::from_raw(gid);
     unistd::setresgid(gid, gid, gid).context("Failed to set resgid")?;
 
+    cdebug!("Setting uid to {}", uid);
     let uid = unistd::Uid::from_raw(uid);
     unistd::setresuid(uid, uid, uid).context("Failed to set resuid")?;
 
     if rt_priveleged {
         reset_effective_caps()?;
         caps::securebits::set_keepcaps(false).context("Failed to set keep caps")?;
+    }
+
+    Ok(())
+}
+
+fn setgroups(gid: u32, supplementary_groups: &[(String, Option<Gid>)]) -> anyhow::Result<()> {
+    let mut groups = vec![gid];
+    groups.reserve(supplementary_groups.len());
+    groups.extend(
+        supplementary_groups
+            .iter()
+            .filter_map(|(group, gid)| {
+                if gid.is_none() {
+                    cwarn!("Skipping invalid supplementary group {}", group);
+                }
+                *gid
+            })
+            .map(Gid::as_raw),
+    );
+
+    cdebug!("Setting groups {:?}", groups);
+    unsafe {
+        nix::libc::setgroups(groups.len(), groups.as_ptr());
     }
 
     Ok(())
