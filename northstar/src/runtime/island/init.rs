@@ -85,8 +85,13 @@ pub(super) fn init(
     let id = format!("init-{}", container.manifest.name);
 
     // Synchronize parent and child startup since we have to rely on a global mut
-    // because unix signal handler suck.
-    let cond = Condition::new().expect("Failed to create pipe");
+    // because unix signal handlers suck.
+    let cond_init = Condition::new().expect("Failed to create pipe");
+    cond_init.set_cloexec().expect("Failed to set CLOEXEC flag");
+    let cond_child = Condition::new().expect("Failed to create pipe");
+    cond_child
+        .set_cloexec()
+        .expect("Failed to set CLOEXEC flag");
 
     match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
         Ok(result) => match result {
@@ -96,14 +101,17 @@ pub(super) fn init(
                     CHILD_PID = child.as_raw();
                 }
 
-                //println!("{}: Waiting for go", id);
+                // Wait for IslandProcess::start to be called (2)
                 intercom.recv::<LaunchProtocol>().expect("intercom error");
 
-                // Signal the child it can go
-                cond.notify();
+                // Signal the child it can start (3)
+                cond_init.notify();
+                // Wait until the child executed the execve. The pipes in cond_child get closed (6)
+                cond_child.wait();
 
+                // Inform the runtime that the child is launchend (7)
                 intercom
-                    .send(LaunchProtocol::InitReady)
+                    .send(LaunchProtocol::Launched)
                     .expect("intercom error");
 
                 drop(intercom);
@@ -130,17 +138,19 @@ pub(super) fn init(
                 };
             }
             unistd::ForkResult::Child => {
+                // Wait until init is prepared for us to crash (4)
+                cond_init.wait();
+
                 drop(intercom);
                 reset_signal_handlers();
                 set_parent_death_signal(SIGKILL).expect("Failed to set parent death signal");
-
-                cond.wait();
 
                 let (init, argv, env) = args(&container.manifest);
                 println!("{} init: {:?}", id, init);
                 println!("{} argv: {:#?}", id, argv);
                 println!("{} env: {:#?}", id, env);
 
+                // The pipe in cond_child is closed on execve (5)
                 panic!("{}: {:?}", id, unistd::execve(&init, &argv, &env))
             }
         },

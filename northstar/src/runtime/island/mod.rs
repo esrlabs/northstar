@@ -55,8 +55,8 @@ type Intercom = (PipeRead, PipeWrite);
 #[derive(Serialize, Deserialize)]
 enum LaunchProtocol {
     Error(String),
-    InitReady,
     Go,
+    Launched,
 }
 
 #[derive(Debug)]
@@ -175,8 +175,11 @@ impl Process for IslandProcess {
                 mut intercom,
                 io: _io,
             } => {
+                // Signal the init process that it shall start the child (1)
                 intercom.send(LaunchProtocol::Go).ok();
+                // Wait for the notification from init that the child is launchend (8)
                 intercom.recv::<LaunchProtocol>().ok();
+
                 Ok(IslandProcess::Started {
                     pid,
                     exit_status,
