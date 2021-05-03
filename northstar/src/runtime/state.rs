@@ -336,7 +336,7 @@ impl<'a, L: Launcher> State<'a, L> {
         // Mount :-)
         let mounts = join_all(mounts).await;
 
-        // Split into succesful and failed ones
+        // Split into successful and failed ones
         let (ok, mut failed): (Vec<_>, Vec<_>) =
             mounts.into_iter().partition(|(_, result)| !result.is_err());
 

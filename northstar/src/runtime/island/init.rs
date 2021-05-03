@@ -15,7 +15,7 @@
 use super::{clone::clone, io::Fd, Container, IslandProcess, ENV_NAME, ENV_VERSION, SIGNAL_OFFSET};
 use crate::runtime::{
     config::Config,
-    island::utils::PathExt,
+    island::{seccomp, seccomp::sock_fprog, utils::PathExt},
     pipe::{Condition, ConditionNotify, ConditionWait},
 };
 use log::{debug, warn};
@@ -391,6 +391,12 @@ pub(super) fn init(
                 // Signal the runtime that we're started
                 cond_started_notify.notify();
 
+                // Set seccomp filter
+                if let Some(filter) = &container.manifest.seccomp {
+                    println!("Adding seccomp filter");
+                    set_seccomp_filter(filter);
+                }
+
                 panic!("{:?}", unistd::execve(&init, &argv, &env))
             }
         },
@@ -489,6 +495,37 @@ fn set_parent_death_signal(signal: Signal) {
         .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
+fn set_seccomp_filter(filter: &HashMap<String, String>) {
+    #[cfg(target_os = "android")]
+    const PR_SET_SECCOMP: c_int = 22;
+    #[cfg(target_os = "android")]
+    const SECCOMP_MODE_FILTER: c_int = 2;
+    #[cfg(not(target_os = "android"))]
+    use libc::PR_SET_SECCOMP;
+    #[cfg(not(target_os = "android"))]
+    use libc::SECCOMP_MODE_FILTER;
+
+    // Build syscall allowlist
+    let mut allowlist = seccomp::Builder::new();
+    for (syscall_name, _) in filter {
+        let syscall_nr =
+            seccomp::translate_syscall(&syscall_name).expect("Failed to translate syscall");
+        allowlist = allowlist.allow_syscall(*syscall_nr as u32);
+    }
+    let mut allowlist = allowlist.build();
+
+    // Set filter
+    let sf_prog = sock_fprog {
+        len: allowlist.len() as u16,
+        filter: allowlist.as_mut_ptr(),
+    };
+    let sf_prog_ptr = &sf_prog as *const sock_fprog;
+    let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
+    Errno::result(result)
+        .map(drop)
+        .expect("Failed to set seccomp filter");
+}
+
 fn set_no_new_privs(value: bool) {
     #[cfg(target_os = "android")]
     pub const PR_SET_NO_NEW_PRIVS: c_int = 38;
@@ -576,7 +613,7 @@ fn drop_capabilities(cs: Option<&HashSet<caps::Capability>>) {
 
     //println!("Dropping capabilities");
     for cap in bounded {
-        // caps::set cannot be called for for bounded
+        // caps::set cannot be called for bounded
         caps::drop(None, caps::CapSet::Bounding, cap).expect("Failed to drop bounding cap");
     }
 

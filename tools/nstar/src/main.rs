@@ -85,7 +85,7 @@ pub enum Subcommand {
         /// Path to the .npk file
         npk: PathBuf,
         /// Target repository
-        repositoriy: String,
+        repository: String,
     },
     /// Uninstall a container
     Uninstall {
@@ -161,7 +161,7 @@ impl TryFrom<Subcommand> for Request {
             } => Ok(Request::Stop(Container::new(name, version), timeout)),
             Subcommand::Install {
                 npk,
-                repositoriy: repo_id,
+                repository: repo_id,
             } => {
                 let size = npk.metadata().map(|m| m.len())?;
                 Ok(Request::Install(repo_id, size))

@@ -12,12 +12,99 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#[cfg(feature = "hello-world")]
 use anyhow::Result;
+use regex::Regex;
+use std::{env, fs::OpenOptions, io::Write, path::PathBuf};
 
 fn main() {
+    generate_syscall_bindings().expect("Failed to generate syscall bindings");
+    generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
+
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
+}
+
+pub fn generate_syscall_bindings() -> Result<()> {
+    let syscall_regex: Regex = Regex::new("SYS_[0-9a-zA-Z_]+").expect("Invalid regex");
+    let rhs_regex: Regex = Regex::new(" = [0-9]+;").expect("Invalid regex");
+    let value_regex: Regex = Regex::new("[0-9]+").expect("Invalid regex");
+
+    // get syscall strings and matching numbers
+    let lines: Vec<String> = bindgen::Builder::default()
+        .header_contents("syscall_wrapper.h", "#include <sys/syscall.h>")
+        .generate()
+        .expect("Failed to generate syscall bindings")
+        .to_string()
+        .lines()
+        .filter(|l| syscall_regex.is_match(l))
+        .map(|s| s.to_string())
+        .collect();
+    let mut names: Vec<String> = lines
+        .iter()
+        .filter_map(|l| syscall_regex.find(l).map(|m| m.as_str().to_string()))
+        .collect();
+    for name in &mut names {
+        name.replace_range(..4, ""); // remove leading "SYS_"
+    }
+    let values: Vec<nix::libc::c_long> = lines
+        .iter()
+        .filter_map(|l| rhs_regex.find(l).map(|m| m.as_str()))
+        .filter_map(|l| value_regex.find(l).map(|m| m.as_str()))
+        .filter_map(|l| l.parse().ok())
+        .collect();
+    assert_eq!(
+        names.len(),
+        values.len(),
+        "Mismatch in number of syscall names and syscall values"
+    );
+
+    let out_path =
+        PathBuf::from(env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"));
+    let mut f = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(&out_path.join("syscall_bindings.rs"))?;
+
+    // write static map that associates syscall strings with syscall numbers
+    writeln!(f, "lazy_static::lazy_static! {{")?;
+    writeln!(f, "    static ref SYSCALL_MAP: std::collections::HashMap<&'static str, nix::libc::c_long> = {{")?;
+    writeln!(f, "        let mut map = std::collections::HashMap::new();")?;
+    for (name, value) in names.iter().zip(values.iter()) {
+        writeln!(f, "        map.insert(\"{}\", {});", name, value)?;
+    }
+    writeln!(f, "        map")?;
+    writeln!(f, "    }};")?;
+    writeln!(f, "}}")?;
+
+    Ok(())
+}
+
+pub fn generate_seccomp_bindings() -> Result<()> {
+    let out_path =
+        PathBuf::from(env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"));
+    bindgen::Builder::default()
+        .header_contents(
+            "seccomp_wrapper.h",
+            "#include <linux/seccomp.h>\n#include <linux/filter.h>",
+        )
+        .allowlist_type("seccomp_data")
+        .allowlist_type("sock_fprog")
+        .allowlist_var("BPF_ABS")
+        .allowlist_var("BPF_JEQ")
+        .allowlist_var("BPF_JMP")
+        .allowlist_var("BPF_K")
+        .allowlist_var("BPF_LD")
+        .allowlist_var("BPF_RET")
+        .allowlist_var("BPF_W")
+        .allowlist_var("SECCOMP_RET_ALLOW")
+        .allowlist_var("SECCOMP_RET_LOG")
+        .allowlist_var("SECCOMP_RET_KILL")
+        .generate()
+        .expect("Failed to generate seccomp bindings")
+        .write_to_file(&out_path.join("seccomp_bindings.rs"))
+        .expect("Failed to write seccomp bindings");
+    Ok(())
 }
 
 #[cfg(feature = "hello-world")]
