@@ -39,6 +39,7 @@ use Signal::SIGCHLD;
 mod clone;
 mod init;
 mod io;
+mod seccomp;
 mod utils;
 
 const ENV_NAME: &str = "NAME";
@@ -282,7 +283,7 @@ impl Process for IslandProcess {
                     Ok(exit_status) => exit_status,
                 }
             }
-            // The proces is terminated already. Wait for the waittask to do it's job and resolve exit_status
+            // The process is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == Errno::ESRCH => {
                 debug!("Process {} already exited. Waiting for status", pid);
                 let exit_status = exit_status.await?;

@@ -342,7 +342,7 @@ impl Minijail {
                 Mount::Bind { host, flags } => {
                     if !&host.exists() {
                         warn!(
-                            "Cannot bind mount nonexitent source {} to {}",
+                            "Cannot bind mount nonexistent source {} to {}",
                             host.display(),
                             target.display()
                         );
@@ -584,7 +584,7 @@ impl Process for MinijailProcess {
                     Ok(exit_status) => exit_status,
                 }
             }
-            // The proces is terminated already. Wait for the waittask to do it's job and resolve exit_status
+            // The process is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == nix::errno::Errno::ESRCH => {
                 debug!("Process {} already exited. Waiting for status", self.pid);
                 let exit_status = exit_status.await?;

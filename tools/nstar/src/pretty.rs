@@ -159,7 +159,7 @@ pub fn response(response: &Response) -> i32 {
                     eprintln!("failed to start container {}: already started", c)
                 }
                 model::Error::StartContainerResource(c) => {
-                    eprintln!("faild to start container {}: resource", c)
+                    eprintln!("failed to start container {}: resource", c)
                 }
                 model::Error::StartContainerMissingResource(c, r) => {
                     eprintln!("failed to start container {}: missing resouce {}", c, r)
