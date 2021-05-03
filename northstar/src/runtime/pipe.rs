@@ -252,6 +252,7 @@ where
 /// Sets O_NONBLOCK flag on self
 trait RawFdExt: AsRawFd {
     fn set_nonblocking(&self);
+    fn set_cloexec(&self, value: bool) -> Result<()>;
 }
 
 impl<T: AsRawFd> RawFdExt for T {
@@ -259,6 +260,18 @@ impl<T: AsRawFd> RawFdExt for T {
         unsafe {
             nix::libc::fcntl(self.as_raw_fd(), nix::libc::F_SETFL, nix::libc::O_NONBLOCK);
         }
+    }
+
+    fn set_cloexec(&self, value: bool) -> Result<()> {
+        let flags = fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
+        flags.set(fcntl::FdFlag::FD_CLOEXEC, value);
+
+        fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .map(drop)
     }
 }
 
@@ -288,20 +301,8 @@ impl Condition {
     }
 
     pub(crate) fn set_cloexec(&self) -> Result<()> {
-        let mut flags = fcntl::fcntl(self.read.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
-        flags.set(fcntl::FdFlag::FD_CLOEXEC, true);
-        fcntl::fcntl(self.read.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        let mut flags = fcntl::fcntl(self.write.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
-        flags.set(fcntl::FdFlag::FD_CLOEXEC, true);
-        fcntl::fcntl(self.write.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
+        self.read.set_cloexec(true);
+        self.write.set_cloexec(true);
         Ok(())
     }
 
