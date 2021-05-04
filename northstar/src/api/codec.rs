@@ -155,3 +155,36 @@ impl<T: Unpin + AsyncRead + AsyncWrite> futures::sink::Sink<model::Message> for 
         Pin::new(&mut self.inner).poll_close(cx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BytesMut;
+    use proptest::{prelude::Just, proptest, strategy::Strategy};
+
+    proptest! {
+        #[test]
+        fn encoding_a_message_then_decoding_it_yields_the_same_message(initial_message in mk_message()) {
+            // Pre-condition.
+            let mut message_as_bytes = BytesMut::default();
+
+            // Action.
+            let mut codec = Codec {};
+
+            codec.encode(initial_message.clone(), &mut message_as_bytes)?;
+            let message = codec.decode(&mut message_as_bytes)?;
+
+            // Post-condition.
+            assert_eq!(message, Some(initial_message));
+        }
+    }
+
+    fn mk_message() -> impl Strategy<Value = model::Message> {
+        mk_simple_payload().prop_map(model::Message::new)
+    }
+
+    fn mk_simple_payload() -> impl Strategy<Value = model::Payload> {
+        // TODO: Perhaps consider all the variants?
+        Just(model::Payload::Request(model::Request::Containers))
+    }
+}
