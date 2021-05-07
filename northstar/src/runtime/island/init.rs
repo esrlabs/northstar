@@ -506,7 +506,7 @@ fn set_seccomp_filter(filter: &HashMap<String, String>) {
     use libc::SECCOMP_MODE_FILTER;
 
     // Build syscall allowlist
-    let mut allowlist = seccomp::Builder::new();
+    let mut allowlist = seccomp::Builder::new(seccomp::Architecture::X86_64);
     for (syscall_name, _) in filter {
         let syscall_nr =
             seccomp::translate_syscall(&syscall_name).expect("Failed to translate syscall");

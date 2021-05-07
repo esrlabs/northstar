@@ -18,6 +18,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/seccomp_bindings.rs"));
 include!(concat!(env!("OUT_DIR"), "/syscall_bindings.rs"));
+include!(concat!(env!("OUT_DIR"), "/audit_bindings.rs"));
 
 pub fn translate_syscall(name: &str) -> Option<&nix::libc::c_long> {
     SYSCALL_MAP.get(name)
@@ -48,30 +49,102 @@ pub fn bpf_ret(k: u32) -> sock_filter {
 
 pub type SyscallAllowlist = Vec<sock_filter>;
 
+static REQUIRED_SYSCALLS_X86_64: &'static [nix::libc::c_long] = &[
+    nix::libc::SYS_clone,
+    nix::libc::SYS_mmap,
+    nix::libc::SYS_prctl,
+    nix::libc::SYS_munmap,
+    nix::libc::SYS_mprotect,
+    nix::libc::SYS_openat,
+    nix::libc::SYS_close,
+    nix::libc::SYS_fstat,
+    nix::libc::SYS_rt_sigaction,
+    nix::libc::SYS_pread64,
+    nix::libc::SYS_read,
+    nix::libc::SYS_execve,
+    nix::libc::SYS_set_tid_address,
+    nix::libc::SYS_sigaltstack,
+    nix::libc::SYS_exit_group,
+    nix::libc::SYS_stat,
+    nix::libc::SYS_poll,
+    nix::libc::SYS_brk,
+    nix::libc::SYS_rt_sigprocmask,
+    nix::libc::SYS_access,
+    nix::libc::SYS_arch_prctl,
+    nix::libc::SYS_sched_getaffinity,
+    nix::libc::SYS_set_robust_list,
+    nix::libc::SYS_prlimit64,
+];
+
+pub enum Architecture {
+    X86_64,
+}
+
+impl Architecture {
+    pub fn to_linux_value(&self) -> u32 {
+        match self {
+            Architecture::X86_64 => AUDIT_ARCH_X86_64,
+        }
+    }
+
+    pub fn required_syscalls(&self) -> &'static [nix::libc::c_long] {
+        match self {
+            Architecture::X86_64 => REQUIRED_SYSCALLS_X86_64,
+        }
+    }
+}
+
 pub struct Builder {
     allowlist: SyscallAllowlist,
     log_violations_only: bool,
 }
 
 impl Builder {
-    pub fn new() -> Self {
+    const EVAL_NEXT: u8 = 0;
+    const SKIP_NEXT: u8 = 1;
+
+    pub fn new(arch: Architecture) -> Self {
         let mut builder = Builder {
             allowlist: Vec::new(),
             log_violations_only: false,
         };
 
-        // Load system call number into accumulator
+        // Load architecture into accumulator
+        builder.allowlist.push(bpf_stmt(
+            BPF_LD | BPF_W | BPF_ABS,
+            memoffset::offset_of!(seccomp_data, arch) as u32,
+        ));
+
+        // Kill process if architecture does not match
+        builder.allowlist.push(bpf_jump(
+            BPF_JMP | BPF_JEQ | BPF_K,
+            arch.to_linux_value(),
+            Builder::SKIP_NEXT,
+            Builder::EVAL_NEXT,
+        ));
+        builder.allowlist.push(bpf_ret(SECCOMP_RET_KILL));
+
+        // Load system call number into accumulator for subsequent filtering
         builder.allowlist.push(bpf_stmt(
             BPF_LD | BPF_W | BPF_ABS,
             memoffset::offset_of!(seccomp_data, nr) as u32,
         ));
+
+        // Add default allowlist for architecture
+        for syscall in arch.required_syscalls() {
+            builder = builder.allow_syscall(*syscall as u32);
+        }
         builder
     }
 
     pub fn allow_syscall(mut self, nr: u32) -> Builder {
-        // If syscall matches return allow directly. If not, go to next instruction.
-        self.allowlist
-            .push(bpf_jump(BPF_JMP | BPF_JEQ | BPF_K, nr, 0, 1));
+        // If syscall matches return 'allow' directly. If not, skip return instruction and go to next check.
+        self.allowlist.push(bpf_jump(
+            BPF_JMP | BPF_JEQ | BPF_K,
+            nr,
+            Builder::EVAL_NEXT,
+            Builder::SKIP_NEXT,
+        ));
         self.allowlist.push(bpf_ret(SECCOMP_RET_ALLOW));
         self
     }
