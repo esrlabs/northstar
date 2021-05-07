@@ -16,29 +16,5 @@ io:
       - DEBUG
       - seccomp
 seccomp:
-  clone: 1
-  mmap: arg2 in ~PROT_EXEC || arg2 in ~PROT_WRITE
-  prctl: 1
-  munmap: 1
-  mprotect: arg2 in ~PROT_EXEC || arg2 in ~PROT_WRITE
-  openat: 1
-  close: 1
-  fstat: 1
-  rt_sigaction: 1
-  pread64: 1
-  read: 1
-  execve: 1
-  set_tid_address: 1
-  sigaltstack: 1
-  exit_group: 1
-  stat: 1
-  poll: 1
-  brk: 1
-  rt_sigprocmask: 1
-  access: 1
-  arch_prctl: 1
-  sched_getaffinity: 1
-  set_robust_list: 1
-  prlimit64: 1;
   write: 1
   clock_nanosleep: 1

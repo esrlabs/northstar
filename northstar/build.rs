@@ -19,6 +19,7 @@ use std::{env, fs::OpenOptions, io::Write, path::PathBuf};
 fn main() {
     generate_syscall_bindings().expect("Failed to generate syscall bindings");
     generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
+    generate_audit_bindings().expect("Failed to generate audit bindings");
 
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
@@ -104,6 +105,19 @@ pub fn generate_seccomp_bindings() -> Result<()> {
         .expect("Failed to generate seccomp bindings")
         .write_to_file(&out_path.join("seccomp_bindings.rs"))
         .expect("Failed to write seccomp bindings");
+    Ok(())
+}
+
+pub fn generate_audit_bindings() -> Result<()> {
+    let out_path =
+        PathBuf::from(env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"));
+    bindgen::Builder::default()
+        .header_contents("audit_wrapper.h", "#include <linux/audit.h>")
+        .allowlist_var("AUDIT_ARCH_X86_64")
+        .generate()
+        .expect("Failed to generate audit bindings")
+        .write_to_file(&out_path.join("audit_bindings.rs"))
+        .expect("Failed to write audit bindings");
     Ok(())
 }
 
