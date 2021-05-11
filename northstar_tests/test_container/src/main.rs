@@ -74,6 +74,14 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn dump(file: &str) {
+    println!("{}:", file);
+    fs::read_to_string(file)
+        .unwrap_or_else(|_| panic!("dump {}", file))
+        .lines()
+        .for_each(|l| println!("  {}", l));
+}
+
 fn cat(path: &Path) -> Result<()> {
     let mut input =
         fs::File::open(&path).with_context(|| format!("Failed to open {}", path.display()))?;
@@ -84,12 +92,12 @@ fn cat(path: &Path) -> Result<()> {
     writeln!(&mut output).context("Failed to write to stdout")
 }
 
-fn echo(message: &[String]) {
-    println!("{}", message.join(" "));
-}
-
 fn crash() {
     panic!("witness me!");
+}
+
+fn echo(message: &[String]) {
+    println!("{}", message.join(" "));
 }
 
 fn write(input: &str, path: &Path) -> Result<()> {
@@ -147,4 +155,21 @@ fn inspect() {
             caps::read(None, *set).expect("Failed to read caps")
         );
     }
+
+    println!("/proc/self/fd:");
+    fs::read_dir("/proc/self/fd")
+        .expect("read_dir /proc/self/fd")
+        .map(|e| e.unwrap().path())
+        .map(|p| (p.clone(), fs::read_link(p).expect("readlink entry")))
+        .filter(|(_, l)| l != &PathBuf::from(format!("/proc/{}/fd", std::process::id())))
+        .for_each(|(p, l)| {
+            println!("    {}: {}", p.display(), l.display());
+        });
+    // Substract the ReadDir fd
+    println!(
+        "    total: {}",
+        fs::read_dir("/proc/self/fd").unwrap().count() - 1
+    );
+
+    dump("/proc/self/mounts");
 }
