@@ -12,384 +12,252 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    super::{config::Config, error::Error},
-    clone::clone,
-    utils::PathExt,
-    Container, Intercom, IslandProcess, LaunchProtocol, ENV_NAME, ENV_VERSION, SIGNAL_OFFSET,
+use super::{clone::clone, io::Fd, Container, IslandProcess, ENV_NAME, ENV_VERSION, SIGNAL_OFFSET};
+use crate::runtime::{
+    config::Config,
+    island::utils::PathExt,
+    pipe::{Condition, ConditionNotify, ConditionWait},
 };
-use crate::runtime::pipe::{Condition, PipeSendRecv};
-use anyhow::Context;
+use log::{debug, warn};
 use nix::{
     errno::Errno,
-    libc::{self, c_int, c_ulong, siginfo_t},
-    mount::{self, MsFlags},
+    libc::{self, c_int, c_ulong, pid_t, siginfo_t},
+    mount::MsFlags,
     sched,
     sys::{
         self,
         signal::{
-            kill, sigaction, signal, SaFlags, SigAction, SigHandler, SigSet, Signal, SIGCHLD,
-            SIGKILL,
+            sigaction, signal, sigprocmask, SaFlags, SigAction, SigHandler, SigSet, SigmaskHow,
+            Signal, SIGCHLD, SIGKILL,
         },
     },
-    unistd::{self, Gid, Uid},
+    unistd::{self, Uid},
 };
-use npk::manifest::{Dev, Mount, MountFlag};
+use npk::manifest::{Manifest, MountFlag};
 use sched::CloneFlags;
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryFrom,
     env,
     ffi::{c_void, CString},
-    os::unix::io::AsRawFd,
-    path::Path,
+    path::PathBuf,
     process::exit,
+    ptr::null,
 };
 use sys::wait::{waitpid, WaitStatus};
+use tokio::task;
 
-static mut CHILD_PID: i32 = -1;
+static mut CHILD_PID: pid_t = -1;
 
-#[allow(unused)]
-macro_rules! ctrace { ($($arg:tt)+) => (log::trace!("{}: {}", std::process::id(), format!($($arg)+))) }
-#[allow(unused)]
-macro_rules! cdebug { ($($arg:tt)+) => (log::debug!("{}: {}", std::process::id(), format!($($arg)+))) }
-#[allow(unused)]
-macro_rules! cinfo { ($($arg:tt)+) => ( log::warn!("{}: {}", std::process::id(), format!($($arg)+))) }
-#[allow(unused)]
-macro_rules! cwarn { ($($arg:tt)+) => ( log::warn!("{}: {}", std::process::id(), format!($($arg)+))) }
-#[allow(unused)]
-macro_rules! cerror { ($($arg:tt)+) => ( log::error!("{}: {}", std::process::id(), format!($($arg)+))) }
-
-// Init function. Pid 1.
-pub(super) fn init(
-    config: &Config,
-    container: &Container<IslandProcess>,
-    mut fds: HashMap<i32, i32>,
-    groups: &[(String, Option<Gid>)],
-    mut intercom: Intercom,
-) -> ! {
-    pr_set_name("init").expect("Failed to set init process name");
-
-    // Add intercom to list of fds to preserve
-    fds.insert(intercom.0.as_raw_fd(), intercom.0.as_raw_fd());
-    fds.insert(intercom.1.as_raw_fd(), intercom.1.as_raw_fd());
-
-    if let Err(e) = prepare(&config, container, fds, &groups) {
-        println!("Init error: {:?}", e);
-        intercom
-            .send(LaunchProtocol::Error(e.to_string()))
-            .expect("intercom error");
-        panic!("Init error: {}", e);
-    }
-
-    let id = format!("init-{}", container.manifest.name);
-
-    // Synchronize parent and child startup since we have to rely on a global mut
-    // because unix signal handlers suck.
-    let cond_init = Condition::new().expect("Failed to create pipe");
-    cond_init.set_cloexec().expect("Failed to set CLOEXEC flag");
-    let cond_child = Condition::new().expect("Failed to create pipe");
-    cond_child
-        .set_cloexec()
-        .expect("Failed to set CLOEXEC flag");
-
-    match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
-        Ok(result) => match result {
-            unistd::ForkResult::Parent { child } => {
-                // Update global CHILD_PID
-                unsafe {
-                    CHILD_PID = child.as_raw();
-                }
-
-                // Wait for IslandProcess::start to be called (2)
-                intercom.recv::<LaunchProtocol>().expect("intercom error");
-
-                // Signal the child it can start (3)
-                cond_init.notify();
-                // Wait until the child executed the execve. The pipes in cond_child get closed (6)
-                cond_child.wait();
-
-                // Inform the runtime that the child is launchend (7)
-                intercom
-                    .send(LaunchProtocol::Launched)
-                    .expect("intercom error");
-
-                drop(intercom);
-
-                // TODO: Anything we can do here to free stuff before waiting forever?
-
-                // If the child dies before we waitpid here it becomes a zombie and is catched
-
-                // Wait for the child to exit
-                //println!("{}: waiting for {} to exit", id, child);
-                let result = waitpid(Some(child), None).expect("waitpid");
-                //println!("{}: waitpid result of {}: {:?}", id, child, result);
-                match result {
-                    WaitStatus::Exited(_pid, status) => exit(status),
-                    WaitStatus::Signaled(_pid, status, _) => {
-                        // Encode the signal number in the process exit status. It's not possible to raise a
-                        // a signal in this "init" process that is received by our parent
-                        let code = SIGNAL_OFFSET + status as i32;
-                        //println!("{}: exiting with {} (signaled {})", id, code, status);
-                        exit(code);
-                    }
-                    // TODO: Other waitpid results
-                    _ => panic!("abnormal exit of child process"),
-                };
-            }
-            unistd::ForkResult::Child => {
-                // Wait until init is prepared for us to crash (4)
-                cond_init.wait();
-
-                drop(intercom);
-                reset_signal_handlers();
-                set_parent_death_signal(SIGKILL).expect("Failed to set parent death signal");
-
-                let (init, argv, env) = args(&container.manifest);
-                println!("{} init: {:?}", id, init);
-                println!("{} argv: {:#?}", id, argv);
-                println!("{} env: {:#?}", id, env);
-
-                // The pipe in cond_child is closed on execve (5)
-                panic!("{}: {:?}", id, unistd::execve(&init, &argv, &env))
-            }
-        },
-        Err(e) => panic!("Fork error: {}", e),
-    }
+#[derive(Debug)]
+pub(super) struct Mount {
+    source: Option<PathBuf>,
+    target: PathBuf,
+    fstype: Option<&'static str>,
+    flags: MsFlags,
+    data: Option<String>,
 }
 
-/// Prepare the environment in init
-fn prepare(
+/// Prepare a list of mounts that can be done in init without any allocation.
+/// TODO: nosuid,noexec,nodev where it fits
+pub(super) async fn mounts(
     config: &Config,
     container: &Container<IslandProcess>,
-    fds: HashMap<i32, i32>,
-    supplementary_groups: &[(String, Option<Gid>)],
-) -> anyhow::Result<()> {
-    let manifest = &container.manifest;
-    let root = container.root.canonicalize()?;
-
-    // Install signal handlers that forward every signal to our child
-    init_signal_handlers();
-
-    // Mount
-    rootfs(&config, &container).context("Failed to mount")?;
-
-    // Chroot
-    cdebug!("Setting chroot to {}", root.display());
-    unistd::chroot(&root).context("Failed to chroot")?;
-
-    // Pwd
-    cdebug!("Setting pwd to /");
-    env::set_current_dir("/").context("Failed to set cwd to /")?;
-
-    // UID / GID
-    setid(manifest.uid, manifest.gid).context("Failed to setuid/gid")?;
-
-    // Supplementary groups
-    setgroups(manifest.gid, &supplementary_groups)?;
-
-    cdebug!("Setting no new privs");
-    set_no_new_privs(true)?;
-
-    // Become a subreaper for orphans in this namespace
-    cdebug!("Setting child subreaper flag");
-    set_child_subreaper(true)?;
-
-    // Set the parent process death signal of the calling process to arg2
-    // (either a signal value in the range 1..maxsig, or 0 to clear).
-    cdebug!("Setting parent death signal to SIGKILL");
-    set_parent_death_signal(SIGKILL)?;
-
-    // Capabilities
-    drop_capabilities(manifest.capabilities.as_ref()).context("Failed to drop privs")?;
-
-    close_file_descriptors(fds)?;
-
-    // We cannot use log after here because the fd to logd is closed on Android
-
-    Ok(())
-}
-
-// TODO: The container could be malformed and the mountpoint might be
-// missing. This is not a fault of the RT so don't expect it.
-// TODO: mount flags: nosuid etc....
-// TODO: /dev mounts from manifest: full or minimal
-fn rootfs(config: &Config, container: &Container<IslandProcess>) -> anyhow::Result<()> {
-    let none = Option::<&str>::None;
-    let root = container.root.canonicalize()?;
+) -> Result<Vec<Mount>, super::Error> {
+    let mut mounts = Vec::new();
+    let root = container
+        .root
+        .canonicalize()
+        .map_err(|e| super::Error::io("Canonicalize root", e))?;
     let uid = container.manifest.uid;
     let gid = container.manifest.gid;
 
     // /proc
-    cdebug!("Mounting /proc");
-    let source = "/proc";
+    debug!("Mounting /proc");
     let target = root.join("proc");
-    mount::mount(none, &target, Some("proc"), MsFlags::empty(), none)
-        .context("Failed to mount /proc")?;
+    mounts.push(Mount {
+        source: Some(PathBuf::from("proc")),
+        target: target.clone(),
+        fstype: Some("proc"),
+        flags: MsFlags::empty(),
+        data: None,
+    });
     // Remount /proc ro
-    cdebug!("Remount /proc read only");
+    debug!("Remount /proc read only");
     let flags = MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-    mount::mount(Some(source), &target, none, flags, none).context("Failed to remount /proc")?;
+    mounts.push(Mount {
+        source: Some(PathBuf::from("/proc")),
+        target,
+        fstype: None,
+        flags,
+        data: None,
+    });
 
-    fn mount_dev(root: &Path, _type: &Dev) -> anyhow::Result<()> {
-        // TODO: Dev mount type
-        cdebug!("Mounting /dev");
-        let source = "/dev/";
-        let target = root.join("dev");
-        mount::mount(
-            Some(source),
-            &target,
-            Option::<&str>::None,
-            MsFlags::MS_BIND,
-            Option::<&str>::None,
-        )
-        .context("Failed to mount /dev")
-    }
+    // TODO: /dev
+    mounts.push(Mount {
+        source: Some(PathBuf::from("/dev")),
+        target: root.join("dev"),
+        fstype: None,
+        flags: MsFlags::MS_BIND,
+        data: None,
+    });
 
-    // TODO
-    if !container
-        .manifest
-        .mounts
-        .iter()
-        .any(|(_, mount)| matches!(mount, Mount::Dev { .. }))
-    {
-        mount_dev(&root, &Dev::Full)?;
-    }
-
-    container
-        .manifest
-        .mounts
-        .iter()
-        .try_for_each(|(target, mount)| {
-            match &mount {
-                Mount::Bind { host, flags } => {
-                    if !&host.exists() {
-                        cdebug!(
-                            "Skipping bind mount of nonexitent source {} to {}",
-                            host.display(),
-                            target.display()
-                        );
-                        return Ok(());
-                    }
-                    let rw = flags.contains(&MountFlag::Rw);
-                    cdebug!(
-                        "Mounting {} on {}{}",
+    for (target, mount) in &container.manifest.mounts {
+        match &mount {
+            npk::manifest::Mount::Bind { host, flags } => {
+                if !&host.exists() {
+                    debug!(
+                        "Skipping bind mount of nonexitent source {} to {}",
                         host.display(),
-                        target.display(),
-                        if rw { " (rw)" } else { "" }
+                        target.display()
                     );
-                    let target = root.join_strip(target);
-                    mount::mount(Some(host), &target, none, MsFlags::MS_BIND, none)
-                        .with_context(|| format!("Failed to bind mount {}", target.display()))?;
-
-                    if !rw {
-                        let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-                        mount::mount(Some(host), &target, none, flags, none)
-                            .with_context(|| format!("Failed to remount {}", target.display()))?;
-                    }
+                    continue;
                 }
-                Mount::Persist => {
-                    let dir = config.data_dir.join(&container.manifest.name);
-                    if !dir.exists() {
-                        cdebug!("Creating {}", dir.display());
-                        std::fs::create_dir_all(&dir).map_err(|e| {
-                            Error::Io(format!("Failed to create {}", dir.display()), e)
-                        })?;
-                    }
+                let rw = flags.contains(&MountFlag::Rw);
+                debug!(
+                    "Mounting {} on {}{}",
+                    host.display(),
+                    target.display(),
+                    if rw { " (rw)" } else { "" }
+                );
+                let target = root.join_strip(target);
+                mounts.push(Mount {
+                    source: Some(host.clone()),
+                    target: target.clone(),
+                    fstype: None,
+                    flags: MsFlags::MS_BIND,
+                    data: None,
+                });
 
-                    cdebug!("Chowning {} to {}:{}", dir.display(), uid, gid);
+                if !rw {
+                    mounts.push(Mount {
+                        source: Some(host.clone()),
+                        target,
+                        fstype: None,
+                        flags: MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
+                        data: None,
+                    });
+                }
+            }
+            npk::manifest::Mount::Persist => {
+                let dir = config.data_dir.join(&container.manifest.name);
+                if !dir.exists() {
+                    debug!("Creating {}", dir.display());
+                    tokio::fs::create_dir_all(&dir).await.map_err(|e| {
+                        super::Error::Io(format!("Failed to create {}", dir.display()), e)
+                    })?;
+                }
+
+                debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
+                task::block_in_place(|| {
                     unistd::chown(
                         dir.as_os_str(),
                         Some(unistd::Uid::from_raw(uid)),
                         Some(unistd::Gid::from_raw(gid)),
                     )
-                    .map_err(|e| {
-                        Error::os(
-                            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-                            e,
-                        )
-                    })?;
+                })
+                .map_err(|e| {
+                    super::Error::os(
+                        format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
+                        e,
+                    )
+                })?;
 
-                    cdebug!("Mounting {} on {}", dir.display(), target.display(),);
+                debug!("Mounting {} on {}", dir.display(), target.display(),);
 
-                    let target = root.join_strip(target);
-                    mount::mount(Some(&dir), &target, none, MsFlags::MS_BIND, none)
-                        .with_context(|| format!("Failed to bind mount {}", target.display()))?;
-                }
-                Mount::Resource { name, version, dir } => {
-                    let src = {
-                        // Join the source of the resource container with the mount dir
-                        let resource_root = config.run_dir.join(format!("{}:{}", name, version));
-                        let dir = dir
-                            .strip_prefix("/")
-                            .map(|d| resource_root.join(d))
-                            .unwrap_or(resource_root);
-
-                        if !dir.exists() {
-                            return Err(anyhow::anyhow!("Missing resource {}", dir.display()));
-                        }
-
-                        dir
-                    };
-
-                    cdebug!("Mounting {} on {}", src.display(), target.display());
-
-                    let target = root.join_strip(target);
-                    mount::mount(Some(&src), &target, none, MsFlags::MS_BIND, none)
-                        .with_context(|| format!("Failed to mount {}", target.display()))?;
-
-                    // Remount ro
-                    let flags = MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
-                    mount::mount(Some(&src), &target, none, flags, none)
-                        .with_context(|| format!("Failed to remount {}", target.display()))?;
-                }
-                Mount::Tmpfs { size } => {
-                    cdebug!(
-                        "Mounting tmpfs with size {} on {}",
-                        bytesize::ByteSize::b(*size),
-                        target.display()
-                    );
-                    let target = root.join_strip(target);
-                    let data = format!("size={},mode=1777", size);
-                    let flags = MsFlags::empty();
-                    mount::mount(none, &target, Some("tmpfs"), flags, Some(data.as_str()))
-                        .with_context(|| format!("Failed to bind mount {}", target.display()))?;
-                }
-                Mount::Dev { r#type } => mount_dev(&root, r#type)?,
+                mounts.push(Mount {
+                    source: Some(dir),
+                    target: root.join_strip(target),
+                    fstype: None,
+                    flags: MsFlags::MS_BIND,
+                    data: None,
+                });
             }
-            Ok(())
-        })?;
+            npk::manifest::Mount::Resource { name, version, dir } => {
+                let src = {
+                    // Join the source of the resource container with the mount dir
+                    let resource_root = config.run_dir.join(format!("{}:{}", name, version));
+                    let dir = dir
+                        .strip_prefix("/")
+                        .map(|d| resource_root.join(d))
+                        .unwrap_or(resource_root);
 
-    Ok(())
-}
+                    if !dir.exists() {
+                        return Err(super::Error::StartContainerMissingResource(
+                            container.container.clone(),
+                            container.container.clone(),
+                        ));
+                    }
 
-// TODO: Do not close the namespace fds?
-fn close_file_descriptors(map: HashMap<i32, i32>) -> anyhow::Result<()> {
-    let keep: HashSet<i32> = map.keys().cloned().collect();
+                    dir
+                };
 
-    for (k, v) in map.iter().filter(|(k, v)| k != v) {
-        // If the fd is mappped to a different fd create a copy
-        cdebug!("Using fd {} mapped as fd {}", v, k);
-        unistd::dup2(*v, *k).context("Failed to dup2")?;
+                debug!("Mounting {} on {}", src.display(), target.display());
+
+                let target = root.join_strip(target);
+                mounts.push(Mount {
+                    source: Some(src.clone()),
+                    target: target.clone(),
+                    fstype: None,
+                    flags: MsFlags::MS_BIND,
+                    data: None,
+                });
+
+                // Remount ro
+                mounts.push(Mount {
+                    source: Some(src),
+                    target,
+                    fstype: None,
+                    flags: MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY,
+                    data: None,
+                });
+            }
+            npk::manifest::Mount::Tmpfs { size } => {
+                debug!(
+                    "Mounting tmpfs with size {} on {}",
+                    bytesize::ByteSize::b(*size),
+                    target.display()
+                );
+                mounts.push(Mount {
+                    source: None,
+                    target: root.join_strip(target),
+                    fstype: Some("tmpfs"),
+                    flags: MsFlags::empty(),
+                    data: Some(format!("size={},mode=1777", size)),
+                });
+            }
+            npk::manifest::Mount::Dev { .. } => { /* See above */ }
+        }
     }
 
-    // Close open fds which are not mapped
-    let fds = std::fs::read_dir("/proc/self/fd")
-        .context("Readdir of /proc/self/fd")?
-        .map(|e| e.unwrap().path())
-        .map(|e| e.file_name().unwrap().to_str().unwrap().parse().unwrap())
-        .filter(|fd| !keep.contains(fd))
-        .collect::<Vec<_>>();
-
-    cdebug!("Closing file descriptors");
-    for fd in fds.iter() {
-        unistd::close(*fd).ok();
-    }
-
-    Ok(())
+    Ok(mounts)
 }
 
-fn args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CString>) {
+/// Generate a list of supplementary gids if the groups info can be retrieved. This
+/// must happen before the init `clone` because the group information cannot be gathered
+/// without `/etc` etc...
+pub(super) fn groups(manifest: &Manifest) -> Vec<u32> {
+    if let Some(groups) = manifest.suppl_groups.as_ref() {
+        let mut result = Vec::with_capacity(groups.len());
+        for group in groups {
+            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+            let group_info = task::block_in_place(|| unsafe {
+                nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char)
+            });
+            if group_info == (null::<c_void>() as *mut nix::libc::group) {
+                warn!("Skipping invalid supplementary group {}", group);
+            } else {
+                let gid = unsafe { (*group_info).gr_gid };
+                // TODO: Are there gids cannot use?
+                result.push(gid)
+            }
+        }
+        result
+    } else {
+        Vec::with_capacity(0)
+    }
+}
+
+pub(super) fn args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CString>) {
     let init = CString::new(manifest.init.as_ref().unwrap().to_str().unwrap()).unwrap();
     let mut argv = vec![init.clone()];
     if let Some(ref args) = manifest.args {
@@ -410,6 +278,157 @@ fn args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CStri
     (init, argv, env)
 }
 
+// Init function. Pid 1.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn init(
+    container: &Container<IslandProcess>,
+    init: &CString,
+    argv: &[CString],
+    env: &[CString],
+    mounts: &[Mount],
+    fds: &HashMap<i32, Fd>,
+    groups: &[u32],
+    cond_cloned_notify: ConditionNotify,
+    cond_start_wait: ConditionWait,
+    cond_started_notify: ConditionNotify,
+) -> ! {
+    pr_set_name_init();
+
+    // Install signal handlers that forward every signal to our child
+    init_signal_handlers();
+
+    // Become a subreaper for orphans in this namespace
+    //debug!("Setting child subreaper flag");
+    set_child_subreaper(true);
+
+    let manifest = &container.manifest;
+    let root = container
+        .root
+        .canonicalize()
+        .expect("Failed to canonicalize root");
+
+    // Mount
+    mount(&mounts);
+
+    // Chroot
+    //println!("Setting chroot to {}", root.display());
+    unistd::chroot(&root).expect("Failed to chroot");
+
+    // Pwd
+    //println!("Setting pwd to /");
+    env::set_current_dir("/").expect("Failed to set cwd to /");
+
+    // UID / GID
+    setid(manifest.uid, manifest.gid);
+
+    // Supplementary groups
+    setgroups(groups);
+
+    //println!("Setting no new privs");
+    set_no_new_privs(true);
+
+    // Set the parent process death signal of the calling process to arg2
+    // (either a signal value in the range 1..maxsig, or 0 to clear).
+    //println!("Setting parent death signal to SIGKILL");
+    //set_parent_death_signal(SIGKILL);
+
+    // Capabilities
+    drop_capabilities(manifest.capabilities.as_ref());
+
+    close_file_descriptors(fds);
+
+    let cond_cloned = Condition::new().expect("Failed to create condition");
+
+    match clone(
+        CloneFlags::empty(),
+        Some(SIGCHLD as i32),
+        Some(unsafe { &mut (CHILD_PID) }),
+    ) {
+        Ok(result) => match result {
+            unistd::ForkResult::Parent { child } => {
+                assert_eq!(unsafe { CHILD_PID }, child.as_raw());
+
+                // These conditions are handled in the child
+                drop(cond_start_wait);
+                drop(cond_started_notify);
+
+                // Wait until the child signals that is has resetted it's signal handlers before
+                // we signal to the runtime that the clone is done. This is important because the rt might
+                // try to kill us before this happened.
+                cond_cloned.wait();
+                // Signal the runtime that the child is cloned
+                cond_cloned_notify.notify();
+
+                // Wait for the child to exit
+                match waitpid(Some(child), None).expect("waitpid") {
+                    WaitStatus::Exited(_pid, status) => exit(status),
+                    WaitStatus::Signaled(_pid, status, _) => {
+                        // Encode the signal number in the process exit status. It's not possible to raise a
+                        // a signal in this "init" process that is received by our parent
+                        let code = SIGNAL_OFFSET + status as i32;
+                        //debug!("Exiting with {} (signaled {})", code, status);
+                        exit(code);
+                    }
+                    // TODO: Other waitpid results
+                    _ => panic!("abnormal exit of child process"),
+                };
+            }
+            unistd::ForkResult::Child => {
+                // TODO: Post Linux 5.5 there's a nice clone flag that allows
+                // to reset the signal handler during the clone.
+                reset_signal_handlers();
+                reset_signal_mask();
+
+                set_parent_death_signal(SIGKILL);
+
+                // Signal init that we setup the signal handling
+                drop(cond_cloned_notify);
+                cond_cloned.notify();
+
+                // Wait for the start command from the runtime
+                cond_start_wait.wait();
+
+                // Signal the runtime that we're started
+                cond_started_notify.notify();
+
+                panic!("{:?}", unistd::execve(&init, &argv, &env))
+            }
+        },
+        Err(e) => panic!("Clone error: {}", e),
+    }
+}
+
+// TODO: The container could be malformed and the mountpoint might be
+// missing. This is not a fault of the RT so don't expect it.
+// TODO: mount flags: nosuid etc....
+// TODO: /dev mounts from manifest: full or minimal
+fn mount(mounts: &[Mount]) {
+    for mount in mounts {
+        nix::mount::mount(
+            mount.source.as_ref(),
+            &mount.target,
+            mount.fstype,
+            mount.flags,
+            mount.data.as_deref(),
+        )
+        .expect("Failed to mount");
+    }
+}
+
+/// Apply file descriptor configuration
+fn close_file_descriptors(map: &HashMap<i32, Fd>) {
+    for (fd, value) in map {
+        match value {
+            Fd::Inherit => (),
+            Fd::Close => { unistd::close(*fd).ok(); }, // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
+            Fd::Dup(n) => {
+                unistd::dup2(*n, *fd).expect("Failed to dup2");
+                unistd::close(*n).expect("Failed to close");
+            }
+        }
+    }
+}
+
 /// Install a signal handler that forwards alls signals to the child process
 /// Init processes by default have *no* signal handlers installed.
 fn init_signal_handlers() {
@@ -423,29 +442,26 @@ fn init_signal_handlers() {
             let action = SigAction::new(
                 handler,
                 SaFlags::SA_SIGINFO | SaFlags::SA_RESTART,
-                SigSet::empty(),
+                SigSet::all(),
             );
-            sigaction(sig, &action).expect("failed to install sigaction");
+            sigaction(sig, &action).expect("Failed to install sigaction");
         }
     }
 }
 
 extern "C" fn forward_signal_to_child(signal: c_int, _: *mut siginfo_t, _: *mut c_void) {
     let child_pid = unsafe { CHILD_PID };
-    if child_pid >= 0 {
-        let child = nix::unistd::Pid::from_raw(child_pid);
-        let signal = Signal::try_from(signal).unwrap();
+    if child_pid != -1 {
         // Writing to stdout in signal handler is bad. Just left this here
-        // for debugging.
-        // println!("{}: forwarding {} to {}", getpid(), signal, child);
-        kill(child, Some(signal)).expect("failed to kill child");
+        // for printlnging.
+        //println!("{}: forwarding {} to {}", std::process::id(), signal, child);
+        unsafe { libc::kill(child_pid, signal) };
     } else {
-        // The signal happened before forking the child process or the forking
-        // of the child raised this signal. Safe to ignore.
+        panic!("Internal error: child pid not set in signal handler");
     }
 }
 
-fn set_child_subreaper(value: bool) -> anyhow::Result<()> {
+fn set_child_subreaper(value: bool) {
     #[cfg(target_os = "android")]
     const PR_SET_CHILD_SUBREAPER: c_int = 36;
     #[cfg(not(target_os = "android"))]
@@ -456,10 +472,10 @@ fn set_child_subreaper(value: bool) -> anyhow::Result<()> {
     let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .context("Failed to set PR_SET_PDEATHSIG")
+        .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
-fn set_parent_death_signal(signal: Signal) -> anyhow::Result<()> {
+fn set_parent_death_signal(signal: Signal) {
     #[cfg(target_os = "android")]
     const PR_SET_PDEATHSIG: c_int = 1;
     #[cfg(not(target_os = "android"))]
@@ -468,10 +484,10 @@ fn set_parent_death_signal(signal: Signal) -> anyhow::Result<()> {
     let result = unsafe { nix::libc::prctl(PR_SET_PDEATHSIG, signal, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .context("Failed to set PR_SET_PDEATHSIG")
+        .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
-fn set_no_new_privs(value: bool) -> anyhow::Result<()> {
+fn set_no_new_privs(value: bool) {
     #[cfg(target_os = "android")]
     pub const PR_SET_NO_NEW_PRIVS: c_int = 38;
     #[cfg(not(target_os = "android"))]
@@ -480,7 +496,7 @@ fn set_no_new_privs(value: bool) -> anyhow::Result<()> {
     let result = unsafe { nix::libc::prctl(PR_SET_NO_NEW_PRIVS, value as c_ulong, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .context("Failed to set PR_SET_NO_NEW_PRIVS")
+        .expect("Failed to set PR_SET_NO_NEW_PRIVS")
 }
 
 #[cfg(target_os = "android")]
@@ -488,12 +504,12 @@ pub const PR_SET_NAME: c_int = 15;
 #[cfg(not(target_os = "android"))]
 use libc::PR_SET_NAME;
 
-fn pr_set_name(name: &str) -> anyhow::Result<()> {
-    let cname = CString::new(name).unwrap();
+fn pr_set_name_init() {
+    let cname = "init\0";
     let result = unsafe { libc::prctl(PR_SET_NAME, cname.as_ptr() as c_ulong, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .context("Failed to set PR_SET_KEEPCAPS")
+        .expect("Failed to set PR_SET_KEEPCAPS");
 }
 
 fn reset_signal_handlers() {
@@ -505,82 +521,68 @@ fn reset_signal_handlers() {
         .expect("failed to signal");
 }
 
+fn reset_signal_mask() {
+    sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None)
+        .expect("Failed to reset signal maks")
+}
+
 // Reset effective caps to the most possible set
-fn reset_effective_caps() -> anyhow::Result<()> {
-    cdebug!("Resetting effective capabilities");
-    caps::set(None, caps::CapSet::Effective, &caps::all())
-        .context("Failed to reset effective caps")?;
-    Ok(())
+fn reset_effective_caps() {
+    //println!("Resetting effective capabilities");
+    caps::set(None, caps::CapSet::Effective, &caps::all()).expect("Failed to reset effective caps");
 }
 
 /// Set uid/gid
-fn setid(uid: u32, gid: u32) -> anyhow::Result<()> {
+fn setid(uid: u32, gid: u32) {
     let rt_priveleged = unistd::geteuid() == Uid::from_raw(0);
 
     // If running as uid 0 safe our caps across the uid/gid drop
     if rt_priveleged {
-        caps::securebits::set_keepcaps(true).context("Failed to set keep caps")?;
+        caps::securebits::set_keepcaps(true).expect("Failed to set keep caps");
     }
 
-    cdebug!("Setting gid to {}", gid);
+    //println!("Setting gid to {}", gid);
     let gid = unistd::Gid::from_raw(gid);
-    unistd::setresgid(gid, gid, gid).context("Failed to set resgid")?;
+    unistd::setresgid(gid, gid, gid).expect("Failed to set resgid");
 
-    cdebug!("Setting uid to {}", uid);
+    //println!("Setting uid to {}", uid);
     let uid = unistd::Uid::from_raw(uid);
-    unistd::setresuid(uid, uid, uid).context("Failed to set resuid")?;
+    unistd::setresuid(uid, uid, uid).expect("Failed to set resuid");
 
     if rt_priveleged {
-        reset_effective_caps()?;
-        caps::securebits::set_keepcaps(false).context("Failed to set keep caps")?;
+        reset_effective_caps();
+        caps::securebits::set_keepcaps(false).expect("Failed to set keep caps");
     }
-
-    Ok(())
 }
 
-fn setgroups(gid: u32, supplementary_groups: &[(String, Option<Gid>)]) -> anyhow::Result<()> {
-    let mut groups = vec![gid];
-    groups.reserve(supplementary_groups.len());
-    groups.extend(
-        supplementary_groups
-            .iter()
-            .filter_map(|(group, gid)| {
-                if gid.is_none() {
-                    cwarn!("Skipping invalid supplementary group {}", group);
-                }
-                *gid
-            })
-            .map(Gid::as_raw),
-    );
-
-    cdebug!("Setting groups {:?}", groups);
+fn setgroups(groups: &[u32]) {
+    //println!("Setting groups {:?}", groups);
     let result = unsafe { nix::libc::setgroups(groups.len(), groups.as_ptr()) };
 
     Errno::result(result)
         .map(drop)
-        .context("Failed to set PR_SET_PDEATHSIG")
+        .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
 /// Drop capabilities
-fn drop_capabilities(cs: Option<&HashSet<caps::Capability>>) -> anyhow::Result<()> {
-    let mut bounded = caps::read(None, caps::CapSet::Bounding)?;
+fn drop_capabilities(cs: Option<&HashSet<caps::Capability>>) {
+    let mut bounded =
+        caps::read(None, caps::CapSet::Bounding).expect("Failed to read bouding caps");
     if let Some(caps) = cs {
         bounded.retain(|c| !caps.contains(c));
     }
 
-    cdebug!("Dropping capabilities");
+    //println!("Dropping capabilities");
     for cap in bounded {
         // caps::set cannot be called for for bounded
-        caps::drop(None, caps::CapSet::Bounding, cap)?;
+        caps::drop(None, caps::CapSet::Bounding, cap).expect("Failed to drop bounding cap");
     }
 
     if let Some(caps) = cs {
-        cdebug!("Settings capabilities to {:?}", caps);
-        caps::set(None, caps::CapSet::Effective, caps)?;
-        caps::set(None, caps::CapSet::Permitted, caps)?;
-        caps::set(None, caps::CapSet::Inheritable, caps)?;
-        caps::set(None, caps::CapSet::Ambient, caps)?;
+        //println!("Settings capabilities to {:?}", caps);
+        caps::set(None, caps::CapSet::Effective, caps).expect("Failed to set effective caps");
+        caps::set(None, caps::CapSet::Permitted, caps).expect("Failed to set permitted caps");
+        caps::set(None, caps::CapSet::Inheritable, caps).expect("Failed to set inheritable caps");
+        caps::set(None, caps::CapSet::Ambient, caps).expect("Failed to set ambient caps");
     }
-
-    Ok(())
 }

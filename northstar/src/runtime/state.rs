@@ -388,22 +388,19 @@ impl<'a, L: Launcher> State<'a, L> {
             let cgroups =
                 // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
                 super::cgroups::CGroups::new(&self.config.cgroups, &container, c, self.events_tx.clone())
-                    .await
-                    .map_err(Error::Cgroups).expect("Failed to create cgroup");
+                    .await.expect("Failed to create cgroup");
 
             // Assigning a pid to a cgroup created by us must work otherwise we did something wrong.
             cgroups
                 .assign(process.pid())
                 .await
-                .map_err(Error::Cgroups)
                 .expect("Failed to assign PID to cgroups");
             Some(cgroups)
         } else {
             None
         };
 
-        // Signal the process to continue starting. This can fail because of the container
-        // content. In case umount everything mounted so far and return the error.
+        // Signal the process to continue starting. This can fail because of the container content
         let process = match process.start().await {
             result::Result::Ok(process) => process,
             result::Result::Err(e) => {
@@ -445,16 +442,13 @@ impl<'a, L: Launcher> State<'a, L> {
         container: &Container,
         timeout: time::Duration,
     ) -> Result<(), Error> {
-        if let Some(context) = self
+        if let Some(process) = self
             .containers
             .get_mut(&container)
             .and_then(|c| c.process.take())
         {
             info!("Terminating {}", container);
-            let exit_status = context
-                .terminate(timeout)
-                .await
-                .expect("Failed to destroy context");
+            let exit_status = process.terminate(timeout).await.expect("Failed to stop");
 
             // Send notification to main loop
             self.notification(Notification::Stopped(container.clone()))

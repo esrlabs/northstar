@@ -12,59 +12,82 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use libc::c_void;
+use std::ptr::null_mut;
 use nix::{
     errno::Errno,
-    libc::{self, c_int},
+    libc::{self, c_int, pid_t},
     sched,
     unistd::{self, ForkResult},
 };
 use sched::CloneFlags;
 
 #[cfg(not(target_os = "android"))]
-pub(super) fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
-    let combined = flags.bits() | signal.unwrap_or(0);
-    let res = unsafe {
-        libc::syscall(
-            libc::SYS_clone,
-            combined,
-            std::ptr::null() as *const c_void,
-            0u64,
-            0u64,
-            0u64,
-        )
+pub(super) fn clone(
+    mut flags: CloneFlags,
+    signal: Option<c_int>,
+    parent_tid: Option<&mut pid_t>,
+) -> nix::Result<ForkResult> {
+    let result = if let Some(parent_tid) = parent_tid {
+        flags |= CloneFlags::CLONE_PARENT_SETTID;
+        let combined = flags.bits() | signal.unwrap_or(0);
+        unsafe {
+            libc::syscall(
+                libc::SYS_clone,
+                combined,
+                null_mut::<u64>(),
+                parent_tid as *mut _,
+            )
+        }
+    } else {
+        let combined = flags.bits() | signal.unwrap_or(0);
+        unsafe { libc::syscall(libc::SYS_clone, combined, null_mut::<u64>()) }
     };
 
-    Errno::result(res).map(|res| match res {
+    Errno::result(result).map(|res| match res {
         0 => ForkResult::Child,
-        res => ForkResult::Parent {
-            child: unistd::Pid::from_raw(res as i32),
+        result => ForkResult::Parent {
+            child: unistd::Pid::from_raw(result as i32),
         },
     })
 }
 
 #[cfg(target_os = "android")]
 #[allow(invalid_value)]
-pub(super) fn clone(flags: CloneFlags, signal: Option<c_int>) -> nix::Result<ForkResult> {
+pub(super) fn clone(
+    mut flags: CloneFlags,
+    signal: Option<c_int>,
+    parent_tid: Option<&mut pid_t>,
+) -> nix::Result<ForkResult> {
     use std::{mem::transmute, ptr::null_mut};
-    let combined = flags.bits() | signal.unwrap_or(0);
-    let res = unsafe {
-        libc::clone(
-            transmute::<u64, extern "C" fn(*mut c_void) -> c_int>(0u64),
-            null_mut(),
-            combined,
-            null_mut(),
-            0u64,
-            0u64,
-            0u64,
-            0u64,
-        )
+
+    let result = if let Some(parent_tid) = parent_tid {
+        flags |= CloneFlags::CLONE_PARENT_SETTID;
+        let combined = flags.bits() | signal.unwrap_or(0);
+        unsafe {
+            libc::clone(
+                transmute::<u64, extern "C" fn(*mut c_void) -> c_int>(0u64),
+                null_mut(),
+                combined,
+                null_mut(),
+                parent_tid as *mut _,
+            )
+        }
+    } else {
+        let combined = flags.bits() | signal.unwrap_or(0);
+        unsafe {
+            libc::clone(
+                transmute::<u64, extern "C" fn(*mut c_void) -> c_int>(0u64),
+                null_mut(),
+                combined,
+                null_mut(),
+            )
+        }
     };
 
-    Errno::result(res).map(|res| match res {
+    Errno::result(result).map(|res| match res {
         0 => ForkResult::Child,
-        res => ForkResult::Parent {
-            child: unistd::Pid::from_raw(res as i32),
+        result => ForkResult::Parent {
+            child: unistd::Pid::from_raw(result as i32),
         },
     })
 }

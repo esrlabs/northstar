@@ -15,10 +15,10 @@
 use super::{
     config::Config,
     error::Error,
-    pipe::{pipe_duplex, PipeSendRecv, PipeWrite},
+    pipe::{ConditionNotify, ConditionWait},
     Event, EventTx, ExitStatus, Launcher, MountedContainer as Container, Pid, Process,
 };
-use crate::runtime::pipe::PipeRead;
+use crate::runtime::{island::io::Fd, pipe::Condition};
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
 use log::{debug, info, warn};
@@ -29,16 +29,12 @@ use nix::{
         self,
         signal::{Signal, SIGCHLD},
     },
-    unistd::{self, Gid},
+    unistd,
 };
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
-use std::{
-    convert::TryFrom,
-    ffi::{c_void, CString},
-    fmt,
-    ptr::null,
-};
+use std::{convert::TryFrom, fmt, os::unix::prelude::AsRawFd};
+use task::block_in_place as block;
 use tokio::{task, time};
 
 mod clone;
@@ -50,9 +46,7 @@ const ENV_NAME: &str = "NAME";
 const ENV_VERSION: &str = "VERSION";
 const SIGNAL_OFFSET: i32 = 128;
 
-type Intercom = (PipeRead, PipeWrite);
-
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 enum LaunchProtocol {
     Error(String),
     Go,
@@ -68,18 +62,17 @@ pub(super) struct Island {
 pub(super) enum IslandProcess {
     Created {
         pid: Pid,
-        intercom: Intercom,
         exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
         io: (Option<io::Log>, Option<io::Log>),
+        cond_start_notify: ConditionNotify,
+        cond_started_wait: ConditionWait,
     },
     Started {
         pid: Pid,
         exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
         io: (Option<io::Log>, Option<io::Log>),
     },
-    Stopped {
-        pid: Pid,
-    },
+    Stopped,
 }
 
 impl fmt::Debug for IslandProcess {
@@ -93,10 +86,7 @@ impl fmt::Debug for IslandProcess {
                 .debug_struct("IslandProcess::Started")
                 .field("pid", &pid)
                 .finish(),
-            IslandProcess::Stopped { pid } => f
-                .debug_struct("IslandProcess::Stoped")
-                .field("pid", &pid)
-                .finish(),
+            IslandProcess::Stopped => f.debug_struct("IslandProcess::Stoped").finish(),
         }
     }
 }
@@ -120,36 +110,91 @@ impl Launcher for Island {
     }
 
     async fn create(&self, container: &Container<Self::Process>) -> Result<Self::Process, Error> {
-        // Intercom
-        let (intercom_runtime, intercom_init) = pipe_duplex::<PipeRead, PipeWrite>()
-            .map_err(|e| Error::io("Failed to create duplex", e))?;
+        let manifest = &container.manifest;
+        let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
 
-        let (stdout, stderr, child_fd_map) = io::from_manifest(&container.manifest).await?;
+        // Condition pair to signal the child is cloned by init
+        let (cond_cloned_wait, cond_cloned_notify) = Condition::new()
+            .map_err(|e| Error::io("Failed to create condition", e))?
+            .split();
+        fds.insert(cond_cloned_notify.as_raw_fd(), Fd::Inherit);
 
-        let groups = groups(&container.manifest);
+        // Condition pair to signal the child to start
+        let (cond_start_wait, cond_start_notify) = Condition::new()
+            .map_err(|e| Error::io("Failed to create condition", e))?
+            .split();
+        fds.insert(cond_start_wait.as_raw_fd(), Fd::Inherit);
+
+        // Condition pair to signal the runtime from the child that it's started
+        let (cond_started_wait, cond_started_notify) = Condition::new()
+            .map_err(|e| Error::io("Failed to create condition", e))?
+            .split();
+        fds.insert(cond_started_notify.as_raw_fd(), Fd::Inherit);
+
+        // Calculating init, argv and env allocates. Do that before `clone`.
+        let (init, argv, env) = init::args(manifest);
+
+        debug!("{} init is {:?}", manifest.name, init);
+        debug!("{} argv is {:?}", manifest.name, argv);
+        debug!("{} env is {:?}", manifest.name, env);
+
+        // Prepare a list of mounts and groups that need to be applied to the child. Prepare the list here
+        // to avoid any allocation in the child
+        let mounts = init::mounts(&self.config, &container).await?;
+        let groups = init::groups(manifest);
 
         // Clone init
         let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
-        match clone::clone(flags, Some(SIGCHLD as i32)) {
+        match block(|| clone::clone(flags, Some(SIGCHLD as i32), None)) {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
+                    debug!("Created {} with pid {}", container.container, child);
+                    block(|| {
+                        drop(cond_cloned_notify);
+                        drop(cond_start_wait);
+                        drop(cond_started_notify);
+                    });
+
+                    // Close writing part of log forwards if any
+                    let stdout = stdout.map(|(log, fd)| {
+                        block(|| unistd::close(fd).ok());
+                        log
+                    });
+                    let stderr = stderr.map(|(log, fd)| {
+                        block(|| unistd::close(fd).ok());
+                        log
+                    });
                     let pid = child.as_raw() as Pid;
                     let exit_status = Box::new(wait(container, pid, self.tx.clone()).await);
+
+                    block(|| cond_cloned_wait.wait());
 
                     Ok(IslandProcess::Created {
                         pid,
                         exit_status,
-                        intercom: intercom_runtime,
                         io: (stdout, stderr),
+                        cond_start_notify,
+                        cond_started_wait,
                     })
                 }
-                unistd::ForkResult::Child => init::init(
-                    &self.config,
-                    container,
-                    child_fd_map,
-                    &groups,
-                    intercom_init,
-                ),
+                unistd::ForkResult::Child => {
+                    drop(cond_cloned_wait);
+                    drop(cond_start_notify);
+                    drop(cond_started_wait);
+
+                    init::init(
+                        container,
+                        &init,
+                        &argv,
+                        &env,
+                        &mounts,
+                        &fds,
+                        &groups,
+                        cond_cloned_notify,
+                        cond_start_wait,
+                        cond_started_notify,
+                    );
+                }
             },
             Err(e) => panic!("Fork error: {}", e),
         }
@@ -162,7 +207,7 @@ impl Process for IslandProcess {
         match self {
             IslandProcess::Created { pid, .. } => *pid,
             IslandProcess::Started { pid, .. } => *pid,
-            IslandProcess::Stopped { pid } => *pid,
+            IslandProcess::Stopped { .. } => unreachable!(),
         }
     }
 
@@ -172,13 +217,14 @@ impl Process for IslandProcess {
             IslandProcess::Created {
                 pid,
                 exit_status,
-                mut intercom,
                 io: _io,
+                cond_start_notify,
+                cond_started_wait,
             } => {
-                // Signal the init process that it shall start the child (1)
-                intercom.send(LaunchProtocol::Go).ok();
-                // Wait for the notification from init that the child is launchend (8)
-                intercom.recv::<LaunchProtocol>().ok();
+                block(|| {
+                    cond_start_notify.notify();
+                    cond_started_wait.wait();
+                });
 
                 Ok(IslandProcess::Started {
                     pid,
@@ -196,15 +242,18 @@ impl Process for IslandProcess {
         mut self,
         timeout: time::Duration,
     ) -> Result<(Self, ExitStatus), super::error::Error> {
-        let (pid, mut exit_status) = match self {
+        let (pid, mut exit_status, io) = match self {
             IslandProcess::Created {
-                pid, exit_status, ..
-            } => (pid, exit_status),
+                pid,
+                exit_status,
+                io,
+                ..
+            } => (pid, exit_status, io),
             IslandProcess::Started {
                 pid,
                 exit_status,
-                io: _io,
-            } => (pid, exit_status),
+                io,
+            } => (pid, exit_status, io),
             IslandProcess::Stopped { .. } => unreachable!(),
         };
         debug!("Trying to send SIGTERM to {}", pid);
@@ -237,12 +286,29 @@ impl Process for IslandProcess {
             Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", pid), e)),
         }?;
 
-        let pid = pid.as_raw() as u32;
-        Ok((IslandProcess::Stopped { pid }, exit_status))
+        if let Some(io) = io.0 {
+            io.stop().await?;
+        }
+        if let Some(io) = io.1 {
+            io.stop().await?;
+        }
+
+        Ok((IslandProcess::Stopped, exit_status))
     }
 
     async fn destroy(mut self) -> Result<(), Error> {
-        Ok(())
+        match self {
+            IslandProcess::Created { io, .. } | IslandProcess::Started { io, .. } => {
+                if let Some(io) = io.0 {
+                    io.stop().await?;
+                }
+                if let Some(io) = io.1 {
+                    io.stop().await?;
+                }
+                Ok(())
+            }
+            IslandProcess::Stopped { .. } => Ok(()),
+        }
     }
 }
 
@@ -264,7 +330,6 @@ async fn wait(
                     // There is no way to make the "init" exit with a signal status. Use a defined
                     // offset to get the original signal. This is the sad way everyone does it...
                     if SIGNAL_OFFSET <= code {
-                        println!("signal: {}", code - SIGNAL_OFFSET);
                         let signal =
                             Signal::try_from(code - SIGNAL_OFFSET).expect("Invalid signal offset");
                         debug!("Process {} exit status is signal {}", pid, signal);
@@ -321,28 +386,4 @@ async fn wait(
             std::io::Error::new(std::io::ErrorKind::Other, e),
         )
     })
-}
-
-/// Generate a list of supplementary gids if the groups info can be retrieved. This
-/// must happen before the init `clone` because the group information cannot be gathered
-/// without `/etc` etc...
-fn groups(manifest: &npk::manifest::Manifest) -> Vec<(String, Option<Gid>)> {
-    if let Some(groups) = manifest.suppl_groups.as_ref() {
-        let mut result = Vec::with_capacity(groups.len());
-        for group in groups {
-            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
-            let group_info =
-                unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
-            if group_info == (null::<c_void>() as *mut nix::libc::group) {
-                result.push((group.clone(), None));
-            } else {
-                let gid = unsafe { (*group_info).gr_gid };
-                // TODO: Are there gids cannot use?
-                result.push((group.clone(), Some(Gid::from_raw(gid))))
-            }
-        }
-        result
-    } else {
-        Vec::with_capacity(0)
-    }
 }
