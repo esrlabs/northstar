@@ -287,11 +287,10 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             Event::Exit(container, exit_status) => state.on_exit(&container, &exit_status).await,
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => {
-                log::debug!("Shutting down Northstar runtime");
-                log::debug!("Dropping queued events");
+                debug!("Shutting down Northstar runtime");
                 drop(event_rx);
                 if let Some(console) = console {
-                    log::debug!("Shutting down console");
+                    debug!("Shutting down console");
                     console.shutdown().await.map_err(Error::Console)?;
                 }
                 break state.shutdown().await;
@@ -310,6 +309,8 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
 
     task::block_in_place(|| nix::mount::umount(&config.run_dir))
         .map_err(|e| Error::Mount(mount::Error::Os(e)))?;
+
+    debug!("Shutdown complete");
 
     Ok(())
 }
