@@ -420,7 +420,9 @@ fn close_file_descriptors(map: &HashMap<i32, Fd>) {
     for (fd, value) in map {
         match value {
             Fd::Inherit => (),
-            Fd::Close => { unistd::close(*fd).ok(); }, // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
+            Fd::Close => {
+                unistd::close(*fd).ok();
+            } // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
             Fd::Dup(n) => {
                 unistd::dup2(*n, *fd).expect("Failed to dup2");
                 unistd::close(*n).expect("Failed to close");

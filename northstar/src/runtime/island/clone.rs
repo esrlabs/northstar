@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::ptr::null_mut;
 use nix::{
     errno::Errno,
     libc::{self, c_int, pid_t},
@@ -20,6 +19,7 @@ use nix::{
     unistd::{self, ForkResult},
 };
 use sched::CloneFlags;
+use std::ptr::null_mut;
 
 #[cfg(not(target_os = "android"))]
 pub(super) fn clone(
