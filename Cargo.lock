@@ -1900,6 +1900,7 @@ dependencies = [
  "env_logger",
  "futures",
  "northstar",
+ "rand 0.8.3",
  "structopt",
  "tokio",
  "tokio-util",
