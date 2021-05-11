@@ -337,6 +337,37 @@ test!(fd_leak, {
     result
 });
 
+// Check open file descriptors in the test container that should be
+// stdin: /dev/null
+// stdout: some pipe
+// stderr: /dev/null
+test!(fd_container, {
+    let runtime = Northstar::launch_install_test_container().await?;
+    runtime.test_cmds("inspect").await;
+    runtime.start(TEST_CONTAINER).await?;
+    assume("/proc/self/fd/0: /dev/null", 5).await?;
+    assume("/proc/self/fd/1: pipe:.*", 5).await?;
+    assume("/proc/self/fd/2: /dev/null", 5).await?;
+
+    #[cfg(features = "rt-island")]
+    assume("total: 3", 5).await?;
+
+    // Minijail does not close it's pipes properly
+    #[cfg(features = "rt-minijail")]
+    assume("total: 6", 5).await?;
+
+    runtime.shutdown().await
+});
+
+// Check if /proc is mounted ro
+test!(proc_ro, {
+    let runtime = Northstar::launch_install_test_container().await?;
+    runtime.test_cmds("inspect").await;
+    runtime.start(TEST_CONTAINER).await?;
+    assume("proc /proc proc ro,", 5).await?;
+    runtime.shutdown().await
+});
+
 // Open many connections to the runtime
 test!(connections, {
     let runtime = Northstar::launch().await?;
