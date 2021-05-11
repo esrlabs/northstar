@@ -250,7 +250,7 @@ where
 }
 
 /// Sets O_NONBLOCK flag on self
-trait RawFdExt: AsRawFd {
+pub trait RawFdExt: AsRawFd {
     fn set_nonblocking(&self);
     fn set_cloexec(&self, value: bool) -> Result<()>;
 }
@@ -284,6 +284,7 @@ fn from_nix(error: nix::Error) -> io::Error {
 }
 
 #[allow(unused)]
+#[derive(Debug)]
 pub(crate) struct Condition {
     read: PipeRead,
     write: PipeWrite,
@@ -300,10 +301,9 @@ impl Condition {
         })
     }
 
-    pub(crate) fn set_cloexec(&self) -> Result<()> {
+    pub(crate) fn set_cloexec(&self) {
         self.read.set_cloexec(true);
         self.write.set_cloexec(true);
-        Ok(())
     }
 
     pub(crate) fn wait(mut self) {
@@ -317,10 +317,72 @@ impl Condition {
                 Err(e) => break,
             }
         }
-        drop(self.read)
     }
 
     pub(crate) fn notify(self) {}
+
+    pub(crate) fn split(self) -> (ConditionWait, ConditionNotify) {
+        (
+            ConditionWait { read: self.read },
+            ConditionNotify { write: self.write },
+        )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConditionWait {
+    read: PipeRead,
+}
+
+impl ConditionWait {
+    #[allow(unused)]
+    pub(crate) fn wait(mut self) {
+        let buf: &mut [u8] = &mut [0u8; 1];
+        use std::io::Read;
+        loop {
+            match self.read.read(buf) {
+                Ok(n) if n == 0 => break,
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+impl AsRawFd for ConditionWait {
+    fn as_raw_fd(&self) -> RawFd {
+        self.read.as_raw_fd()
+    }
+}
+
+impl IntoRawFd for ConditionWait {
+    fn into_raw_fd(self) -> RawFd {
+        self.read.into_raw_fd()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConditionNotify {
+    write: PipeWrite,
+}
+
+impl ConditionNotify {
+    #[allow(unused)]
+    pub(crate) fn notify(self) {
+        drop(self.write)
+    }
+}
+
+impl AsRawFd for ConditionNotify {
+    fn as_raw_fd(&self) -> RawFd {
+        self.write.as_raw_fd()
+    }
+}
+
+impl IntoRawFd for ConditionNotify {
+    fn into_raw_fd(self) -> RawFd {
+        self.write.into_raw_fd()
+    }
 }
 
 #[cfg(test)]
@@ -560,5 +622,29 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn condition() {
+        let (w0, n0) = Condition::new().unwrap().split();
+        let (w1, n1) = Condition::new().unwrap().split();
+
+        match unsafe { unistd::fork().unwrap() } {
+            unistd::ForkResult::Parent { .. } => {
+                drop(w0);
+                drop(n1);
+
+                n0.notify();
+                w1.wait();
+            }
+            unistd::ForkResult::Child => {
+                drop(n0);
+                drop(w1);
+
+                w0.wait();
+                n1.notify();
+                process::exit(0);
+            }
+        }
     }
 }
