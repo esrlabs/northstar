@@ -4,8 +4,14 @@ init: /inspect
 uid: 1000
 gid: 1000
 io:
-  stdout: pipe
-  stderr: pipe
+  stdout:
+    log:
+      - DEBUG
+      - inspect
+  stderr:
+    log:
+      - WARN
+      - inspect
 mounts:
     /lib:
       host: /lib

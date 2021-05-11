@@ -62,7 +62,7 @@ fn main() {
     println!("fds:");
     for entry in fs::read_dir("/proc/self/fd").expect("read_dir /proc/self/fd") {
         let entry = entry.unwrap().path();
-        let link = fs::read_link(&entry).expect("mount entry");
+        let link = fs::read_link(&entry).expect("readlink");
         println!("    {}: {}", entry.display(), link.display());
     }
 
