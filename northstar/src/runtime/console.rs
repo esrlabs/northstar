@@ -18,6 +18,7 @@ use crate::{
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
+use bytes::BytesMut;
 use futures::{
     future::join_all,
     sink::SinkExt,
@@ -25,13 +26,14 @@ use futures::{
     Future, StreamExt, TryFutureExt,
 };
 use log::{debug, error, info, trace, warn};
-use std::{path::PathBuf, unreachable};
+use std::{fmt, io::Write, path::PathBuf, unreachable};
+use tempfile::NamedTempFile;
 use thiserror::Error;
 use tokio::{
     fs,
-    io::{self, AsyncRead, AsyncWrite},
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
     net::{TcpListener, UnixListener},
-    select,
+    pin, select,
     sync::{self, broadcast, oneshot},
     task::{self},
     time,
@@ -69,8 +71,8 @@ pub enum Error {
     Protocol(String),
     #[error("IO error: {0} ({1})")]
     Io(String, #[source] io::Error),
-    #[error("Event loop closed, request cannot be processed")]
-    EventLoopClosed,
+    #[error("Shutting down")]
+    Shutdown,
 }
 
 impl Console {
@@ -202,7 +204,7 @@ impl Console {
             drop(notification_rx);
             Either::Right(stream::pending())
         };
-        tokio::pin!(notifications);
+        pin!(notifications);
 
         loop {
             select! {
@@ -239,7 +241,7 @@ impl Console {
                     };
 
                     trace!("{}: --> {:?}", peer, message);
-                    let response = match process_request(&peer, &mut network_stream, &event_tx, message).await {
+                    let response = match process_request(&peer, &mut network_stream, &stop, &event_tx, message).await {
                         Ok(response) => response,
                         Err(e) => {
                             warn!("Failed to process request: {}", e);
@@ -274,6 +276,7 @@ impl Console {
 async fn process_request<S>(
     client_id: &ClientId,
     stream: &mut S,
+    stop: &CancellationToken,
     event_loop: &EventTx,
     message: api::model::Message,
 ) -> Result<api::model::Message, Error>
@@ -281,7 +284,7 @@ where
     S: AsyncRead + Unpin,
 {
     let message_id = message.id.clone();
-    let response =
+    let (request, tmpfile) =
         if let api::model::Payload::Request(api::model::Request::Install(repository, size)) =
             message.payload
         {
@@ -291,56 +294,68 @@ where
                 bytesize::ByteSize::b(size)
             );
             info!("{}: Using repository \"{}\"", client_id, repository);
-            let tmpfile = copy_to_tempfile(stream, size)
+            let tmpfile = stream_to_tmpfile(stream, size)
                 .await
                 .map_err(|e| Error::Io("Failed to receive bytes".to_string(), e))?;
             let path = tmpfile.path().to_owned();
 
-            send_event(&event_loop, Request::Install(repository, path)).await?
+            (Request::Install(repository, path), Some(tmpfile))
         } else {
-            send_event(&event_loop, Request::Message(message)).await?
+            (Request::Message(message), None)
         };
 
-    Ok(api::model::Message {
+    trace!("    {:?} -> event loop", request);
+
+    let (reply_tx, reply_rx) = oneshot::channel();
+    event_loop
+        .send(Event::Console(request, reply_tx))
+        .map_err(|_| Error::Shutdown)
+        .await?;
+
+    let response = select! {
+        reply = reply_rx => reply.map_err(|_| Error::Shutdown),
+        _ = stop.cancelled() => Err(Error::Shutdown), // There can be a shutdown while we're waiting for an reply
+    };
+
+    trace!("    {:?} <- event loop", response);
+
+    // Remove tmpfile if this is an install request
+    drop(tmpfile);
+
+    response.map(|response| api::model::Message {
         id: message_id,
         payload: api::model::Payload::Response(response),
     })
 }
 
 /// Copies size bytes to a named tempfile
-async fn copy_to_tempfile<Stream>(
-    stream: Stream,
+async fn stream_to_tmpfile<S: AsyncRead + Unpin>(
+    stream: S,
     size: u64,
-) -> std::io::Result<tempfile::NamedTempFile>
-where
-    Stream: AsyncRead + Unpin,
-{
-    let tmpfile = tempfile::NamedTempFile::new()?;
-    let mut file = fs::File::create(&tmpfile.path()).await?;
-
-    // Receive size bytes into tmpfile
+) -> io::Result<NamedTempFile> {
+    let mut tmpfile = NamedTempFile::new()?;
     let start = time::Instant::now();
-    let bytes = io::copy(&mut io::AsyncReadExt::take(stream, size), &mut file).await?;
+    let mut stream = io::BufReader::new(stream).take(size);
+    let mut buf = BytesMut::with_capacity(16 * 1024);
+    loop {
+        let n = stream.read_buf(&mut buf).await?;
+        task::block_in_place(|| tmpfile.write_all(&buf[..]))?;
+        if n != 0 || !buf.is_empty() {
+            buf.clear();
+        } else {
+            break;
+        }
+    }
+
+    task::block_in_place(|| tmpfile.flush())?;
+
     debug!(
         "Received {} in {:?}",
-        bytesize::ByteSize::b(bytes),
+        bytesize::ByteSize::b(size),
         start.elapsed()
     );
 
     Ok(tmpfile)
-}
-
-/// Sends an `Event::Console` to the event loop and await its response
-async fn send_event(event_loop: &EventTx, request: Request) -> Result<api::model::Response, Error> {
-    trace!("{:?} -> event loop", request);
-    let (reply_tx, reply_rx) = oneshot::channel();
-    let response = event_loop
-        .send(Event::Console(request, reply_tx))
-        .map_err(|_| Error::EventLoopClosed)
-        .and_then(|_| reply_rx.map_err(|_| Error::EventLoopClosed))
-        .await;
-    trace!("{:?} <- event loop", response);
-    response
 }
 
 /// Types of listeners for console connections
@@ -350,7 +365,7 @@ enum Listener {
 }
 
 impl Listener {
-    async fn new(url: &Url) -> std::io::Result<Listener> {
+    async fn new(url: &Url) -> io::Result<Listener> {
         let listener = match url.scheme() {
             "tcp" => {
                 let address = url.socket_addrs(|| Some(4200))?.first().unwrap().to_owned();
@@ -400,7 +415,7 @@ async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
     Connection: Future<Output = Result<(Stream, Client), E>>,
     Stream: AsyncWrite + AsyncRead + Unpin + Send + 'static,
     Client: Into<ClientId>,
-    E: std::fmt::Debug,
+    E: fmt::Debug,
 {
     let mut connections = FuturesUnordered::new();
     loop {
@@ -452,8 +467,8 @@ impl From<tokio::net::unix::SocketAddr> for ClientId {
     }
 }
 
-impl std::fmt::Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ClientId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
