@@ -28,6 +28,6 @@ npk = { path = "../npk" }
 tokio = { version = "1.5", features = ["full"] }
 
 [features]
-default = ["rt-island"]
+default = ["rt-minijail"]
 rt-island = ["northstar/rt-island"]
 rt-minijail = ["northstar/rt-minijail"]
