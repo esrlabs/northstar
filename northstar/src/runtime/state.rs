@@ -766,10 +766,12 @@ impl<'a, L: Launcher> State<'a, L> {
     }
 
     async fn notification(&self, n: Notification) {
-        self.events_tx
-            .send(Event::Notification(n))
-            .await
-            .expect("Internal channel error on main");
+        if !self.events_tx.is_closed() {
+            self.events_tx
+                .send(Event::Notification(n))
+                .await
+                .expect("Internal channel error on main");
+        }
     }
 }
 
