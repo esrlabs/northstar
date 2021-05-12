@@ -102,7 +102,7 @@ impl Launcher for Island {
         Ok(Island { tx, config })
     }
 
-    async fn shutdown(self) -> Result<(), Error>
+    async fn shutdown(&mut self) -> Result<(), Error>
     where
         Self: Sized,
     {
