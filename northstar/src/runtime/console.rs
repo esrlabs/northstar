@@ -420,7 +420,7 @@ async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
     let mut connections = FuturesUnordered::new();
     loop {
         select! {
-            _ = connections.next() => {/* removes closed connections */},
+            _ = connections.next(), if !connections.is_empty() => (), // removes closed connections
             // If event_tx is closed then the runtime is shutting down therefore no new connections
             // are accepted
             connection = accept(), if !event_tx.is_closed() && !stop.is_cancelled() => {
