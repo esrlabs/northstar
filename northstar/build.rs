@@ -13,19 +13,22 @@
 //   limitations under the License.
 
 fn main() {
-    #[cfg(feature = "rt-island")]
-    generate_syscall_bindings().expect("Failed to generate syscall bindings");
-    #[cfg(feature = "rt-island")]
-    generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
-    #[cfg(feature = "rt-island")]
-    generate_audit_bindings().expect("Failed to generate audit bindings");
+    #[cfg(feature = "seccomp")]
+    generate_seccomp();
 
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
-#[cfg(feature = "rt-island")]
-pub fn generate_syscall_bindings() -> anyhow::Result<()> {
+#[cfg(feature = "seccomp")]
+fn generate_seccomp() {
+    generate_syscall_bindings().expect("Failed to generate syscall bindings");
+    generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
+    generate_audit_bindings().expect("Failed to generate audit bindings");
+}
+
+#[cfg(feature = "seccomp")]
+fn generate_syscall_bindings() -> anyhow::Result<()> {
     use regex::Regex;
     use std::{fs::OpenOptions, io::Write};
 
@@ -85,7 +88,7 @@ pub fn generate_syscall_bindings() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "rt-island")]
+#[cfg(feature = "seccomp")]
 pub fn generate_seccomp_bindings() -> anyhow::Result<()> {
     let out_path = std::path::PathBuf::from(
         std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
@@ -114,7 +117,7 @@ pub fn generate_seccomp_bindings() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "rt-island")]
+#[cfg(feature = "seccomp")]
 pub fn generate_audit_bindings() -> anyhow::Result<()> {
     let out_path = std::path::PathBuf::from(
         std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),

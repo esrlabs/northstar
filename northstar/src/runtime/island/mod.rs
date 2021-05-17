@@ -39,6 +39,7 @@ use Signal::SIGCHLD;
 mod clone;
 mod init;
 mod io;
+#[cfg(feature = "seccomp")]
 mod seccomp;
 mod utils;
 
