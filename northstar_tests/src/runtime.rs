@@ -18,7 +18,7 @@ use super::{
     logger,
     test_container::{test_container_npk, test_resource_npk},
 };
-use color_eyre::eyre::{eyre, Result, WrapErr};
+use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use northstar::{
     api::{client::Client, model::Notification},
@@ -26,13 +26,14 @@ use northstar::{
 };
 use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
-use tokio::{fs, select, time};
+use tokio::{fs, pin, select, time};
 
 pub struct Northstar {
     config: config::Config,
     client: northstar::api::client::Client,
     runtime: runtime::Runtime,
     tmpdir: TempDir,
+    data_dir: PathBuf,
 }
 
 impl std::ops::Deref for Northstar {
@@ -44,6 +45,15 @@ impl std::ops::Deref for Northstar {
 }
 
 impl Northstar {
+    /// Launches an instance of Northstar with the test container and
+    /// resource installed.
+    pub async fn launch_install_test_container() -> Result<Northstar> {
+        let runtime = Self::launch().await?;
+        runtime.install_test_resource().await?;
+        runtime.install_test_container().await?;
+        Ok(runtime)
+    }
+
     /// Launches an instance of Northstar
     pub async fn launch() -> Result<Northstar> {
         let pid = std::process::id();
@@ -82,10 +92,9 @@ impl Northstar {
         let console_url = url::Url::parse(&console)?;
 
         let config = Config {
-            log_level: log::Level::Debug,
             console: Some(console_url.clone()),
             run_dir,
-            data_dir,
+            data_dir: data_dir.clone(),
             log_dir,
             repositories,
             cgroups,
@@ -109,7 +118,7 @@ impl Northstar {
         // Start the runtime
         let runtime = runtime::Runtime::start(config.clone())
             .await
-            .wrap_err("Failed to start runtime")?;
+            .context("Failed to start runtime")?;
         // Wait until the console is up and running
         super::logger::assume("Started console on", 5u64).await?;
 
@@ -123,6 +132,7 @@ impl Northstar {
             client,
             runtime,
             tmpdir,
+            data_dir,
         })
     }
 
@@ -133,12 +143,12 @@ impl Northstar {
         self.runtime
             .shutdown()
             .await
-            .wrap_err("Failed to stop the runtime")?;
+            .context("Failed to stop the runtime")?;
 
         logger::assume("Closed listener", 5u64).await?;
 
         // Remove the tmpdir
-        self.tmpdir.close().wrap_err("Failed to remove tmpdir")
+        self.tmpdir.close().context("Failed to remove tmpdir")
     }
 
     /// Return the runtimes configuration
@@ -152,7 +162,7 @@ impl Northstar {
         self.client
             .start(container.name(), container.version())
             .await
-            .wrap_err("Failed to start")
+            .context("Failed to start")
     }
 
     /// Stop a container
@@ -165,7 +175,7 @@ impl Northstar {
                 Duration::from_secs(timeout),
             )
             .await
-            .wrap_err("Failed to stop")?;
+            .context("Failed to stop")?;
         Ok(())
     }
 
@@ -175,7 +185,7 @@ impl Northstar {
         self.client
             .umount(container.name(), container.version())
             .await
-            .wrap_err("Failed to umount")?;
+            .context("Failed to umount")?;
         Ok(())
     }
 
@@ -183,7 +193,7 @@ impl Northstar {
         self.client
             .install(test_container_npk().await, "test")
             .await
-            .wrap_err("Failed to install test container")
+            .context("Failed to install test container")
     }
 
     pub async fn uninstall_test_container(&self) -> Result<()> {
@@ -193,14 +203,14 @@ impl Northstar {
                 &npk::manifest::Version::parse("0.0.1").unwrap(),
             )
             .await
-            .wrap_err("Failed to uninstall test container")
+            .context("Failed to uninstall test container")
     }
 
     pub async fn install_test_resource(&self) -> Result<()> {
         self.client
             .install(test_resource_npk().await, "test")
             .await
-            .wrap_err("Failed to install test resource")
+            .context("Failed to install test resource")
     }
 
     pub async fn uninstall_test_resource(&self) -> Result<()> {
@@ -210,7 +220,7 @@ impl Northstar {
                 &npk::manifest::Version::parse("0.0.1").unwrap(),
             )
             .await
-            .wrap_err("Failed to uninstall test resource")
+            .context("Failed to uninstall test resource")
     }
 
     // TOOD: Queue the notifications in the runtime struct. Currently there's a race
@@ -219,29 +229,29 @@ impl Northstar {
     where
         F: FnMut(&Notification) -> bool,
     {
-        let mut timeout = Box::pin(time::sleep(time::Duration::from_secs(timeout)));
+        let timeout = time::sleep(time::Duration::from_secs(timeout));
+        pin!(timeout);
+
         loop {
             select! {
-                _ = &mut timeout => break Err(eyre!("Timeout waiting for notification")),
+                _ = &mut timeout => break Err(anyhow!("Timeout waiting for notification")),
                 notification = self.client.next() => {
                     match notification {
                         Some(Ok(n)) if pred(&n) => break Ok(()),
                         Some(_) => continue,
-                        None => break Err(eyre!("Client connection closed")),
+                        None => break Err(anyhow!("Client connection closed")),
                     }
                 }
             }
         }
     }
 
-    /// TODO
     pub async fn test_cmds(&self, cmd: &str) {
-        let data_dir = self.tmpdir.path().join("data").join("test_container");
-        fs::create_dir_all(&data_dir)
+        let data = self.data_dir.join("test_container");
+        fs::create_dir_all(&data)
             .await
             .expect("Failed to create data dir");
-        let input_file = data_dir.join("input.txt");
-        fs::write(&input_file, &cmd)
+        fs::write(&data.join("input.txt"), &cmd)
             .await
             .expect("Failed to write test_container input");
     }

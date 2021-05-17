@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use log::Level;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;
@@ -22,8 +21,6 @@ use super::RepositoryId;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Log level: DEBUG, INFO, WARN or ERROR
-    pub log_level: Level,
     /// Console address.
     pub console: Option<Url>,
     /// Directory with unpacked containers.
@@ -68,8 +65,6 @@ pub struct Devices {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Debug {
-    /// Runtime debug options
-    pub runtime: Option<debug::Runtime>,
     /// Strace options
     pub strace: Option<debug::Strace>,
     /// perf options
@@ -79,17 +74,6 @@ pub struct Debug {
 pub mod debug {
     use serde::Deserialize;
     use std::path::PathBuf;
-
-    /// Runtime debug options
-    #[derive(Clone, Debug, Deserialize)]
-    pub struct Runtime {
-        /// Do not enter a mount namespace if this option is set
-        /// This exposes the `run_dir` mounts for debugging. Be aware
-        /// that in case of a non normal termination of the runtime the
-        /// images mounted in `run_dir` have to be umounted manually before
-        /// starting the runtime again.
-        pub disable_mount_namespace: bool,
-    }
 
     #[derive(Clone, Debug, Deserialize)]
     pub enum StraceOutput {
