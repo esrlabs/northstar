@@ -507,7 +507,7 @@ fn set_parent_death_signal(signal: Signal) {
         .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
-fn set_seccomp_filter(filter: &HashMap<String, String>) {
+fn set_seccomp_filter(filter: &std::collections::HashMap<String, String>) {
     #[cfg(target_os = "android")]
     const PR_SET_SECCOMP: c_int = 22;
     #[cfg(target_os = "android")]

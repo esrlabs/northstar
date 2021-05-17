@@ -12,20 +12,23 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::Result;
-use regex::Regex;
-use std::{env, fs::OpenOptions, io::Write, path::PathBuf};
-
 fn main() {
+    #[cfg(feature = "rt-island")]
     generate_syscall_bindings().expect("Failed to generate syscall bindings");
+    #[cfg(feature = "rt-island")]
     generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
+    #[cfg(feature = "rt-island")]
     generate_audit_bindings().expect("Failed to generate audit bindings");
 
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
-pub fn generate_syscall_bindings() -> Result<()> {
+#[cfg(feature = "rt-island")]
+pub fn generate_syscall_bindings() -> anyhow::Result<()> {
+    use regex::Regex;
+    use std::{fs::OpenOptions, io::Write};
+
     let syscall_regex: Regex = Regex::new("SYS_[0-9a-zA-Z_]+").expect("Invalid regex");
     let rhs_regex: Regex = Regex::new(" = [0-9]+;").expect("Invalid regex");
     let value_regex: Regex = Regex::new("[0-9]+").expect("Invalid regex");
@@ -59,8 +62,9 @@ pub fn generate_syscall_bindings() -> Result<()> {
         "Mismatch in number of syscall names and syscall values"
     );
 
-    let out_path =
-        PathBuf::from(env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"));
+    let out_path = std::path::PathBuf::from(
+        std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
+    );
     let mut f = OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -81,9 +85,11 @@ pub fn generate_syscall_bindings() -> Result<()> {
     Ok(())
 }
 
-pub fn generate_seccomp_bindings() -> Result<()> {
-    let out_path =
-        PathBuf::from(env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"));
+#[cfg(feature = "rt-island")]
+pub fn generate_seccomp_bindings() -> anyhow::Result<()> {
+    let out_path = std::path::PathBuf::from(
+        std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
+    );
     bindgen::Builder::default()
         .header_contents(
             "seccomp_wrapper.h",
@@ -108,9 +114,11 @@ pub fn generate_seccomp_bindings() -> Result<()> {
     Ok(())
 }
 
-pub fn generate_audit_bindings() -> Result<()> {
-    let out_path =
-        PathBuf::from(env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"));
+#[cfg(feature = "rt-island")]
+pub fn generate_audit_bindings() -> anyhow::Result<()> {
+    let out_path = std::path::PathBuf::from(
+        std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
+    );
     bindgen::Builder::default()
         .header_contents("audit_wrapper.h", "#include <linux/audit.h>")
         .allowlist_var("AUDIT_ARCH_X86_64")
@@ -122,7 +130,7 @@ pub fn generate_audit_bindings() -> Result<()> {
 }
 
 #[cfg(feature = "hello-world")]
-pub fn package_hello_example() -> Result<()> {
+pub fn package_hello_example() -> anyhow::Result<()> {
     use anyhow::Context;
     use npk::npk;
     use std::{env, fs, path::Path};
