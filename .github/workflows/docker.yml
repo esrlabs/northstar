@@ -1,4 +1,3 @@
----
 name: Docker
 on:
   push:
@@ -9,29 +8,25 @@ jobs:
   build:
     name: Build docker images
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - aarch64-linux-android
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
     steps:
-      - uses: actions/checkout@v2
-      - env:
-          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          
-          tag="$( echo "${GITHUB_REF}" | sed 's/refs\/tags\/docker-//' )"
-
-          echo "${TOKEN}" | docker login -u esrlabs --password-stdin
-          
-          cd docker
-
-          for f in Dockerfile.*; do
-            
-            image_name="$( echo "$f" | sed 's/Dockerfile\.//' )"
-            
-            full_image_name="esrlabs/${image_name}:${tag}"
-
-            docker build \
-              -t "$full_image_name" \
-              -f "$f" \
-              .
-            
-            docker push "$full_image_name"
-
-          done
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: esrlabs
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        with:
+          context: docker
+          file: docker/Dockerfile.${{ matrix.target }}
+          push: true
+          tags: esrlabs/northstar-${{ matrix.target }}:latest

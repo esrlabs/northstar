@@ -1,11 +1,11 @@
 [target.aarch64-linux-android]
-image = "esrlabs/aarch64-linux-android:latest"
+image = "esrlabs/northstar-aarch64-linux-android:latest"
 
 [target.aarch64-unknown-linux-gnu]
-image = "esrlabs/aarch64-unknown-linux-gnu:latest"
+image = "esrlabs/northstar-aarch64-unknown-linux-gnu:latest"
 
 [target.aarch64-unknown-linux-musl]
-image = "esrlabs/aarch64-unknown-linux-musl:latest"
+image = "esrlabs/northstar-aarch64-unknown-linux-musl:latest"
 
 [target.x86_64-unknown-linux-gnu]
-image = "esrlabs/x86_64-unknown-linux-gnu:latest"
+image = "esrlabs/northstar-x86_64-unknown-linux-gnu:latest"
