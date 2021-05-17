@@ -71,16 +71,21 @@ pub(super) struct MountedContainer<P> {
 pub(super) struct ProcessContext<P> {
     process: P,
     started: time::Instant,
+    debug: super::debug::Debug,
     cgroups: Option<super::cgroups::CGroups>,
 }
 
 impl<P: Process> ProcessContext<P> {
     async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
-        let status = self
+        let (process, status) = self
             .process
             .stop(timeout)
             .await
             .expect("Failed to terminate process");
+
+        process.destroy().await.expect("Failed to destroy process");
+
+        self.debug.destroy().await?;
 
         if let Some(cgroups) = self.cgroups.take() {
             cgroups.destroy().await.expect("Failed to destroy cgroups")
@@ -90,6 +95,16 @@ impl<P: Process> ProcessContext<P> {
     }
 
     async fn destroy(mut self) {
+        self.process
+            .destroy()
+            .await
+            .expect("Failed to destroy process");
+
+        self.debug
+            .destroy()
+            .await
+            .expect("Failed to destroy debug utilities");
+
         if let Some(cgroups) = self.cgroups.take() {
             cgroups.destroy().await.expect("Failed to destroy cgroups")
         }
@@ -143,11 +158,10 @@ impl<'a, L: Launcher> State<'a, L> {
         })
     }
 
-    fn npk(&self, container: &Container) -> Option<(&Path, &Npk, Option<&PublicKey>)> {
+    fn npk(&self, container: &Container) -> Option<(&Path, &Manifest, Option<&PublicKey>)> {
         for repository in self.repositories.values() {
-            if let Some(path) = repository.containers.get(container) {
-                let npk = repository.npks.get(container)?;
-                return Some((path, npk, repository.key.as_ref()));
+            if let Some((path, manifest)) = repository.containers.get(container) {
+                return Some((path, manifest, repository.key.as_ref()));
             }
         }
         None
@@ -259,9 +273,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         let mut need_mount = HashSet::new();
 
-        if let Some((_, npk, _)) = self.npk(container) {
-            let manifest = npk.manifest();
-
+        if let Some((_, manifest, _)) = self.npk(container) {
             // The the to be started container
             if let Some(mounted_container) = self.containers.get(container) {
                 // Check if the container is not a resouce
@@ -351,11 +363,11 @@ impl<'a, L: Launcher> State<'a, L> {
         }
 
         // This must exist
-        let mouted_container = self.containers.get(container).expect("Internal error");
+        let mounted_container = self.containers.get(container).expect("Internal error");
 
         // Spawn process
         info!("Creating {}", container);
-        let mut process = match self.launcher.create(&mouted_container).await {
+        let process = match self.launcher.create(&mounted_container).await {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -365,33 +377,41 @@ impl<'a, L: Launcher> State<'a, L> {
             }
         };
 
+        // Debug
+        let debug =
+            super::debug::Debug::new(&self.config, &mounted_container.manifest, process.pid())
+                .await?;
+
         // CGroups
-        let cgroups = if let Some(ref c) = mouted_container.manifest.cgroups {
+        let cgroups = if let Some(ref c) = mounted_container.manifest.cgroups {
             debug!("Configuring CGroups of {}", container);
             let cgroups =
                 // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
                 super::cgroups::CGroups::new(&self.config.cgroups, &container, c, self.events_tx.clone())
-                    .await
-                    .map_err(Error::Cgroups).expect("Failed to create cgroup");
+                    .await.expect("Failed to create cgroup");
 
             // Assigning a pid to a cgroup created by us must work otherwise we did something wrong.
             cgroups
                 .assign(process.pid())
                 .await
-                .map_err(Error::Cgroups)
                 .expect("Failed to assign PID to cgroups");
             Some(cgroups)
         } else {
             None
         };
 
-        // Signal the process to continue starting. This can fail because of the container
-        // content. In case umount everything mounted so far and return the error.
-        if let Err(e) = process.start().await {
-            warn!("Failed to resume process of {}", container);
-            warn!("Failed to start {}", container);
-            return Err(e);
-        }
+        // Signal the process to continue starting. This can fail because of the container content
+        let process = match process.start().await {
+            result::Result::Ok(process) => process,
+            result::Result::Err(e) => {
+                warn!("Failed to start {}: {}", container, e);
+                debug.destroy().await.expect("Failed to destroy debug");
+                if let Some(cgroups) = cgroups {
+                    cgroups.destroy().await.expect("Failed to destroy cgroups");
+                }
+                return Err(e);
+            }
+        };
 
         let mounted_container = self.containers.get_mut(&container).unwrap();
 
@@ -399,6 +419,7 @@ impl<'a, L: Launcher> State<'a, L> {
         mounted_container.process = Some(ProcessContext {
             process,
             started: time::Instant::now(),
+            debug,
             cgroups,
         });
 
@@ -421,16 +442,13 @@ impl<'a, L: Launcher> State<'a, L> {
         container: &Container,
         timeout: time::Duration,
     ) -> Result<(), Error> {
-        if let Some(context) = self
+        if let Some(process) = self
             .containers
             .get_mut(&container)
             .and_then(|c| c.process.take())
         {
             info!("Terminating {}", container);
-            let exit_status = context
-                .terminate(timeout)
-                .await
-                .expect("Failed to destroy context");
+            let exit_status = process.terminate(timeout).await.expect("Failed to stop");
 
             // Send notification to main loop
             self.notification(Notification::Stopped(container.clone()))
@@ -691,7 +709,7 @@ impl<'a, L: Launcher> State<'a, L> {
     async fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut containers = Vec::new();
         for (repository_name, repository) in &self.repositories {
-            for npk in repository.containers.values() {
+            for (npk, _) in repository.containers.values() {
                 let npk = Npk::from_path(npk, None).await.expect("Failed to read npk");
                 let manifest = npk.manifest();
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
@@ -748,10 +766,12 @@ impl<'a, L: Launcher> State<'a, L> {
     }
 
     async fn notification(&self, n: Notification) {
-        self.events_tx
-            .send(Event::Notification(n))
-            .await
-            .expect("Internal channel error on main");
+        if !self.events_tx.is_closed() {
+            self.events_tx
+                .send(Event::Notification(n))
+                .await
+                .expect("Internal channel error on main");
+        }
     }
 }
 

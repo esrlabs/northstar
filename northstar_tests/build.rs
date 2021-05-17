@@ -32,7 +32,7 @@ fn main() {
         .manifest_path(CARGO_MANIFEST)
         .current_release()
         .target(env::var("TARGET").unwrap())
-        .target_dir(tmpdir.path())
+        .target_dir("target")
         .run()
         .expect("Failed to build")
         .path()

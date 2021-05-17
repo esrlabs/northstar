@@ -17,7 +17,7 @@ jobs:
         uses: Swatinem/rust-cache@v1
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Tests
-        run: cargo test --all-features -- --color always
-        env:
-            CLICOLOR_FORCE: yes
+      - name: Tests (Minijail)
+        run: cargo test --features rt-minijail --no-default-features
+      - name: Tests (Island)
+        run: cargo test --features rt-island --no-default-features

@@ -12,29 +12,18 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::logger::LogParser;
-use colored::control::ShouldColorize;
-use log::LevelFilter;
-use std::sync::Once;
-
-static INIT: Once = Once::new();
-static LOGGER: LogParser = LogParser;
-
 pub fn init() {
-    INIT.call_once(|| {
-        color_eyre::install().unwrap();
-        ShouldColorize::from_env();
-        log::set_logger(&LOGGER).unwrap();
-        log::set_max_level(LevelFilter::Debug);
+    color_eyre::install().unwrap();
+    crate::logger::init();
+    log::set_max_level(log::LevelFilter::Debug);
 
-        // TODO make the test independent of the workspace structure
-        // set the CWD to the root
-        std::env::set_current_dir("..").unwrap();
+    // TODO make the test independent of the workspace structure
+    // set the CWD to the root
+    std::env::set_current_dir("..").unwrap();
 
-        // Enter a mount namespace. This needs to be done before spawning
-        // the tokio threadpool.
-        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).unwrap();
-    })
+    // Enter a mount namespace. This needs to be done before spawning
+    // the tokio threadpool.
+    nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).unwrap();
 }
 
 #[macro_export]
@@ -45,14 +34,18 @@ macro_rules! test {
             #[test]
             fn $name() {
                 ::northstar_tests::macros::init();
-                logger::reset();
-                tokio::runtime::Builder::new_multi_thread()
+                match tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .thread_name(stringify!($name))
                     .build()
                     .expect("Failed to start runtime")
-                    .block_on(async { $e })
-                    .expect("Test failed");
+                    .block_on(async { $e }) {
+                        Ok(_) => std::process::exit(0),
+                        Err(e) => {
+                            eprintln!("{:?}", e);
+                            std::process::abort();
+                        }
+                    }
             }
         }
     };

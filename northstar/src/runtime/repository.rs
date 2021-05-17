@@ -25,7 +25,7 @@ use super::{
 };
 use futures::future::OptionFuture;
 use log::debug;
-use npk::npk::Npk;
+use npk::{manifest::Manifest, npk::Npk};
 use tokio::fs;
 
 #[derive(Debug)]
@@ -33,8 +33,7 @@ pub(super) struct Repository {
     pub(super) id: RepositoryId,
     pub(super) dir: PathBuf,
     pub(super) key: Option<PublicKey>,
-    pub(super) containers: HashMap<Container, PathBuf>,
-    pub(super) npks: HashMap<Container, Npk>,
+    pub(super) containers: HashMap<Container, (PathBuf, Manifest)>,
 }
 
 impl Repository {
@@ -45,7 +44,6 @@ impl Repository {
     ) -> Result<Repository, Error> {
         let key: OptionFuture<_> = key.map(|k| key::load(&k)).into();
         let mut containers = HashMap::new();
-        let mut npks = HashMap::new();
 
         let mut readir = fs::read_dir(&dir)
             .await
@@ -63,8 +61,7 @@ impl Repository {
             let name = npk.manifest().name.clone();
             let version = npk.manifest().version.clone();
             let container = Container::new(name, version);
-            containers.insert(container.clone(), entry.path());
-            npks.insert(container, npk);
+            containers.insert(container.clone(), (entry.path(), npk.manifest().clone()));
         }
 
         Ok(Repository {
@@ -72,7 +69,6 @@ impl Repository {
             dir,
             key: key.await.transpose().map_err(Error::Key)?,
             containers,
-            npks,
         })
     }
 
@@ -97,16 +93,15 @@ impl Repository {
         let name = npk.manifest().name.clone();
         let version = npk.manifest().version.clone();
         let container = Container::new(name, version);
-        self.containers.insert(container.clone(), dest.to_owned());
-        self.npks.insert(container, npk);
+        self.containers
+            .insert(container, (dest.to_owned(), npk.manifest().clone()));
 
         Ok(())
     }
 
     pub async fn remove(&mut self, container: &Container) -> Result<(), Error> {
-        if let Some(npk) = self.containers.remove(&container) {
+        if let Some((npk, _)) = self.containers.remove(&container) {
             debug!("Removing {}", npk.display());
-            self.npks.remove(&container);
             fs::remove_file(npk)
                 .await
                 .map_err(|e| Error::Io("Failed to remove npk".into(), e))

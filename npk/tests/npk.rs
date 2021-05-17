@@ -25,7 +25,7 @@ mod npk {
     const TEST_MANIFEST: &str = "name: hello
 version: 0.0.2
 init: /hello
-uid: 0
+uid: 100
 gid: 1
 env:
   HELLO: north";
@@ -33,7 +33,7 @@ env:
 name: hello
 version: 0.0.2
 init: /hello
-uid: 0
+uid: 100
 gid: 1
 env:
   HELLO: north

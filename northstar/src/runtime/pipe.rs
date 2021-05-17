@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use futures::ready;
-use nix::unistd;
+use nix::{fcntl, unistd};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     convert::TryFrom,
@@ -250,8 +250,9 @@ where
 }
 
 /// Sets O_NONBLOCK flag on self
-trait RawFdExt: AsRawFd {
+pub trait RawFdExt: AsRawFd {
     fn set_nonblocking(&self);
+    fn set_cloexec(&self, value: bool) -> Result<()>;
 }
 
 impl<T: AsRawFd> RawFdExt for T {
@@ -260,6 +261,18 @@ impl<T: AsRawFd> RawFdExt for T {
             nix::libc::fcntl(self.as_raw_fd(), nix::libc::F_SETFL, nix::libc::O_NONBLOCK);
         }
     }
+
+    fn set_cloexec(&self, value: bool) -> Result<()> {
+        let flags = fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
+        flags.set(fcntl::FdFlag::FD_CLOEXEC, value);
+
+        fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .map(drop)
+    }
 }
 
 /// Maps an nix::Error to a io::Error
@@ -267,6 +280,108 @@ fn from_nix(error: nix::Error) -> io::Error {
     match error {
         nix::Error::Sys(e) => io::Error::from_raw_os_error(e as i32),
         e => io::Error::new(io::ErrorKind::Other, e),
+    }
+}
+
+#[allow(unused)]
+#[derive(Debug)]
+pub(crate) struct Condition {
+    read: PipeRead,
+    write: PipeWrite,
+}
+
+#[allow(unused)]
+impl Condition {
+    pub(crate) fn new() -> Result<Condition> {
+        let (rfd, wfd) = pipe()?;
+
+        Ok(Condition {
+            read: rfd,
+            write: wfd,
+        })
+    }
+
+    pub(crate) fn set_cloexec(&self) {
+        self.read.set_cloexec(true);
+        self.write.set_cloexec(true);
+    }
+
+    pub(crate) fn wait(mut self) {
+        drop(self.write);
+        let buf: &mut [u8] = &mut [0u8; 1];
+        use std::io::Read;
+        loop {
+            match self.read.read(buf) {
+                Ok(n) if n == 0 => break,
+                Ok(_) => continue,
+                Err(e) => break,
+            }
+        }
+    }
+
+    pub(crate) fn notify(self) {}
+
+    pub(crate) fn split(self) -> (ConditionWait, ConditionNotify) {
+        (
+            ConditionWait { read: self.read },
+            ConditionNotify { write: self.write },
+        )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConditionWait {
+    read: PipeRead,
+}
+
+impl ConditionWait {
+    #[allow(unused)]
+    pub(crate) fn wait(mut self) {
+        let buf: &mut [u8] = &mut [0u8; 1];
+        use std::io::Read;
+        loop {
+            match self.read.read(buf) {
+                Ok(n) if n == 0 => break,
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+impl AsRawFd for ConditionWait {
+    fn as_raw_fd(&self) -> RawFd {
+        self.read.as_raw_fd()
+    }
+}
+
+impl IntoRawFd for ConditionWait {
+    fn into_raw_fd(self) -> RawFd {
+        self.read.into_raw_fd()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ConditionNotify {
+    write: PipeWrite,
+}
+
+impl ConditionNotify {
+    #[allow(unused)]
+    pub(crate) fn notify(self) {
+        drop(self.write)
+    }
+}
+
+impl AsRawFd for ConditionNotify {
+    fn as_raw_fd(&self) -> RawFd {
+        self.write.as_raw_fd()
+    }
+}
+
+impl IntoRawFd for ConditionNotify {
+    fn into_raw_fd(self) -> RawFd {
+        self.write.into_raw_fd()
     }
 }
 
@@ -507,5 +622,29 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn condition() {
+        let (w0, n0) = Condition::new().unwrap().split();
+        let (w1, n1) = Condition::new().unwrap().split();
+
+        match unsafe { unistd::fork().unwrap() } {
+            unistd::ForkResult::Parent { .. } => {
+                drop(w0);
+                drop(n1);
+
+                n0.notify();
+                w1.wait();
+            }
+            unistd::ForkResult::Child => {
+                drop(n0);
+                drop(w1);
+
+                w0.wait();
+                n1.notify();
+                process::exit(0);
+            }
+        }
     }
 }

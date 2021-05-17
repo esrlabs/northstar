@@ -5,13 +5,15 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
+anyhow = "1.0"
 color-eyre = "0.5.11"
-colored = "2.0"
+env_logger = "0.8.3"
+flume = { version = "0.10.5", features = ["async"] }
 futures = "0.3.14"
 lazy_static = "1.4"
 log = "0.4.14"
 nix = "0.20.0"
-northstar = { path = "../northstar", features = ["runtime", "api"] }
+northstar = { path = "../northstar", features = ["api"] }
 npk = { path = "../npk" }
 regex = "1.4"
 rusty-fork = "0.3.0"
@@ -24,3 +26,8 @@ tempfile = "3.2"
 escargot = "0.5.2"
 npk = { path = "../npk" }
 tokio = { version = "1.5", features = ["full"] }
+
+[features]
+default = ["rt-minijail"]
+rt-island = ["northstar/rt-island"]
+rt-minijail = ["northstar/rt-minijail"]

@@ -68,6 +68,10 @@ impl Error {
     pub(crate) fn io<T: ToString>(m: T, e: io::Error) -> Error {
         Error::Io(m.to_string(), e)
     }
+
+    pub(crate) fn os<T: ToString>(e: T, err: nix::Error) -> Error {
+        Error::Os(e.to_string(), err)
+    }
 }
 
 impl From<Error> for api::model::Error {

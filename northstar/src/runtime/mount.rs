@@ -219,7 +219,14 @@ async fn setup_and_mount(
     }
 
     // Finally mount
-    mount(&device, target, &FS_TYPE, MountFlags::MS_RDONLY, None).await?;
+    mount(
+        &device,
+        target,
+        &FS_TYPE,
+        MountFlags::MS_RDONLY | MountFlags::MS_NODEV | MountFlags::MS_NOSUID,
+        None,
+    )
+    .await?;
 
     // Set the device to auto-remove once unmounted
     if verity {
