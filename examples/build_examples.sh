@@ -144,6 +144,7 @@ main() {
     "./examples/container/crashing"
     "./examples/container/datarw"
     "./examples/container/hello-world"
+    "./examples/container/inspect"
     "./examples/container/memeater"
     "./examples/container/resource/ferris"
     "./examples/container/resource/hello-ferris"

@@ -1,0 +1,12 @@
+[package]
+name = "inspect"
+version = "0.1.0"
+authors = ["ESRLabs"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.40"
+caps = "0.5.1"
+nix = "0.20.0"
+proc-mounts = "0.2.4"
+signal-hook = { version = "0.3.8", features = ["extended-siginfo"] }
