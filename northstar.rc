@@ -1,0 +1,162 @@
+#  Copyright (c) 2018 E.S.R.Labs. All rights reserved.
+#
+#  NOTICE:  All information contained herein is, and remains
+#  the property of E.S.R.Labs and its suppliers, if any.
+#  The intellectual and technical concepts contained herein are
+#  proprietary to E.S.R.Labs and its suppliers and may be covered
+#  by German and Foreign Patents, patents in process, and are protected
+#  by trade secret or copyright law.
+#  Dissemination of this information or reproduction of this material
+#  is strictly forbidden unless prior written permission is obtained
+#  from E.S.R.Labs.
+
+on post-fs-data
+    mkdir /dev/memcg/northstar
+    mkdir /dev/cpuctl/northstar
+    chown system system /dev/memcg/northstar
+    chown system system /dev/cpuctl/northstar
+
+    chown system system /dev/device-mapper
+    chown system system /dev/loop-control
+    chown system system /dev/memcg/northstar
+    chown system system /dev/cpuctl/northstar
+
+    chown system system /dev/block/loop0
+    chown system system /dev/block/loop1
+    chown system system /dev/block/loop2
+    chown system system /dev/block/loop3
+    chown system system /dev/block/loop4
+    chown system system /dev/block/loop5
+    chown system system /dev/block/loop6
+    chown system system /dev/block/loop7
+    chown system system /dev/block/loop8
+    chown system system /dev/block/loop9
+    chown system system /dev/block/loop10
+    chown system system /dev/block/loop11
+    chown system system /dev/block/loop12
+    chown system system /dev/block/loop13
+    chown system system /dev/block/loop14
+    chown system system /dev/block/loop15
+    chown system system /dev/block/loop16
+    chown system system /dev/block/loop17
+    chown system system /dev/block/loop18
+    chown system system /dev/block/loop19
+    chown system system /dev/block/loop20
+    chown system system /dev/block/loop21
+    chown system system /dev/block/loop22
+    chown system system /dev/block/loop23
+    chown system system /dev/block/loop24
+    chown system system /dev/block/loop25
+    chown system system /dev/block/loop26
+    chown system system /dev/block/loop27
+    chown system system /dev/block/loop28
+    chown system system /dev/block/loop29
+    chown system system /dev/block/loop30
+    chown system system /dev/block/loop31
+    chown system system /dev/block/loop32
+    chown system system /dev/block/loop33
+    chown system system /dev/block/loop34
+    chown system system /dev/block/loop35
+    chown system system /dev/block/loop36
+    chown system system /dev/block/loop37
+    chown system system /dev/block/loop38
+    chown system system /dev/block/loop39
+    chown system system /dev/block/loop40
+    chown system system /dev/block/loop41
+    chown system system /dev/block/loop42
+    chown system system /dev/block/loop43
+    chown system system /dev/block/loop44
+    chown system system /dev/block/loop45
+    chown system system /dev/block/loop46
+    chown system system /dev/block/loop47
+    chown system system /dev/block/loop48
+    chown system system /dev/block/loop49
+    chown system system /dev/block/loop50
+    chown system system /dev/block/loop51
+    chown system system /dev/block/loop52
+    chown system system /dev/block/loop53
+    chown system system /dev/block/loop54
+    chown system system /dev/block/loop55
+    chown system system /dev/block/loop56
+    chown system system /dev/block/loop57
+    chown system system /dev/block/loop58
+    chown system system /dev/block/loop59
+    chown system system /dev/block/loop60
+    chown system system /dev/block/loop61
+    chown system system /dev/block/loop62
+    chown system system /dev/block/loop63
+    chown system system /dev/block/loop64
+    chown system system /dev/block/loop65
+    chown system system /dev/block/loop66
+    chown system system /dev/block/loop67
+    chown system system /dev/block/loop68
+    chown system system /dev/block/loop69
+    chown system system /dev/block/loop70
+    chown system system /dev/block/loop71
+    chown system system /dev/block/loop72
+    chown system system /dev/block/loop73
+    chown system system /dev/block/loop74
+    chown system system /dev/block/loop75
+    chown system system /dev/block/loop76
+    chown system system /dev/block/loop77
+    chown system system /dev/block/loop78
+    chown system system /dev/block/loop79
+    chown system system /dev/block/loop80
+    chown system system /dev/block/loop81
+    chown system system /dev/block/loop82
+    chown system system /dev/block/loop83
+    chown system system /dev/block/loop84
+    chown system system /dev/block/loop85
+    chown system system /dev/block/loop86
+    chown system system /dev/block/loop87
+    chown system system /dev/block/loop88
+    chown system system /dev/block/loop89
+    chown system system /dev/block/loop90
+    chown system system /dev/block/loop91
+    chown system system /dev/block/loop92
+    chown system system /dev/block/loop93
+    chown system system /dev/block/loop94
+    chown system system /dev/block/loop95
+    chown system system /dev/block/loop96
+    chown system system /dev/block/loop97
+    chown system system /dev/block/loop98
+    chown system system /dev/block/loop99
+    chown system system /dev/block/loop100
+    chown system system /dev/block/loop101
+    chown system system /dev/block/loop102
+    chown system system /dev/block/loop103
+    chown system system /dev/block/loop104
+    chown system system /dev/block/loop105
+    chown system system /dev/block/loop106
+    chown system system /dev/block/loop107
+    chown system system /dev/block/loop108
+    chown system system /dev/block/loop109
+    chown system system /dev/block/loop110
+    chown system system /dev/block/loop111
+    chown system system /dev/block/loop112
+    chown system system /dev/block/loop113
+    chown system system /dev/block/loop114
+    chown system system /dev/block/loop115
+    chown system system /dev/block/loop116
+    chown system system /dev/block/loop117
+    chown system system /dev/block/loop118
+    chown system system /dev/block/loop119
+    chown system system /dev/block/loop120
+    chown system system /dev/block/loop121
+    chown system system /dev/block/loop122
+    chown system system /dev/block/loop123
+    chown system system /dev/block/loop124
+    chown system system /dev/block/loop125
+    chown system system /dev/block/loop126
+    chown system system /dev/block/loop127
+
+service northstar /system/bin/logwrapper -- /system/bin/northstar -c /system/etc/northstar.toml
+    class main
+    setenv ANDROID_DNS_MODE local
+    seclabel u:r:native:s0
+    user system
+    group system inet shell
+    devmode
+    capabilities CHOWN KILL MKNOD NET_ADMIN NET_RAW SETFCAP SETPCAP SETGID SETUID SYS_ADMIN SYS_BOOT SYS_CHROOT 
+    namespace mnt
+    disabled
