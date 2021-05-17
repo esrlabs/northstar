@@ -12,101 +12,75 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#![allow(dead_code)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+use bindings::{
+    seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET,
+    BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
+};
+use nix::errno::Errno;
 
-include!(concat!(env!("OUT_DIR"), "/seccomp_bindings.rs"));
-include!(concat!(env!("OUT_DIR"), "/syscall_bindings.rs"));
-include!(concat!(env!("OUT_DIR"), "/audit_bindings.rs"));
+#[allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
+mod bindings {
+    include!(concat!(env!("OUT_DIR"), "/syscall_bindings.rs"));
+    include!(concat!(env!("OUT_DIR"), "/seccomp_bindings.rs"));
 
-pub fn translate_syscall(name: &str) -> Option<&nix::libc::c_long> {
-    SYSCALL_MAP.get(name)
+    /// SECCOMP_RET_LOG is implemented by Linux 4.14 but not present in all C libs
+    #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
+    pub const SECCOMP_RET_LOG: u32 = 2147221504;
 }
 
-// https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/filter.h
-pub fn bpf_stmt(code: u32, k: u32) -> sock_filter {
-    sock_filter {
-        code: code as u16,
-        k,
-        jt: 0,
-        jf: 0,
-    }
-}
+#[cfg(all(target_arch = "aarch64"))]
+const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_AARCH64;
 
-pub fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> sock_filter {
-    sock_filter {
-        code: code as u16,
-        k,
-        jt,
-        jf,
-    }
-}
+#[cfg(all(target_arch = "x86_64"))]
+const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
-pub fn bpf_ret(k: u32) -> sock_filter {
-    bpf_stmt(BPF_RET | BPF_K, k)
-}
-
-pub type SyscallAllowlist = Vec<sock_filter>;
-
-static REQUIRED_SYSCALLS_X86_64: &'static [nix::libc::c_long] = &[
-    nix::libc::SYS_clone,
-    nix::libc::SYS_mmap,
-    nix::libc::SYS_prctl,
-    nix::libc::SYS_munmap,
-    nix::libc::SYS_mprotect,
-    nix::libc::SYS_openat,
-    nix::libc::SYS_close,
-    nix::libc::SYS_fstat,
-    nix::libc::SYS_rt_sigaction,
-    nix::libc::SYS_pread64,
-    nix::libc::SYS_read,
-    nix::libc::SYS_execve,
-    nix::libc::SYS_set_tid_address,
-    nix::libc::SYS_sigaltstack,
-    nix::libc::SYS_exit_group,
-    nix::libc::SYS_stat,
-    nix::libc::SYS_poll,
-    nix::libc::SYS_brk,
-    nix::libc::SYS_rt_sigprocmask,
-    nix::libc::SYS_access,
-    nix::libc::SYS_arch_prctl,
-    nix::libc::SYS_sched_getaffinity,
-    nix::libc::SYS_set_robust_list,
-    nix::libc::SYS_prlimit64,
+#[cfg(all(target_arch = "aarch64"))]
+const REQUIRED_SYSCALLS: &[u32] = &[
+    // TODO
 ];
 
-pub enum Architecture {
-    X86_64,
-}
-
-impl Architecture {
-    pub fn to_linux_value(&self) -> u32 {
-        match self {
-            Architecture::X86_64 => AUDIT_ARCH_X86_64,
-        }
-    }
-
-    pub fn required_syscalls(&self) -> &'static [nix::libc::c_long] {
-        match self {
-            Architecture::X86_64 => REQUIRED_SYSCALLS_X86_64,
-        }
-    }
-}
+#[cfg(all(target_arch = "x86_64"))]
+const REQUIRED_SYSCALLS: &[u32] = &[
+    bindings::SYS_access,
+    bindings::SYS_arch_prctl,
+    bindings::SYS_brk,
+    bindings::SYS_clone,
+    bindings::SYS_close,
+    bindings::SYS_execve,
+    bindings::SYS_exit_group,
+    bindings::SYS_fstat,
+    bindings::SYS_mmap,
+    bindings::SYS_mprotect,
+    bindings::SYS_munmap,
+    bindings::SYS_openat,
+    bindings::SYS_poll,
+    bindings::SYS_prctl,
+    bindings::SYS_pread64,
+    bindings::SYS_prlimit64,
+    bindings::SYS_read,
+    bindings::SYS_rt_sigaction,
+    bindings::SYS_rt_sigprocmask,
+    bindings::SYS_sched_getaffinity,
+    bindings::SYS_set_robust_list,
+    bindings::SYS_set_tid_address,
+    bindings::SYS_sigaltstack,
+    bindings::SYS_stat,
+];
 
 pub struct Builder {
-    allowlist: SyscallAllowlist,
-    log_violations_only: bool,
+    allowlist: Vec<sock_filter>,
+    log_only: bool,
 }
 
 impl Builder {
     const EVAL_NEXT: u8 = 0;
     const SKIP_NEXT: u8 = 1;
 
-    pub fn new(arch: Architecture) -> Self {
+    /// Create a new secommp builder
+    pub fn new() -> Self {
         let mut builder = Builder {
             allowlist: Vec::new(),
-            log_violations_only: false,
+            log_only: false,
         };
 
         // Load architecture into accumulator
@@ -118,7 +92,7 @@ impl Builder {
         // Kill process if architecture does not match
         builder.allowlist.push(bpf_jump(
             BPF_JMP | BPF_JEQ | BPF_K,
-            arch.to_linux_value(),
+            AUDIT_ARCH,
             Builder::SKIP_NEXT,
             Builder::EVAL_NEXT,
         ));
@@ -131,13 +105,13 @@ impl Builder {
         ));
 
         // Add default allowlist for architecture
-        for syscall in arch.required_syscalls() {
-            builder = builder.allow_syscall(*syscall as u32);
+        for syscall in REQUIRED_SYSCALLS {
+            builder = builder.allow_syscall_nr(*syscall as u32);
         }
         builder
     }
 
-    pub fn allow_syscall(mut self, nr: u32) -> Builder {
+    pub fn allow_syscall_nr(mut self, nr: u32) -> Builder {
         // If syscall matches return 'allow' directly. If not, skip return instruction and go to next check.
         self.allowlist.push(bpf_jump(
             BPF_JMP | BPF_JEQ | BPF_K,
@@ -149,17 +123,75 @@ impl Builder {
         self
     }
 
+    /// Add syscall name to whitelist
+    pub fn allow_syscall_name(self, name: &str) -> Builder {
+        let syscall_nr = translate_syscall(name).expect("Failed to translate syscall");
+        self.allow_syscall_nr(syscall_nr)
+    }
+
+    /// Log syscall violations only
+    #[allow(unused)]
     pub fn log_only(mut self) -> Builder {
-        self.log_violations_only = true;
+        self.log_only = true;
         self
     }
 
-    pub fn build(mut self) -> SyscallAllowlist {
-        if self.log_violations_only {
+    /// Apply seccomp rules
+    pub fn apply(mut self) {
+        #[cfg(target_os = "android")]
+        const PR_SET_SECCOMP: nix::libc::c_int = 22;
+
+        #[cfg(target_os = "android")]
+        const SECCOMP_MODE_FILTER: nix::libc::c_int = 2;
+
+        #[cfg(not(target_os = "android"))]
+        use nix::libc::PR_SET_SECCOMP;
+
+        #[cfg(not(target_os = "android"))]
+        use nix::libc::SECCOMP_MODE_FILTER;
+
+        if self.log_only {
             self.allowlist.push(bpf_ret(SECCOMP_RET_LOG));
         } else {
             self.allowlist.push(bpf_ret(SECCOMP_RET_KILL));
         }
-        self.allowlist
+
+        let sf_prog = sock_fprog {
+            len: self.allowlist.len() as u16,
+            filter: self.allowlist.as_mut_ptr(),
+        };
+        let sf_prog_ptr = &sf_prog as *const sock_fprog;
+        let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
+        Errno::result(result)
+            .map(drop)
+            .expect("Failed to set seccomp filter")
     }
+}
+
+/// Get number of systemcall for a name
+fn translate_syscall(name: &str) -> Option<u32> {
+    SYSCALL_MAP.get(name).cloned()
+}
+
+// https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/filter.h
+fn bpf_stmt(code: u32, k: u32) -> sock_filter {
+    sock_filter {
+        code: code as u16,
+        k,
+        jt: 0,
+        jf: 0,
+    }
+}
+
+fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> sock_filter {
+    sock_filter {
+        code: code as u16,
+        k,
+        jt,
+        jf,
+    }
+}
+
+fn bpf_ret(k: u32) -> sock_filter {
+    bpf_stmt(BPF_RET | BPF_K, k)
 }

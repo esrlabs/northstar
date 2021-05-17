@@ -406,10 +406,8 @@ pub(super) fn init(
                 cond_started_notify.notify();
 
                 // Set seccomp filter
-                #[cfg(feature = "seccomp")]
-                if let Some(filter) = &container.manifest.seccomp {
-                    set_seccomp_filter(filter);
-                }
+                // TODO: Move the allocations to parent/parent
+                set_seccomp_filter(container.manifest.seccomp.as_ref());
 
                 panic!("{:?}", unistd::execve(&init, &argv, &env))
             }
@@ -509,38 +507,14 @@ fn set_parent_death_signal(signal: Signal) {
         .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
-#[cfg(feature = "seccomp")]
-fn set_seccomp_filter(filter: &std::collections::HashMap<String, String>) {
-    use super::seccomp;
-
-    #[cfg(target_os = "android")]
-    const PR_SET_SECCOMP: c_int = 22;
-    #[cfg(target_os = "android")]
-    const SECCOMP_MODE_FILTER: c_int = 2;
-    #[cfg(not(target_os = "android"))]
-    use libc::PR_SET_SECCOMP;
-    #[cfg(not(target_os = "android"))]
-    use libc::SECCOMP_MODE_FILTER;
-
-    // Build syscall allowlist
-    let mut allowlist = seccomp::Builder::new(super::seccomp::Architecture::X86_64);
-    for (syscall_name, _) in filter {
-        let syscall_nr =
-            super::seccomp::translate_syscall(&syscall_name).expect("Failed to translate syscall");
-        allowlist = allowlist.allow_syscall(*syscall_nr as u32);
+fn set_seccomp_filter(filter: Option<&std::collections::HashMap<String, String>>) {
+    if let Some(filter) = filter {
+        let mut builder = super::seccomp::Builder::new();
+        for syscall_name in filter.keys() {
+            builder = builder.allow_syscall_name(syscall_name);
+        }
+        builder.apply();
     }
-    let mut allowlist = allowlist.build();
-
-    // Set filter
-    let sf_prog = seccomp::sock_fprog {
-        len: allowlist.len() as u16,
-        filter: allowlist.as_mut_ptr(),
-    };
-    let sf_prog_ptr = &sf_prog as *const super::seccomp::sock_fprog;
-    let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
-    Errno::result(result)
-        .map(drop)
-        .expect("Failed to set seccomp filter");
 }
 
 fn set_no_new_privs(value: bool) {

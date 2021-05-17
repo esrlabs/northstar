@@ -18,3 +18,4 @@ io:
 seccomp:
   write: 1
   clock_nanosleep: 1
+  nanosleep: 1

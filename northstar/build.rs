@@ -13,123 +13,94 @@
 //   limitations under the License.
 
 fn main() {
-    #[cfg(feature = "seccomp")]
+    #[cfg(feature = "rt-island")]
     generate_seccomp();
 
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
-#[cfg(feature = "seccomp")]
+#[cfg(feature = "rt-island")]
 fn generate_seccomp() {
-    generate_syscall_bindings().expect("Failed to generate syscall bindings");
-    generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
-    generate_audit_bindings().expect("Failed to generate audit bindings");
-}
+    use std::{env, fs, io::Write, path};
 
-#[cfg(feature = "seccomp")]
-fn generate_syscall_bindings() -> anyhow::Result<()> {
-    use regex::Regex;
-    use std::{fs::OpenOptions, io::Write};
+    fn generate() -> anyhow::Result<()> {
+        let target = std::env::var("TARGET").unwrap();
 
-    let syscall_regex: Regex = Regex::new("SYS_[0-9a-zA-Z_]+").expect("Invalid regex");
-    let rhs_regex: Regex = Regex::new(" = [0-9]+;").expect("Invalid regex");
-    let value_regex: Regex = Regex::new("[0-9]+").expect("Invalid regex");
+        // Need some extra include path for the cross images for aarch64 gnu and musl
+        let extra_arg = match target.as_str() {
+            "aarch64-unknown-linux-gnu" => "-I/usr/aarch64-linux-gnu/include",
+            "aarch64-unknown-linux-musl" => "-I/usr/local/aarch64-linux-musl/include",
+            _ => "",
+        };
 
-    // get syscall strings and matching numbers
-    let lines: Vec<String> = bindgen::Builder::default()
-        .header_contents("syscall_wrapper.h", "#include <sys/syscall.h>")
-        .generate()
-        .expect("Failed to generate syscall bindings")
-        .to_string()
-        .lines()
-        .filter(|l| syscall_regex.is_match(l))
-        .map(|s| s.to_string())
-        .collect();
-    let mut names: Vec<String> = lines
-        .iter()
-        .filter_map(|l| syscall_regex.find(l).map(|m| m.as_str().to_string()))
-        .collect();
-    for name in &mut names {
-        name.replace_range(..4, ""); // remove leading "SYS_"
+        let lines = bindgen::Builder::default()
+            .header_contents("syscall.h", "#include <sys/syscall.h>")
+            .allowlist_var("SYS_[0-9a-zA-Z_]+")
+            .clang_arg(extra_arg)
+            .generate()
+            .expect("Failed to generate syscall bindings")
+            .to_string();
+        let lines: Vec<&str> = lines
+            .lines()
+            .filter(|s| s.starts_with("pub const SYS_"))
+            .collect();
+
+        let out_path = path::PathBuf::from(env::var("OUT_DIR")?);
+        let mut f = fs::File::create(&out_path.join("syscall_bindings.rs"))?;
+
+        f.write_all(&lines.join("\n").as_bytes())?;
+        writeln!(f)?;
+        writeln!(f)?;
+
+        // Write static map that associates syscall strings with syscall numbers
+        writeln!(f, "lazy_static::lazy_static! {{")?;
+        writeln!(
+            f,
+            "    pub(super) static ref SYSCALL_MAP: std::collections::HashMap<&'static str, u32> = {{"
+        )?;
+        writeln!(f, "        let mut map = std::collections::HashMap::new();")?;
+        lines.iter().try_for_each(|l| {
+            let mut split = l.split_ascii_whitespace();
+            let var = split.nth(2).unwrap().trim_end_matches(':');
+            let name = var.replace("SYS_", "");
+            writeln!(f, "        map.insert(\"{}\", {});", name, var)?;
+            std::io::Result::Ok(())
+        })?;
+        writeln!(f, "        map")?;
+        writeln!(f, "    }};")?;
+        writeln!(f, "}}")?;
+
+        let out_path = std::path::PathBuf::from(env::var("OUT_DIR")?);
+        bindgen::Builder::default()
+            .header_contents(
+                "seccomp.h",
+                r#"#include <linux/seccomp.h>
+#include <linux/filter.h>
+#include <linux/audit.h>"#,
+            )
+            .clang_arg(extra_arg)
+            .allowlist_type("seccomp_data")
+            .allowlist_type("sock_fprog")
+            .allowlist_var("BPF_ABS")
+            .allowlist_var("BPF_JEQ")
+            .allowlist_var("BPF_JMP")
+            .allowlist_var("BPF_K")
+            .allowlist_var("BPF_LD")
+            .allowlist_var("BPF_RET")
+            .allowlist_var("BPF_W")
+            .allowlist_var("SECCOMP_RET_ALLOW")
+            .allowlist_var("SECCOMP_RET_LOG")
+            .allowlist_var("SECCOMP_RET_KILL")
+            .allowlist_var("AUDIT_ARCH_X86_64")
+            .allowlist_var("AUDIT_ARCH_AARCH64")
+            .generate()
+            .expect("Failed to generate seccomp bindings")
+            .write_to_file(&out_path.join("seccomp_bindings.rs"))?;
+        Ok(())
     }
-    let values: Vec<nix::libc::c_long> = lines
-        .iter()
-        .filter_map(|l| rhs_regex.find(l).map(|m| m.as_str()))
-        .filter_map(|l| value_regex.find(l).map(|m| m.as_str()))
-        .filter_map(|l| l.parse().ok())
-        .collect();
-    assert_eq!(
-        names.len(),
-        values.len(),
-        "Mismatch in number of syscall names and syscall values"
-    );
 
-    let out_path = std::path::PathBuf::from(
-        std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
-    );
-    let mut f = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .create(true)
-        .open(&out_path.join("syscall_bindings.rs"))?;
-
-    // write static map that associates syscall strings with syscall numbers
-    writeln!(f, "lazy_static::lazy_static! {{")?;
-    writeln!(f, "    static ref SYSCALL_MAP: std::collections::HashMap<&'static str, nix::libc::c_long> = {{")?;
-    writeln!(f, "        let mut map = std::collections::HashMap::new();")?;
-    for (name, value) in names.iter().zip(values.iter()) {
-        writeln!(f, "        map.insert(\"{}\", {});", name, value)?;
-    }
-    writeln!(f, "        map")?;
-    writeln!(f, "    }};")?;
-    writeln!(f, "}}")?;
-
-    Ok(())
-}
-
-#[cfg(feature = "seccomp")]
-pub fn generate_seccomp_bindings() -> anyhow::Result<()> {
-    let out_path = std::path::PathBuf::from(
-        std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
-    );
-    bindgen::Builder::default()
-        .header_contents(
-            "seccomp_wrapper.h",
-            "#include <linux/seccomp.h>\n#include <linux/filter.h>",
-        )
-        .allowlist_type("seccomp_data")
-        .allowlist_type("sock_fprog")
-        .allowlist_var("BPF_ABS")
-        .allowlist_var("BPF_JEQ")
-        .allowlist_var("BPF_JMP")
-        .allowlist_var("BPF_K")
-        .allowlist_var("BPF_LD")
-        .allowlist_var("BPF_RET")
-        .allowlist_var("BPF_W")
-        .allowlist_var("SECCOMP_RET_ALLOW")
-        .allowlist_var("SECCOMP_RET_LOG")
-        .allowlist_var("SECCOMP_RET_KILL")
-        .generate()
-        .expect("Failed to generate seccomp bindings")
-        .write_to_file(&out_path.join("seccomp_bindings.rs"))
-        .expect("Failed to write seccomp bindings");
-    Ok(())
-}
-
-#[cfg(feature = "seccomp")]
-pub fn generate_audit_bindings() -> anyhow::Result<()> {
-    let out_path = std::path::PathBuf::from(
-        std::env::var("OUT_DIR").expect("Environment variable 'OUT_DIR' is not set"),
-    );
-    bindgen::Builder::default()
-        .header_contents("audit_wrapper.h", "#include <linux/audit.h>")
-        .allowlist_var("AUDIT_ARCH_X86_64")
-        .generate()
-        .expect("Failed to generate audit bindings")
-        .write_to_file(&out_path.join("audit_bindings.rs"))
-        .expect("Failed to write audit bindings");
-    Ok(())
+    generate().expect("Failed to generate seccomp bindings");
 }
 
 #[cfg(feature = "hello-world")]

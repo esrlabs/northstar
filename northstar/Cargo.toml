@@ -47,7 +47,7 @@ proptest = "1.0"
 default = []
 api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util"]
 hello-world = []
-rt-island = ["caps", "runtime"]
+rt-island = ["caps", "memoffset", "runtime"]
 rt-minijail = ["runtime", "minijail"]
 runtime = [
     "api",
@@ -68,7 +68,6 @@ runtime = [
     "procinfo",
     "tempfile",
 ]
-seccomp = ["memoffset"]
 
 [build-dependencies]
 anyhow = "1.0"
