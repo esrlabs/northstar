@@ -30,6 +30,12 @@ struct Opt {
     /// File that contains the northstar configuration
     #[structopt(short, long, default_value = "northstar.toml")]
     pub config: PathBuf,
+
+    /// Do not enter a mount namespace if this option is set Be aware that in
+    /// case of a non normal termination of the runtime the images mounted in
+    /// `run_dir` have to be umounted manually before starting the runtime again.
+    #[structopt(short, long)]
+    pub disable_mount_namespace: bool,
 }
 
 fn main() -> Result<(), Error> {
@@ -42,13 +48,7 @@ fn main() -> Result<(), Error> {
     logger::init();
 
     // Skip mount namespace setup in case it's disabled for debugging purposes
-    if !config
-        .debug
-        .as_ref()
-        .and_then(|d| d.runtime.as_ref())
-        .map(|r| r.disable_mount_namespace)
-        .unwrap_or(false)
-    {
+    if !opt.disable_mount_namespace {
         // Enter a mount namespace. This needs to be done before spawning
         // the tokio threadpool.
         debug!("Entering mount namespace");
