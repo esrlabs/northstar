@@ -25,7 +25,7 @@ thiserror = "1.0"
 tokio = { version = "1.5", features = ["fs", "io-util", "rt-multi-thread"] }
 uuid = { version = "0.8.2", features = ["v4"] }
 which = "4.1"
-zip = { git = "https://github.com/esrlabs/zip.git", branch = "support-extra-field", features = ["unreserved"] }
+zip = { git = "https://github.com/zip-rs/zip.git", rev = "3fd44ff", features = ["unreserved"] }
 
 [dev-dependencies]
 anyhow = "1.0"
