@@ -1,0 +1,28 @@
+name: inspect 
+version: 0.0.1
+init: /inspect
+uid: 1000
+gid: 1000
+io:
+  stdout:
+    log:
+      - DEBUG
+      - inspect
+  stderr:
+    log:
+      - WARN
+      - inspect
+mounts:
+    /lib:
+      host: /lib
+    /lib64:
+      host: /lib64
+    /system:
+      host: /system
+    /tmp:
+      tmpfs: 20480000
+capabilities:
+  - CAP_KILL
+suppl_groups:
+  - src
+  - inet
