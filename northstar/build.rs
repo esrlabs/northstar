@@ -14,18 +14,23 @@
 
 fn main() {
     #[cfg(feature = "rt-island")]
-    generate_syscall_bindings().expect("Failed to generate syscall bindings");
-    #[cfg(feature = "rt-island")]
-    generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
-    #[cfg(feature = "rt-island")]
-    generate_audit_bindings().expect("Failed to generate audit bindings");
+    generate_seccomp();
 
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
 #[cfg(feature = "rt-island")]
-pub fn generate_syscall_bindings() -> anyhow::Result<()> {
+fn generate_seccomp() {
+    generate_syscall_bindings().expect("Failed to generate syscall bindings");
+    #[cfg(feature = "rt-island")]
+    generate_seccomp_bindings().expect("Failed to generate seccomp bindings");
+    #[cfg(feature = "rt-island")]
+    generate_audit_bindings().expect("Failed to generate audit bindings");
+}
+
+#[cfg(feature = "rt-island")]
+fn generate_syscall_bindings() -> anyhow::Result<()> {
     use regex::Regex;
     use std::{fs::OpenOptions, io::Write};
 

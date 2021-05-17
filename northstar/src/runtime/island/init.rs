@@ -12,10 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{clone::clone, io::Fd, Container, IslandProcess, ENV_NAME, ENV_VERSION, SIGNAL_OFFSET};
+use super::{
+    clone::clone, io::Fd, utils::PathExt, Container, IslandProcess, ENV_NAME, ENV_VERSION,
+    SIGNAL_OFFSET,
+};
 use crate::runtime::{
     config::Config,
-    island::{seccomp, seccomp::sock_fprog, utils::PathExt},
     pipe::{Condition, ConditionNotify, ConditionWait},
 };
 use log::{debug, warn};
@@ -404,6 +406,7 @@ pub(super) fn init(
                 cond_started_notify.notify();
 
                 // Set seccomp filter
+                #[cfg(target_os = "linux")]
                 if let Some(filter) = &container.manifest.seccomp {
                     println!("Adding seccomp filter");
                     set_seccomp_filter(filter);
@@ -507,7 +510,10 @@ fn set_parent_death_signal(signal: Signal) {
         .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
+#[cfg(target_os = "linux")]
 fn set_seccomp_filter(filter: &std::collections::HashMap<String, String>) {
+    use super::seccomp;
+
     #[cfg(target_os = "android")]
     const PR_SET_SECCOMP: c_int = 22;
     #[cfg(target_os = "android")]
@@ -518,20 +524,20 @@ fn set_seccomp_filter(filter: &std::collections::HashMap<String, String>) {
     use libc::SECCOMP_MODE_FILTER;
 
     // Build syscall allowlist
-    let mut allowlist = seccomp::Builder::new(seccomp::Architecture::X86_64);
+    let mut allowlist = seccomp::Builder::new(super::seccomp::Architecture::X86_64);
     for (syscall_name, _) in filter {
         let syscall_nr =
-            seccomp::translate_syscall(&syscall_name).expect("Failed to translate syscall");
+            super::seccomp::translate_syscall(&syscall_name).expect("Failed to translate syscall");
         allowlist = allowlist.allow_syscall(*syscall_nr as u32);
     }
     let mut allowlist = allowlist.build();
 
     // Set filter
-    let sf_prog = sock_fprog {
+    let sf_prog = seccomp::sock_fprog {
         len: allowlist.len() as u16,
         filter: allowlist.as_mut_ptr(),
     };
-    let sf_prog_ptr = &sf_prog as *const sock_fprog;
+    let sf_prog_ptr = &sf_prog as *const super::seccomp::sock_fprog;
     let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
     Errno::result(result)
         .map(drop)

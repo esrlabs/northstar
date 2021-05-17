@@ -39,6 +39,7 @@ use Signal::SIGCHLD;
 mod clone;
 mod init;
 mod io;
+#[cfg(target_os = "linux")]
 mod seccomp;
 mod utils;
 
