@@ -38,6 +38,10 @@ struct Opt {
     /// Duration to run the test for in seconds
     #[structopt(short, long)]
     duration: Option<u64>,
+
+    /// Random delay between start and stop within 0..value ms
+    #[structopt(short, long)]
+    random: Option<u64>,
 }
 
 #[tokio::main]
@@ -70,12 +74,18 @@ async fn main() -> Result<()> {
         let token = token.clone();
         let url = opt.address.clone();
         let umount = opt.umount;
+        let random = opt.random;
 
         let task = task::spawn(async move {
             let client = client::Client::new(&url, None, timeout).await?;
             loop {
                 // Start the container
                 client.start(&app, &version).await?;
+
+                if let Some(delay) = random {
+                    let delay = rand::random::<u64>() % delay;
+                    time::sleep(time::Duration::from_millis(delay)).await;
+                }
 
                 // Ignore errors on stop because some containers just do something and exit
                 // See for example the datarw example container
