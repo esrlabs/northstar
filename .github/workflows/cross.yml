@@ -12,6 +12,7 @@ jobs:
           - aarch64-linux-android
           - aarch64-unknown-linux-gnu
           - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
     steps:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
