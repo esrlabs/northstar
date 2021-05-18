@@ -6,5 +6,4 @@ referenced in Cross.toml.
 
 [aarch64, x86_64]-unknown-linux-gnu
 
-The `cross` docker image for x86_64-unknown-linux-gnu lacks libcap. The Dockerfile adds this.
 The Docker tag is referenced in Cross.toml.
