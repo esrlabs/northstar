@@ -1,9 +1,8 @@
 REPOSITORY = `pwd`.strip + '/target/northstar/repository'
-KEY = `pwd`.strip + '/examples/keys/northstar.key'
 
 directory REPOSITORY
 
-def cross_targets
+def targets
   %w[
     aarch64-linux-android
     aarch64-unknown-linux-gnu
@@ -12,30 +11,15 @@ def cross_targets
   ]
 end
 
-def cross_packages
-  %w[
-    cpueater
-    crashing
-    datarw
-    ferris
-    memeater
-    minijail
-    northstar
-    test_container
-  ]
-end
-
 desc 'Check'
 task :check do
   sh 'cargo +nightly fmt -- --color=always --check'
   sh 'cargo clippy'
-  sh 'cargo check'
   sh 'cargo test'
+  sh 'cargo test --features rt-island --no-default-features -p northstar_tests'
 
-  cross_targets.each do |target|
-    cross_packages.each do |package|
-      sh "cross build --target #{target} -p #{package}"
-    end
+  targets.each do |target|
+    sh "cross build --target #{target}"
   end
 end
 
@@ -49,10 +33,7 @@ task :setup do
   raise 'Cargo is required' unless which('cargo')
   raise 'Docker is required' unless which('docker')
 
-  unless which('mksquashfs')
-    system 'sudo apt install squashfs-tools' if OS.linux?
-    system 'brew install squashfs' if OS.mac?
-  end
+  system 'sudo apt install squashfs-tools' unless which('mksquashfs')
   'cargo install --version 0.2.1 cross' unless which('cross')
 end
 
@@ -109,7 +90,7 @@ task :rustfmt do
   sh 'cargo +nightly fmt'
 end
 
-desc 'display mount info for process with id'
+desc 'Display mount info for process with id'
 task :mountinfo, [:id] do |t,args|
   process_id = args[:id]
   pid = `ps axf | grep #{process_id} | grep -v grep | grep -v rake | awk '{print $1}'`.strip
@@ -122,23 +103,4 @@ task :mountinfo, [:id] do |t,args|
   puts '========= findmnt ========'
   found = `findmnt | grep #{process_id}`
   puts found
-end
-
-# os detection
-module OS
-  def self.windows?
-    (/cygwin|mswin|mingw|bccwin|wince|emx/ =~ RUBY_PLATFORM) != nil
-  end
-
-  def self.mac?
-    (/darwin/ =~ RUBY_PLATFORM) != nil
-  end
-
-  def self.unix?
-    !OS.windows?
-  end
-
-  def self.linux?
-    OS.unix? && !OS.mac?
-  end
 end
