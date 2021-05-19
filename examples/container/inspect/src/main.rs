@@ -42,6 +42,8 @@ fn main() {
     println!("getppid: {}", unistd::getppid());
     println!("getuid: {}", unistd::getuid());
     println!("getgid: {}", unistd::getgid());
+    println!("getsid: {}", unistd::getsid(None).unwrap());
+    println!("getpgid: {}", unistd::getpgid(None).unwrap());
     println!(
         "getgroups: {:?}",
         unistd::getgroups()

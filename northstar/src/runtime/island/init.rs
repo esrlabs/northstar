@@ -23,15 +23,12 @@ use crate::runtime::{
 use log::{debug, warn};
 use nix::{
     errno::Errno,
-    libc::{self, c_int, c_ulong, pid_t, siginfo_t},
+    libc::{self, c_ulong},
     mount::MsFlags,
     sched,
     sys::{
         self,
-        signal::{
-            sigaction, signal, sigprocmask, SaFlags, SigAction, SigHandler, SigSet, SigmaskHow,
-            Signal, SIGCHLD, SIGKILL,
-        },
+        signal::{signal, sigprocmask, SigHandler, SigSet, SigmaskHow, Signal, SIGCHLD, SIGKILL},
     },
     unistd::{self, Uid},
 };
@@ -48,8 +45,6 @@ use std::{
 };
 use sys::wait::{waitpid, WaitStatus};
 use tokio::task;
-
-static mut CHILD_PID: pid_t = -1;
 
 #[derive(Debug)]
 pub(super) struct Mount {
@@ -306,9 +301,6 @@ pub(super) fn init(
 ) -> ! {
     pr_set_name_init();
 
-    // Install signal handlers that forward every signal to our child
-    init_signal_handlers();
-
     // Become a subreaper for orphans in this namespace
     set_child_subreaper(true);
 
@@ -329,6 +321,9 @@ pub(super) fn init(
 
     // UID / GID
     setid(manifest.uid, manifest.gid);
+
+    // Become a session group leader
+    setsid();
 
     // Supplementary groups
     setgroups(groups);
@@ -353,15 +348,9 @@ pub(super) fn init(
 
     let cond_cloned = Condition::new().expect("Failed to create condition");
 
-    match clone(
-        CloneFlags::empty(),
-        Some(SIGCHLD as i32),
-        Some(unsafe { &mut (CHILD_PID) }),
-    ) {
+    match clone(CloneFlags::empty(), Some(SIGCHLD as i32), None) {
         Ok(result) => match result {
             unistd::ForkResult::Parent { child } => {
-                assert_eq!(unsafe { CHILD_PID }, child.as_raw());
-
                 // These conditions are handled in the child
                 drop(cond_start_wait);
                 drop(cond_started_notify);
@@ -446,38 +435,6 @@ fn file_descriptors(map: &[(RawFd, Fd)]) {
                 unistd::close(*n).expect("Failed to close");
             }
         }
-    }
-}
-
-/// Install a signal handler that forwards alls signals to the child process
-/// Init processes by default have *no* signal handlers installed.
-fn init_signal_handlers() {
-    for sig in Signal::iterator()
-        .filter(|s| *s != Signal::SIGCHLD)
-        .filter(|s| *s != Signal::SIGKILL)
-        .filter(|s| *s != Signal::SIGSTOP)
-    {
-        unsafe {
-            let handler = SigHandler::SigAction(forward_signal_to_child);
-            let action = SigAction::new(
-                handler,
-                SaFlags::SA_SIGINFO | SaFlags::SA_RESTART,
-                SigSet::all(),
-            );
-            sigaction(sig, &action).expect("Failed to install sigaction");
-        }
-    }
-}
-
-extern "C" fn forward_signal_to_child(signal: c_int, _: *mut siginfo_t, _: *mut c_void) {
-    let child_pid = unsafe { CHILD_PID };
-    if child_pid != -1 {
-        // Writing to stdout in signal handler is bad. Just left this here
-        // for printlnging.
-        //println!("{}: forwarding {} to {}", std::process::id(), signal, child);
-        unsafe { libc::kill(child_pid, signal) };
-    } else {
-        panic!("Internal error: child pid not set in signal handler");
     }
 }
 
@@ -583,6 +540,11 @@ fn setid(uid: u32, gid: u32) {
         reset_effective_caps();
         caps::securebits::set_keepcaps(false).expect("Failed to set keep caps");
     }
+}
+
+/// Become a session group leader
+fn setsid() {
+    unistd::setsid().expect("Failed to call setsid");
 }
 
 fn setgroups(groups: &[u32]) {
