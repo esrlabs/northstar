@@ -297,6 +297,20 @@ test!(ppid, {
     runtime.shutdown().await
 });
 
+// Check session id which needs to be pid of init or none for minijail
+test!(sid, {
+    let runtime = Northstar::launch_install_test_container().await?;
+    runtime.test_cmds("inspect").await;
+    runtime.start(TEST_CONTAINER).await?;
+
+    #[cfg(features = "rt-island")]
+    assume("getsid: 1", 5).await?;
+    #[cfg(features = "rt-minijail")]
+    assume("getsid: 0", 5).await?;
+
+    runtime.shutdown().await
+});
+
 // The test container only gets the cap_kill capability. See the manifest
 test!(capabilities, {
     let runtime = Northstar::launch_install_test_container().await?;

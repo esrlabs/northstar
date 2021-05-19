@@ -263,9 +263,9 @@ impl Process for IslandProcess {
             IslandProcess::Stopped { .. } => unreachable!(),
         };
         debug!("Trying to send SIGTERM to {}", pid);
-        let pid = unistd::Pid::from_raw(pid as i32);
+        let process_group = unistd::Pid::from_raw(-(pid as i32));
         let sigterm = Some(sys::signal::SIGTERM);
-        let exit_status = match sys::signal::kill(pid, sigterm) {
+        let exit_status = match sys::signal::kill(process_group, sigterm) {
             Ok(_) => {
                 match time::timeout(timeout, &mut exit_status).await {
                     Err(_) => {
@@ -275,7 +275,7 @@ impl Process for IslandProcess {
                         );
                         // Send SIGKILL if the process did not terminate before timeout
                         let sigkill = Some(sys::signal::SIGKILL);
-                        sys::signal::kill(pid, sigkill)
+                        sys::signal::kill(process_group, sigkill)
                             .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
 
                         (&mut exit_status).await
@@ -289,7 +289,7 @@ impl Process for IslandProcess {
                 let exit_status = exit_status.await?;
                 Ok(exit_status)
             }
-            Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", pid), e)),
+            Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", process_group), e)),
         }?;
 
         if let Some(io) = io.0 {
