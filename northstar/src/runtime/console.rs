@@ -99,7 +99,7 @@ impl Console {
 
         let task = match Listener::new(&self.url)
             .await
-            .map_err(|e| Error::Io("Failed to remove unix socket".into(), e))?
+            .map_err(|e| Error::Io("Failed start console listener".into(), e))?
         {
             Listener::Tcp(listener) => task::spawn(async move {
                 handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
