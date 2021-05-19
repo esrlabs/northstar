@@ -26,5 +26,6 @@ android-logd-logger = "0.1.3"
 
 [features]
 default = ["rt-minijail"]
+hello-world = ["northstar/hello-world"]
 rt-island = ["northstar/rt-island"]
 rt-minijail = ["northstar/rt-minijail"]
