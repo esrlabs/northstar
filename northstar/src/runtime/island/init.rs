@@ -300,6 +300,9 @@ pub(super) fn init(
     // If the child is spawn when the signal is sent to this group it shall exit and the init returns from waitpid.
     set_init_signal_handlers();
 
+    // Become a session group leader
+    setsid();
+
     checkpoint.wait(Start::Start);
     checkpoint.send(Start::Started);
     drop(checkpoint);
@@ -326,9 +329,6 @@ pub(super) fn init(
 
     // UID / GID
     setid(manifest.uid, manifest.gid);
-
-    // Become a session group leader
-    setsid();
 
     // Supplementary groups
     setgroups(groups);
