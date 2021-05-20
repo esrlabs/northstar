@@ -17,15 +17,11 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::{
     io,
-    io::{Read, SeekFrom::Start},
+    io::{Read, SeekFrom::Start, Write},
 };
 
 use std::{io::Seek, path::Path};
 use thiserror::Error;
-use tokio::{
-    fs::{File, OpenOptions},
-    io::AsyncWriteExt,
-};
 use uuid::Uuid;
 
 pub const SHA256_SIZE: usize = 32;
@@ -166,12 +162,11 @@ impl VerityHeader {
 /// and a dm-verity hash_tree
 /// https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#hash-tree
 /// to the given file.
-pub async fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest, Error> {
+pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest, Error> {
     let (level_offsets, tree_size) =
         calc_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
-    let (salt, root_hash, hash_tree) =
-        gen_hash_tree(fsimg, fsimg_size, &level_offsets, tree_size).await?;
-    append_superblock_and_hashtree(fsimg, fsimg_size, &salt, &hash_tree).await?;
+    let (salt, root_hash, hash_tree) = gen_hash_tree(fsimg, fsimg_size, &level_offsets, tree_size)?;
+    append_superblock_and_hashtree(fsimg, fsimg_size, &salt, &hash_tree)?;
     Ok(root_hash)
 }
 
@@ -213,7 +208,7 @@ fn calc_hash_tree_level_offsets(
     (level_offsets, tree_size)
 }
 
-async fn gen_hash_tree(
+fn gen_hash_tree(
     fsimg: &Path,
     image_size: u64,
     level_offsets: &[usize],
@@ -222,14 +217,10 @@ async fn gen_hash_tree(
     // For a description of the overall hash tree generation logic see
     // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
-    let mut fsimg = &File::open(&fsimg)
-        .await
-        .map_err(|e| Error::Os {
-            context: format!("Cannot open '{}'", &fsimg.display()),
-            error: e,
-        })?
-        .into_std()
-        .await;
+    let mut fsimg = &std::fs::File::open(&fsimg).map_err(|e| Error::Os {
+        context: format!("Cannot open '{}'", &fsimg.display()),
+        error: e,
+    })?;
     let mut hashes: Vec<[u8; SHA256_SIZE]> = vec![];
     let mut level_num = 0;
     let mut level_size = image_size;
@@ -310,17 +301,16 @@ async fn gen_hash_tree(
     Ok((salt, root_hash, hash_tree))
 }
 
-async fn append_superblock_and_hashtree(
+fn append_superblock_and_hashtree(
     fsimg: &Path,
     fsimg_size: u64,
     salt: &Salt,
     hash_tree: &[u8],
 ) -> Result<(), Error> {
-    let mut fsimg = OpenOptions::new()
+    let mut fsimg = std::fs::OpenOptions::new()
         .write(true)
         .append(true)
         .open(&fsimg)
-        .await
         .map_err(|e| Error::Os {
             context: format!("Cannot open '{}'", &fsimg.display()),
             error: e,
@@ -334,11 +324,11 @@ async fn append_superblock_and_hashtree(
     assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
     let data_blocks = fsimg_size / BLOCK_SIZE as u64;
     let header = VerityHeader::new(&uuid, data_blocks, SHA256_SIZE as u16, &salt).to_bytes();
-    fsimg.write_all(&header).await.map_err(|e| Error::Os {
+    fsimg.write_all(&header).map_err(|e| Error::Os {
         context: "Failed to write verity header".to_string(),
         error: e,
     })?;
-    fsimg.write_all(&hash_tree).await.map_err(|e| Error::Os {
+    fsimg.write_all(&hash_tree).map_err(|e| Error::Os {
         context: "Failed to write verity hash tree".to_string(),
         error: e,
     })?;

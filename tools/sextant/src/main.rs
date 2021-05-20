@@ -70,8 +70,7 @@ enum Opt {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     env_logger::init();
 
     match Opt::from_args() {
@@ -84,11 +83,11 @@ async fn main() -> Result<()> {
             block_size,
         } => {
             let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-            npk::npk::pack_with(&manifest, &root, &out, key.as_deref(), squashfs_opts).await?
+            npk::npk::pack_with(&manifest, &root, &out, key.as_deref(), squashfs_opts)?
         }
-        Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out).await?,
-        Opt::Inspect { npk, short } => inspect::inspect(&npk, short).await?,
-        Opt::GenKey { name, out } => npk::npk::gen_key(&name, &out).await?,
+        Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
+        Opt::Inspect { npk, short } => inspect::inspect(&npk, short)?,
+        Opt::GenKey { name, out } => npk::npk::gen_key(&name, &out)?,
     }
     Ok(())
 }

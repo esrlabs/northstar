@@ -1171,7 +1171,6 @@ dependencies = [
  "proc-mounts",
  "procinfo",
  "proptest",
- "regex",
  "serde",
  "serde_json",
  "tempfile",
@@ -1837,7 +1836,6 @@ dependencies = [
  "npk",
  "structopt",
  "tempfile",
- "tokio",
  "which 4.1.0",
 ]
 
