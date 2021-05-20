@@ -150,7 +150,7 @@ on post-fs-data
     chown system system /dev/block/loop126
     chown system system /dev/block/loop127
 
-service northstar /system/bin/logwrapper -- /system/bin/northstar -c /system/etc/northstar.toml
+service northstar /system/bin/logwrapper -- /system/bin/northstar --disable-mount-namespace -c /system/etc/northstar.toml
     class main
     setenv ANDROID_DNS_MODE local
     seclabel u:r:native:s0

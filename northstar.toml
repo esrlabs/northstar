@@ -8,7 +8,6 @@ memory = "northstar"
 cpu = "northstar"
 
 [devices]
-unshare_root = "/"
 loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"

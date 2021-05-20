@@ -1,0 +1,23 @@
+console = "tcp://[::1]:4200"
+run_dir = "/data/northstar/run"
+data_dir = "/data/northstar/data"
+log_dir = "/data/northstar/logs"
+
+[repositories.system]
+dir = "/system/northstar/system"
+key = "/system/etc/northstar/system.pub"
+
+[cgroups]
+memory = "northstar"
+cpu = "northstar"
+
+#[debug.strace]
+#output = "file"
+#flags = "-f -s 256"
+#include_runtime = true
+
+[devices]
+loop_control = "/dev/loop-control"
+loop_dev = "/dev/block/loop"
+device_mapper = "/dev/device-mapper"
+device_mapper_dev = "/dev/block/dm-"
