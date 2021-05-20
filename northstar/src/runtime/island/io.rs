@@ -185,6 +185,9 @@ pub(super) async fn from_manifest(
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
                 fd_configuration.insert(log.read_fd, Fd::Close);
+                // Remove fd that is set to be Fd::Close by default. fd is closed
+                // by dup2
+                fd_configuration.remove(&fd);
                 // The writing fd shall be dupped to 1
                 fd_configuration.insert(libc::STDOUT_FILENO, Fd::Dup(fd));
                 Some((log, fd))
@@ -200,6 +203,9 @@ pub(super) async fn from_manifest(
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
                 fd_configuration.insert(log.read_fd, Fd::Close);
+                // Remove fd that is set to be Fd::Close by default. fd is closed
+                // by dup2
+                fd_configuration.remove(&fd);
                 // The writing fd shall be dupped to 2
                 fd_configuration.insert(libc::STDERR_FILENO, Fd::Dup(fd));
                 Some((log, fd))
