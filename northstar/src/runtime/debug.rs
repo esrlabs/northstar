@@ -28,7 +28,8 @@ use tokio::{
     fs,
     io::{self, AsyncBufReadExt},
     process::{Child, Command},
-    select, task,
+    select,
+    task::{self, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -36,6 +37,7 @@ use tokio_util::sync::CancellationToken;
 pub struct Strace {
     child: Child,
     token: CancellationToken,
+    task: JoinHandle<()>,
 }
 
 /// Debugging facilities attached to a started container
@@ -127,45 +129,61 @@ impl Strace {
             .next_line()
             .await
             .map_err(|e| Error::io("Reading strace stderr", e))?;
-        let mut stderr = stderr.into_inner();
 
-        match strace.output {
-            debug::StraceOutput::File => {
-                let mut filename = log_dir.join(format!("strace-{}-{}.log", pid, manifest.name));
-                let mut n = 0u32;
-                while filename.exists() {
-                    n += 1;
-                    filename = log_dir.join(format!("strace-{}-{}-{}.log", pid, manifest.name, n));
-                }
+        let task = {
+            let token = token.clone();
+            let log_dir = log_dir.to_owned();
+            let name = manifest.name.clone();
+            let strace = strace.clone();
 
-                info!("Dumping strace output to {}", filename.display());
+            task::spawn(async move {
+                // Discard until execve if configured
+                if !strace.include_runtime.unwrap_or_default() {
+                    loop {
+                        match stderr.next_line().await {
+                            Ok(Some(l)) if l.contains("execve(") => break,
+                            Ok(None) => return,
+                            _ => continue,
+                        }
+                    }
+                };
 
-                let mut file = fs::File::create(&filename)
-                    .await
-                    .map_err(|e| Error::io("Failed to create strace log file", e))?;
+                match strace.output {
+                    debug::StraceOutput::File => {
+                        let mut stderr = stderr.into_inner();
+                        let mut filename = log_dir.join(format!("strace-{}-{}.strace", pid, name));
+                        let mut n = 0u32;
+                        while filename.exists() {
+                            n += 1;
+                            let name = format!("strace-{}-{}-{}.strace", pid, name, n);
+                            filename = log_dir.join(name);
+                        }
 
-                let token = token.clone();
-                task::spawn(async move {
-                    select! {
-                        result = tokio::io::copy(&mut stderr, &mut file) => {
-                            if let Err(e) = result {
+                        info!("Dumping strace output to {}", filename.display());
+
+                        let mut file = match fs::File::create(&filename).await {
+                            Ok(file) => file,
+                            Err(e) => {
                                 error!("Failed to write strace output: {}", e);
+                                return;
+                            }
+                        };
+
+                        select! {
+                            _ = token.cancelled() => (),
+                            result = tokio::io::copy_buf(&mut stderr, &mut file) => {
+                                if let Err(e) = result {
+                                    error!("Failed to write strace output: {}", e);
+                                }
                             }
                         }
-                        _ = token.cancelled() => (),
                     }
-                });
-            }
-            debug::StraceOutput::Log => {
-                let mut stderr = io::BufReader::new(stderr).lines();
-                let tag = format!("[strace] {}:", manifest.name);
-                let token = token.clone();
-                task::spawn(async move {
-                    loop {
+                    debug::StraceOutput::Log => loop {
                         select! {
+                            _ = token.cancelled() => break,
                             stderr = stderr.next_line() => {
                                 match stderr {
-                                    Ok(Some(line)) => debug!("{}: {}", tag, line),
+                                    Ok(Some(line)) => debug!("{}: {}", name, line),
                                     Ok(None) => break,
                                     Err(e) => {
                                         error!("Failed to forward strace output: {}", e);
@@ -173,18 +191,21 @@ impl Strace {
                                     }
                                 }
                             }
-                            _ = token.cancelled() => break,
                         }
-                    }
-                });
-            }
-        }
-        Ok(Strace { child, token })
+                    },
+                }
+            })
+        };
+
+        Ok(Strace { task, child, token })
     }
 
     pub async fn destroy(mut self) -> Result<(), Error> {
         // Stop the strace output forwarding
         self.token.cancel();
+        self.task
+            .await
+            .map_err(|e| Error::io("Join error", io::Error::new(io::ErrorKind::Other, e)))?;
 
         // Stop strace - if not already existed - irgnore any error
         let pid = self.child.id().unwrap();

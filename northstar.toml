@@ -14,24 +14,26 @@ loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
 
-# # Start a `strace -p PID ...` instance after a container is started.
-# # The execution of the application is defered until strace is attached.
+# Start a `strace -p PID ...` instance after a container is started.
+# The execution of the application is defered until strace is attached.
 # [debug.strace]
-# # Confgure the output of the strace instance attached to a started
-# # application. "file" for a file named strace-<PID>-name.log or "log"
-# # to forward the strace output to the runtimes log.
-# output = "file"
-# # Optional additional flags passed to `strace`
-# flags = "-v -f -s 256"
-# # Optional path to the strace binary
+# Confgure the output of the strace instance attached to a started
+# application. "file" for a file named strace-<PID>-name.log or "log"
+# to forward the strace output to the runtimes log.
+# output = "log"
+# Optional additional flags passed to `strace`
+# flags = "-f -s 256"
+# Optional path to the strace binary
 # path = /bin/strace
+# Include the runtime system calls prior to exeve
+# include_runtime = true
 
-# # Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
-# # after a container is started.
+# Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
+# after a container is started.
 # [debug.perf]
-# # Optional path to the perf binary
-# path = /bin/perf
-# # Optional additional flags passed to `perf`
+# Optional path to the perf binary
+# path = "/bin/perf"
+# Optional additional flags passed to `perf`
 # flags = ""
 
 [repositories.default]
