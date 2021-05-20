@@ -108,7 +108,6 @@ pub fn package_hello_example() -> anyhow::Result<()> {
     use anyhow::Context;
     use npk::npk;
     use std::{env, fs, path::Path};
-    use tokio::runtime;
 
     const MANIFEST: &str = r#"name: hello-world
 version: 0.0.1
@@ -158,18 +157,15 @@ mounts:
     let manifest_file = out_dir.join("manifest.yaml");
     std::fs::write(&manifest_file, &manifest).context("Failed to create manifest")?;
 
-    runtime::Builder::new_multi_thread()
-        .enable_io()
-        .build()?
-        .block_on(npk::pack_with(
-            &manifest_file,
-            &root_dir,
-            &out_dir,
-            None,
-            npk::SquashfsOpts {
-                comp: None,
-                block_size: None,
-            },
-        ))?;
+    npk::pack_with(
+        &manifest_file,
+        &root_dir,
+        &out_dir,
+        None,
+        npk::SquashfsOpts {
+            comp: None,
+            block_size: None,
+        },
+    )?;
     Ok(())
 }

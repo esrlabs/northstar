@@ -14,7 +14,6 @@
 
 use escargot::CargoBuild;
 use std::{env, fs, path::Path};
-use tokio::runtime::Builder;
 
 const CARGO_MANIFEST: &str = "test_container/Cargo.toml";
 const TEST_CONTAINER_MANIFEST: &str = "test_container/manifest.yaml";
@@ -41,30 +40,22 @@ fn main() {
     fs::copy(&bin, "/tmp/asdf").expect("failed to copy bin");
 
     let out_dir = env::var("OUT_DIR").unwrap();
-    let runtime = Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to start RT");
 
-    runtime.block_on(async {
-        // Pack test container npk
-        npk::npk::pack(
-            Path::new(TEST_CONTAINER_MANIFEST),
-            &npk.join("root"),
-            Path::new(&out_dir),
-            Some(Path::new(KEY)),
-        )
-        .await
-        .expect("Failed to create test container npk");
+    // Pack test container npk
+    npk::npk::pack(
+        Path::new(TEST_CONTAINER_MANIFEST),
+        &npk.join("root"),
+        Path::new(&out_dir),
+        Some(Path::new(KEY)),
+    )
+    .expect("Failed to create test container npk");
 
-        // Pack test resource npk
-        npk::npk::pack(
-            Path::new(TEST_RESOURCE_MANIFEST),
-            &Path::new("test_resource").join("root"),
-            Path::new(&out_dir),
-            Some(Path::new(KEY)),
-        )
-        .await
-        .expect("Failed to create test resource npk");
-    });
+    // Pack test resource npk
+    npk::npk::pack(
+        Path::new(TEST_RESOURCE_MANIFEST),
+        &Path::new("test_resource").join("root"),
+        Path::new(&out_dir),
+        Some(Path::new(KEY)),
+    )
+    .expect("Failed to create test resource npk");
 }

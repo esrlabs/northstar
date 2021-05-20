@@ -180,7 +180,7 @@ impl<'a, L: Launcher> State<'a, L> {
         // TODO: Reuse Npk stored in the repository and do not open again. This changed
         // implies some lifetime changes due to the movement into the mount task.
         // Load NPK
-        let npk = Npk::from_path(npk, key).await.map_err(Error::Npk)?;
+        let npk = task::block_in_place(|| Npk::from_path(npk, key).map_err(Error::Npk))?;
         let manifest = npk.manifest().clone();
 
         // Try to mount the npk found. If this fails return with an error - nothing needs to
@@ -495,8 +495,7 @@ impl<'a, L: Launcher> State<'a, L> {
             .get(repository_id)
             .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
         // Load the npk to indentify name and version
-        let npk = Npk::from_path(src, repository.key.as_ref())
-            .await
+        let npk = task::block_in_place(|| Npk::from_path(src, repository.key.as_ref()))
             .map_err(Error::Npk)?;
 
         // Construct a container key for the new npk
@@ -710,7 +709,8 @@ impl<'a, L: Launcher> State<'a, L> {
         let mut containers = Vec::new();
         for (repository_name, repository) in &self.repositories {
             for (npk, _) in repository.containers.values() {
-                let npk = Npk::from_path(npk, None).await.expect("Failed to read npk");
+                let npk =
+                    task::block_in_place(|| Npk::from_path(npk, None).expect("Failed to read npk"));
                 let manifest = npk.manifest();
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let process = self

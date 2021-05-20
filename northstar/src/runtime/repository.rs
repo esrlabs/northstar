@@ -26,7 +26,7 @@ use super::{
 use futures::future::OptionFuture;
 use log::debug;
 use npk::{manifest::Manifest, npk::Npk};
-use tokio::fs;
+use tokio::{fs, task};
 
 #[derive(Debug)]
 pub(super) struct Repository {
@@ -55,8 +55,7 @@ impl Repository {
                 continue;
             }
 
-            let npk = Npk::from_path(entry.path().as_path(), None)
-                .await
+            let npk = task::block_in_place(|| Npk::from_path(entry.path().as_path(), None))
                 .map_err(Error::Npk)?;
             let name = npk.manifest().name.clone();
             let version = npk.manifest().version.clone();
@@ -87,9 +86,8 @@ impl Repository {
             .await
             .map_err(|e| Error::Io("Failed to copy npk to repository".into(), e))?;
 
-        let npk = Npk::from_path(dest.as_path(), None)
-            .await
-            .map_err(Error::Npk)?;
+        let npk =
+            task::block_in_place(|| Npk::from_path(dest.as_path(), None)).map_err(Error::Npk)?;
         let name = npk.manifest().name.clone();
         let version = npk.manifest().version.clone();
         let container = Container::new(name, version);
