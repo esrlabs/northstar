@@ -157,15 +157,6 @@ mounts:
     let manifest_file = out_dir.join("manifest.yaml");
     std::fs::write(&manifest_file, &manifest).context("Failed to create manifest")?;
 
-    npk::pack_with(
-        &manifest_file,
-        &root_dir,
-        &out_dir,
-        None,
-        npk::SquashfsOpts {
-            comp: None,
-            block_size: None,
-        },
-    )?;
+    npk::pack(&manifest_file, &root_dir, &out_dir, None)?;
     Ok(())
 }

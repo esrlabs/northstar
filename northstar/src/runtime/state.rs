@@ -118,7 +118,6 @@ impl<'a, L: Launcher> State<'a, L> {
 
         // Internal test repository
         #[cfg(feature = "hello-world")]
-        #[cfg(debug_assertions)]
         let internal_repository = {
             let name = "hello-world".to_string();
             let (dir, repository) = prepare_internal_repository(&name).await?;
