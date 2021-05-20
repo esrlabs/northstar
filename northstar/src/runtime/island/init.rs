@@ -351,7 +351,7 @@ pub(super) fn init(
     // TODO: Fix the "we're spawned from a thread that times out" issue
     //set_parent_death_signal(SIGKILL);
 
-    match clone(CloneFlags::empty(), Some(SIGCHLD as i32), None) {
+    match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
         Ok(result) => match result {
             unistd::ForkResult::Parent { child } => {
                 reset_signal_handlers();

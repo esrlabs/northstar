@@ -125,7 +125,7 @@ impl Launcher for Island {
         // cause the child to be signalled with the signal specificed as parent death signal.
         // TODO: actually there's currently no way to ensure this future to be processes from
         // an persistent thread.
-        match clone::clone(flags, Some(SIGCHLD as c_int), None) {
+        match clone::clone(flags, Some(SIGCHLD as c_int)) {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
                     block(|| drop(checkpoint_child));
