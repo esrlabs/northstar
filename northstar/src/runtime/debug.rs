@@ -197,7 +197,7 @@ impl Strace {
             })
         };
 
-        Ok(Strace { task, child, token })
+        Ok(Strace { child, token, task })
     }
 
     pub async fn destroy(mut self) -> Result<(), Error> {
