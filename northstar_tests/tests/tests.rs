@@ -324,32 +324,35 @@ test!(container_shall_only_have_configured_capabilities, {
 
 // Check whether after a runtime start, container start and shutdow
 // any filedescriptor is leaked
-test!(start_stop_runtime_and_containers_shall_not_leak_file_descriptors, {
-    /// Collect a set of files in /proc/$$/fd
-    fn fds() -> Result<Vec<PathBuf>, std::io::Error> {
-        let mut links = std::fs::read_dir("/proc/self/fd")?
-            .filter_map(Result::ok)
-            .flat_map(|entry| entry.path().read_link())
-            .collect::<Vec<_>>();
-        links.sort();
-        Ok(links)
+test!(
+    start_stop_runtime_and_containers_shall_not_leak_file_descriptors,
+    {
+        /// Collect a set of files in /proc/$$/fd
+        fn fds() -> Result<Vec<PathBuf>, std::io::Error> {
+            let mut links = std::fs::read_dir("/proc/self/fd")?
+                .filter_map(Result::ok)
+                .flat_map(|entry| entry.path().read_link())
+                .collect::<Vec<_>>();
+            links.sort();
+            Ok(links)
+        }
+        // Collect list of fds
+        let before = fds()?;
+
+        let runtime = Northstar::launch_install_test_container().await?;
+
+        runtime.start(TEST_CONTAINER).await?;
+        assume("test_container: Sleeping", 5).await?;
+        runtime.stop(TEST_CONTAINER, 5).await?;
+
+        let result = runtime.shutdown().await;
+
+        // Compare the list of fds before and after the RT run.
+        assert_eq!(before, fds()?);
+
+        result
     }
-    // Collect list of fds
-    let before = fds()?;
-
-    let runtime = Northstar::launch_install_test_container().await?;
-
-    runtime.start(TEST_CONTAINER).await?;
-    assume("test_container: Sleeping", 5).await?;
-    runtime.stop(TEST_CONTAINER, 5).await?;
-
-    let result = runtime.shutdown().await;
-
-    // Compare the list of fds before and after the RT run.
-    assert_eq!(before, fds()?);
-
-    result
-});
+);
 
 // Check open file descriptors in the test container that should be
 // stdin: /dev/null

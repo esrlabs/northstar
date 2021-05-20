@@ -15,10 +15,9 @@
 use super::{
     config::Config,
     error::Error,
-    pipe::{ConditionNotify, ConditionWait},
+    pipe::{self, PipeRead, PipeRecv, PipeSend, PipeWrite},
     Event, EventTx, ExitStatus, Launcher, MountedContainer as Container, Pid, Process,
 };
-use crate::runtime::{island::io::Fd, pipe::Condition};
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
 use log::{debug, info, warn};
@@ -31,7 +30,7 @@ use nix::{
 };
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, fmt, os::unix::prelude::AsRawFd};
+use std::{convert::TryFrom, fmt};
 use task::block_in_place as block;
 use tokio::{task, time};
 use Signal::SIGCHLD;
@@ -46,13 +45,6 @@ const ENV_NAME: &str = "NAME";
 const ENV_VERSION: &str = "VERSION";
 const SIGNAL_OFFSET: i32 = 128;
 
-#[derive(Debug, Serialize, Deserialize)]
-enum LaunchProtocol {
-    Error(String),
-    Go,
-    Launched,
-}
-
 #[derive(Debug)]
 pub(super) struct Island {
     tx: EventTx,
@@ -64,8 +56,7 @@ pub(super) enum IslandProcess {
         pid: Pid,
         exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
         io: (Option<io::Log>, Option<io::Log>),
-        cond_start_notify: ConditionNotify,
-        cond_started_wait: ConditionWait,
+        checkpoint: Checkpoint,
     },
     Started {
         pid: Pid,
@@ -111,25 +102,8 @@ impl Launcher for Island {
 
     async fn create(&self, container: &Container<Self::Process>) -> Result<Self::Process, Error> {
         let manifest = &container.manifest;
-        let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
-
-        // Condition pair to signal the child is cloned by init
-        let (cond_cloned_wait, cond_cloned_notify) = Condition::new()
-            .map_err(|e| Error::io("Failed to create condition", e))?
-            .split();
-        fds.push((cond_cloned_notify.as_raw_fd(), Fd::Inherit));
-
-        // Condition pair to signal the child to start
-        let (cond_start_wait, cond_start_notify) = Condition::new()
-            .map_err(|e| Error::io("Failed to create condition", e))?
-            .split();
-        fds.push((cond_start_wait.as_raw_fd(), Fd::Inherit));
-
-        // Condition pair to signal the runtime from the child that it's started
-        let (cond_started_wait, cond_started_notify) = Condition::new()
-            .map_err(|e| Error::io("Failed to create condition", e))?
-            .split();
-        fds.push((cond_started_notify.as_raw_fd(), Fd::Inherit));
+        let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
+        let (checkpoint_parent, checkpoint_child) = checkoints();
 
         // Calculating init, argv and env allocates. Do that before `clone`.
         let (init, argv, env) = init::args(manifest);
@@ -154,12 +128,8 @@ impl Launcher for Island {
         match clone::clone(flags, Some(SIGCHLD as c_int), None) {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
+                    block(|| drop(checkpoint_child));
                     debug!("Created {} with pid {}", container.container, child);
-                    block(|| {
-                        drop(cond_cloned_notify);
-                        drop(cond_start_wait);
-                        drop(cond_started_notify);
-                    });
 
                     // Close writing part of log forwards if any
                     let stdout = stdout.map(|(log, fd)| {
@@ -173,20 +143,15 @@ impl Launcher for Island {
                     let pid = child.as_raw() as Pid;
                     let exit_status = Box::new(wait(container, pid, self.tx.clone()).await);
 
-                    block(|| cond_cloned_wait.wait());
-
                     Ok(IslandProcess::Created {
                         pid,
                         exit_status,
                         io: (stdout, stderr),
-                        cond_start_notify,
-                        cond_started_wait,
+                        checkpoint: checkpoint_parent,
                     })
                 }
                 unistd::ForkResult::Child => {
-                    drop(cond_cloned_wait);
-                    drop(cond_start_notify);
-                    drop(cond_started_wait);
+                    drop(checkpoint_parent);
 
                     init::init(
                         container,
@@ -196,9 +161,7 @@ impl Launcher for Island {
                         &mounts,
                         &fds,
                         &groups,
-                        cond_cloned_notify,
-                        cond_start_wait,
-                        cond_started_notify,
+                        checkpoint_child,
                     );
                 }
             },
@@ -224,13 +187,10 @@ impl Process for IslandProcess {
                 pid,
                 exit_status,
                 io: _io,
-                cond_start_notify,
-                cond_started_wait,
+                mut checkpoint,
             } => {
-                block(|| {
-                    cond_start_notify.notify();
-                    cond_started_wait.wait();
-                });
+                checkpoint.async_send(Start::Start).await;
+                checkpoint.async_wait(Start::Started).await;
 
                 Ok(IslandProcess::Started {
                     pid,
@@ -392,4 +352,53 @@ async fn wait(
             std::io::Error::new(std::io::ErrorKind::Other, e),
         )
     })
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum Start {
+    // Signal the child to go
+    Start,
+    // Signal the parent that go is received
+    Started,
+}
+
+pub(super) struct Checkpoint(PipeRead, PipeWrite);
+
+fn checkoints() -> (Checkpoint, Checkpoint) {
+    let a = pipe::pipe().unwrap();
+    let b = pipe::pipe().unwrap();
+
+    (Checkpoint(a.0, b.1), Checkpoint(b.0, a.1))
+}
+
+impl Checkpoint {
+    fn send(&mut self, c: Start) {
+        self.1.send(c).expect("Pipe error");
+    }
+
+    fn wait(&mut self, c: Start) {
+        match self.0.recv::<Start>() {
+            Ok(n) if n == c => (),
+            Ok(n) => panic!("Invalid value {:?}. Expected {:?}", n, c),
+            Err(e) => panic!("Pipe error: {}", e),
+        }
+    }
+
+    async fn async_send(&mut self, c: Start) {
+        task::block_in_place(move || self.send(c));
+    }
+
+    async fn async_wait(&mut self, c: Start) {
+        task::block_in_place(|| self.wait(c));
+    }
+}
+
+#[test]
+fn sync() {
+    let (mut child, mut parent) = checkoints();
+    parent.send(Start::Start);
+    child.wait(Start::Start);
+
+    child.send(Start::Started);
+    parent.wait(Start::Started);
 }

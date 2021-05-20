@@ -13,17 +13,14 @@
 //   limitations under the License.
 
 use super::{
-    clone::clone, io::Fd, utils::PathExt, Container, IslandProcess, ENV_NAME, ENV_VERSION,
-    SIGNAL_OFFSET,
+    clone::clone, io::Fd, utils::PathExt, Checkpoint, Container, IslandProcess, ENV_NAME,
+    ENV_VERSION, SIGNAL_OFFSET,
 };
-use crate::runtime::{
-    config::Config,
-    pipe::{Condition, ConditionNotify, ConditionWait},
-};
+use crate::runtime::{config::Config, island::Start};
 use log::{debug, warn};
 use nix::{
     errno::Errno,
-    libc::{self, c_ulong},
+    libc::{self, c_int, c_ulong},
     mount::MsFlags,
     sched,
     sys::{
@@ -295,10 +292,18 @@ pub(super) fn init(
     mounts: &[Mount],
     fds: &[(RawFd, Fd)],
     groups: &[u32],
-    cond_cloned_notify: ConditionNotify,
-    cond_start_wait: ConditionWait,
-    cond_started_notify: ConditionNotify,
+    mut checkpoint: Checkpoint,
 ) -> ! {
+    // Install "default signal handler" that exit on any signal. This process is the "init"
+    // process of this pid ns and therefore doesn't have any signal handlers. The handler that just exists
+    // is needed if the container is signaled *before* the child is spawned and also receives the signal.
+    // If the child is spawn when the signal is sent to this group it shall exit and the init returns from waitpid.
+    set_init_signal_handlers();
+
+    checkpoint.wait(Start::Start);
+    checkpoint.send(Start::Started);
+    drop(checkpoint);
+
     pr_set_name_init();
 
     // Become a subreaper for orphans in this namespace
@@ -346,21 +351,10 @@ pub(super) fn init(
     // TODO: Fix the "we're spawned from a thread that times out" issue
     //set_parent_death_signal(SIGKILL);
 
-    let cond_cloned = Condition::new().expect("Failed to create condition");
-
     match clone(CloneFlags::empty(), Some(SIGCHLD as i32), None) {
         Ok(result) => match result {
             unistd::ForkResult::Parent { child } => {
-                // These conditions are handled in the child
-                drop(cond_start_wait);
-                drop(cond_started_notify);
-
-                // Wait until the child signals that is has resetted it's signal handlers before
-                // we signal to the runtime that the clone is done. This is important because the rt might
-                // try to kill us before this happened.
-                cond_cloned.wait();
-                // Signal the runtime that the child is cloned
-                cond_cloned_notify.notify();
+                reset_signal_handlers();
 
                 // Wait for the child to exit
                 match waitpid(Some(child), None).expect("waitpid") {
@@ -383,16 +377,6 @@ pub(super) fn init(
                 // to reset the signal handler during the clone.
                 reset_signal_handlers();
                 reset_signal_mask();
-
-                // Signal init that we setup the signal handling
-                drop(cond_cloned_notify);
-                cond_cloned.notify();
-
-                // Wait for the start command from the runtime
-                cond_start_wait.wait();
-
-                // Signal the runtime that we're started
-                cond_started_notify.notify();
 
                 // Set seccomp filter
                 // TODO: Move the allocations to parent/parent
@@ -491,6 +475,7 @@ pub const PR_SET_NAME: c_int = 15;
 #[cfg(not(target_os = "android"))]
 use libc::PR_SET_NAME;
 
+/// Set the name of the current process to "init"
 fn pr_set_name_init() {
     let cname = "init\0";
     let result = unsafe { libc::prctl(PR_SET_NAME, cname.as_ptr() as c_ulong, 0, 0, 0) };
@@ -499,6 +484,7 @@ fn pr_set_name_init() {
         .expect("Failed to set PR_SET_KEEPCAPS");
 }
 
+/// Install default signal handler
 fn reset_signal_handlers() {
     Signal::iterator()
         .filter(|s| *s != Signal::SIGCHLD)
@@ -513,9 +499,25 @@ fn reset_signal_mask() {
         .expect("Failed to reset signal maks")
 }
 
+/// Install a signal handler that terminates the init process if the signal
+/// is received before the clone of the child. If this handler would not be
+/// installed the signal would be ignored (and not sent to the group) because
+/// the init processes in PID namespace do not have default signal handlers.
+fn set_init_signal_handlers() {
+    extern "C" fn init_signal_handler(signal: c_int) {
+        exit(SIGNAL_OFFSET + signal);
+    }
+
+    Signal::iterator()
+        .filter(|s| *s != Signal::SIGCHLD)
+        .filter(|s| *s != Signal::SIGKILL)
+        .filter(|s| *s != Signal::SIGSTOP)
+        .try_for_each(|s| unsafe { signal(s, SigHandler::Handler(init_signal_handler)) }.map(drop))
+        .expect("Failed to set signal handler");
+}
+
 // Reset effective caps to the most possible set
 fn reset_effective_caps() {
-    //println!("Resetting effective capabilities");
     caps::set(None, caps::CapSet::Effective, &caps::all()).expect("Failed to reset effective caps");
 }
 
