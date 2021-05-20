@@ -94,6 +94,8 @@ pub mod debug {
         pub path: Option<PathBuf>,
         /// Additional strace command line flags options
         pub flags: Option<String>,
+        /// Include strace output before final execve
+        pub include_runtime: Option<bool>,
     }
 
     /// perf profiling options
