@@ -34,7 +34,7 @@ use tokio::{
 };
 
 // Test a good and bad log assumption
-test!(logger, {
+test!(logger_smoketest, {
     debug!("Yippie");
     assume("Yippie", 3).await?;
     assert!(assume("Juhuuu!", 1).await.is_err());
@@ -48,7 +48,7 @@ test!(runtime_launch, {
 
 // Install and uninstall is a loop. After a number of installation
 // try to start the test container
-test!(install_uninstall, {
+test!(install_uninstall_test_container, {
     let runtime = Northstar::launch().await?;
     for _ in 0u32..10 {
         runtime.install_test_container().await?;
@@ -58,7 +58,7 @@ test!(install_uninstall, {
 });
 
 // Start and stop a container multiple times
-test!(start_stop, {
+test!(start_stop_test_container_with_waiting, {
     #[cfg(not(feature = "rt-minijail"))]
     let mut runtime = Northstar::launch_install_test_container().await?;
     #[cfg(feature = "rt-minijail")]
@@ -94,7 +94,7 @@ test!(start_stop, {
 });
 
 // Start and stop a container without waiting
-test!(start_stop_no_wait, {
+test!(start_stop_test_container_without_waiting, {
     #[cfg(not(feature = "rt-minijail"))]
     let mut runtime = Northstar::launch_install_test_container().await?;
     #[cfg(feature = "rt-minijail")]
@@ -128,7 +128,7 @@ test!(start_stop_no_wait, {
 });
 
 // Mount and umount all containers known to the runtime
-test!(mount, {
+test!(mount_umount_test_container_via_client, {
     let runtime = Northstar::launch_install_test_container().await?;
 
     // Mount
@@ -149,7 +149,7 @@ test!(mount, {
 });
 
 // Try to stop a not started container and expect an Err
-test!(invalid_stop, {
+test!(try_to_stop_unknown_container, {
     let runtime = Northstar::launch().await?;
     let container = "foo:0.0.1:default";
     assert!(runtime.stop(container, 5).await.is_err());
@@ -157,7 +157,7 @@ test!(invalid_stop, {
 });
 
 // Try to start a container which is not installed/known
-test!(unknown_container_start, {
+test!(try_to_start_unknown_container, {
     let runtime = Northstar::launch().await?;
     let container = "unknown_application:0.0.12:asdf";
     assert!(runtime.start(container).await.is_err());
@@ -165,7 +165,7 @@ test!(unknown_container_start, {
 });
 
 // Try to start a container where a dependecy is missing
-test!(missing_resource, {
+test!(try_to_start_containter_that_misses_a_resource, {
     let runtime = Northstar::launch().await?;
     runtime.install_test_container().await?;
     // The TEST_RESOURCE is not installed.
@@ -174,7 +174,7 @@ test!(missing_resource, {
 });
 
 // Start a container that uses a resource
-test!(resource, {
+test!(check_test_container_resource_usage, {
     let runtime = Northstar::launch().await?;
 
     // Install test container & resource
@@ -198,7 +198,7 @@ test!(resource, {
 });
 
 // Try to uninstall a started container
-test!(uninstall_started, {
+test!(try_to_uninstall_a_started_container, {
     let runtime = Northstar::launch().await?;
 
     runtime.install_test_container().await?;
@@ -215,7 +215,7 @@ test!(uninstall_started, {
     runtime.shutdown().await
 });
 
-test!(start_umount_resource_start, {
+test!(start_mounted_container_with_not_mounted_resource, {
     let runtime = Northstar::launch().await?;
 
     runtime.install_test_container().await?;
@@ -239,7 +239,7 @@ test!(start_umount_resource_start, {
 
 // The test is flaky and needs to listen for notifications
 // in order to be implemented correctly
-test!(crashing_container, {
+test!(container_crash_exit, {
     let mut runtime = Northstar::launch().await?;
 
     // install test container
@@ -270,7 +270,7 @@ test!(crashing_container, {
 
 // Check uid. In the manifest of the test container the uid
 // is set to 1000
-test!(uid, {
+test!(container_uses_correct_uid, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -280,7 +280,7 @@ test!(uid, {
 
 // Check gid. In the manifest of the test container the gid
 // is set to 1000
-test!(gid, {
+test!(container_uses_correct_gid, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -289,7 +289,7 @@ test!(gid, {
 });
 
 // Check parent pid. Northstar starts an init process which must have pid 1.
-test!(ppid, {
+test!(container_ppid_must_be_init, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -298,7 +298,7 @@ test!(ppid, {
 });
 
 // Check session id which needs to be pid of init or none for minijail
-test!(sid, {
+test!(container_sid_must_be_init_or_none, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -312,7 +312,7 @@ test!(sid, {
 });
 
 // The test container only gets the cap_kill capability. See the manifest
-test!(capabilities, {
+test!(container_shall_only_have_configured_capabilities, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -324,7 +324,7 @@ test!(capabilities, {
 
 // Check whether after a runtime start, container start and shutdow
 // any filedescriptor is leaked
-test!(fd_leak, {
+test!(start_stop_runtime_and_containers_shall_not_leak_file_descriptors, {
     /// Collect a set of files in /proc/$$/fd
     fn fds() -> Result<Vec<PathBuf>, std::io::Error> {
         let mut links = std::fs::read_dir("/proc/self/fd")?
@@ -355,7 +355,7 @@ test!(fd_leak, {
 // stdin: /dev/null
 // stdout: some pipe
 // stderr: /dev/null
-test!(fd_container, {
+test!(container_shall_only_have_configured_fds, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -374,7 +374,7 @@ test!(fd_container, {
 });
 
 // Check if /proc is mounted ro
-test!(proc_ro, {
+test!(proc_is_mounted_ro, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
@@ -383,13 +383,13 @@ test!(proc_ro, {
 });
 
 // Open many connections to the runtime
-test!(connections, {
+test!(open_many_connections_to_the_runtime_and_shutdown, {
     let runtime = Northstar::launch().await?;
 
     let console = runtime.config().console.as_ref().unwrap();
 
     let mut clients = Vec::new();
-    for _ in 0..10 {
+    for _ in 0..100 {
         let client =
             api::client::Client::new(&console, None, time::Duration::from_secs(30)).await?;
         clients.push(client);
@@ -405,7 +405,7 @@ test!(connections, {
     result
 });
 
-test!(connect_version, {
+test!(check_api_version_on_connect, {
     let runtime = Northstar::launch().await?;
 
     trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
