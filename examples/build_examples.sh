@@ -18,6 +18,7 @@ usage() {
     echo "    -t, --target <platform>   Target platform"
     echo "    -c, --comp   <algorithm>  Compression algorithm used by squashfs"
     echo "                              (gzip, lzma, lzo, xz, zstd)"
+    echo "    --clones     <number>     Create number of clones"
     echo "    -h, --help                Prints help information"
 
 }
@@ -34,6 +35,11 @@ case $key in
     ;;
     -c|--comp)
     COMPRESSION_ALGORITHM="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    --clones)
+    CLONES="--clones $2"
     shift # past argument
     shift # past value
     ;;
@@ -132,7 +138,7 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant -- pack --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key" --comp "${COMPRESSION_ALGORITHM}"
+  exe cargo run --bin sextant --release -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key" --comp "${COMPRESSION_ALGORITHM}"
 }
 
 main() {
