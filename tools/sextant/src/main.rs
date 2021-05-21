@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 mod inspect;
+mod pack;
 
 #[derive(Debug, StructOpt)]
 #[structopt(about = "Northstar CLI")]
@@ -38,11 +39,14 @@ enum Opt {
         #[structopt(short, long)]
         out: PathBuf,
         /// Compression algorithm to use in squashfs (default gzip)
-        #[structopt(short, long)]
-        comp: Option<npk::npk::CompressionAlgorithm>,
+        #[structopt(short, long, default_value = "gzip")]
+        comp: npk::npk::CompressionAlgorithm,
         /// Block size used by squashfs (default 128 KiB)
         #[structopt(short, long)]
         block_size: Option<u32>,
+        /// Create n clones of the container
+        #[structopt(long)]
+        clones: Option<u32>,
     },
     /// Unpack Northstar containers
     Unpack {
@@ -81,10 +85,16 @@ fn main() -> Result<()> {
             key,
             comp,
             block_size,
-        } => {
-            let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-            npk::npk::pack_with(&manifest, &root, &out, key.as_deref(), squashfs_opts)?
-        }
+            clones,
+        } => pack::pack(
+            &manifest,
+            &root,
+            &out,
+            key.as_deref(),
+            comp,
+            block_size,
+            clones,
+        )?,
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
         Opt::Inspect { npk, short } => inspect::inspect(&npk, short)?,
         Opt::GenKey { name, out } => npk::npk::gen_key(&name, &out)?,

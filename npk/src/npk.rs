@@ -340,8 +340,8 @@ impl Builder {
         self
     }
 
-    fn squashfs_opts(mut self, opts: SquashfsOpts) -> Builder {
-        self.squashfs_opts = opts;
+    fn squashfs_opts(mut self, opts: &SquashfsOpts) -> Builder {
+        self.squashfs_opts = opts.clone();
         self
     }
 
@@ -364,7 +364,7 @@ impl Builder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum CompressionAlgorithm {
     Gzip,
     Lzma,
@@ -400,12 +400,21 @@ impl FromStr for CompressionAlgorithm {
 }
 
 /// Squashfs Options
-#[derive(Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SquashfsOpts {
     /// The compression algorithm used (default gzip)
-    pub comp: Option<CompressionAlgorithm>,
+    pub comp: CompressionAlgorithm,
     /// Size of the blocks of data compressed separately
     pub block_size: Option<u32>,
+}
+
+impl Default for SquashfsOpts {
+    fn default() -> Self {
+        SquashfsOpts {
+            comp: CompressionAlgorithm::Gzip,
+            block_size: None,
+        }
+    }
 }
 
 /// Create an NPK for the northstar runtime.
@@ -428,7 +437,7 @@ pub struct SquashfsOpts {
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
-    pack_with(manifest, root, out, key, SquashfsOpts::default())
+    pack_with(manifest, root, out, key, &SquashfsOpts::default())
 }
 
 /// Create an NPK with special `squashfs` options
@@ -458,7 +467,7 @@ pub fn pack_with(
     root: &Path,
     out: &Path,
     key: Option<&Path>,
-    squashfs_opts: SquashfsOpts,
+    squashfs_opts: &SquashfsOpts,
 ) -> Result<(), Error> {
     let manifest = read_manifest(manifest)?;
     let name = manifest.name.clone();
@@ -467,7 +476,7 @@ pub fn pack_with(
     if let Some(key) = key {
         builder = builder.key(&key);
     }
-    builder = builder.squashfs_opts(squashfs_opts);
+    builder = builder.squashfs_opts(&squashfs_opts);
 
     let npk_dest = out
         .join(format!("{}-{}.", &name, &version.to_string()))
@@ -685,16 +694,12 @@ fn create_squashfs_img(
         )));
     }
 
-    let compression_algorithm = squashfs_opts
-        .comp
-        .as_ref()
-        .unwrap_or(&CompressionAlgorithm::Gzip);
     let mut cmd = Command::new(&MKSQUASHFS_BIN);
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
         .arg("-no-progress")
         .arg("-comp")
-        .arg(compression_algorithm.to_string())
+        .arg(squashfs_opts.comp.to_string())
         .arg("-info")
         .arg("-force-uid")
         .arg(manifest.uid.to_string())
