@@ -357,18 +357,20 @@ pub(super) fn init(
                 reset_signal_handlers();
 
                 // Wait for the child to exit
-                match waitpid(Some(child), None).expect("waitpid") {
-                    WaitStatus::Exited(_pid, status) => exit(status),
-                    WaitStatus::Signaled(_pid, status, _) => {
-                        // Encode the signal number in the process exit status. It's not possible to raise a
-                        // a signal in this "init" process that is received by our parent
-                        let code = SIGNAL_OFFSET + status as i32;
-                        //debug!("Exiting with {} (signaled {})", code, status);
-                        exit(code);
+                loop {
+                    match waitpid(Some(child), None) {
+                        Ok(WaitStatus::Exited(_pid, status)) => exit(status),
+                        Ok(WaitStatus::Signaled(_pid, status, _)) => {
+                            // Encode the signal number in the process exit status. It's not possible to raise a
+                            // a signal in this "init" process that is received by our parent
+                            let code = SIGNAL_OFFSET + status as i32;
+                            //debug!("Exiting with {} (signaled {})", code, status);
+                            exit(code);
+                        }
+                        Err(e) if e == nix::Error::Sys(Errno::EINTR) => continue,
+                        e => panic!("Failed to waitpid on {}: {:?}", child, e),
                     }
-                    // TODO: Other waitpid results
-                    _ => panic!("abnormal exit of child process"),
-                };
+                }
             }
             unistd::ForkResult::Child => {
                 set_parent_death_signal(SIGKILL);
