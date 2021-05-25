@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use futures::{
     future::{ready, try_join_all},
     FutureExt,
@@ -31,6 +31,7 @@ struct Opt {
     /// Runtime address
     #[structopt(short, long, default_value = "tcp://localhost:4200")]
     address: url::Url,
+
     /// Umount container after stopping
     #[structopt(short, long)]
     umount: bool,
@@ -59,16 +60,17 @@ async fn main() -> Result<()> {
         .filter(|c| c.manifest.init.is_some())
         .map(|c| (c.manifest.name.to_string(), c.manifest.version.clone()))
         .collect::<Vec<_>>();
-    for (app, version) in &apps {
-        client
-            .stop(&app, &version, time::Duration::from_secs(5))
-            .await
-            .ok();
-    }
     drop(client);
 
     let mut tasks = Vec::new();
     let token = CancellationToken::new();
+
+    // Check random value that cannot be 0
+    if let Some(delay) = opt.random {
+        if delay == 0 {
+            panic!("Invalid random value");
+        }
+    }
 
     for (app, version) in apps.clone().drain(..) {
         let token = token.clone();
@@ -87,15 +89,16 @@ async fn main() -> Result<()> {
                     time::sleep(time::Duration::from_millis(delay)).await;
                 }
 
-                // Ignore errors on stop because some containers just do something and exit
-                // See for example the datarw example container
                 client
                     .stop(&app, &version, time::Duration::from_secs(5))
                     .await
-                    .ok();
+                    .context("Failed to stop container")?;
 
                 if umount {
-                    client.umount(&app, &version).await?;
+                    client
+                        .umount(&app, &version)
+                        .await
+                        .context("Failed to umount")?;
                 }
                 if token.is_cancelled() {
                     drop(client);
@@ -105,12 +108,13 @@ async fn main() -> Result<()> {
         })
         .then(|r| match r {
             Ok(r) => ready(r),
-            Err(e) => ready(Result::<()>::Err(anyhow::anyhow!("task error: {}", e))),
+            Err(e) => ready(Result::<()>::Err(anyhow!("task error: {}", e))),
         });
         tasks.push(task);
     }
 
     let mut tasks = try_join_all(tasks);
+    let ctrl_c = tokio::signal::ctrl_c();
 
     if let Some(duration) = opt.duration {
         select! {
@@ -118,9 +122,19 @@ async fn main() -> Result<()> {
                 token.cancel();
                 tasks.await.map(drop)
             }
+            _ = ctrl_c => {
+                token.cancel();
+                tasks.await.map(drop)
+            }
             r = &mut tasks => r.map(drop),
         }
     } else {
-        tasks.await.map(drop)
+        select! {
+            _ = ctrl_c => {
+                token.cancel();
+                tasks.await.map(drop)
+            }
+            r = &mut tasks => r.map(drop),
+        }
     }
 }
