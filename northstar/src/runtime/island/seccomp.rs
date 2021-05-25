@@ -13,10 +13,11 @@
 //   limitations under the License.
 
 use bindings::{
-    seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_RET,
-    BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
+    seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_MAXINSNS,
+    BPF_RET, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
 };
 use nix::errno::Errno;
+use thiserror::Error;
 
 #[allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 mod bindings {
@@ -39,6 +40,53 @@ const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 
 #[cfg(all(target_arch = "x86_64"))]
 const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Seccomp error: {0}")]
+    Seccomp(String),
+}
+
+// Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
+pub struct AllowList {
+    list: Vec<sock_filter>,
+}
+
+impl AllowList {
+    pub fn apply(&mut self) -> Result<(), Error> {
+        #[cfg(target_os = "android")]
+        const PR_SET_SECCOMP: nix::libc::c_int = 22;
+
+        #[cfg(target_os = "android")]
+        const SECCOMP_MODE_FILTER: nix::libc::c_int = 2;
+
+        #[cfg(not(target_os = "android"))]
+        use nix::libc::PR_SET_SECCOMP;
+
+        #[cfg(not(target_os = "android"))]
+        use nix::libc::SECCOMP_MODE_FILTER;
+
+        if self.list.len() > BPF_MAXINSNS as usize {
+            return Err(Error::Seccomp(format!(
+                "Generated seccomp allowlist is too long ({}). Maximum is {}.",
+                self.list.len(),
+                BPF_MAXINSNS as usize
+            )));
+        }
+
+        let sf_prog = sock_fprog {
+            len: self.list.len() as u16,
+            filter: self.list.as_mut_ptr(),
+        };
+
+        let sf_prog_ptr = &sf_prog as *const sock_fprog;
+        let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
+        Errno::result(result)
+            .map(drop)
+            .expect("Failed to set seccomp filter");
+        Ok(())
+    }
+}
 
 pub struct Builder {
     allowlist: Vec<sock_filter>,
@@ -111,34 +159,16 @@ impl Builder {
     }
 
     /// Apply seccomp rules
-    pub fn apply(mut self) {
-        #[cfg(target_os = "android")]
-        const PR_SET_SECCOMP: nix::libc::c_int = 22;
-
-        #[cfg(target_os = "android")]
-        const SECCOMP_MODE_FILTER: nix::libc::c_int = 2;
-
-        #[cfg(not(target_os = "android"))]
-        use nix::libc::PR_SET_SECCOMP;
-
-        #[cfg(not(target_os = "android"))]
-        use nix::libc::SECCOMP_MODE_FILTER;
-
+    pub fn build(mut self) -> AllowList {
         if self.log_only {
             self.allowlist.push(bpf_ret(SECCOMP_RET_LOG));
         } else {
             self.allowlist.push(bpf_ret(SECCOMP_RET_KILL));
         }
 
-        let sf_prog = sock_fprog {
-            len: self.allowlist.len() as u16,
-            filter: self.allowlist.as_mut_ptr(),
-        };
-        let sf_prog_ptr = &sf_prog as *const sock_fprog;
-        let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
-        Errno::result(result)
-            .map(drop)
-            .expect("Failed to set seccomp filter")
+        AllowList {
+            list: self.allowlist,
+        }
     }
 }
 
