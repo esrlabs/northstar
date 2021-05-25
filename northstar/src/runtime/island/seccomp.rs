@@ -35,37 +35,10 @@ const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_AARCH64;
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
 #[cfg(all(target_arch = "aarch64"))]
-const REQUIRED_SYSCALLS: &[u32] = &[
-    // TODO
-];
+const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 
 #[cfg(all(target_arch = "x86_64"))]
-const REQUIRED_SYSCALLS: &[u32] = &[
-    bindings::SYS_access,
-    bindings::SYS_arch_prctl,
-    bindings::SYS_brk,
-    bindings::SYS_clone,
-    bindings::SYS_close,
-    bindings::SYS_execve,
-    bindings::SYS_exit_group,
-    bindings::SYS_fstat,
-    bindings::SYS_mmap,
-    bindings::SYS_mprotect,
-    bindings::SYS_munmap,
-    bindings::SYS_openat,
-    bindings::SYS_poll,
-    bindings::SYS_prctl,
-    bindings::SYS_pread64,
-    bindings::SYS_prlimit64,
-    bindings::SYS_read,
-    bindings::SYS_rt_sigaction,
-    bindings::SYS_rt_sigprocmask,
-    bindings::SYS_sched_getaffinity,
-    bindings::SYS_set_robust_list,
-    bindings::SYS_set_tid_address,
-    bindings::SYS_sigaltstack,
-    bindings::SYS_stat,
-];
+const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 
 pub struct Builder {
     allowlist: Vec<sock_filter>,
