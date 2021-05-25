@@ -30,9 +30,9 @@ use nix::{
 };
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, fmt};
+use std::{convert::TryFrom, fmt, thread};
 use task::block_in_place as block;
-use tokio::{task, time};
+use tokio::{sync::mpsc::error::TrySendError, task, time};
 use Signal::SIGCHLD;
 
 mod clone;
@@ -141,7 +141,7 @@ impl Launcher for Island {
                         log
                     });
                     let pid = child.as_raw() as Pid;
-                    let exit_status = Box::new(wait(container, pid, self.tx.clone()).await);
+                    let exit_status = Box::new(wait(container, pid, self.tx.clone()));
 
                     Ok(IslandProcess::Created {
                         pid,
@@ -280,7 +280,7 @@ impl Process for IslandProcess {
 
 /// Spawn a task that waits for the process to exit. This resolves to the exit status
 /// of `pid`.
-async fn wait(
+fn wait(
     container: &Container<IslandProcess>,
     pid: Pid,
     tx: EventTx,
@@ -341,8 +341,13 @@ async fn wait(
         };
 
         // Send notification to main loop
-        tx.blocking_send(Event::Exit(container, status.clone()))
-            .ok();
+        loop {
+            match tx.try_send(Event::Exit(container.clone(), status.clone())) {
+                Ok(_) => break,
+                Err(TrySendError::Closed(_)) => break, // The main loop is shutting down. Noone would receive this message...
+                Err(TrySendError::Full(_)) => thread::sleep(time::Duration::from_millis(1)),
+            }
+        }
 
         status
     })
