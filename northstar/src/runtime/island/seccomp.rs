@@ -49,7 +49,7 @@ impl Builder {
     const EVAL_NEXT: u8 = 0;
     const SKIP_NEXT: u8 = 1;
 
-    /// Create a new secommp builder
+    /// Create a new seccomp builder
     pub fn new() -> Self {
         let mut builder = Builder {
             allowlist: Vec::new(),
@@ -84,6 +84,7 @@ impl Builder {
         builder
     }
 
+    /// Add syscall number to whitelist
     pub fn allow_syscall_nr(mut self, nr: u32) -> Builder {
         // If syscall matches return 'allow' directly. If not, skip return instruction and go to next check.
         self.allowlist.push(bpf_jump(
