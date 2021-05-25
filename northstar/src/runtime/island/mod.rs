@@ -103,7 +103,7 @@ impl Launcher for Island {
     async fn create(&self, container: &Container<Self::Process>) -> Result<Self::Process, Error> {
         let manifest = &container.manifest;
         let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
-        let (checkpoint_parent, checkpoint_child) = checkoints();
+        let (checkpoint_parent, checkpoint_child) = checkpoints();
 
         // Calculating init, argv and env allocates. Do that before `clone`.
         let (init, argv, env) = init::args(manifest);
@@ -112,17 +112,18 @@ impl Launcher for Island {
         debug!("{} argv is {:?}", manifest.name, argv);
         debug!("{} env is {:?}", manifest.name, env);
 
-        // Prepare a list of mounts and groups that need to be applied to the child. Prepare the list here
-        // to avoid any allocation in the child
+        // Prepare a list of mounts, groups and seccomp filter rules that need to be applied to the child.
+        // Prepare the list here to avoid any allocation in the child
         let mounts = init::mounts(&self.config, &container).await?;
         let groups = init::groups(manifest);
+        let seccomp = init::seccomp_filter(container.manifest.seccomp.as_ref());
 
         // Clone init
         let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
 
         // Do not call this clone from a `block_in_place` to avoid the child to be spawned
         // from a short lived thread that is terminated by a timeout. This termination would
-        // cause the child to be signalled with the signal specificed as parent death signal.
+        // cause the child to be signalled with the signal specified as parent death signal.
         // TODO: actually there's currently no way to ensure this future to be processes from
         // an persistent thread.
         match clone::clone(flags, Some(SIGCHLD as c_int)) {
@@ -161,6 +162,7 @@ impl Launcher for Island {
                         &mounts,
                         &fds,
                         &groups,
+                        seccomp,
                         checkpoint_child,
                     );
                 }
@@ -369,7 +371,7 @@ enum Start {
 
 pub(super) struct Checkpoint(PipeRead, PipeWrite);
 
-fn checkoints() -> (Checkpoint, Checkpoint) {
+fn checkpoints() -> (Checkpoint, Checkpoint) {
     let a = pipe::pipe().unwrap();
     let b = pipe::pipe().unwrap();
 
@@ -400,7 +402,7 @@ impl Checkpoint {
 
 #[test]
 fn sync() {
-    let (mut child, mut parent) = checkoints();
+    let (mut child, mut parent) = checkpoints();
     parent.send(Start::Start);
     child.wait(Start::Start);
 

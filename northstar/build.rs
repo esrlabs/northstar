@@ -89,6 +89,7 @@ fn generate_seccomp() {
             .allowlist_var("BPF_LD")
             .allowlist_var("BPF_RET")
             .allowlist_var("BPF_W")
+            .allowlist_var("BPF_MAXINSNS")
             .allowlist_var("SECCOMP_RET_ALLOW")
             .allowlist_var("SECCOMP_RET_LOG")
             .allowlist_var("SECCOMP_RET_KILL")

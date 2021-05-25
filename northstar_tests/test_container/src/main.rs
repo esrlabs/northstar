@@ -182,6 +182,6 @@ fn inspect() {
 
 fn sleep(seconds: u64) {
     thread::sleep(time::Duration::from_secs(seconds));
-    println!("Exitting after {} seconds sleep", seconds);
+    println!("Exiting after {} seconds sleep", seconds);
     process::exit(0);
 }

@@ -16,7 +16,10 @@ use super::{
     clone::clone, io::Fd, utils::PathExt, Checkpoint, Container, IslandProcess, ENV_NAME,
     ENV_VERSION, SIGNAL_OFFSET,
 };
-use crate::runtime::{config::Config, island::Start};
+use crate::runtime::{
+    config::Config,
+    island::{seccomp, Start},
+};
 use log::{debug, warn};
 use nix::{
     errno::Errno,
@@ -261,6 +264,20 @@ pub(super) fn groups(manifest: &Manifest) -> Vec<u32> {
     }
 }
 
+pub(super) fn seccomp_filter(
+    filter: Option<&std::collections::HashMap<String, String>>,
+) -> Option<seccomp::AllowList> {
+    if let Some(filter) = filter {
+        let mut builder = seccomp::Builder::new();
+        for syscall_name in filter.keys() {
+            builder = builder.allow_syscall_name(syscall_name);
+        }
+        Some(builder.build())
+    } else {
+        None
+    }
+}
+
 pub(super) fn args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CString>) {
     let init = CString::new(manifest.init.as_ref().unwrap().to_str().unwrap()).unwrap();
     let mut argv = vec![init.clone()];
@@ -292,6 +309,7 @@ pub(super) fn init(
     mounts: &[Mount],
     fds: &[(RawFd, Fd)],
     groups: &[u32],
+    seccomp: Option<seccomp::AllowList>,
     mut checkpoint: Checkpoint,
 ) -> ! {
     // Install "default signal handler" that exit on any signal. This process is the "init"
@@ -381,8 +399,9 @@ pub(super) fn init(
                 reset_signal_mask();
 
                 // Set seccomp filter
-                // TODO: Move the allocations to parent/parent
-                set_seccomp_filter(container.manifest.seccomp.as_ref());
+                if let Some(mut filter) = seccomp {
+                    filter.apply().expect("Failed to apply seccomp filter.");
+                }
 
                 panic!(
                     "Execve: {:?} {:?}: {:?}",
@@ -457,16 +476,6 @@ fn set_parent_death_signal(signal: Signal) {
     Errno::result(result)
         .map(drop)
         .expect("Failed to set PR_SET_PDEATHSIG");
-}
-
-fn set_seccomp_filter(filter: Option<&std::collections::HashMap<String, String>>) {
-    if let Some(filter) = filter {
-        let mut builder = super::seccomp::Builder::new();
-        for syscall_name in filter.keys() {
-            builder = builder.allow_syscall_name(syscall_name);
-        }
-        builder.apply();
-    }
 }
 
 fn set_no_new_privs(value: bool) {
