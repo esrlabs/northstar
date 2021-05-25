@@ -66,6 +66,9 @@ use state::MountedContainer;
 type ExitCode = i32;
 type Pid = u32;
 
+/// Buffer size of the main loop channel
+const MAIN_BUFFER: usize = 1000;
+
 #[cfg(feature = "rt-island")]
 type RuntimeLauncher = island::Island;
 
@@ -264,7 +267,7 @@ async fn runtime_task<L: Launcher>(
     stop: CancellationToken,
 ) -> Result<(), Error> {
     // Northstar runs in a event loop
-    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(MAIN_BUFFER);
 
     let mut state = State::<L>::new(config, event_tx.clone()).await?;
 
