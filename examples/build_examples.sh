@@ -9,6 +9,8 @@ set -o nounset
 this_script=$(basename $0)
 bold=$(tput bold)
 normal=$(tput sgr0)
+CLONES=""
+KEY="./examples/keys/northstar.key"
 
 usage() {
     echo "USAGE:"
@@ -20,7 +22,6 @@ usage() {
     echo "                              (gzip, lzma, lzo, xz, zstd)"
     echo "    --clones     <number>     Create number of clones"
     echo "    -h, --help                Prints help information"
-
 }
 
 while [[ $# -gt 0 ]]
