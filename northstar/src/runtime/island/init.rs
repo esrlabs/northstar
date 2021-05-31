@@ -384,7 +384,12 @@ pub(super) fn init(
                 // TODO: Move the allocations to parent/parent
                 set_seccomp_filter(container.manifest.seccomp.as_ref());
 
-                panic!("{:?}", unistd::execve(&init, &argv, &env))
+                panic!(
+                    "Execve: {:?} {:?}: {:?}",
+                    &init,
+                    &argv,
+                    unistd::execve(&init, &argv, &env)
+                )
             }
         },
         Err(e) => panic!("Clone error: {}", e),
@@ -397,6 +402,10 @@ pub(super) fn init(
 // TODO: /dev mounts from manifest: full or minimal
 fn mount(mounts: &[Mount]) {
     for mount in mounts {
+        if !mount.target.exists() {
+            panic!("Missing mount point {}", mount.target.display())
+        }
+
         nix::mount::mount(
             mount.source.as_ref(),
             &mount.target,
@@ -404,7 +413,7 @@ fn mount(mounts: &[Mount]) {
             mount.flags,
             mount.data.as_deref(),
         )
-        .expect("Failed to mount");
+        .expect(&format!("Failed to mount {:?}", mount));
     }
 }
 
