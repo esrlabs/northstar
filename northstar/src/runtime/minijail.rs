@@ -28,7 +28,7 @@ use nix::{
     sys::{signal, wait},
     unistd::{self, chown},
 };
-use npk::manifest::{Dev, Manifest, Mount, MountFlag, Output};
+use npk::manifest::{Dev, Manifest, Mount, MountOption, Output};
 use signal::Signal::{SIGKILL, SIGTERM};
 use std::{
     convert::TryInto,
@@ -339,7 +339,7 @@ impl Minijail {
 
         for (target, mount) in &container.manifest.mounts {
             match &mount {
-                Mount::Bind { host, flags } => {
+                Mount::Bind { host, options } => {
                     if !&host.exists() {
                         warn!(
                             "Cannot bind mount nonexistent source {} to {}",
@@ -348,7 +348,7 @@ impl Minijail {
                         );
                         continue;
                     }
-                    let rw = flags.contains(&MountFlag::Rw);
+                    let rw = options.contains(&MountOption::Rw);
                     debug!(
                         "Mounting {} on {}{}",
                         host.display(),
