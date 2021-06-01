@@ -32,7 +32,7 @@ use nix::{
     },
     unistd::{self, Uid},
 };
-use npk::manifest::{Manifest, MountFlag};
+use npk::manifest::{Manifest, MountOption};
 use sched::CloneFlags;
 use seccomp::AllowList;
 use std::{
@@ -101,7 +101,10 @@ pub(super) async fn mounts(
 
     for (target, mount) in &container.manifest.mounts {
         match &mount {
-            npk::manifest::Mount::Bind { host, flags } => {
+            npk::manifest::Mount::Bind {
+                host,
+                options: flags,
+            } => {
                 if !&host.exists() {
                     debug!(
                         "Skipping bind mount of nonexistent source {} to {}",
@@ -110,7 +113,7 @@ pub(super) async fn mounts(
                     );
                     continue;
                 }
-                let rw = flags.contains(&MountFlag::Rw);
+                let rw = flags.contains(&MountOption::Rw);
                 debug!(
                     "Mounting {} on {}{}",
                     host.display(),

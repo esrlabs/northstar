@@ -12,10 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use lazy_static::lazy_static;
 use serde::{
     de::{Deserializer, Visitor},
-    ser::{SerializeMap, Serializer},
+    ser::Serializer,
     Deserialize, Serialize,
 };
 use std::{
@@ -26,14 +25,134 @@ use std::{
 };
 use thiserror::Error;
 
-/// A container version. Versions follow the semver format
+pub type Name = String;
+pub type Capability = caps::Capability;
+pub type CGroupConfig = HashMap<String, String>;
+pub type CGroups = HashMap<String, CGroupConfig>;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Invalid manifest: {0}")]
+    Invalid(String),
+    #[error("Failed to parse YAML format: {0}")]
+    SerdeYaml(#[from] serde_yaml::Error),
+}
+
 #[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
 pub struct Version(pub semver::Version);
 
-pub type Name = String;
-pub type Capability = caps::Capability;
-pub type CGroup = HashMap<String, String>;
-pub type CGroups = HashMap<String, CGroup>;
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+
+pub enum MountOption {
+    /// Bind mount
+    #[serde(rename = "rw")]
+    Rw,
+    // Mount noexec
+    // #[serde(rename = "noexec")]
+    // NoExec,
+    // Mount noexec
+    // #[serde(rename = "nosuid")]
+    // NoSuid,
+}
+
+/// Configuration for the /dev mount
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Dev {
+    /// Bind mount the full /dev of the host
+    #[serde(rename = "full")]
+    Full,
+}
+
+/// Mounts
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub enum Mount {
+    /// Mount a directory from a resource
+    Resource {
+        name: String,
+        version: Version,
+        dir: PathBuf,
+    },
+    /// Bind mount of a host dir with options
+    Bind {
+        host: PathBuf,
+        options: HashSet<MountOption>,
+    },
+    /// Mount /dev with flavor `dev`
+    Dev { r#type: Dev },
+    /// Mount a rw host directory dedicated to this container rw
+    Persist,
+    /// Mount a tmpfs with size
+    Tmpfs { size: u64 },
+}
+
+/// IO configuration for stdin, stdout, stderr
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Io {
+    /// stdout configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<Output>,
+    /// stderr configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<Output>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Output {
+    /// Inherit the runtimes stdout/stderr
+    #[serde(rename = "pipe")]
+    Pipe,
+    /// Forward output to the logging system with level and optional tag
+    #[serde(rename = "log")]
+    Log { level: log::Level, tag: String },
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Manifest {
+    /// Name of container
+    pub name: Name,
+    /// Container version
+    pub version: Version,
+    /// Path to init
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub init: Option<PathBuf>,
+    /// Additional arguments for the application invocation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+    /// UID
+    pub uid: u32,
+    /// GID
+    pub gid: u32,
+    /// Environment passed to container
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    /// Autostart this container upon northstar startup
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub autostart: Option<bool>,
+    /// CGroup config
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cgroups: Option<CGroups>,
+    /// Seccomp configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seccomp: Option<HashMap<String, String>>,
+    /// List of bind mounts and resources
+    #[serde(
+        default,
+        with = "serde_mounts",
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub mounts: HashMap<PathBuf, Mount>,
+    /// String containing capability names to give to
+    /// new container
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_caps")]
+    pub capabilities: Option<HashSet<Capability>>,
+    /// String containing group names to give to new container
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suppl_groups: Option<Vec<String>>,
+    /// IO configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub io: Option<Io>,
+}
 
 impl Version {
     #[allow(dead_code)]
@@ -106,215 +225,47 @@ impl fmt::Debug for Version {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum OnExit {
-    /// Container is restarted n number and not started anymore after n exits
-    #[serde(rename = "restart")]
-    Restart(u32),
-}
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
-pub enum MountFlag {
-    /// Bind mount
-    #[serde(rename = "rw")]
-    Rw,
-    // Mount noexec
-    // #[serde(rename = "noexec")]
-    // NoExec,
-    // Mount noexec
-    // #[serde(rename = "nosuid")]
-    // NoSuid,
-}
+mod serde_mounts {
+    use super::{Dev, Mount, MountOption, Version};
+    use lazy_static::lazy_static;
+    use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
+    use std::{
+        collections::{HashMap, HashSet},
+        fmt,
+        path::PathBuf,
+    };
 
-/// Configuration for the /dev mount
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum Dev {
-    /// Bind mount the full /dev of the host
-    #[serde(rename = "full")]
-    Full,
-}
-
-/// Mounts
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub enum Mount {
-    /// Mount a directory from a resource
-    Resource {
-        name: String,
-        version: Version,
-        dir: PathBuf,
-    },
-    /// Bind mount of a host dir with flags
-    Bind {
-        host: PathBuf,
-        flags: HashSet<MountFlag>,
-    },
-    /// Mount /dev with flavor `dev`
-    Dev { r#type: Dev },
-    /// Mount a rw host directory dedicated to this container rw
-    Persist,
-    /// Mount a tmpfs with size
-    Tmpfs { size: u64 },
-}
-
-/// IO configuration for stdin, stdout, stderr
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Io {
-    /// stdout configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stdout: Option<Output>,
-    /// stderr configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stderr: Option<Output>,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum Output {
-    /// Inherit the runtimes stdout/stderr
-    #[serde(rename = "pipe")]
-    Pipe,
-    /// Forward output to the logging system with level and optional tag
-    #[serde(rename = "log")]
-    Log { level: log::Level, tag: String },
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Manifest {
-    /// Name of container
-    pub name: Name,
-    /// Container version
-    pub version: Version,
-    /// Path to init
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub init: Option<PathBuf>,
-    /// Additional arguments for the application invocation
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub args: Option<Vec<String>>,
-    /// UID
-    pub uid: u32,
-    /// GID
-    pub gid: u32,
-    /// Environment passed to container
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env: Option<HashMap<String, String>>,
-    /// Autostart this container upon northstar startup
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub autostart: Option<bool>,
-    /// CGroup config
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cgroups: Option<CGroups>,
-    /// Seccomp configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seccomp: Option<HashMap<String, String>>,
-    /// List of bind mounts and resources
-    #[serde(
-        with = "MountsSerialization",
-        skip_serializing_if = "HashMap::is_empty"
-    )]
-    #[serde(default)]
-    pub mounts: HashMap<PathBuf, Mount>,
-    /// String containing capability names to give to
-    /// new container
-    #[serde(skip_serializing_if = "Option::is_none", default, with = "serde_caps")]
-    pub capabilities: Option<HashSet<Capability>>,
-    /// String containing group names to give to new container
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suppl_groups: Option<Vec<String>>,
-    /// IO configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub io: Option<Io>,
-}
-
-/// Configuration for the persist mounts
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum Persist {
-    #[serde(rename = "persist")]
-    Persist,
-}
-
-struct MountsSerialization;
-
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-enum MountSource {
-    Resource {
-        resource: String,
-    },
-    Tmpfs {
-        #[serde(deserialize_with = "deserialize_tmpfs")]
-        tmpfs: u64,
-    },
-    Bind {
-        host: PathBuf,
-        #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-        flags: HashSet<MountFlag>,
-    },
-    Dev(Dev),
-    Persist(Persist),
-}
-
-fn deserialize_tmpfs<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct SizeVisitor;
-
-    impl<'de> Visitor<'de> for SizeVisitor {
-        type Value = u64;
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")
-        }
-
-        fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
-            Ok(v)
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            lazy_static! {
-                static ref RE: regex::Regex =
-                    regex::Regex::new(r"^(?P<value>\d+)(?P<unit>k|m|g)?$").expect("Invalid regex");
-            }
-
-            let caps = RE
-                .captures(&v)
-                .ok_or_else(|| serde::de::Error::custom(format!("Invalid tmpfs size: {}", v)))?;
-
-            let value = caps
-                .name("value")
-                .unwrap()
-                .as_str()
-                .parse::<u64>()
-                .map_err(serde::de::Error::custom)?;
-            if let Some(unit) = caps.name("unit") {
-                let value = match unit.as_str() {
-                    "k" => value * 1024,
-                    "m" => value * 1024 * 1024,
-                    "g" => value * 1024 * 1024 * 1024,
-                    _ => {
-                        return Err(serde::de::Error::custom(format!(
-                            "Invalid tmpfs unit: {}",
-                            unit.as_str()
-                        )))
-                    }
-                };
-                Ok(value)
-            } else {
-                Ok(value)
-            }
-        }
+    /// Configuration for the persist mounts
+    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+    enum Persist {
+        #[serde(rename = "persist")]
+        Persist,
     }
 
-    deserializer.deserialize_any(SizeVisitor)
-}
+    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+    #[serde(untagged)]
+    enum MountSource {
+        Resource {
+            resource: String,
+        },
+        Tmpfs {
+            #[serde(deserialize_with = "deserialize_tmpfs")]
+            tmpfs: u64,
+        },
+        Bind {
+            host: PathBuf,
+            #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+            options: HashSet<MountOption>,
+        },
+        Dev(Dev),
+        Persist(Persist),
+    }
 
-impl MountsSerialization {
-    fn serialize<S>(mounts: &HashMap<PathBuf, Mount>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    pub(super) fn serialize<S: Serializer>(
+        mounts: &HashMap<PathBuf, Mount>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(mounts.len()))?;
         for (target, mount) in mounts {
             match target.display().to_string().as_str() {
@@ -326,11 +277,11 @@ impl MountsSerialization {
                     }
                 }
                 target => match mount {
-                    Mount::Bind { host, flags } => map.serialize_entry(
+                    Mount::Bind { host, options } => map.serialize_entry(
                         &target,
                         &MountSource::Bind {
                             host: host.clone(),
-                            flags: flags.clone(),
+                            options: options.clone(),
                         },
                     )?,
                     Mount::Dev { r#type: _ } => {
@@ -357,7 +308,7 @@ impl MountsSerialization {
         map.end()
     }
 
-    fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<PathBuf, Mount>, D::Error>
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<PathBuf, Mount>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -388,7 +339,7 @@ impl MountsSerialization {
                             }
                         }
                         _ => match source {
-                            MountSource::Bind { host, flags } => Mount::Bind { host, flags },
+                            MountSource::Bind { host, options } => Mount::Bind { host, options },
                             MountSource::Dev(..) => {
                                 return Err(serde::de::Error::custom(format!(
                                     "dev cannot be mounted on {}",
@@ -442,6 +393,61 @@ impl MountsSerialization {
 
         deserializer.deserialize_map(MountVectorVisitor)
     }
+
+    fn deserialize_tmpfs<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+        struct SizeVisitor;
+
+        impl<'de> Visitor<'de> for SizeVisitor {
+            type Value = u64;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(v)
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                lazy_static::lazy_static! {
+                    static ref RE: regex::Regex =
+                        regex::Regex::new(r"^(?P<value>\d+)(?P<unit>k|m|g)?$")
+                            .expect("Invalid regex");
+                }
+
+                let caps = RE.captures(&v).ok_or_else(|| {
+                    serde::de::Error::custom(format!("Invalid tmpfs size: {}", v))
+                })?;
+
+                let value = caps
+                    .name("value")
+                    .unwrap()
+                    .as_str()
+                    .parse::<u64>()
+                    .map_err(serde::de::Error::custom)?;
+                if let Some(unit) = caps.name("unit") {
+                    let value = match unit.as_str() {
+                        "k" => value * 1024,
+                        "m" => value * 1024 * 1024,
+                        "g" => value * 1024 * 1024 * 1024,
+                        _ => {
+                            return Err(serde::de::Error::custom(format!(
+                                "Invalid tmpfs unit: {}",
+                                unit.as_str()
+                            )))
+                        }
+                    };
+                    Ok(value)
+                } else {
+                    Ok(value)
+                }
+            }
+        }
+
+        deserializer.deserialize_any(SizeVisitor)
+    }
 }
 
 mod serde_caps {
@@ -489,14 +495,6 @@ mod serde_caps {
             Ok(None)
         }
     }
-}
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Invalid manifest: {0}")]
-    Invalid(String),
-    #[error("Failed to parse YAML format: {0}")]
-    SerdeYaml(#[from] serde_yaml::Error),
 }
 
 impl Manifest {
@@ -612,7 +610,7 @@ mounts:
   /dev: full
   /lib:
     host: /lib
-    flags:
+    options:
       - rw
   /data: persist
   /resource:
@@ -650,7 +648,7 @@ seccomp:
             PathBuf::from("/lib"),
             Mount::Bind {
                 host: PathBuf::from("/lib"),
-                flags: [MountFlag::Rw].iter().cloned().collect(),
+                options: [MountOption::Rw].iter().cloned().collect(),
             },
         );
         mounts.insert(PathBuf::from("/data"), Mount::Persist);
@@ -818,7 +816,7 @@ env:
 mounts:
   /lib:
     host: /lib
-    flags:
+    options:
       - rw
   /data: persist
   /resource:
