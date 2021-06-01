@@ -13,14 +13,27 @@ mounts:
   /data: persist
   /lib:
     host: /lib
+    options:
+      - nosuid
+      - nodev
   /lib64:
     host: /lib64
+    options:
+      - nosuid
+      - nodev
   /system:
     host: /system
+    options:
+      - nosuid
+      - nodev
   /tmpfs:
     tmpfs: 20480000
   /resource:
     resource: test_resource:0.0.1:test/
+    options:
+      - nosuid
+      - nodev
+      - noexec
 io:
   stdout:
     log:

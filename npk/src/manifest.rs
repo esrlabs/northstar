@@ -42,18 +42,24 @@ pub enum Error {
 pub struct Version(pub semver::Version);
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
-
+/// Mount options
 pub enum MountOption {
     /// Bind mount
     #[serde(rename = "rw")]
     Rw,
     // Mount noexec
-    // #[serde(rename = "noexec")]
-    // NoExec,
-    // Mount noexec
-    // #[serde(rename = "nosuid")]
-    // NoSuid,
+    #[serde(rename = "noexec")]
+    NoExec,
+    // Mount nosuid
+    #[serde(rename = "nosuid")]
+    NoSuid,
+    // Mount nonodev
+    #[serde(rename = "nodev")]
+    NoDev,
 }
+
+/// Set of mount options
+pub type MountOptions = HashSet<MountOption>;
 
 /// Configuration for the /dev mount
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -71,11 +77,12 @@ pub enum Mount {
         name: String,
         version: Version,
         dir: PathBuf,
+        options: MountOptions,
     },
     /// Bind mount of a host dir with options
     Bind {
         host: PathBuf,
-        options: HashSet<MountOption>,
+        options: MountOptions,
     },
     /// Mount /dev with flavor `dev`
     Dev { r#type: Dev },
@@ -225,9 +232,8 @@ impl fmt::Debug for Version {
     }
 }
 
-
 mod serde_mounts {
-    use super::{Dev, Mount, MountOption, Version};
+    use super::{Dev, Mount, MountOptions, Version};
     use lazy_static::lazy_static;
     use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use std::{
@@ -248,6 +254,8 @@ mod serde_mounts {
     enum MountSource {
         Resource {
             resource: String,
+            #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+            options: MountOptions,
         },
         Tmpfs {
             #[serde(deserialize_with = "deserialize_tmpfs")]
@@ -256,7 +264,7 @@ mod serde_mounts {
         Bind {
             host: PathBuf,
             #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-            options: HashSet<MountOption>,
+            options: MountOptions,
         },
         Dev(Dev),
         Persist(Persist),
@@ -293,10 +301,16 @@ mod serde_mounts {
                     Mount::Persist => {
                         map.serialize_entry(&target, &MountSource::Persist(Persist::Persist))?
                     }
-                    Mount::Resource { name, version, dir } => map.serialize_entry(
+                    Mount::Resource {
+                        name,
+                        version,
+                        dir,
+                        options,
+                    } => map.serialize_entry(
                         &target,
                         &MountSource::Resource {
                             resource: format!("{}:{}:{}", name, version, dir.display()),
+                            options: options.clone(),
                         },
                     )?,
                     Mount::Tmpfs { size } => {
@@ -346,7 +360,7 @@ mod serde_mounts {
                                     target.display()
                                 )));
                             }
-                            MountSource::Tmpfs { tmpfs: size } => Mount::Tmpfs { size },
+                            MountSource::Tmpfs { tmpfs } => Mount::Tmpfs { size: tmpfs },
                             MountSource::Persist(Persist::Persist) => {
                                 if entries.values().any(|v| v == &Mount::Persist) {
                                     return Err(serde::de::Error::custom(
@@ -355,7 +369,7 @@ mod serde_mounts {
                                 }
                                 Mount::Persist
                             }
-                            MountSource::Resource { resource } => {
+                            MountSource::Resource { resource, options } => {
                                 lazy_static! {
                                     static ref RE: regex::Regex = regex::Regex::new(
                                         r"(?P<name>((\w|-|\.|_)+)):(?P<version>\d+\.\d+\.\d+):(?P<dir>[\w/]+)"
@@ -376,7 +390,12 @@ mod serde_mounts {
                                         .map_err(serde::de::Error::custom)?;
                                 let dir = PathBuf::from(caps.name("dir").unwrap().as_str());
 
-                                Mount::Resource { name, version, dir }
+                                Mount::Resource {
+                                    name,
+                                    version,
+                                    dir,
+                                    options,
+                                }
                             }
                         },
                     };
@@ -498,6 +517,15 @@ mod serde_caps {
 }
 
 impl Manifest {
+    /// Manifest version supported by the runtime
+    pub const VERSION: Version = Version(semver::Version {
+        major: 0,
+        minor: 0,
+        patch: 4,
+        pre: vec![],
+        build: vec![],
+    });
+
     pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
         let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)?;
         manifest.verify()?;
@@ -615,6 +643,8 @@ mounts:
   /data: persist
   /resource:
     resource: bla-blah.foo:1.0.0:/bin/foo
+    options:
+      - noexec
 autostart: true
 cgroups:
   memory:
@@ -658,6 +688,7 @@ seccomp:
                 name: "bla-blah.foo".to_string(),
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
+                options: [MountOption::NoExec].iter().cloned().collect(),
             },
         );
         mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs { size: 42 });
@@ -796,6 +827,10 @@ gid: 1001
 mounts:
   /foo:
     resource: foo-bar.qwerty12:0.0.1:/
+    options:
+      - rw
+      - noexec
+      - nosuid
 ";
         Manifest::from_str(manifest).unwrap();
     }

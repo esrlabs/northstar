@@ -417,6 +417,34 @@ test!(proc_is_mounted_ro, {
     runtime.shutdown().await
 });
 
+// Check proc mount options
+test!(proc_mount_options, {
+    let runtime = Northstar::launch_install_test_container().await?;
+    runtime.test_cmds("inspect").await;
+    runtime.start(TEST_CONTAINER).await?;
+    assume("proc /proc proc ro,nosuid,nodev", 5).await?;
+    runtime.shutdown().await
+});
+
+// Check if the resource is mounted with the options from the manifest
+test!(resource_mount_options, {
+    let runtime = Northstar::launch_install_test_container().await?;
+    runtime.test_cmds("inspect").await;
+    runtime.start(TEST_CONTAINER).await?;
+    #[cfg(feature = "rt-island")]
+    assume("resource squashfs ro,nosuid,nodev,noexec,", 5).await?;
+    runtime.shutdown().await
+});
+
+// Check if the bind mounts have the options from the manifest
+test!(bind_mount_options, {
+    let runtime = Northstar::launch_install_test_container().await?;
+    runtime.test_cmds("inspect").await;
+    runtime.start(TEST_CONTAINER).await?;
+    #[cfg(feature = "rt-island")]
+    assume("/lib .* ro,nosuid,nodev", 5).await?;
+    runtime.shutdown().await
+});
 // Open many connections to the runtime
 test!(open_many_connections_to_the_runtime_and_shutdown, {
     let runtime = Northstar::launch().await?;
