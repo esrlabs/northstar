@@ -32,7 +32,7 @@ use nix::{
     },
     unistd::{self, Uid},
 };
-use npk::manifest::{Manifest, MountOption};
+use npk::manifest::{Manifest, MountOption, MountOptions};
 use sched::CloneFlags;
 use seccomp::AllowList;
 use std::{
@@ -81,7 +81,11 @@ pub(super) async fn mounts(
     });
     // Remount /proc ro
     debug!("Remount /proc read only");
-    let flags = MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY;
+    let flags = MsFlags::MS_REMOUNT
+        | MsFlags::MS_RDONLY
+        | MsFlags::MS_NOSUID
+        | MsFlags::MS_NOEXEC
+        | MsFlags::MS_NODEV;
     mounts.push(Mount {
         source: Some(PathBuf::from("/proc")),
         target,
@@ -95,16 +99,26 @@ pub(super) async fn mounts(
         source: Some(PathBuf::from("/dev")),
         target: root.join("dev"),
         fstype: None,
-        flags: MsFlags::MS_BIND,
+        flags: MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
         data: None,
     });
 
+    fn options_to_flags(opt: &MountOptions) -> MsFlags {
+        let mut flags = MsFlags::empty();
+        for opt in opt {
+            match opt {
+                MountOption::Rw => {}
+                MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
+                MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
+                MountOption::NoDev => flags |= MsFlags::MS_NODEV,
+            }
+        }
+        flags
+    }
+
     for (target, mount) in &container.manifest.mounts {
         match &mount {
-            npk::manifest::Mount::Bind {
-                host,
-                options: flags,
-            } => {
+            npk::manifest::Mount::Bind { host, options } => {
                 if !&host.exists() {
                     debug!(
                         "Skipping bind mount of nonexistent source {} to {}",
@@ -113,32 +127,29 @@ pub(super) async fn mounts(
                     );
                     continue;
                 }
-                let rw = flags.contains(&MountOption::Rw);
                 debug!(
-                    "Mounting {} on {}{}",
+                    "Mounting {} on {} with {:?}",
                     host.display(),
                     target.display(),
-                    if rw { " (rw)" } else { "" }
+                    options.iter().collect::<Vec<_>>(),
                 );
                 let target = root.join_strip(target);
+                let mut flags = options_to_flags(&options);
+                flags.set(MsFlags::MS_BIND, true);
                 mounts.push(Mount {
                     source: Some(host.clone()),
                     target: target.clone(),
                     fstype: None,
-                    flags: MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID,
+                    flags: MsFlags::MS_BIND | flags,
                     data: None,
                 });
 
-                if !rw {
+                if !options.contains(&MountOption::Rw) {
                     mounts.push(Mount {
                         source: Some(host.clone()),
                         target,
                         fstype: None,
-                        flags: MsFlags::MS_BIND
-                            | MsFlags::MS_REMOUNT
-                            | MsFlags::MS_RDONLY
-                            | MsFlags::MS_NODEV
-                            | MsFlags::MS_NOSUID,
+                        flags: MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | flags,
                         data: None,
                     });
                 }
@@ -180,7 +191,12 @@ pub(super) async fn mounts(
                     data: None,
                 });
             }
-            npk::manifest::Mount::Resource { name, version, dir } => {
+            npk::manifest::Mount::Resource {
+                name,
+                version,
+                dir,
+                options,
+            } => {
                 let src = {
                     // Join the source of the resource container with the mount dir
                     let resource_root = config.run_dir.join(format!("{}:{}", name, version));
@@ -199,14 +215,22 @@ pub(super) async fn mounts(
                     dir
                 };
 
-                debug!("Mounting {} on {}", src.display(), target.display());
+                debug!(
+                    "Mounting {} on {} with {:?}",
+                    src.display(),
+                    target.display(),
+                    options
+                );
+
+                let mut flags = options_to_flags(&options);
+                flags |= MsFlags::MS_RDONLY | MsFlags::MS_BIND;
 
                 let target = root.join_strip(target);
                 mounts.push(Mount {
                     source: Some(src.clone()),
                     target: target.clone(),
                     fstype: None,
-                    flags: MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID,
+                    flags,
                     data: None,
                 });
 
@@ -215,10 +239,7 @@ pub(super) async fn mounts(
                     source: Some(src),
                     target,
                     fstype: None,
-                    flags: MsFlags::MS_BIND
-                        | MsFlags::MS_REMOUNT
-                        | MsFlags::MS_RDONLY
-                        | MsFlags::MS_NODEV,
+                    flags: MsFlags::MS_REMOUNT | flags,
                     data: None,
                 });
             }

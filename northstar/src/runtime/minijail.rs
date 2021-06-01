@@ -383,7 +383,12 @@ impl Minijail {
                     jail.mount_bind(&dir, &target, true)
                         .map_err(into_io_error)?;
                 }
-                Mount::Resource { name, version, dir } => {
+                Mount::Resource {
+                    name,
+                    version,
+                    dir,
+                    options: _,
+                } => {
                     let src = {
                         // Join the source of the resource container with the mount dir
                         let resource_root = config.run_dir.join(format!("{}:{}", name, version));
