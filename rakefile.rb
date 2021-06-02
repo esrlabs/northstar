@@ -56,35 +56,6 @@ namespace :examples do
   end
 end
 
-namespace :test do
-  task :prepare => 'examples:build' do
-    `cargo build -p northstar`
-  end
-
-  desc 'Run integration tests'
-  task :run => :prepare do
-    sh `cargo test`
-  end
-
-  desc 'Test coverage'
-  task :coverage do
-    raise 'Test coverage runs on Linux only!' unless OS.linux?
-
-    sh 'cargo clean'
-    rust_flags = ['-Zprofile',
-                  '-Ccodegen-units=1',
-                  '-Copt-level=0',
-                  '-Clink-dead-code',
-                  '-Coverflow-checks=off'].join(' ')
-    sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly build', verbose: false)
-    sh({ 'CARGO_INCREMENTAL' => '0', 'RUSTFLAGS' => rust_flags }, 'cargo +nightly test', verbose: false)
-    cov_dir = 'target/debug/coverage'
-    sh "mkdir #{cov_dir}"
-    sh "grcov ./target/debug/ -s northstar/src/ -t html --llvm --branch --ignore-not-existing -o ./#{cov_dir}/northstar"
-    info "Code coverage report for northstar in: ./#{cov_dir}/northstar/index.html"
-  end
-end
-
 desc 'Format code with nightly cargo fmt'
 task :rustfmt do
   sh 'cargo +nightly fmt'
