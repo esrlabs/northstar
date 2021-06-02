@@ -138,7 +138,7 @@ Required Kernel features are:
 * PID namespaces
 * mount namespaces
 
-The script in `doc/tools/check_conf.sh` can be used to check your running kernel for the correct configuration. The version provided is for Android, but can be adapted to any platform providing the shell on the platform supports arrays.
+The script in `tools/check_conf.sh` can be used to check your running kernel for the correct configuration. The version provided is for Android, but can be adapted to any platform providing the shell on the platform supports arrays.
 
 
 
