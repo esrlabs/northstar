@@ -233,14 +233,13 @@ impl fmt::Debug for Version {
 }
 
 mod serde_mounts {
-    use super::{Dev, Mount, MountOptions, Version};
+    use crate::manifest::MountOptions;
+
+    use super::{Dev, Mount, MountOption, Version};
+    use itertools::Itertools;
     use lazy_static::lazy_static;
     use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-    use std::{
-        collections::{HashMap, HashSet},
-        fmt,
-        path::PathBuf,
-    };
+    use std::{collections::HashMap, fmt, path::PathBuf, str::FromStr};
 
     /// Configuration for the persist mounts
     #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -254,8 +253,8 @@ mod serde_mounts {
     enum MountSource {
         Resource {
             resource: String,
-            #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-            options: MountOptions,
+            #[serde(default, skip_serializing_if = "String::is_empty")]
+            options: String,
         },
         Tmpfs {
             #[serde(deserialize_with = "deserialize_tmpfs")]
@@ -263,11 +262,53 @@ mod serde_mounts {
         },
         Bind {
             host: PathBuf,
-            #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-            options: MountOptions,
+            #[serde(default, skip_serializing_if = "String::is_empty")]
+            options: String,
         },
         Dev(Dev),
         Persist(Persist),
+    }
+
+    impl ToString for MountOption {
+        fn to_string(&self) -> String {
+            match self {
+                MountOption::Rw => "rw",
+                MountOption::NoExec => "noexec",
+                MountOption::NoSuid => "nosuid",
+                MountOption::NoDev => "nodev",
+            }
+            .to_string()
+        }
+    }
+
+    impl FromStr for MountOption {
+        type Err = String;
+
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match s {
+                "rw" => Ok(MountOption::Rw),
+                "noexec" => Ok(MountOption::NoExec),
+                "nosuid" => Ok(MountOption::NoSuid),
+                "nodev" => Ok(MountOption::NoDev),
+                _ => Err(format!("invalid mount option {}", s)),
+            }
+        }
+    }
+
+    /// Parse a string containing comma seperated mount options to a set
+    fn parse_mount_options(options: &str) -> Result<MountOptions, String> {
+        let options = options.trim();
+        if !options.is_empty() {
+            let mut iter = options.split(',');
+            let mut result = MountOptions::with_capacity(iter.size_hint().0);
+            iter.try_for_each(|s| {
+                result.insert(MountOption::from_str(s.trim())?);
+                Result::<_, String>::Ok(())
+            })?;
+            Ok(result)
+        } else {
+            Ok(MountOptions::default())
+        }
     }
 
     pub(super) fn serialize<S: Serializer>(
@@ -289,7 +330,7 @@ mod serde_mounts {
                         &target,
                         &MountSource::Bind {
                             host: host.clone(),
-                            options: options.clone(),
+                            options: options.iter().map(ToString::to_string).join(","),
                         },
                     )?,
                     Mount::Dev { r#type: _ } => {
@@ -310,7 +351,7 @@ mod serde_mounts {
                         &target,
                         &MountSource::Resource {
                             resource: format!("{}:{}:{}", name, version, dir.display()),
-                            options: options.clone(),
+                            options: options.iter().map(ToString::to_string).join(","),
                         },
                     )?,
                     Mount::Tmpfs { size } => {
@@ -353,7 +394,11 @@ mod serde_mounts {
                             }
                         }
                         _ => match source {
-                            MountSource::Bind { host, options } => Mount::Bind { host, options },
+                            MountSource::Bind { host, options } => Mount::Bind {
+                                host,
+                                options: parse_mount_options(&options)
+                                    .map_err(serde::de::Error::custom)?,
+                            },
                             MountSource::Dev(..) => {
                                 return Err(serde::de::Error::custom(format!(
                                     "dev cannot be mounted on {}",
@@ -389,6 +434,8 @@ mod serde_mounts {
                                     Version::parse(caps.name("version").unwrap().as_str())
                                         .map_err(serde::de::Error::custom)?;
                                 let dir = PathBuf::from(caps.name("dir").unwrap().as_str());
+                                let options = parse_mount_options(&options)
+                                    .map_err(serde::de::Error::custom)?;
 
                                 Mount::Resource {
                                     name,
@@ -638,13 +685,11 @@ mounts:
   /dev: full
   /lib:
     host: /lib
-    options:
-      - rw
+    options: rw
   /data: persist
   /resource:
     resource: bla-blah.foo:1.0.0:/bin/foo
-    options:
-      - noexec
+    options: noexec
 autostart: true
 cgroups:
   memory:
@@ -827,10 +872,7 @@ gid: 1001
 mounts:
   /foo:
     resource: foo-bar.qwerty12:0.0.1:/
-    options:
-      - rw
-      - noexec
-      - nosuid
+    options: rw,noexec,nosuid
 ";
         Manifest::from_str(manifest).unwrap();
     }
@@ -851,11 +893,13 @@ env:
 mounts:
   /lib:
     host: /lib
-    options:
-      - rw
+    options: rw,nosuid,nodev,noexec
+  /no_option:
+    host: /foo
   /data: persist
   /resource:
     resource: bla-bar.blah1234:1.0.0:/bin/foo
+    options: rw,nosuid,nodev,noexec
   /tmp:
     tmpfs: 42
   /dev: full
