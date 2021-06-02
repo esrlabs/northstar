@@ -18,9 +18,32 @@ use futures::{
     FutureExt,
 };
 use northstar::api::client;
+use std::str::FromStr;
 use structopt::StructOpt;
 use tokio::{select, task, time};
 use tokio_util::sync::CancellationToken;
+
+#[derive(Clone, Debug, PartialEq)]
+enum Mode {
+    MountUmount,
+    StartStop,
+    StartStopUmount,
+    MountStartStopUmount,
+}
+
+impl FromStr for Mode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "mount-umount" => Ok(Mode::MountUmount),
+            "start-stop" => Ok(Mode::StartStop),
+            "start-stop-umount" => Ok(Mode::StartStopUmount),
+            "mount-start-stop-umount" => Ok(Mode::StartStopUmount),
+            _ => Err("Invalid mode"),
+        }
+    }
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -32,17 +55,17 @@ struct Opt {
     #[structopt(short, long, default_value = "tcp://localhost:4200")]
     address: url::Url,
 
-    /// Umount container after stopping
-    #[structopt(short, long)]
-    umount: bool,
-
     /// Duration to run the test for in seconds
     #[structopt(short, long)]
     duration: Option<u64>,
 
-    /// Random delay between start and stop within 0..value ms
+    /// Random delay between each iteration within 1..value ms
     #[structopt(short, long)]
     random: Option<u64>,
+
+    /// Mode
+    #[structopt(short, long, default_value = "start-stop")]
+    mode: Mode,
 }
 
 #[tokio::main]
@@ -74,67 +97,80 @@ async fn main() -> Result<()> {
 
     for (app, version) in apps.clone().drain(..) {
         let token = token.clone();
-        let url = opt.address.clone();
-        let umount = opt.umount;
         let random = opt.random;
+        let url = opt.address.clone();
+        let mode = opt.mode.clone();
 
         let task = task::spawn(async move {
             let client = client::Client::new(&url, None, timeout).await?;
+            let mut iterations = 0;
             loop {
-                // Start the container
-                client.start(&app, &version).await?;
+                if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
+                    client.mount(vec![(app.as_str(), &version)]).await?;
+                }
+
+                if mode != Mode::MountUmount {
+                    client.start(&app, &version).await?;
+                }
 
                 if let Some(delay) = random {
                     let delay = rand::random::<u64>() % delay;
                     time::sleep(time::Duration::from_millis(delay)).await;
                 }
 
-                client
-                    .stop(&app, &version, time::Duration::from_secs(5))
-                    .await
-                    .context("Failed to stop container")?;
+                if mode != Mode::MountUmount {
+                    client
+                        .stop(&app, &version, time::Duration::from_secs(5))
+                        .await
+                        .context("Failed to stop container")?;
+                }
 
-                if umount {
+                // Check if we need to umount
+                if mode != Mode::StartStop {
                     client
                         .umount(&app, &version)
                         .await
                         .context("Failed to umount")?;
                 }
+
+                iterations += 1;
                 if token.is_cancelled() {
                     drop(client);
-                    break Ok(());
+                    break Ok(iterations);
                 }
             }
         })
         .then(|r| match r {
             Ok(r) => ready(r),
-            Err(e) => ready(Result::<()>::Err(anyhow!("task error: {}", e))),
+            Err(e) => ready(Result::<u32>::Err(anyhow!("task error: {}", e))),
         });
         tasks.push(task);
     }
 
     let mut tasks = try_join_all(tasks);
     let ctrl_c = tokio::signal::ctrl_c();
-
-    if let Some(duration) = opt.duration {
+    let result = if let Some(duration) = opt.duration {
         select! {
             _ = time::sleep(time::Duration::from_secs(duration)) => {
                 token.cancel();
-                tasks.await.map(drop)
+                tasks.await
             }
             _ = ctrl_c => {
                 token.cancel();
-                tasks.await.map(drop)
+                tasks.await
             }
-            r = &mut tasks => r.map(drop),
+            r = &mut tasks => r,
         }
     } else {
         select! {
             _ = ctrl_c => {
                 token.cancel();
-                tasks.await.map(drop)
+                tasks.await
             }
-            r = &mut tasks => r.map(drop),
+            r = &mut tasks => r,
         }
-    }
+    };
+
+    println!("Total iterations: {}", result?.iter().sum::<u32>());
+    Ok(())
 }
