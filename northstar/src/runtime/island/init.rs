@@ -413,7 +413,7 @@ fn mount(mounts: &[Mount]) {
             mount.flags,
             mount.data.as_deref(),
         )
-        .expect(&format!("Failed to mount {:?}", mount));
+        .unwrap_or_else(|_| panic!("Failed to mount {:?}", mount));
     }
 }
 
