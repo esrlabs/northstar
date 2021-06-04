@@ -34,8 +34,9 @@ use nix::{
 };
 use npk::manifest::{Manifest, MountFlag};
 use sched::CloneFlags;
+use seccomp::AllowList;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     env,
     ffi::{c_void, CString},
     os::unix::prelude::RawFd,
@@ -264,13 +265,20 @@ pub(super) fn groups(manifest: &Manifest) -> Vec<u32> {
     }
 }
 
-pub(super) fn seccomp_filter(
-    filter: Option<&std::collections::HashMap<String, String>>,
-) -> Option<seccomp::AllowList> {
+/// Construct a whitelist syscall filter that is applies post clone.
+pub(super) fn seccomp_filter(filter: Option<&HashMap<String, String>>) -> Option<AllowList> {
     if let Some(filter) = filter {
         let mut builder = seccomp::Builder::new();
-        for syscall_name in filter.keys() {
-            builder = builder.allow_syscall_name(syscall_name);
+        for name in filter.keys() {
+            if let Err(e) = builder.allow_syscall_name(name) {
+                // TODO: This is an error that is cause by a malicious container. It's not the runtimes fault if
+                // the manifest contains a syscall name that is not known here. This cannot be checked at container assembly
+                // time since this normally doesn't happen on the target architecture.
+                //
+                // Return an error here. Extend runtime::Error with an error: InvalidManifest
+                warn!("Failed to whitelist {}: {}. Disabling seccomp", name, e);
+                return None;
+            };
         }
         Some(builder.build())
     } else {
@@ -309,7 +317,7 @@ pub(super) fn init(
     mounts: &[Mount],
     fds: &[(RawFd, Fd)],
     groups: &[u32],
-    seccomp: Option<seccomp::AllowList>,
+    seccomp: Option<AllowList>,
     mut checkpoint: Checkpoint,
 ) -> ! {
     // Install "default signal handler" that exit on any signal. This process is the "init"
