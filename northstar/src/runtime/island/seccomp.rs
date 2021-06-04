@@ -35,16 +35,17 @@ const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_AARCH64;
 #[cfg(all(target_arch = "x86_64"))]
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
-#[cfg(all(target_arch = "aarch64"))]
-const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
-
-#[cfg(all(target_arch = "x86_64"))]
+/// Syscalls used by northstar after the secomp rules are applied and before the actual execve is done.
 const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Seccomp error: {0}")]
-    Seccomp(String),
+    #[error("Invalid arguments")]
+    InvalidArguments,
+    #[error("Unknown systemcall {0}")]
+    UnknownSystemcall(String),
+    #[error("OS error: {0}")]
+    Os(nix::Error),
 }
 
 // Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
@@ -67,11 +68,7 @@ impl AllowList {
         use nix::libc::SECCOMP_MODE_FILTER;
 
         if self.list.len() > BPF_MAXINSNS as usize {
-            return Err(Error::Seccomp(format!(
-                "Generated seccomp allowlist is too long ({}). Maximum is {}.",
-                self.list.len(),
-                BPF_MAXINSNS as usize
-            )));
+            return Err(Error::InvalidArguments);
         }
 
         let sf_prog = sock_fprog {
@@ -81,10 +78,7 @@ impl AllowList {
 
         let sf_prog_ptr = &sf_prog as *const sock_fprog;
         let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
-        Errno::result(result)
-            .map(drop)
-            .expect("Failed to set seccomp filter");
-        Ok(())
+        Errno::result(result).map_err(Error::Os).map(drop)
     }
 }
 
@@ -127,13 +121,13 @@ impl Builder {
 
         // Add default allowlist for architecture
         for syscall in REQUIRED_SYSCALLS {
-            builder = builder.allow_syscall_nr(*syscall as u32);
+            builder.allow_syscall_nr(*syscall as u32);
         }
         builder
     }
 
     /// Add syscall number to whitelist
-    pub fn allow_syscall_nr(mut self, nr: u32) -> Builder {
+    pub fn allow_syscall_nr(&mut self, nr: u32) -> &mut Builder {
         // If syscall matches return 'allow' directly. If not, skip return instruction and go to next check.
         self.allowlist.push(bpf_jump(
             BPF_JMP | BPF_JEQ | BPF_K,
@@ -146,14 +140,16 @@ impl Builder {
     }
 
     /// Add syscall name to whitelist
-    pub fn allow_syscall_name(self, name: &str) -> Builder {
-        let syscall_nr = translate_syscall(name).expect("Failed to translate syscall");
-        self.allow_syscall_nr(syscall_nr)
+    pub fn allow_syscall_name(&mut self, name: &str) -> Result<&mut Builder, Error> {
+        match translate_syscall(name) {
+            Some(nr) => Ok(self.allow_syscall_nr(nr)),
+            None => Err(Error::UnknownSystemcall(name.into())),
+        }
     }
 
     /// Log syscall violations only
     #[allow(unused)]
-    pub fn log_only(mut self) -> Builder {
+    pub fn log_only(&mut self) -> &mut Builder {
         self.log_only = true;
         self
     }
