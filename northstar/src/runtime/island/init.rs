@@ -72,24 +72,11 @@ pub(super) async fn mounts(
     // /proc
     debug!("Mounting /proc");
     let target = root.join("proc");
+    let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
     mounts.push(Mount {
         source: Some(PathBuf::from("proc")),
         target: target.clone(),
         fstype: Some("proc"),
-        flags: MsFlags::empty(),
-        data: None,
-    });
-    // Remount /proc ro
-    debug!("Remount /proc read only");
-    let flags = MsFlags::MS_REMOUNT
-        | MsFlags::MS_RDONLY
-        | MsFlags::MS_NOSUID
-        | MsFlags::MS_NOEXEC
-        | MsFlags::MS_NODEV;
-    mounts.push(Mount {
-        source: Some(PathBuf::from("/proc")),
-        target,
-        fstype: None,
         flags,
         data: None,
     });
