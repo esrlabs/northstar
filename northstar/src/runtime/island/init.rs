@@ -13,18 +13,12 @@
 //   limitations under the License.
 
 use super::{
-    clone::clone, io::Fd, utils::PathExt, Checkpoint, Container, IslandProcess, ENV_NAME,
-    ENV_VERSION, SIGNAL_OFFSET,
+    clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Checkpoint, Container, SIGNAL_OFFSET,
 };
-use crate::runtime::{
-    config::Config,
-    island::{seccomp, Start},
-};
-use log::{debug, warn};
+use crate::runtime::island::Start;
 use nix::{
     errno::Errno,
     libc::{self, c_int, c_ulong},
-    mount::MsFlags,
     sched,
     sys::{
         self,
@@ -32,297 +26,14 @@ use nix::{
     },
     unistd::{self, Uid},
 };
-use npk::manifest::{Manifest, MountOption, MountOptions};
 use sched::CloneFlags;
-use seccomp::AllowList;
-use std::{
-    collections::{HashMap, HashSet},
-    env,
-    ffi::{c_void, CString},
-    os::unix::prelude::RawFd,
-    path::PathBuf,
-    process::exit,
-    ptr::null,
-};
+use std::{collections::HashSet, env, ffi::CString, os::unix::prelude::RawFd, process::exit};
 use sys::wait::{waitpid, WaitStatus};
-use tokio::task;
-
-#[derive(Debug)]
-pub(super) struct Mount {
-    source: Option<PathBuf>,
-    target: PathBuf,
-    fstype: Option<&'static str>,
-    flags: MsFlags,
-    data: Option<String>,
-}
-
-/// Prepare a list of mounts that can be done in init without any allocation.
-pub(super) async fn mounts(
-    config: &Config,
-    container: &Container<IslandProcess>,
-) -> Result<Vec<Mount>, super::Error> {
-    let mut mounts = Vec::new();
-    let root = container
-        .root
-        .canonicalize()
-        .map_err(|e| super::Error::io("Canonicalize root", e))?;
-    let uid = container.manifest.uid;
-    let gid = container.manifest.gid;
-
-    // /proc
-    debug!("Mounting /proc");
-    let target = root.join("proc");
-    let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
-    mounts.push(Mount {
-        source: Some(PathBuf::from("proc")),
-        target: target.clone(),
-        fstype: Some("proc"),
-        flags,
-        data: None,
-    });
-
-    // TODO: /dev
-    mounts.push(Mount {
-        source: Some(PathBuf::from("/dev")),
-        target: root.join("dev"),
-        fstype: None,
-        flags: MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
-        data: None,
-    });
-
-    fn options_to_flags(opt: &MountOptions) -> MsFlags {
-        let mut flags = MsFlags::empty();
-        for opt in opt {
-            match opt {
-                MountOption::Rw => {}
-                MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
-                MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
-                MountOption::NoDev => flags |= MsFlags::MS_NODEV,
-            }
-        }
-        flags
-    }
-
-    for (target, mount) in &container.manifest.mounts {
-        match &mount {
-            npk::manifest::Mount::Bind { host, options } => {
-                if !&host.exists() {
-                    debug!(
-                        "Skipping bind mount of nonexistent source {} to {}",
-                        host.display(),
-                        target.display()
-                    );
-                    continue;
-                }
-                debug!(
-                    "Mounting {} on {} with {:?}",
-                    host.display(),
-                    target.display(),
-                    options.iter().collect::<Vec<_>>(),
-                );
-                let target = root.join_strip(target);
-                let mut flags = options_to_flags(&options);
-                flags.set(MsFlags::MS_BIND, true);
-                mounts.push(Mount {
-                    source: Some(host.clone()),
-                    target: target.clone(),
-                    fstype: None,
-                    flags: MsFlags::MS_BIND | flags,
-                    data: None,
-                });
-
-                if !options.contains(&MountOption::Rw) {
-                    mounts.push(Mount {
-                        source: Some(host.clone()),
-                        target,
-                        fstype: None,
-                        flags: MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | flags,
-                        data: None,
-                    });
-                }
-            }
-            npk::manifest::Mount::Persist => {
-                let dir = config.data_dir.join(&container.manifest.name);
-                if !dir.exists() {
-                    debug!("Creating {}", dir.display());
-                    tokio::fs::create_dir_all(&dir).await.map_err(|e| {
-                        super::Error::Io(format!("Failed to create {}", dir.display()), e)
-                    })?;
-                }
-
-                debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
-                task::block_in_place(|| {
-                    unistd::chown(
-                        dir.as_os_str(),
-                        Some(unistd::Uid::from_raw(uid)),
-                        Some(unistd::Gid::from_raw(gid)),
-                    )
-                })
-                .map_err(|e| {
-                    super::Error::os(
-                        format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-                        e,
-                    )
-                })?;
-
-                debug!("Mounting {} on {}", dir.display(), target.display(),);
-
-                mounts.push(Mount {
-                    source: Some(dir),
-                    target: root.join_strip(target),
-                    fstype: None,
-                    flags: MsFlags::MS_BIND
-                        | MsFlags::MS_NODEV
-                        | MsFlags::MS_NOSUID
-                        | MsFlags::MS_NOEXEC,
-                    data: None,
-                });
-            }
-            npk::manifest::Mount::Resource {
-                name,
-                version,
-                dir,
-                options,
-            } => {
-                let src = {
-                    // Join the source of the resource container with the mount dir
-                    let resource_root = config.run_dir.join(format!("{}:{}", name, version));
-                    let dir = dir
-                        .strip_prefix("/")
-                        .map(|d| resource_root.join(d))
-                        .unwrap_or(resource_root);
-
-                    if !dir.exists() {
-                        return Err(super::Error::StartContainerMissingResource(
-                            container.container.clone(),
-                            container.container.clone(),
-                        ));
-                    }
-
-                    dir
-                };
-
-                debug!(
-                    "Mounting {} on {} with {:?}",
-                    src.display(),
-                    target.display(),
-                    options
-                );
-
-                let mut flags = options_to_flags(&options);
-                flags |= MsFlags::MS_RDONLY | MsFlags::MS_BIND;
-
-                let target = root.join_strip(target);
-                mounts.push(Mount {
-                    source: Some(src.clone()),
-                    target: target.clone(),
-                    fstype: None,
-                    flags,
-                    data: None,
-                });
-
-                // Remount ro
-                mounts.push(Mount {
-                    source: Some(src),
-                    target,
-                    fstype: None,
-                    flags: MsFlags::MS_REMOUNT | flags,
-                    data: None,
-                });
-            }
-            npk::manifest::Mount::Tmpfs { size } => {
-                debug!(
-                    "Mounting tmpfs with size {} on {}",
-                    bytesize::ByteSize::b(*size),
-                    target.display()
-                );
-                mounts.push(Mount {
-                    source: None,
-                    target: root.join_strip(target),
-                    fstype: Some("tmpfs"),
-                    flags: MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
-                    data: Some(format!("size={},mode=1777", size)),
-                });
-            }
-            npk::manifest::Mount::Dev { .. } => { /* See above */ }
-        }
-    }
-
-    Ok(mounts)
-}
-
-/// Generate a list of supplementary gids if the groups info can be retrieved. This
-/// must happen before the init `clone` because the group information cannot be gathered
-/// without `/etc` etc...
-pub(super) fn groups(manifest: &Manifest) -> Vec<u32> {
-    if let Some(groups) = manifest.suppl_groups.as_ref() {
-        let mut result = Vec::with_capacity(groups.len());
-        for group in groups {
-            let cgroup = CString::new(group.as_str()).unwrap(); // Checked during manifest parsing
-            let group_info = task::block_in_place(|| unsafe {
-                nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char)
-            });
-            if group_info == (null::<c_void>() as *mut nix::libc::group) {
-                warn!("Skipping invalid supplementary group {}", group);
-            } else {
-                let gid = unsafe { (*group_info).gr_gid };
-                // TODO: Are there gids cannot use?
-                result.push(gid)
-            }
-        }
-        result
-    } else {
-        Vec::with_capacity(0)
-    }
-}
-
-/// Construct a whitelist syscall filter that is applies post clone.
-pub(super) fn seccomp_filter(filter: Option<&HashMap<String, String>>) -> Option<AllowList> {
-    if let Some(filter) = filter {
-        let mut builder = seccomp::Builder::new();
-        for name in filter.keys() {
-            if let Err(e) = builder.allow_syscall_name(name) {
-                // TODO: This is an error that is cause by a malicious container. It's not the runtimes fault if
-                // the manifest contains a syscall name that is not known here. This cannot be checked at container assembly
-                // time since this normally doesn't happen on the target architecture.
-                //
-                // Return an error here. Extend runtime::Error with an error: InvalidManifest
-                warn!("Failed to whitelist {}: {}. Disabling seccomp", name, e);
-                return None;
-            };
-        }
-        Some(builder.build())
-    } else {
-        None
-    }
-}
-
-pub(super) fn args(
-    manifest: &npk::manifest::Manifest,
-) -> Option<(CString, Vec<CString>, Vec<CString>)> {
-    let init = CString::new(manifest.init.as_ref()?.to_str()?).ok()?;
-    let mut argv = vec![init.clone()];
-    if let Some(ref args) = manifest.args {
-        for arg in args {
-            argv.push(CString::new(arg.as_bytes()).ok()?);
-        }
-    }
-
-    let mut env = manifest.env.clone().unwrap_or_default();
-    env.insert(ENV_NAME.to_string(), manifest.name.to_string());
-    env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
-    let env = env
-        .iter()
-        .map(|(k, v)| CString::new(format!("{}={}", k, v)).ok())
-        .collect::<Option<Vec<CString>>>()?;
-
-    Some((init, argv, env))
-}
 
 // Init function. Pid 1.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn init(
-    container: &Container<IslandProcess>,
+    container: &Container,
     init: &CString,
     argv: &[CString],
     env: &[CString],
@@ -403,7 +114,7 @@ pub(super) fn init(
                             // Encode the signal number in the process exit status. It's not possible to raise a
                             // a signal in this "init" process that is received by our parent
                             let code = SIGNAL_OFFSET + status as i32;
-                            debug!("Exiting with {} (signaled {})", code, status);
+                            //debug!("Exiting with {} (signaled {})", code, status);
                             exit(code);
                         }
                         Err(e) if e == nix::Error::Sys(Errno::EINTR) => continue,
@@ -441,18 +152,7 @@ pub(super) fn init(
 // TODO: /dev mounts from manifest: full or minimal
 fn mount(mounts: &[Mount]) {
     for mount in mounts {
-        if !mount.target.exists() {
-            panic!("Missing mount point {}", mount.target.display())
-        }
-
-        nix::mount::mount(
-            mount.source.as_ref(),
-            &mount.target,
-            mount.fstype,
-            mount.flags,
-            mount.data.as_deref(),
-        )
-        .unwrap_or_else(|_| panic!("Failed to mount {:?}", mount));
+        mount.mount();
     }
 }
 

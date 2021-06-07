@@ -12,10 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use std::collections::HashMap;
+
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_MAXINSNS,
     BPF_RET, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
 };
+use log::warn;
 use nix::errno::Errno;
 use thiserror::Error;
 
@@ -37,6 +40,27 @@ const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
 /// Syscalls used by northstar after the secomp rules are applied and before the actual execve is done.
 const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
+
+/// Construct a whitelist syscall filter that is applies post clone.
+pub(super) fn seccomp_filter(filter: Option<&HashMap<String, String>>) -> Option<AllowList> {
+    if let Some(filter) = filter {
+        let mut builder = Builder::new();
+        for name in filter.keys() {
+            if let Err(e) = builder.allow_syscall_name(name) {
+                // TODO: This is an error that is cause by a malicious container. It's not the runtimes fault if
+                // the manifest contains a syscall name that is not known here. This cannot be checked at container assembly
+                // time since this normally doesn't happen on the target architecture.
+                //
+                // Return an error here. Extend runtime::Error with an error: InvalidManifest
+                warn!("Failed to whitelist {}: {}. Disabling seccomp", name, e);
+                return None;
+            };
+        }
+        Some(builder.build())
+    } else {
+        None
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
