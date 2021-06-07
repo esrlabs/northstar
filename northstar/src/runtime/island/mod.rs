@@ -16,7 +16,8 @@ use super::{
     config::Config,
     error::Error,
     pipe::{self, PipeRead, PipeRecv, PipeSend, PipeWrite},
-    Event, EventTx, ExitStatus, Launcher, MountedContainer as Container, Pid, Process,
+    state::MountedContainer,
+    Event, EventTx, ExitStatus, Launcher, Pid,
 };
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
@@ -28,14 +29,23 @@ use nix::{
     sys::{self, signal::Signal},
     unistd,
 };
+use npk::manifest::Manifest;
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
-use std::{convert::TryFrom, fmt, thread};
+use std::{
+    convert::TryFrom,
+    ffi::{c_void, CString},
+    fmt,
+    ptr::null,
+    thread,
+};
 use task::block_in_place as block;
 use tokio::{sync::mpsc::error::TrySendError, task, time};
 use Signal::SIGCHLD;
 
+mod args;
 mod clone;
+mod fs;
 mod init;
 mod io;
 mod seccomp;
@@ -44,6 +54,8 @@ mod utils;
 const ENV_NAME: &str = "NAME";
 const ENV_VERSION: &str = "VERSION";
 const SIGNAL_OFFSET: i32 = 128;
+
+type Container = MountedContainer<IslandProcess>;
 
 #[derive(Debug)]
 pub(super) struct Island {
@@ -100,25 +112,24 @@ impl Launcher for Island {
         Ok(())
     }
 
-    async fn create(&self, container: &Container<Self::Process>) -> Result<Self::Process, Error> {
+    async fn create(&self, container: &Container) -> Result<Self::Process, Error> {
         let manifest = &container.manifest;
         let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
         let (checkpoint_parent, checkpoint_child) =
             checkpoints().expect("Failed to create pipes between parent and child processes");
 
         // Calculating init, argv and env allocates. Do that before `clone`.
-        let (init, argv, env) =
-            init::args(manifest).expect("Failed to extract container arguments");
+        let (init, argv, env) = args::args(manifest).expect("Failed to extract container arguments");
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
         debug!("{} env is {:?}", manifest.name, env);
 
-        // Prepare a list of mounts, groups and seccomp filter rules that need to be applied to the child.
-        // Prepare the list here to avoid any allocation in the child
-        let mounts = init::mounts(&self.config, &container).await?;
-        let groups = init::groups(manifest);
-        let seccomp = init::seccomp_filter(container.manifest.seccomp.as_ref());
+        // Prepare a list of mounts and groups that need to be applied to the child. Prepare the list here
+        // to avoid any allocation in the child
+        let mounts = fs::mounts(&self.config, &container).await?;
+        let groups = groups(manifest);
+        let seccomp = seccomp::seccomp_filter(container.manifest.seccomp.as_ref());
 
         // Clone init
         let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
@@ -175,7 +186,7 @@ impl Launcher for Island {
 }
 
 #[async_trait]
-impl Process for IslandProcess {
+impl super::Process for IslandProcess {
     fn pid(&self) -> Pid {
         match self {
             IslandProcess::Created { pid, .. } => *pid,
@@ -285,7 +296,7 @@ impl Process for IslandProcess {
 /// Spawn a task that waits for the process to exit. This resolves to the exit status
 /// of `pid`.
 fn wait(
-    container: &Container<IslandProcess>,
+    container: &Container,
     pid: Pid,
     tx: EventTx,
 ) -> impl Future<Output = Result<ExitStatus, Error>> {
@@ -399,6 +410,30 @@ impl Checkpoint {
 
     async fn async_wait(&mut self, c: Start) {
         task::block_in_place(|| self.wait(c));
+    }
+}
+/// Generate a list of supplementary gids if the groups info can be retrieved. This
+/// must happen before the init `clone` because the group information cannot be gathered
+/// without `/etc` etc...
+fn groups(manifest: &Manifest) -> Vec<u32> {
+    if let Some(groups) = manifest.suppl_groups.as_ref() {
+        let mut result = Vec::with_capacity(groups.len());
+        for group in groups {
+            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+            let group_info = task::block_in_place(|| unsafe {
+                nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char)
+            });
+            if group_info == (null::<c_void>() as *mut nix::libc::group) {
+                warn!("Skipping invalid supplementary group {}", group);
+            } else {
+                let gid = unsafe { (*group_info).gr_gid };
+                // TODO: Are there gids cannot use?
+                result.push(gid)
+            }
+        }
+        result
+    } else {
+        Vec::with_capacity(0)
     }
 }
 
