@@ -132,10 +132,13 @@ uid: 1000
 gid: 1000
 mounts:
     /lib:
+      type: bind
       host: /lib
     /lib64:
+      type: bind
       host: /lib64
     /system:
+      type: bind
       host: /system";
 
     fn create_test_npk(dest: &Path) -> PathBuf {

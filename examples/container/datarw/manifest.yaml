@@ -4,12 +4,16 @@ init: /datarw
 uid: 1000
 gid: 1000
 mounts:
-  /data: persist
+  /data:
+    type: persist
   /lib:
+    type: bind
     host: /lib
   /lib64:
+    type: bind
     host: /lib64
   /system:
+    type: bind
     host: /system
 io:
   stdout:

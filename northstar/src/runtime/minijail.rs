@@ -28,7 +28,7 @@ use nix::{
     sys::{signal, wait},
     unistd::{self, chown},
 };
-use npk::manifest::{Bind, Dev, Manifest, Mount, MountOption, Output, Resource, Tmpfs};
+use npk::manifest::{Bind, Manifest, Mount, MountOption, Output, Resource, Tmpfs};
 use signal::Signal::{SIGKILL, SIGTERM};
 use std::{
     convert::TryInto,
@@ -413,15 +413,11 @@ impl Minijail {
                         .map_err(into_io_error)?;
                 }
                 Mount::Dev(dev) => {
-                    match dev {
-                        // The Full mount of /dev is a simple rw bind mount of /dev
-                        Dev::Full => {
-                            jail.mount_bind(&Path::new("/dev"), &target, true)
-                                .map_err(into_io_error)?;
-                        }
-                        Dev::Minimal => {
-                            jail.mount_dev();
-                        }
+                    if dev.links.is_some() {
+                        jail.mount_dev();
+                    } else {
+                        jail.mount_bind(&Path::new("/dev"), &target, true)
+                            .map_err(into_io_error)?;
                     }
                 }
             }

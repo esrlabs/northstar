@@ -11,9 +11,12 @@ io:
       level: DEBUG
       tag: hello
 mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+  /system:
+    type: bind
+    host: /system

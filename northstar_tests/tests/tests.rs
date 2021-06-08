@@ -479,7 +479,7 @@ test!(check_api_version_on_connect, {
 
     // Send a connect with an version unequal to the one defined in the model
     let mut version = api::model::version();
-    version.0.patch += 1;
+    version.patch += 1;
 
     let connect = api::model::Connect::Connect {
         version,
