@@ -137,7 +137,7 @@ pub enum Dev {
 /// Mounts
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
-    /// Mount a directory from a resouce
+    /// Mount a directory from a resource
     Resource {
         name: String,
         version: Version,
@@ -520,10 +520,24 @@ impl Manifest {
     }
 
     fn verify(&self) -> Result<(), Error> {
-        // TODO: check for none on env, autostart, cgroups, seccomp
-        if self.init.is_none() && self.args.is_some() {
+        fn assume_no_zero_byte(s: &str) -> Result<(), Error> {
+            if s.contains('\0') {
+                return Err(Error::Invalid(
+                    "Encountered unexpected null byte".to_string(),
+                ));
+            }
+            Ok(())
+        }
+
+        if self.init.is_none()
+            && (self.args.is_some()
+                || self.env.is_some()
+                || self.autostart.is_some()
+                || self.cgroups.is_some()
+                || self.seccomp.is_some())
+        {
             return Err(Error::Invalid(
-                "Arguments not allowed in resource container".to_string(),
+                "A resource container must not contain args, env, autostart, cgroups or seccomp entries".to_string(),
             ));
         }
 
@@ -532,19 +546,27 @@ impl Manifest {
             return Err(Error::Invalid("Invalid uid 0".to_string()));
         }
 
-        // Check for null bytes in suppl groups. Rust Strings allow null bytes in Strings.
-        // For passing the group names to getgrnam they need to be C string compliant.
+        // Check for null bytes. Rust Strings allow null bytes in Strings that cannot be converted to cstrings.
         if let Some(suppl_groups) = self.suppl_groups.as_ref() {
             for suppl_group in suppl_groups {
-                if suppl_group.contains('\0') {
-                    return Err(Error::Invalid(format!(
-                        "Null byte in suppl group {}",
-                        suppl_group
-                    )));
-                }
+                assume_no_zero_byte(suppl_group)?;
             }
         }
-
+        if let Some(args) = self.args.as_ref() {
+            for arg in args {
+                assume_no_zero_byte(arg)?;
+            }
+        }
+        if let Some(env) = self.env.as_ref() {
+            for val in env.values() {
+                assume_no_zero_byte(val)?;
+            }
+        }
+        if let Some(seccomp) = self.seccomp.as_ref() {
+            for syscall in seccomp.keys() {
+                assume_no_zero_byte(syscall)?;
+            }
+        }
         Ok(())
     }
 }

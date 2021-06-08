@@ -170,7 +170,7 @@ pub(super) async fn from_manifest(
         .map_err(|e| Error::io("Readdir", e))?;
     while let Ok(Some(e)) = fds.next_entry().await {
         let file = e.file_name();
-        let fd: i32 = file.to_str().unwrap().parse().unwrap();
+        let fd: i32 = file.to_str().unwrap().parse().unwrap(); // fds are always numeric
         fd_configuration.insert(fd as RawFd, Fd::Close);
     }
     drop(fds);
@@ -185,8 +185,7 @@ pub(super) async fn from_manifest(
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
                 fd_configuration.insert(log.read_fd, Fd::Close);
-                // Remove fd that is set to be Fd::Close by default. fd is closed
-                // by dup2
+                // Remove fd that is set to be Fd::Close by default. fd is closed by dup2
                 fd_configuration.remove(&fd);
                 // The writing fd shall be dupped to 1
                 fd_configuration.insert(libc::STDOUT_FILENO, Fd::Dup(fd));
@@ -203,8 +202,7 @@ pub(super) async fn from_manifest(
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
                 fd_configuration.insert(log.read_fd, Fd::Close);
-                // Remove fd that is set to be Fd::Close by default. fd is closed
-                // by dup2
+                // Remove fd that is set to be Fd::Close by default. fd is closed by dup2
                 fd_configuration.remove(&fd);
                 // The writing fd shall be dupped to 2
                 fd_configuration.insert(libc::STDERR_FILENO, Fd::Dup(fd));

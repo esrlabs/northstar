@@ -28,13 +28,13 @@ pub enum Error {
     /// The container cannot be started because it's already running
     #[error("Container {0} failed to start: Already started")]
     StartContainerStarted(Container),
-    /// The container cannot be started because it's already running
+    /// The container cannot be started because it's a resource container
     #[error("Container {0} failed to start: Resources cannot be started")]
     StartContainerResource(Container),
-    /// The container cannot be started because it's already running
+    /// The container cannot be started because it's missing a running resource container
     #[error("Container {0} failed to start: Resource {1} is missing")]
     StartContainerMissingResource(Container, Container),
-    /// The container cannot be started because it's already running
+    /// The container cannot be started
     #[error("Container {0} failed to start: {1}")]
     StartContainerFailed(Container, String),
     /// The container cannot be started because it's already running

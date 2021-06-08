@@ -104,7 +104,7 @@ pub(super) async fn mounts(
             npk::manifest::Mount::Bind { host, flags } => {
                 if !&host.exists() {
                     debug!(
-                        "Skipping bind mount of nonexitent source {} to {}",
+                        "Skipping bind mount of nonexistent source {} to {}",
                         host.display(),
                         target.display()
                     );
@@ -247,7 +247,7 @@ pub(super) fn groups(manifest: &Manifest) -> Vec<u32> {
     if let Some(groups) = manifest.suppl_groups.as_ref() {
         let mut result = Vec::with_capacity(groups.len());
         for group in groups {
-            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+            let cgroup = CString::new(group.as_str()).unwrap(); // Checked during manifest parsing
             let group_info = task::block_in_place(|| unsafe {
                 nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char)
             });
@@ -286,12 +286,14 @@ pub(super) fn seccomp_filter(filter: Option<&HashMap<String, String>>) -> Option
     }
 }
 
-pub(super) fn args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>, Vec<CString>) {
-    let init = CString::new(manifest.init.as_ref().unwrap().to_str().unwrap()).unwrap();
+pub(super) fn args(
+    manifest: &npk::manifest::Manifest,
+) -> Option<(CString, Vec<CString>, Vec<CString>)> {
+    let init = CString::new(manifest.init.as_ref()?.to_str()?).ok()?;
     let mut argv = vec![init.clone()];
     if let Some(ref args) = manifest.args {
         for arg in args {
-            argv.push(CString::new(arg.as_bytes()).unwrap());
+            argv.push(CString::new(arg.as_bytes()).ok()?);
         }
     }
 
@@ -300,11 +302,10 @@ pub(super) fn args(manifest: &npk::manifest::Manifest) -> (CString, Vec<CString>
     env.insert(ENV_VERSION.to_string(), manifest.version.to_string());
     let env = env
         .iter()
-        .map(|(k, v)| CString::new(format!("{}={}", k, v)))
-        .map(Result::unwrap)
-        .collect::<Vec<CString>>();
+        .map(|(k, v)| CString::new(format!("{}={}", k, v)).ok())
+        .collect::<Option<Vec<CString>>>()?;
 
-    (init, argv, env)
+    Some((init, argv, env))
 }
 
 // Init function. Pid 1.
@@ -320,9 +321,9 @@ pub(super) fn init(
     seccomp: Option<AllowList>,
     mut checkpoint: Checkpoint,
 ) -> ! {
-    // Install "default signal handler" that exit on any signal. This process is the "init"
-    // process of this pid ns and therefore doesn't have any signal handlers. The handler that just exists
-    // is needed if the container is signaled *before* the child is spawned and also receives the signal.
+    // Install a "default signal handler" that exits on any signal. This process is the "init"
+    // process of this pid ns and therefore doesn't have any own signal handlers. This handler that just exits
+    // is needed in case the container is signaled *before* the child is spawned that would otherwise receive the signal.
     // If the child is spawn when the signal is sent to this group it shall exit and the init returns from waitpid.
     set_init_signal_handlers();
 
@@ -364,6 +365,7 @@ pub(super) fn init(
 
     // Set the parent process death signal of the calling process to arg2
     // (either a signal value in the range 1..maxsig, or 0 to clear).
+    // TODO: remove or reactivate
     //println!("Setting parent death signal to SIGKILL");
     //set_parent_death_signal(SIGKILL);
 
@@ -390,7 +392,7 @@ pub(super) fn init(
                             // Encode the signal number in the process exit status. It's not possible to raise a
                             // a signal in this "init" process that is received by our parent
                             let code = SIGNAL_OFFSET + status as i32;
-                            //debug!("Exiting with {} (signaled {})", code, status);
+                            debug!("Exiting with {} (signaled {})", code, status);
                             exit(code);
                         }
                         Err(e) if e == nix::Error::Sys(Errno::EINTR) => continue,
@@ -401,8 +403,7 @@ pub(super) fn init(
             unistd::ForkResult::Child => {
                 set_parent_death_signal(SIGKILL);
 
-                // TODO: Post Linux 5.5 there's a nice clone flag that allows
-                // to reset the signal handler during the clone.
+                // TODO: Post Linux 5.5 there's a nice clone flag that allows to reset the signal handler during the clone.
                 reset_signal_handlers();
                 reset_signal_mask();
 
@@ -467,7 +468,6 @@ fn set_child_subreaper(value: bool) {
     use libc::PR_SET_CHILD_SUBREAPER;
 
     let value = if value { 1u64 } else { 0u64 };
-
     let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
@@ -553,16 +553,14 @@ fn reset_effective_caps() {
 fn setid(uid: u32, gid: u32) {
     let rt_priveleged = unistd::geteuid() == Uid::from_raw(0);
 
-    // If running as uid 0 safe our caps across the uid/gid drop
+    // If running as uid 0 save our caps across the uid/gid drop
     if rt_priveleged {
         caps::securebits::set_keepcaps(true).expect("Failed to set keep caps");
     }
 
-    //println!("Setting gid to {}", gid);
     let gid = unistd::Gid::from_raw(gid);
     unistd::setresgid(gid, gid, gid).expect("Failed to set resgid");
 
-    //println!("Setting uid to {}", uid);
     let uid = unistd::Uid::from_raw(uid);
     unistd::setresuid(uid, uid, uid).expect("Failed to set resuid");
 
@@ -578,7 +576,6 @@ fn setsid() {
 }
 
 fn setgroups(groups: &[u32]) {
-    //println!("Setting groups {:?}", groups);
     let result = unsafe { nix::libc::setgroups(groups.len(), groups.as_ptr()) };
 
     Errno::result(result)
@@ -589,19 +586,17 @@ fn setgroups(groups: &[u32]) {
 /// Drop capabilities
 fn drop_capabilities(cs: Option<&HashSet<caps::Capability>>) {
     let mut bounded =
-        caps::read(None, caps::CapSet::Bounding).expect("Failed to read bouding caps");
+        caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
     if let Some(caps) = cs {
         bounded.retain(|c| !caps.contains(c));
     }
 
-    //println!("Dropping capabilities");
     for cap in bounded {
         // caps::set cannot be called for bounded
         caps::drop(None, caps::CapSet::Bounding, cap).expect("Failed to drop bounding cap");
     }
 
     if let Some(caps) = cs {
-        //println!("Settings capabilities to {:?}", caps);
         caps::set(None, caps::CapSet::Effective, caps).expect("Failed to set effective caps");
         caps::set(None, caps::CapSet::Permitted, caps).expect("Failed to set permitted caps");
         caps::set(None, caps::CapSet::Inheritable, caps).expect("Failed to set inheritable caps");
