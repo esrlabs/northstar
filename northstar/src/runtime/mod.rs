@@ -72,7 +72,7 @@ const MAIN_BUFFER: usize = 1000;
 #[cfg(feature = "rt-island")]
 type RuntimeLauncher = island::Island;
 
-#[cfg(feature = "rt-minijail")]
+#[cfg(all(feature = "rt-minijail", not(feature = "rt-island")))]
 type RuntimeLauncher = minijail::Minijail;
 
 #[async_trait]
