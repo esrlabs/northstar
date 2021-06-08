@@ -8,8 +8,8 @@ env:
 io:
   stdout:
     log:
-      - DEBUG
-      - hello
+      level: DEBUG
+      tag: hello
 mounts:
     /lib:
       host: /lib

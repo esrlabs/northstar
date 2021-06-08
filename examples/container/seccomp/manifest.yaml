@@ -4,17 +4,17 @@ init: /seccomp
 uid: 1000
 gid: 1000
 mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system
 io:
   stdout:
     log:
-      - DEBUG
-      - seccomp
+      level: DEBUG
+      tag: seccomp
 seccomp:
   write: 1
   clock_nanosleep: 1
