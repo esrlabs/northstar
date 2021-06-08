@@ -14,7 +14,7 @@
 
 use crate::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-    manifest::{Manifest, Mount, MountOption, Version},
+    manifest::{Bind, Manifest, Mount, MountOption, Version},
 };
 use ed25519_dalek::{
     ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
@@ -666,7 +666,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
 
     for (target, mount) in &manifest.mounts {
         let mode = match mount {
-            Mount::Bind { options: flags, .. } => {
+            Mount::Bind(Bind { options: flags, .. }) => {
                 if flags.contains(&MountOption::Rw) {
                     777
                 } else {

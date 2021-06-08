@@ -146,10 +146,7 @@ pub(super) fn init(
     }
 }
 
-// TODO: The container could be malformed and the mountpoint might be
-// missing. This is not a fault of the RT so don't expect it.
-// TODO: mount flags: nosuid etc....
-// TODO: /dev mounts from manifest: full or minimal
+/// Execute list of mount calls
 fn mount(mounts: &[Mount]) {
     for mount in mounts {
         mount.mount();

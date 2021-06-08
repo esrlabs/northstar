@@ -26,7 +26,9 @@ use futures::{
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
-use npk::manifest::{Manifest, Mount};
+use npk::{
+    manifest::{Manifest, Mount, Resource},
+};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -256,7 +258,7 @@ impl<'a, L: Launcher> State<'a, L> {
                 .flatten() // A iter of Mounts
                 .map(|(_, mount)| mount)
                 .filter_map(|mount| match mount {
-                    Mount::Resource { name, version, .. } => {
+                    Mount::Resource(Resource { name, version, .. }) => {
                         Some(Container::new(name.clone(), version.clone()))
                     }
                     _ => None,
@@ -311,7 +313,7 @@ impl<'a, L: Launcher> State<'a, L> {
                 .mounts
                 .values()
                 .filter_map(|m| match m {
-                    Mount::Resource { name, version, .. } => {
+                    Mount::Resource(Resource { name, version, .. }) => {
                         Some(Container::new(name.clone(), version.clone()))
                     }
                     _ => None,

@@ -28,13 +28,13 @@ use nix::{
     sys::{signal, wait},
     unistd::{self, chown},
 };
-use npk::manifest::{Dev, Manifest, Mount, MountOption, Output};
+use npk::manifest::{Bind, Dev, Manifest, Mount, MountOption, Output, Resource, Tmpfs};
 use signal::Signal::{SIGKILL, SIGTERM};
 use std::{
     convert::TryInto,
     fmt, iter, ops,
     os::unix::{io::AsRawFd, prelude::*},
-    path::{Path, PathBuf},
+    path::Path,
     pin::Pin,
     task::{Context, Poll},
     unimplemented,
@@ -327,19 +327,9 @@ impl Minijail {
             .map_err(into_io_error)?;
         jail.remount_proc_readonly();
 
-        // If there's no explicit mount for /dev add a minimal variant
-        if !container
-            .manifest
-            .mounts
-            .contains_key(&PathBuf::from("/dev"))
-        {
-            debug!("Mounting minimal /dev");
-            jail.mount_dev();
-        }
-
         for (target, mount) in &container.manifest.mounts {
             match &mount {
-                Mount::Bind { host, options } => {
+                Mount::Bind(Bind { host, options }) => {
                     if !&host.exists() {
                         warn!(
                             "Cannot bind mount nonexistent source {} to {}",
@@ -383,12 +373,12 @@ impl Minijail {
                     jail.mount_bind(&dir, &target, true)
                         .map_err(into_io_error)?;
                 }
-                Mount::Resource {
+                Mount::Resource(Resource {
                     name,
                     version,
                     dir,
                     options: _,
-                } => {
+                }) => {
                     let src = {
                         // Join the source of the resource container with the mount dir
                         let resource_root = config.run_dir.join(format!("{}:{}", name, version));
@@ -412,7 +402,7 @@ impl Minijail {
                     jail.mount_bind(&src, &target, false)
                         .map_err(into_io_error)?;
                 }
-                Mount::Tmpfs { size } => {
+                Mount::Tmpfs(Tmpfs { size }) => {
                     debug!(
                         "Mounting tmpfs with size {} on {}",
                         bytesize::ByteSize::b(*size),
@@ -422,12 +412,15 @@ impl Minijail {
                     jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
                         .map_err(into_io_error)?;
                 }
-                Mount::Dev { r#type } => {
-                    match r#type {
+                Mount::Dev(dev) => {
+                    match dev {
                         // The Full mount of /dev is a simple rw bind mount of /dev
                         Dev::Full => {
-                            let dev = Path::new("/dev");
-                            jail.mount_bind(&dev, &dev, true).map_err(into_io_error)?;
+                            jail.mount_bind(&Path::new("/dev"), &target, true)
+                                .map_err(into_io_error)?;
+                        }
+                        Dev::Minimal => {
+                            jail.mount_dev();
                         }
                     }
                 }

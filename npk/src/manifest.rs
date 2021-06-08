@@ -61,35 +61,52 @@ pub enum MountOption {
 /// Set of mount options
 pub type MountOptions = HashSet<MountOption>;
 
-/// Configuration for the /dev mount
+/// /dev mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Dev {
     /// Bind mount the full /dev of the host
     #[serde(rename = "full")]
     Full,
+    /// Minimal /dev
+    #[serde(rename = "minimal")]
+    Minimal,
+}
+
+/// Resource mount configuration
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Resource {
+    pub name: String,
+    pub version: Version,
+    pub dir: PathBuf,
+    pub options: MountOptions,
+}
+
+/// Bind mount configuration
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Bind {
+    pub host: PathBuf,
+    pub options: MountOptions,
+}
+
+/// Tmpfs configuration
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Tmpfs {
+    pub size: u64,
 }
 
 /// Mounts
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Mount {
-    /// Mount a directory from a resource
-    Resource {
-        name: String,
-        version: Version,
-        dir: PathBuf,
-        options: MountOptions,
-    },
+    /// Mount a directory from a resouce
+    Resource(Resource),
     /// Bind mount of a host dir with options
-    Bind {
-        host: PathBuf,
-        options: MountOptions,
-    },
+    Bind(Bind),
     /// Mount /dev with flavor `dev`
-    Dev { r#type: Dev },
+    Dev(Dev),
     /// Mount a rw host directory dedicated to this container rw
     Persist,
     /// Mount a tmpfs with size
-    Tmpfs { size: u64 },
+    Tmpfs(Tmpfs),
 }
 
 /// IO configuration for stdin, stdout, stderr
@@ -257,8 +274,8 @@ mod serde_mounts {
             options: String,
         },
         Tmpfs {
-            #[serde(deserialize_with = "deserialize_tmpfs")]
-            tmpfs: u64,
+            #[serde(rename = "tmpfs", deserialize_with = "deserialize_tmpfs")]
+            size: u64,
         },
         Bind {
             host: PathBuf,
@@ -317,47 +334,33 @@ mod serde_mounts {
     ) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(mounts.len()))?;
         for (target, mount) in mounts {
-            match target.display().to_string().as_str() {
-                "/dev" => {
-                    if let Mount::Dev { r#type } = mount {
-                        map.serialize_entry(&target, &r#type)?;
-                    } else {
-                        return Err(serde::ser::Error::custom("Invalid mount type on /dev"));
-                    }
+            match mount {
+                Mount::Bind(super::Bind { host, options }) => map.serialize_entry(
+                    &target,
+                    &MountSource::Bind {
+                        host: host.clone(),
+                        options: options.iter().map(ToString::to_string).join(","),
+                    },
+                )?,
+                Mount::Dev(dev) => map.serialize_entry(&target, dev)?,
+                Mount::Persist => {
+                    map.serialize_entry(&target, &MountSource::Persist(Persist::Persist))?
                 }
-                target => match mount {
-                    Mount::Bind { host, options } => map.serialize_entry(
-                        &target,
-                        &MountSource::Bind {
-                            host: host.clone(),
-                            options: options.iter().map(ToString::to_string).join(","),
-                        },
-                    )?,
-                    Mount::Dev { r#type: _ } => {
-                        return Err(serde::ser::Error::custom(format!(
-                            "dev cannot be mounted on {}",
-                            target
-                        )));
-                    }
-                    Mount::Persist => {
-                        map.serialize_entry(&target, &MountSource::Persist(Persist::Persist))?
-                    }
-                    Mount::Resource {
-                        name,
-                        version,
-                        dir,
-                        options,
-                    } => map.serialize_entry(
-                        &target,
-                        &MountSource::Resource {
-                            resource: format!("{}:{}:{}", name, version, dir.display()),
-                            options: options.iter().map(ToString::to_string).join(","),
-                        },
-                    )?,
-                    Mount::Tmpfs { size } => {
-                        map.serialize_entry(&target, &MountSource::Tmpfs { tmpfs: *size })?
-                    }
-                },
+                Mount::Resource(super::Resource {
+                    name,
+                    version,
+                    dir,
+                    options,
+                }) => map.serialize_entry(
+                    &target,
+                    &MountSource::Resource {
+                        resource: format!("{}:{}:{}", name, version, dir.display()),
+                        options: options.iter().map(ToString::to_string).join(","),
+                    },
+                )?,
+                Mount::Tmpfs(tmpfs) => {
+                    map.serialize_entry(&target, &MountSource::Tmpfs { size: tmpfs.size })?
+                }
             }
         }
         map.end()
@@ -382,76 +385,66 @@ mod serde_mounts {
                 let mut entries = HashMap::<PathBuf, Mount>::new();
                 while let Some((target, source)) = map.next_entry()? {
                     let target: PathBuf = target;
-                    let mount = match target.display().to_string().as_str() {
-                        "/dev" => {
-                            if let MountSource::Dev(dev) = source {
-                                Mount::Dev { r#type: dev }
-                            } else {
-                                return Err(serde::de::Error::custom(format!(
-                                    "Invalid mount on /dev: {:?}",
-                                    source
-                                )));
-                            }
-                        }
-                        _ => match source {
-                            MountSource::Bind { host, options } => Mount::Bind {
-                                host,
-                                options: parse_mount_options(&options)
-                                    .map_err(serde::de::Error::custom)?,
-                            },
-                            MountSource::Dev(..) => {
-                                return Err(serde::de::Error::custom(format!(
-                                    "dev cannot be mounted on {}",
-                                    target.display()
-                                )));
-                            }
-                            MountSource::Tmpfs { tmpfs } => Mount::Tmpfs { size: tmpfs },
-                            MountSource::Persist(Persist::Persist) => {
-                                if entries.values().any(|v| v == &Mount::Persist) {
-                                    return Err(serde::de::Error::custom(
-                                        "mount configurations can only have one persist entry",
-                                    ));
-                                }
-                                Mount::Persist
-                            }
-                            MountSource::Resource { resource, options } => {
-                                lazy_static! {
-                                    static ref RE: regex::Regex = regex::Regex::new(
-                                        r"(?P<name>((\w|-|\.|_)+)):(?P<version>\d+\.\d+\.\d+):(?P<dir>[\w/]+)"
-                                    )
-                                    .expect("Invalid regex");
-                                }
 
-                                let caps = RE.captures(&resource).ok_or_else(|| {
-                                    serde::de::Error::custom(format!(
-                                        "Invalid resource: {}",
-                                        resource
-                                    ))
-                                })?;
-
-                                let name = caps.name("name").unwrap().as_str().to_string();
-                                let version =
-                                    Version::parse(caps.name("version").unwrap().as_str())
-                                        .map_err(serde::de::Error::custom)?;
-                                let dir = PathBuf::from(caps.name("dir").unwrap().as_str());
-                                let options = parse_mount_options(&options)
-                                    .map_err(serde::de::Error::custom)?;
-
-                                Mount::Resource {
-                                    name,
-                                    version,
-                                    dir,
-                                    options,
-                                }
-                            }
-                        },
-                    };
-                    if entries.insert(target.clone(), mount).is_some() {
+                    if entries.contains_key(&target) {
                         return Err(serde::de::Error::custom(format!(
-                            "Duplicate mountpoint: {:?}",
-                            target
+                            "duplicate mount target: {}",
+                            target.display()
                         )));
                     }
+
+                    let mount = match source {
+                        MountSource::Bind { host, options } => Mount::Bind(super::Bind {
+                            host,
+                            options: parse_mount_options(&options)
+                                .map_err(serde::de::Error::custom)?,
+                        }),
+                        MountSource::Dev(dev) => {
+                            // Check that only one Dev entry is configured
+                            if entries.values().any(|m| matches!(m, Mount::Dev(_))) {
+                                return Err(serde::de::Error::custom(
+                                    "mount configurations can only have one dev entry",
+                                ));
+                            }
+                            Mount::Dev(dev)
+                        }
+                        MountSource::Tmpfs { size } => Mount::Tmpfs(super::Tmpfs { size }),
+                        MountSource::Persist(Persist::Persist) => {
+                            if entries.values().any(|v| v == &Mount::Persist) {
+                                return Err(serde::de::Error::custom(
+                                    "mount configurations can only have one persist entry",
+                                ));
+                            }
+                            Mount::Persist
+                        }
+                        MountSource::Resource { resource, options } => {
+                            lazy_static! {
+                                static ref RE: regex::Regex = regex::Regex::new(
+                                    r"(?P<name>((\w|-|\.|_)+)):(?P<version>\d+\.\d+\.\d+):(?P<dir>[\w/]+)"
+                                )
+                                .expect("Invalid regex");
+                            }
+
+                            let caps = RE.captures(&resource).ok_or_else(|| {
+                                serde::de::Error::custom(format!("Invalid resource: {}", resource))
+                            })?;
+
+                            let name = caps.name("name").unwrap().as_str().to_string();
+                            let version = Version::parse(caps.name("version").unwrap().as_str())
+                                .map_err(serde::de::Error::custom)?;
+                            let dir = PathBuf::from(caps.name("dir").unwrap().as_str());
+                            let options =
+                                parse_mount_options(&options).map_err(serde::de::Error::custom)?;
+
+                            Mount::Resource(super::Resource {
+                                name,
+                                version,
+                                dir,
+                                options,
+                            })
+                        }
+                    };
+                    entries.insert(target, mount);
                 }
                 Ok(entries)
             }
@@ -680,9 +673,9 @@ capabilities:
   - CAP_MKNOD
   - CAP_SYS_TIME
 mounts:
+  /dev: full
   /tmp:
     tmpfs: 42
-  /dev: full
   /lib:
     host: /lib
     options: rw
@@ -721,23 +714,23 @@ seccomp:
         let mut mounts = HashMap::new();
         mounts.insert(
             PathBuf::from("/lib"),
-            Mount::Bind {
+            Mount::Bind(Bind {
                 host: PathBuf::from("/lib"),
                 options: [MountOption::Rw].iter().cloned().collect(),
-            },
+            }),
         );
         mounts.insert(PathBuf::from("/data"), Mount::Persist);
         mounts.insert(
             PathBuf::from("/resource"),
-            Mount::Resource {
+            Mount::Resource(Resource {
                 name: "bla-blah.foo".to_string(),
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
                 options: [MountOption::NoExec].iter().cloned().collect(),
-            },
+            }),
         );
-        mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs { size: 42 });
-        mounts.insert(PathBuf::from("/dev"), Mount::Dev { r#type: Dev::Full });
+        mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs(Tmpfs { size: 42 }));
+        mounts.insert(PathBuf::from("/dev"), Mount::Dev(Dev::Full));
         assert_eq!(manifest.mounts, mounts);
 
         let mut cgroups = HashMap::new();
@@ -777,12 +770,7 @@ seccomp:
     /// Two mounts on the same target are invalid
     #[test]
     fn duplicate_mount() -> Result<()> {
-        let manifest = "
-name: hello
-version: 0.0.0
-init: /binary
-uid: 1000
-gid: 1001
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 mounts:
   /dev: full
   /dev: full
@@ -794,12 +782,7 @@ mounts:
 
     #[test]
     fn tmpfs() {
-        let manifest = "
-name: hello
-version: 0.0.0
-init: /binary
-uid: 1000
-gid: 1001
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 mounts:
   /a:
     tmpfs: 100
@@ -813,32 +796,27 @@ mounts:
         let manifest = Manifest::from_str(manifest).unwrap();
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/a")),
-            Some(&Mount::Tmpfs { size: 100 })
+            Some(&Mount::Tmpfs(Tmpfs { size: 100 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/b")),
-            Some(&Mount::Tmpfs { size: 100 * 1024 })
+            Some(&Mount::Tmpfs(Tmpfs { size: 100 * 1024 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/c")),
-            Some(&Mount::Tmpfs {
+            Some(&Mount::Tmpfs(Tmpfs {
                 size: 100 * 1024 * 1024
-            })
+            }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/d")),
-            Some(&Mount::Tmpfs {
+            Some(&Mount::Tmpfs(Tmpfs {
                 size: 100 * 1024 * 1024 * 1024
-            })
+            }))
         );
 
         // Test a invalid tmpfs size string
-        let manifest = "
-name: hello
-version: 0.0.0
-init: /binary
-uid: 1000
-gid: 1001
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\n uid: 1000\ngid: 1001
 mounts:
   /tmp:
     tmpfs: 100M
@@ -847,28 +825,26 @@ mounts:
     }
 
     #[test]
-    fn invalid_dev() {
-        let manifest = "
-name: hello
-version: 0.0.0
-init: /binary
-uid: 1000
-gid: 1001
-mounts:
-  /dev:
-    tmpfs: 42
-";
+    fn dev_minimal() {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev: minimal";
+        assert!(Manifest::from_str(manifest).is_ok());
+    }
+
+    #[test]
+    fn dev_full() {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev: full";
+        assert!(Manifest::from_str(manifest).is_ok());
+    }
+
+    #[test]
+    fn dev_invalid() {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev: foo";
         assert!(Manifest::from_str(manifest).is_err());
     }
 
     #[test]
     fn mount_resource() {
-        let manifest = "
-name: hello
-version: 0.0.0
-init: /binary
-uid: 1000
-gid: 1001
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 mounts:
   /foo:
     resource: foo-bar.qwerty12:0.0.1:/

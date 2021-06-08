@@ -28,5 +28,5 @@ mounts:
 io:
   stdout:
     log:
-      - DEBUG
-      - test_container
+      level: DEBUG
+      tag: test_container
