@@ -10,20 +10,28 @@ gid: 1000
 capabilities:
   - CAP_KILL
 mounts:
-  /data: persist
+  /data:
+    type: persist
   /lib:
+    type: bind
     host: /lib
     options: nosuid,nodev
   /lib64:
+    type: bind
     host: /lib64
     options: nosuid,nodev
   /system:
+    type: bind
     host: /system
     options: nosuid,nodev
   /tmpfs:
-    tmpfs: 20480000
+    type: tmpfs
+    size: 20480000
   /resource:
-    resource: test_resource:0.0.1:test/
+    type: resource
+    name: test_resource
+    version: 0.0.1
+    dir: test
     options: nosuid,nodev,noexec
 io:
   stdout:

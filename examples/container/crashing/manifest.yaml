@@ -7,10 +7,13 @@ env:
   RUST_BACKTRACE: 1
 mounts:
   /lib:
+    type: bind
     host: /lib
   /lib64:
+    type: bind
     host: /lib64
   /system:
+    type: bind
     host: /system
 io:
   stdout:

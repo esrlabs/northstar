@@ -122,10 +122,13 @@ io:
   stdout: pipe
 mounts:
   /bin:
+    type: bind
     host: /bin
   /lib:
+    type: bind
     host: /lib
   /lib64:
+    type: bind
     host: /lib64"#;
 
     const MANIFEST_ANDROID: &str = r#"name: hello-world
@@ -140,6 +143,7 @@ args:
   - "echo Hello World!"
 mounts:
   /system:
+    type: bind
     host: /system"#;
 
     let out_dir = env::var("OUT_DIR").context("Failed to read OUT_DIR")?;

@@ -9,15 +9,29 @@ args:
   - /message/hello
 mounts:
   /bin:
-    resource: ferris:0.0.1:/
+    type: resource
+    name: ferris
+    version: 0.0.1
+    dir: /
+    options: nodev,nosuid
   /lib:
+    type: bind
     host: /lib
+    options: nodev,nosuid
   /lib64:
+    type: bind
     host: /lib64
+    options: nodev,nosuid
   /system:
+    type: bind
     host: /system
+    options: nodev,nosuid
   /message:
-    resource: message:0.0.1:/
+    type: resource
+    name: message
+    version: 0.0.1
+    dir: /
+    options: noexec,nodev,nosuid
 io:
   stdout:
     log:

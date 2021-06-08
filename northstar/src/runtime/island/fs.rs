@@ -86,21 +86,16 @@ pub(super) async fn mounts(
                 resource(&root, target, config, container, res, &mut mounts)?;
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => tmpfs(&root, target, *size, &mut mounts),
-            manifest::Mount::Dev(d) => {
-                dev = self::dev(&root, d, &container.manifest, &mut mounts).await;
+            manifest::Mount::Dev(_) => {
+                // TODO: links
+                dev = self::dev(&root, &container.manifest, &mut mounts).await;
             }
         }
     }
 
     // No dev configured in mounts: Use minimal version
     if dev.is_none() {
-        dev = self::dev(
-            &root,
-            &manifest::Dev::Minimal,
-            &container.manifest,
-            &mut mounts,
-        )
-        .await;
+        dev = self::dev(&root, &container.manifest, &mut mounts).await;
     }
 
     Ok((mounts, dev))
@@ -288,51 +283,30 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
     flags
 }
 
-async fn dev(
-    root: &Path,
-    config: &npk::manifest::Dev,
-    manifest: &Manifest,
-    mounts: &mut Vec<Mount>,
-) -> Dev {
-    match config {
-        npk::manifest::Dev::Full => {
-            debug!("Bind mounting /dev");
-            mounts.push(Mount {
-                source: Some(PathBuf::from("/dev")),
-                target: root.join("dev"),
-                fstype: None,
-                flags: MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
-                data: None,
-            });
-            None
-        }
-        npk::manifest::Dev::Minimal => {
-            let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
-            debug!("Creating devfs in {}", dir.path().display());
-            task::block_in_place(|| dev_devices(dir.path(), manifest.uid, manifest.gid));
-            dev_symlinks(dir.path()).await;
+async fn dev(root: &Path, manifest: &Manifest, mounts: &mut Vec<Mount>) -> Dev {
+    let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
+    debug!("Creating devfs in {}", dir.path().display());
+    task::block_in_place(|| dev_devices(dir.path(), manifest.uid, manifest.gid));
+    dev_symlinks(dir.path()).await;
 
-            let flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
+    let flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
 
-            mounts.push(Mount {
-                source: Some(dir.path().into()),
-                target: root.join("dev"),
-                fstype: None,
-                flags,
-                data: None,
-            });
+    mounts.push(Mount {
+        source: Some(dir.path().into()),
+        target: root.join("dev"),
+        fstype: None,
+        flags,
+        data: None,
+    });
 
-            mounts.push(Mount {
-                source: Some(dir.path().into()),
-                target: root.join("dev"),
-                fstype: None,
-                flags: MsFlags::MS_REMOUNT | flags,
-                data: None,
-            });
-
-            Some(dir)
-        }
-    }
+    mounts.push(Mount {
+        source: Some(dir.path().into()),
+        target: root.join("dev"),
+        fstype: None,
+        flags: MsFlags::MS_REMOUNT | flags,
+        data: None,
+    });
+    Some(dir)
 }
 
 fn dev_devices(dir: &Path, uid: u32, gid: u32) {

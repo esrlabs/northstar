@@ -12,11 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use super::RepositoryId;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;
-
-use super::RepositoryId;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

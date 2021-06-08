@@ -14,12 +14,16 @@ io:
       tag: inspect
 mounts:
   /lib:
+    type: bind
     host: /lib
   /lib64:
+    type: bind
     host: /lib64
   /system:
+    type: bind
     host: /system
   /tmp:
-    tmpfs: 20480000
+    type: tmpfs
+    size: 10MB
 capabilities: [CAP_KILL]
 suppl_groups: [src, inet]

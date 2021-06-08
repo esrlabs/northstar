@@ -5,12 +5,18 @@ uid: 1000
 gid: 1000
 mounts:
   /lib:
+    type: bind
     host: /lib
   /lib64:
+    type: bind
     host: /lib64
   /message:
-    resource: message:0.0.2:/
+    type: resource
+    name: msesage
+    version: 0.0.2
+    dir: /
   /system:
+    type: bind
     host: /system
 io:
   stdout:

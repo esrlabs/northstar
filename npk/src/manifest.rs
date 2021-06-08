@@ -14,9 +14,9 @@
 
 use serde::{
     de::{Deserializer, Visitor},
-    ser::Serializer,
     Deserialize, Serialize,
 };
+use serde_with::skip_serializing_none;
 use std::{
     collections::{HashMap, HashSet},
     fmt, io,
@@ -29,17 +29,126 @@ pub type Name = String;
 pub type Capability = caps::Capability;
 pub type CGroupConfig = HashMap<String, String>;
 pub type CGroups = HashMap<String, CGroupConfig>;
+pub type MountOptions = HashSet<MountOption>;
+pub type Version = semver::Version;
+
+#[skip_serializing_none]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Manifest {
+    /// Name of container
+    pub name: Name,
+    /// Container version
+    pub version: Version,
+    /// Path to init
+    pub init: Option<PathBuf>,
+    /// Additional arguments for the application invocation
+    pub args: Option<Vec<String>>,
+    /// UID
+    pub uid: u32,
+    /// GID
+    pub gid: u32,
+    /// Environment passed to container
+    pub env: Option<HashMap<String, String>>,
+    /// Autostart this container upon northstar startup
+    pub autostart: Option<bool>,
+    /// CGroup config
+    pub cgroups: Option<CGroups>,
+    /// Seccomp configuration
+    pub seccomp: Option<HashMap<String, String>>,
+    /// List of bind mounts and resources
+    #[serde(
+        default,
+        skip_serializing_if = "HashMap::is_empty",
+        with = "::serde_with::rust::maps_duplicate_key_is_error"
+    )]
+    pub mounts: HashMap<PathBuf, Mount>,
+    /// String containing capability names to give to
+    /// new container
+    #[serde(default, with = "serde_caps")]
+    pub capabilities: Option<HashSet<Capability>>,
+    /// String containing group names to give to new container
+    pub suppl_groups: Option<Vec<String>>,
+    /// IO configuration
+    pub io: Option<Io>,
+}
+
+impl Manifest {
+    /// Manifest version supported by the runtime
+    pub const VERSION: Version = Version {
+        major: 0,
+        minor: 1,
+        patch: 0,
+        pre: vec![],
+        build: vec![],
+    };
+
+    pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
+        let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)?;
+        manifest.verify()?;
+        Ok(manifest)
+    }
+
+    pub fn to_writer<W: io::Write>(&self, writer: W) -> Result<(), Error> {
+        serde_yaml::to_writer(writer, self).map_err(Error::SerdeYaml)
+    }
+
+    fn verify(&self) -> Result<(), Error> {
+        // TODO: check for none on env, autostart, cgroups, seccomp
+        if self.init.is_none() && self.args.is_some() {
+            return Err(Error::Invalid(
+                "Arguments not allowed in resource container".to_string(),
+            ));
+        }
+
+        // Check for invalid uid 0
+        if self.uid == 0 {
+            return Err(Error::Invalid("Invalid uid 0".to_string()));
+        }
+
+        // Check for null bytes in suppl groups. Rust Strings allow null bytes in Strings.
+        // For passing the group names to getgrnam they need to be C string compliant.
+        if let Some(suppl_groups) = self.suppl_groups.as_ref() {
+            for suppl_group in suppl_groups {
+                if suppl_group.contains('\0') {
+                    return Err(Error::Invalid(format!(
+                        "Null byte in suppl group {}",
+                        suppl_group
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl FromStr for Manifest {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Manifest, Error> {
+        let manifest: Self = serde_yaml::from_str(s).map_err(Error::SerdeYaml)?;
+        manifest.verify()?;
+        Ok(manifest)
+    }
+}
+
+impl ToString for Manifest {
+    fn to_string(&self) -> String {
+        // A `Manifest` is convertible to `String` as long as its implementation of `Serialize` does
+        // not return an error. This should never happen for the types that we use in `Manifest` so
+        // we can safely use .unwrap() here.
+        serde_yaml::to_string(self).unwrap()
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Invalid manifest: {0}")]
     Invalid(String),
-    #[error("Failed to parse YAML format: {0}")]
+    #[error("Failed to parse: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
 }
-
-#[derive(Clone, PartialOrd, Hash, Eq, PartialEq)]
-pub struct Version(pub semver::Version);
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 /// Mount options
@@ -58,18 +167,11 @@ pub enum MountOption {
     NoDev,
 }
 
-/// Set of mount options
-pub type MountOptions = HashSet<MountOption>;
-
 /// /dev mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum Dev {
-    /// Bind mount the full /dev of the host
-    #[serde(rename = "full")]
-    Full,
-    /// Minimal /dev
-    #[serde(rename = "minimal")]
-    Minimal,
+pub struct Dev {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<PathBuf>>,
 }
 
 /// Resource mount configuration
@@ -78,6 +180,11 @@ pub struct Resource {
     pub name: String,
     pub version: Version,
     pub dir: PathBuf,
+    #[serde(
+        default,
+        with = "mount_options",
+        skip_serializing_if = "HashSet::is_empty"
+    )]
     pub options: MountOptions,
 }
 
@@ -85,27 +192,39 @@ pub struct Resource {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Bind {
     pub host: PathBuf,
+    #[serde(
+        default,
+        with = "mount_options",
+        skip_serializing_if = "HashSet::is_empty"
+    )]
     pub options: MountOptions,
 }
 
 /// Tmpfs configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Tmpfs {
+    #[serde(deserialize_with = "deserialize_tmpfs_size")]
     pub size: u64,
 }
 
 /// Mounts
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum Mount {
-    /// Mount a directory from a resouce
-    Resource(Resource),
     /// Bind mount of a host dir with options
+    #[serde(rename = "bind")]
     Bind(Bind),
     /// Mount /dev with flavor `dev`
+    #[serde(rename = "dev")]
     Dev(Dev),
     /// Mount a rw host directory dedicated to this container rw
+    #[serde(rename = "persist")]
     Persist,
+    /// Mount a directory from a resouce
+    #[serde(rename = "resource")]
+    Resource(Resource),
     /// Mount a tmpfs with size
+    #[serde(rename = "tmpfs")]
     Tmpfs(Tmpfs),
 }
 
@@ -130,161 +249,11 @@ pub enum Output {
     Log { level: log::Level, tag: String },
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Manifest {
-    /// Name of container
-    pub name: Name,
-    /// Container version
-    pub version: Version,
-    /// Path to init
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub init: Option<PathBuf>,
-    /// Additional arguments for the application invocation
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub args: Option<Vec<String>>,
-    /// UID
-    pub uid: u32,
-    /// GID
-    pub gid: u32,
-    /// Environment passed to container
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env: Option<HashMap<String, String>>,
-    /// Autostart this container upon northstar startup
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub autostart: Option<bool>,
-    /// CGroup config
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cgroups: Option<CGroups>,
-    /// Seccomp configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seccomp: Option<HashMap<String, String>>,
-    /// List of bind mounts and resources
-    #[serde(
-        default,
-        with = "serde_mounts",
-        skip_serializing_if = "HashMap::is_empty"
-    )]
-    pub mounts: HashMap<PathBuf, Mount>,
-    /// String containing capability names to give to
-    /// new container
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_caps")]
-    pub capabilities: Option<HashSet<Capability>>,
-    /// String containing group names to give to new container
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suppl_groups: Option<Vec<String>>,
-    /// IO configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub io: Option<Io>,
-}
-
-impl Version {
-    #[allow(dead_code)]
-    pub fn parse(s: &str) -> Result<Version, semver::SemVerError> {
-        Ok(Version(semver::Version::parse(s)?))
-    }
-}
-
-impl FromStr for Version {
-    type Err = semver::SemVerError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s)
-    }
-}
-
-impl Default for Version {
-    fn default() -> Version {
-        Version(semver::Version::new(0, 0, 0))
-    }
-}
-
-/// Serde serialization for `Version`
-impl Serialize for Version {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&self.0.to_string())
-    }
-}
-
-/// Serde deserialization for `Version`
-impl<'de> Deserialize<'de> for Version {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct VersionVisitor;
-
-        impl<'de> Visitor<'de> for VersionVisitor {
-            type Value = Version;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
-                formatter.write_str("string v0.0.0")
-            }
-
-            fn visit_str<E>(self, str_data: &str) -> Result<Version, E>
-            where
-                E: serde::de::Error,
-            {
-                semver::Version::parse(str_data).map(Version).map_err(|_| {
-                    serde::de::Error::invalid_value(::serde::de::Unexpected::Str(str_data), &self)
-                })
-            }
-        }
-
-        deserializer.deserialize_str(VersionVisitor)
-    }
-}
-
-impl fmt::Display for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl fmt::Debug for Version {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
-    }
-}
-
-mod serde_mounts {
-    use crate::manifest::MountOptions;
-
-    use super::{Dev, Mount, MountOption, Version};
+mod mount_options {
+    use super::{MountOption, MountOptions};
     use itertools::Itertools;
-    use lazy_static::lazy_static;
-    use serde::{de::Visitor, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
-    use std::{collections::HashMap, fmt, path::PathBuf, str::FromStr};
-
-    /// Configuration for the persist mounts
-    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-    enum Persist {
-        #[serde(rename = "persist")]
-        Persist,
-    }
-
-    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-    #[serde(untagged)]
-    enum MountSource {
-        Resource {
-            resource: String,
-            #[serde(default, skip_serializing_if = "String::is_empty")]
-            options: String,
-        },
-        Tmpfs {
-            #[serde(rename = "tmpfs", deserialize_with = "deserialize_tmpfs")]
-            size: u64,
-        },
-        Bind {
-            host: PathBuf,
-            #[serde(default, skip_serializing_if = "String::is_empty")]
-            options: String,
-        },
-        Dev(Dev),
-        Persist(Persist),
-    }
+    use serde::{de::Visitor, Deserializer, Serializer};
+    use std::str::FromStr;
 
     impl ToString for MountOption {
         fn to_string(&self) -> String {
@@ -300,7 +269,6 @@ mod serde_mounts {
 
     impl FromStr for MountOption {
         type Err = String;
-
         fn from_str(s: &str) -> Result<Self, Self::Err> {
             match s {
                 "rw" => Ok(MountOption::Rw),
@@ -312,201 +280,68 @@ mod serde_mounts {
         }
     }
 
-    /// Parse a string containing comma seperated mount options to a set
-    fn parse_mount_options(options: &str) -> Result<MountOptions, String> {
-        let options = options.trim();
-        if !options.is_empty() {
-            let mut iter = options.split(',');
-            let mut result = MountOptions::with_capacity(iter.size_hint().0);
-            iter.try_for_each(|s| {
-                result.insert(MountOption::from_str(s.trim())?);
-                Result::<_, String>::Ok(())
-            })?;
-            Ok(result)
-        } else {
-            Ok(MountOptions::default())
-        }
-    }
-
     pub(super) fn serialize<S: Serializer>(
-        mounts: &HashMap<PathBuf, Mount>,
+        options: &MountOptions,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(mounts.len()))?;
-        for (target, mount) in mounts {
-            match mount {
-                Mount::Bind(super::Bind { host, options }) => map.serialize_entry(
-                    &target,
-                    &MountSource::Bind {
-                        host: host.clone(),
-                        options: options.iter().map(ToString::to_string).join(","),
-                    },
-                )?,
-                Mount::Dev(dev) => map.serialize_entry(&target, dev)?,
-                Mount::Persist => {
-                    map.serialize_entry(&target, &MountSource::Persist(Persist::Persist))?
-                }
-                Mount::Resource(super::Resource {
-                    name,
-                    version,
-                    dir,
-                    options,
-                }) => map.serialize_entry(
-                    &target,
-                    &MountSource::Resource {
-                        resource: format!("{}:{}:{}", name, version, dir.display()),
-                        options: options.iter().map(ToString::to_string).join(","),
-                    },
-                )?,
-                Mount::Tmpfs(tmpfs) => {
-                    map.serialize_entry(&target, &MountSource::Tmpfs { size: tmpfs.size })?
-                }
-            }
-        }
-        map.end()
+        serializer.serialize_str(&options.iter().map(ToString::to_string).join(","))
     }
 
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<PathBuf, Mount>, D::Error>
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<MountOptions, D::Error>
     where
         D: Deserializer<'de>,
     {
-        struct MountVectorVisitor;
-        impl<'de> Visitor<'de> for MountVectorVisitor {
-            type Value = HashMap<PathBuf, Mount>;
+        struct MountOptionsVisitor;
+        impl<'de> Visitor<'de> for MountOptionsVisitor {
+            type Value = MountOptions;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
-                formatter.write_str("{ /path/a: Bind {} | Persist {} | Resource {}, /path/b: ... }")
+                formatter.write_str("comma seperated mount options")
             }
 
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let mut entries = HashMap::<PathBuf, Mount>::new();
-                while let Some((target, source)) = map.next_entry()? {
-                    let target: PathBuf = target;
-
-                    if entries.contains_key(&target) {
-                        return Err(serde::de::Error::custom(format!(
-                            "duplicate mount target: {}",
-                            target.display()
-                        )));
+            fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<MountOptions, E> {
+                let options = str_data.trim();
+                if !options.is_empty() {
+                    let iter = options.split(',');
+                    let mut result = MountOptions::with_capacity(iter.size_hint().0);
+                    for opt in iter {
+                        result.insert(
+                            MountOption::from_str(opt.trim()).map_err(serde::de::Error::custom)?,
+                        );
                     }
-
-                    let mount = match source {
-                        MountSource::Bind { host, options } => Mount::Bind(super::Bind {
-                            host,
-                            options: parse_mount_options(&options)
-                                .map_err(serde::de::Error::custom)?,
-                        }),
-                        MountSource::Dev(dev) => {
-                            // Check that only one Dev entry is configured
-                            if entries.values().any(|m| matches!(m, Mount::Dev(_))) {
-                                return Err(serde::de::Error::custom(
-                                    "mount configurations can only have one dev entry",
-                                ));
-                            }
-                            Mount::Dev(dev)
-                        }
-                        MountSource::Tmpfs { size } => Mount::Tmpfs(super::Tmpfs { size }),
-                        MountSource::Persist(Persist::Persist) => {
-                            if entries.values().any(|v| v == &Mount::Persist) {
-                                return Err(serde::de::Error::custom(
-                                    "mount configurations can only have one persist entry",
-                                ));
-                            }
-                            Mount::Persist
-                        }
-                        MountSource::Resource { resource, options } => {
-                            lazy_static! {
-                                static ref RE: regex::Regex = regex::Regex::new(
-                                    r"(?P<name>((\w|-|\.|_)+)):(?P<version>\d+\.\d+\.\d+):(?P<dir>[\w/]+)"
-                                )
-                                .expect("Invalid regex");
-                            }
-
-                            let caps = RE.captures(&resource).ok_or_else(|| {
-                                serde::de::Error::custom(format!("Invalid resource: {}", resource))
-                            })?;
-
-                            let name = caps.name("name").unwrap().as_str().to_string();
-                            let version = Version::parse(caps.name("version").unwrap().as_str())
-                                .map_err(serde::de::Error::custom)?;
-                            let dir = PathBuf::from(caps.name("dir").unwrap().as_str());
-                            let options =
-                                parse_mount_options(&options).map_err(serde::de::Error::custom)?;
-
-                            Mount::Resource(super::Resource {
-                                name,
-                                version,
-                                dir,
-                                options,
-                            })
-                        }
-                    };
-                    entries.insert(target, mount);
-                }
-                Ok(entries)
-            }
-        }
-
-        deserializer.deserialize_map(MountVectorVisitor)
-    }
-
-    fn deserialize_tmpfs<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-        struct SizeVisitor;
-
-        impl<'de> Visitor<'de> for SizeVisitor {
-            type Value = u64;
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(v)
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                lazy_static::lazy_static! {
-                    static ref RE: regex::Regex =
-                        regex::Regex::new(r"^(?P<value>\d+)(?P<unit>k|m|g)?$")
-                            .expect("Invalid regex");
-                }
-
-                let caps = RE.captures(&v).ok_or_else(|| {
-                    serde::de::Error::custom(format!("Invalid tmpfs size: {}", v))
-                })?;
-
-                let value = caps
-                    .name("value")
-                    .unwrap()
-                    .as_str()
-                    .parse::<u64>()
-                    .map_err(serde::de::Error::custom)?;
-                if let Some(unit) = caps.name("unit") {
-                    let value = match unit.as_str() {
-                        "k" => value * 1024,
-                        "m" => value * 1024 * 1024,
-                        "g" => value * 1024 * 1024 * 1024,
-                        _ => {
-                            return Err(serde::de::Error::custom(format!(
-                                "Invalid tmpfs unit: {}",
-                                unit.as_str()
-                            )))
-                        }
-                    };
-                    Ok(value)
+                    Ok(result)
                 } else {
-                    Ok(value)
+                    Ok(MountOptions::default())
                 }
             }
         }
 
-        deserializer.deserialize_any(SizeVisitor)
+        deserializer.deserialize_str(MountOptionsVisitor)
     }
+}
+
+fn deserialize_tmpfs_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    struct SizeVisitor;
+
+    impl<'de> Visitor<'de> for SizeVisitor {
+        type Value = u64;
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<u64, E> {
+            Ok(v)
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<u64, E> {
+            use humanize_rs::bytes::Bytes;
+            v.parse::<Bytes>()
+                .map(|b| b.size() as u64)
+                .map_err(serde::de::Error::custom)
+        }
+    }
+
+    deserializer.deserialize_any(SizeVisitor)
 }
 
 mod serde_caps {
@@ -514,13 +349,10 @@ mod serde_caps {
     use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serializer};
     use std::{collections::HashSet, str::FromStr};
 
-    pub(super) fn serialize<S>(
+    pub(super) fn serialize<S: Serializer>(
         caps: &Option<HashSet<Capability>>,
         serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
+    ) -> Result<S::Ok, S::Error> {
         if let Some(caps) = caps {
             let mut seq = serializer.serialize_seq(Some(caps.len()))?;
             for cap in caps {
@@ -532,12 +364,9 @@ mod serde_caps {
         }
     }
 
-    pub(super) fn deserialize<'de, D>(
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Option<HashSet<Capability>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
+    ) -> Result<Option<HashSet<Capability>>, D::Error> {
         let s: Option<HashSet<String>> = Option::deserialize(deserializer)?;
         if let Some(s) = s {
             if s.is_empty() {
@@ -553,96 +382,6 @@ mod serde_caps {
         } else {
             Ok(None)
         }
-    }
-}
-
-impl Manifest {
-    /// Manifest version supported by the runtime
-    pub const VERSION: Version = Version(semver::Version {
-        major: 0,
-        minor: 0,
-        patch: 4,
-        pre: vec![],
-        build: vec![],
-    });
-
-    pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
-        let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)?;
-        manifest.verify()?;
-        Ok(manifest)
-    }
-
-    pub fn to_writer<W: io::Write>(&self, writer: W) -> Result<(), Error> {
-        serde_yaml::to_writer(writer, self).map_err(Error::SerdeYaml)
-    }
-
-    fn verify(&self) -> Result<(), Error> {
-        fn assume_no_zero_byte(s: &str) -> Result<(), Error> {
-            if s.contains('\0') {
-                return Err(Error::Invalid(
-                    "Encountered unexpected null byte".to_string(),
-                ));
-            }
-            Ok(())
-        }
-
-        if self.init.is_none()
-            && (self.args.is_some()
-                || self.env.is_some()
-                || self.autostart.is_some()
-                || self.cgroups.is_some()
-                || self.seccomp.is_some())
-        {
-            return Err(Error::Invalid(
-                "A resource container must not contain args, env, autostart, cgroups or seccomp entries".to_string(),
-            ));
-        }
-
-        // Check for invalid uid 0
-        if self.uid == 0 {
-            return Err(Error::Invalid("Invalid uid 0".to_string()));
-        }
-
-        // Check for null bytes. Rust Strings allow null bytes in Strings that cannot be converted to cstrings.
-        if let Some(suppl_groups) = self.suppl_groups.as_ref() {
-            for suppl_group in suppl_groups {
-                assume_no_zero_byte(suppl_group)?;
-            }
-        }
-        if let Some(args) = self.args.as_ref() {
-            for arg in args {
-                assume_no_zero_byte(arg)?;
-            }
-        }
-        if let Some(env) = self.env.as_ref() {
-            for val in env.values() {
-                assume_no_zero_byte(val)?;
-            }
-        }
-        if let Some(seccomp) = self.seccomp.as_ref() {
-            for syscall in seccomp.keys() {
-                assume_no_zero_byte(syscall)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl FromStr for Manifest {
-    type Err = Error;
-    fn from_str(s: &str) -> Result<Manifest, Error> {
-        let manifest: Self = serde_yaml::from_str(s).map_err(Error::SerdeYaml)?;
-        manifest.verify()?;
-        Ok(manifest)
-    }
-}
-
-impl ToString for Manifest {
-    fn to_string(&self) -> String {
-        // A `Manifest` is convertible to `String` as long as its implementation of `Serialize` does
-        // not return an error. This should never happen for the types that we use in `Manifest` so
-        // we can safely use .unwrap() here.
-        serde_yaml::to_string(self).unwrap()
     }
 }
 
@@ -673,15 +412,22 @@ capabilities:
   - CAP_MKNOD
   - CAP_SYS_TIME
 mounts:
-  /dev: full
+  /dev:
+    type: dev
   /tmp:
-    tmpfs: 42
+    type: tmpfs
+    size: 42
   /lib:
+    type: bind
     host: /lib
     options: rw
-  /data: persist
+  /data:
+    type: persist
   /resource:
-    resource: bla-blah.foo:1.0.0:/bin/foo
+    type: resource
+    name: bla-blah.foo
+    version: 1.0.0
+    dir: /bin/foo
     options: noexec
 autostart: true
 cgroups:
@@ -730,7 +476,7 @@ seccomp:
             }),
         );
         mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs(Tmpfs { size: 42 }));
-        mounts.insert(PathBuf::from("/dev"), Mount::Dev(Dev::Full));
+        mounts.insert(PathBuf::from("/dev"), Mount::Dev(Dev { links: None }));
         assert_eq!(manifest.mounts, mounts);
 
         let mut cgroups = HashMap::new();
@@ -772,8 +518,10 @@ seccomp:
     fn duplicate_mount() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 mounts:
-  /dev: full
-  /dev: full
+  /dev:
+    type: dev
+  /dev:
+    type: dev
 ";
         assert!(Manifest::from_str(manifest).is_err());
 
@@ -785,13 +533,17 @@ mounts:
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 mounts:
   /a:
-    tmpfs: 100
+    type: tmpfs
+    size: 100
   /b:
-    tmpfs: 100k
+    type: tmpfs
+    size: 100kB
   /c:
-    tmpfs: 100m
+    type: tmpfs
+    size: 100MB
   /d:
-    tmpfs: 100g
+    type: tmpfs
+    size: 100GB
 ";
         let manifest = Manifest::from_str(manifest).unwrap();
         assert_eq!(
@@ -800,46 +552,31 @@ mounts:
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/b")),
-            Some(&Mount::Tmpfs(Tmpfs { size: 100 * 1024 }))
+            Some(&Mount::Tmpfs(Tmpfs { size: 100000 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/c")),
-            Some(&Mount::Tmpfs(Tmpfs {
-                size: 100 * 1024 * 1024
-            }))
+            Some(&Mount::Tmpfs(Tmpfs { size: 100000000 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/d")),
-            Some(&Mount::Tmpfs(Tmpfs {
-                size: 100 * 1024 * 1024 * 1024
-            }))
+            Some(&Mount::Tmpfs(Tmpfs { size: 100000000000 }))
         );
 
         // Test a invalid tmpfs size string
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\n uid: 1000\ngid: 1001
 mounts:
   /tmp:
-    tmpfs: 100M
+    type: tmpfs
+    size: 100MB
 ";
         assert!(Manifest::from_str(manifest).is_err());
     }
 
     #[test]
     fn dev_minimal() {
-        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev: minimal";
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev:\n    type: dev\n    links: []";
         assert!(Manifest::from_str(manifest).is_ok());
-    }
-
-    #[test]
-    fn dev_full() {
-        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev: full";
-        assert!(Manifest::from_str(manifest).is_ok());
-    }
-
-    #[test]
-    fn dev_invalid() {
-        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev: foo";
-        assert!(Manifest::from_str(manifest).is_err());
     }
 
     #[test]
@@ -847,7 +584,10 @@ mounts:
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 mounts:
   /foo:
-    resource: foo-bar.qwerty12:0.0.1:/
+    type: resource
+    name: foo-bar.qwerty12
+    version: 0.0.1
+    dir: /
     options: rw,noexec,nosuid
 ";
         Manifest::from_str(manifest).unwrap();
@@ -867,18 +607,27 @@ args:
 env:
   LD_LIBRARY_PATH: /lib
 mounts:
+  /dev:
+    type: dev
+    links: [/dev/socket/logdw, /dev/sda1]
   /lib:
+    type: bind
     host: /lib
     options: rw,nosuid,nodev,noexec
   /no_option:
+    type: bind
     host: /foo
-  /data: persist
+  /data:
+    type: persist
   /resource:
-    resource: bla-bar.blah1234:1.0.0:/bin/foo
+    type: resource
+    name: bla-bar.blah1234
+    version: 1.0.0
+    dir: /bin/foo
     options: rw,nosuid,nodev,noexec
   /tmp:
-    tmpfs: 42
-  /dev: full
+    type: tmpfs
+    size: 42
 autostart: true
 cgroups:
   memory:
@@ -894,8 +643,8 @@ io:
   stdin: pipe
   stdout: 
     log:
-      - DEBUG
-      - test
+      level: DEBUG
+      tag: test
   stderr: pipe
 ";
 
