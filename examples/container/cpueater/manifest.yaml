@@ -9,14 +9,14 @@ cgroups:
   cpu:
     shares: 100
 mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system
 io:
   stdout:
     log:
-      - DEBUG
-      - cpueater
+      level: DEBUG
+      tag: cpueater

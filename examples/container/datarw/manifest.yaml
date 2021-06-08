@@ -14,5 +14,5 @@ mounts:
 io:
   stdout:
     log:
-      - DEBUG
-      - datarw
+      level: DEBUG
+      tag: datarw

@@ -8,18 +8,18 @@ gid: 1000
 args:
   - /message/hello
 mounts:
-    /bin:
-      resource: ferris:0.0.1:/
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
-    /message:
-      resource: message:0.0.1:/
+  /bin:
+    resource: ferris:0.0.1:/
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system
+  /message:
+    resource: message:0.0.1:/
 io:
   stdout:
     log:
-      - DEBUG
-      - ferris
+      level: DEBUG
+      tag: ferris

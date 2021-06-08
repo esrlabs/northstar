@@ -6,23 +6,20 @@ gid: 1000
 io:
   stdout:
     log:
-      - DEBUG
-      - inspect
+      level: DEBUG
+      tag: inspect
   stderr:
     log:
-      - WARN
-      - inspect
+      level: WARN
+      tag: inspect
 mounts:
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
-    /tmp:
-      tmpfs: 20480000
-capabilities:
-  - CAP_KILL
-suppl_groups:
-  - src
-  - inet
+  /lib:
+    host: /lib
+  /lib64:
+    host: /lib64
+  /system:
+    host: /system
+  /tmp:
+    tmpfs: 20480000
+capabilities: [CAP_KILL]
+suppl_groups: [src, inet]
