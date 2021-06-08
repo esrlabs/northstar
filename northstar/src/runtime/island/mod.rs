@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use self::fs::Dev;
 use super::{
     config::Config,
     error::Error,
@@ -68,12 +69,14 @@ pub(super) enum IslandProcess {
         pid: Pid,
         exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
         io: (Option<io::Log>, Option<io::Log>),
+        _dev: Dev,
         checkpoint: Checkpoint,
     },
     Started {
         pid: Pid,
         exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
         io: (Option<io::Log>, Option<io::Log>),
+        _dev: Dev,
     },
     Stopped,
 }
@@ -127,7 +130,7 @@ impl Launcher for Island {
 
         // Prepare a list of mounts and groups that need to be applied to the child. Prepare the list here
         // to avoid any allocation in the child
-        let mounts = fs::mounts(&self.config, &container).await?;
+        let (mounts, dev) = fs::mounts(&self.config, &container).await?;
         let groups = groups(manifest);
         let seccomp = seccomp::seccomp_filter(container.manifest.seccomp.as_ref());
 
@@ -162,6 +165,7 @@ impl Launcher for Island {
                         exit_status,
                         io: (stdout, stderr),
                         checkpoint: checkpoint_parent,
+                        _dev: dev,
                     })
                 }
                 unistd::ForkResult::Child => {
@@ -202,6 +206,7 @@ impl super::Process for IslandProcess {
                 pid,
                 exit_status,
                 io: _io,
+                _dev,
                 mut checkpoint,
             } => {
                 checkpoint.async_send(Start::Start).await;
@@ -211,6 +216,7 @@ impl super::Process for IslandProcess {
                     pid,
                     exit_status,
                     io: _io,
+                    _dev,
                 })
             }
             _ => unreachable!(),
@@ -234,6 +240,7 @@ impl super::Process for IslandProcess {
                 pid,
                 exit_status,
                 io,
+                ..
             } => (pid, exit_status, io),
             IslandProcess::Stopped { .. } => unreachable!(),
         };

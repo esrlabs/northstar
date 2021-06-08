@@ -37,7 +37,6 @@ fn main() {
         .path()
         .to_owned();
     fs::copy(&bin, &root.join("test_container")).expect("failed to copy bin");
-    fs::copy(&bin, "/tmp/asdf").expect("failed to copy bin");
 
     let out_dir = env::var("OUT_DIR").unwrap();
 
