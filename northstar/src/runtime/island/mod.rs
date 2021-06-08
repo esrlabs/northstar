@@ -77,7 +77,7 @@ impl fmt::Debug for IslandProcess {
                 .debug_struct("IslandProcess::Started")
                 .field("pid", &pid)
                 .finish(),
-            IslandProcess::Stopped => f.debug_struct("IslandProcess::Stoped").finish(),
+            IslandProcess::Stopped => f.debug_struct("IslandProcess::Stopped").finish(),
         }
     }
 }
@@ -103,10 +103,12 @@ impl Launcher for Island {
     async fn create(&self, container: &Container<Self::Process>) -> Result<Self::Process, Error> {
         let manifest = &container.manifest;
         let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
-        let (checkpoint_parent, checkpoint_child) = checkpoints();
+        let (checkpoint_parent, checkpoint_child) =
+            checkpoints().expect("Failed to create pipes between parent and child processes");
 
         // Calculating init, argv and env allocates. Do that before `clone`.
-        let (init, argv, env) = init::args(manifest);
+        let (init, argv, env) =
+            init::args(manifest).expect("Failed to extract container arguments");
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
@@ -371,11 +373,11 @@ enum Start {
 
 pub(super) struct Checkpoint(PipeRead, PipeWrite);
 
-fn checkpoints() -> (Checkpoint, Checkpoint) {
-    let a = pipe::pipe().unwrap();
-    let b = pipe::pipe().unwrap();
+fn checkpoints() -> Option<(Checkpoint, Checkpoint)> {
+    let a = pipe::pipe().ok()?;
+    let b = pipe::pipe().ok()?;
 
-    (Checkpoint(a.0, b.1), Checkpoint(b.0, a.1))
+    Some((Checkpoint(a.0, b.1), Checkpoint(b.0, a.1)))
 }
 
 impl Checkpoint {
@@ -402,7 +404,8 @@ impl Checkpoint {
 
 #[test]
 fn sync() {
-    let (mut child, mut parent) = checkpoints();
+    let (mut child, mut parent) =
+        checkpoints().expect("Failed to create pipes between parent and child processes");
     parent.send(Start::Start);
     child.wait(Start::Start);
 

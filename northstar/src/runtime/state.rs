@@ -275,7 +275,7 @@ impl<'a, L: Launcher> State<'a, L> {
         if let Some((_, manifest, _)) = self.npk(container) {
             // The the to be started container
             if let Some(mounted_container) = self.containers.get(container) {
-                // Check if the container is not a resouce
+                // Check if the container is not a resource
                 if mounted_container.manifest.init.is_none() {
                     warn!("Container {} is a resource", container);
                     return Err(Error::StartContainerResource(container.clone()));
@@ -493,7 +493,7 @@ impl<'a, L: Launcher> State<'a, L> {
             .repositories
             .get(repository_id)
             .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
-        // Load the npk to indentify name and version
+        // Load the npk to identify name and version
         let npk = task::block_in_place(|| Npk::from_path(src, repository.key.as_ref()))
             .map_err(Error::Npk)?;
 
