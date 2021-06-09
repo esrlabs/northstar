@@ -18,8 +18,11 @@ use super::{
     Container, RepositoryId,
 };
 use floating_duration::TimeAsFloat;
-use futures::future::OptionFuture;
-use log::{debug, info};
+use futures::{
+    future::{join_all, ready, OptionFuture},
+    FutureExt,
+};
+use log::{debug, info, warn};
 use npk::npk::Npk;
 use std::{
     collections::HashMap,
@@ -55,23 +58,41 @@ impl Repository {
             .map_err(|e| Error::Io("Repository read dir".into(), e))?;
 
         let start = Instant::now();
+        let mut loads = vec![];
+        let npk_extension = Some(OsStr::new("npk"));
         while let Ok(Some(entry)) = readir.next_entry().await {
-            let npk_extension = Some(OsStr::new("npk"));
-            if entry.path().extension() != npk_extension {
-                continue;
+            let file = entry.path();
+            if file.extension() == npk_extension {
+                let task = task::spawn_blocking(move || {
+                    debug!("Loading {}", file.display());
+                    let npk = Npk::from_path(&file, key.as_ref())
+                        .map_err(|e| Error::Npk(file.clone(), e))?;
+                    let name = npk.manifest().name.clone();
+                    let version = npk.manifest().version.clone();
+                    let container = Container::new(name, version);
+                    Result::<_, Error>::Ok((container, file, npk))
+                })
+                .then(|r| match r {
+                    Ok(r) => ready(r),
+                    Err(_) => panic!("Task error"),
+                });
+                loads.push(task);
             }
-
-            debug!("Loading {}", entry.path().display());
-            let npk = task::block_in_place(|| Npk::from_path(entry.path().as_path(), key.as_ref()))
-                .map_err(|e| Error::Npk(entry.path(), e))?;
-            let name = npk.manifest().name.clone();
-            let version = npk.manifest().version.clone();
-            let container = Container::new(name, version);
-            containers.insert(container.clone(), (entry.path(), Arc::new(npk)));
         }
+
+        let results = join_all(loads).await;
+        for result in results {
+            match result {
+                Ok((container, file, npk)) => {
+                    containers.insert(container, (file, Arc::new(npk)));
+                }
+                Err(e) => warn!("Failed to load: {}", e),
+            }
+        }
+
         let duration = start.elapsed();
         info!(
-            "Loaded {} containers from {} in {:.03}s (avg: {:.03}s)",
+            "Loaded {} containers from {} in {:.03}s (avg: {:.05}s)",
             containers.len(),
             dir.display(),
             duration.as_fractional_secs(),
