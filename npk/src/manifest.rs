@@ -167,13 +167,6 @@ pub enum MountOption {
     NoDev,
 }
 
-/// /dev mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Dev {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<PathBuf>>,
-}
-
 /// Resource mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Resource {
@@ -216,7 +209,7 @@ pub enum Mount {
     Bind(Bind),
     /// Mount /dev with flavor `dev`
     #[serde(rename = "dev")]
-    Dev(Dev),
+    Dev,
     /// Mount a rw host directory dedicated to this container rw
     #[serde(rename = "persist")]
     Persist,
@@ -476,7 +469,7 @@ seccomp:
             }),
         );
         mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs(Tmpfs { size: 42 }));
-        mounts.insert(PathBuf::from("/dev"), Mount::Dev(Dev { links: None }));
+        mounts.insert(PathBuf::from("/dev"), Mount::Dev);
         assert_eq!(manifest.mounts, mounts);
 
         let mut cgroups = HashMap::new();
@@ -575,7 +568,7 @@ mounts:
 
     #[test]
     fn dev_minimal() {
-        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev:\n    type: dev\n    links: []";
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\nmounts:\n  /dev:\n    type: dev";
         assert!(Manifest::from_str(manifest).is_ok());
     }
 
@@ -609,7 +602,6 @@ env:
 mounts:
   /dev:
     type: dev
-    links: [/dev/socket/logdw, /dev/sda1]
   /lib:
     type: bind
     host: /lib

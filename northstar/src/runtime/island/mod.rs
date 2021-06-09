@@ -122,7 +122,8 @@ impl Launcher for Island {
             checkpoints().expect("Failed to create pipes between parent and child processes");
 
         // Calculating init, argv and env allocates. Do that before `clone`.
-        let (init, argv, env) = args::args(manifest).expect("Failed to extract container arguments");
+        let (init, argv, env) =
+            args::args(manifest).expect("Failed to extract container arguments");
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
