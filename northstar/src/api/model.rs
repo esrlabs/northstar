@@ -23,7 +23,7 @@ pub type Name = String;
 pub type Pid = u32;
 pub type RepositoryId = String;
 
-const VERSION: &str = "0.0.3";
+const VERSION: &str = "0.0.4";
 
 /// Protocol version
 /// TODO: Do some static initialization of the version struct
@@ -192,7 +192,7 @@ pub enum Error {
     InvalidRepository(RepositoryId),
     InstallDuplicate(Container),
 
-    Npk(String),
+    Npk(String, String),
     NpkArchive(String),
     Process(String),
     Console(String),

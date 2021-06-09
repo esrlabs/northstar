@@ -179,7 +179,8 @@ impl<'a, L: Launcher> State<'a, L> {
         // TODO: Reuse Npk stored in the repository and do not open again. This changed
         // implies some lifetime changes due to the movement into the mount task.
         // Load NPK
-        let npk = task::block_in_place(|| Npk::from_path(npk, key).map_err(Error::Npk))?;
+        let npk = task::block_in_place(|| Npk::from_path(npk, key))
+            .map_err(|e| Error::Npk(npk.to_owned(), e))?;
         let manifest = npk.manifest().clone();
 
         // Try to mount the npk found. If this fails return with an error - nothing needs to
@@ -495,7 +496,7 @@ impl<'a, L: Launcher> State<'a, L> {
             .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
         // Load the npk to identify name and version
         let npk = task::block_in_place(|| Npk::from_path(src, repository.key.as_ref()))
-            .map_err(Error::Npk)?;
+            .map_err(|e| Error::Npk(src.to_owned(), e))?;
 
         // Construct a container key for the new npk
         let manifest = npk.manifest();
