@@ -412,13 +412,8 @@ impl Minijail {
                     jail.mount_with_data(&Path::new("none"), &target, "tmpfs", 0, &data)
                         .map_err(into_io_error)?;
                 }
-                Mount::Dev(dev) => {
-                    if dev.links.is_some() {
-                        jail.mount_dev();
-                    } else {
-                        jail.mount_bind(&Path::new("/dev"), &target, true)
-                            .map_err(into_io_error)?;
-                    }
+                Mount::Dev => {
+                    jail.mount_dev();
                 }
             }
         }

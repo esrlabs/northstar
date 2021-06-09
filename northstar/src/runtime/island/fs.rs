@@ -22,7 +22,7 @@ use nix::{
     unistd,
     unistd::{chown, Gid, Uid},
 };
-use npk::manifest::{self, Manifest, MountOption, MountOptions, Resource, Tmpfs};
+use npk::manifest::{self, MountOption, MountOptions, Resource, Tmpfs};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::{fs::symlink, task};
@@ -74,7 +74,9 @@ pub(super) async fn mounts(
 
     proc(&root, &mut mounts);
 
-    for (target, mount) in &container.manifest.mounts {
+    let manifest_mounts = &container.manifest.mounts;
+
+    for (target, mount) in manifest_mounts {
         match &mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
                 bind(&root, target, host, options, &mut mounts)
@@ -86,16 +88,15 @@ pub(super) async fn mounts(
                 resource(&root, target, config, container, res, &mut mounts)?;
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => tmpfs(&root, target, *size, &mut mounts),
-            manifest::Mount::Dev(_) => {
-                // TODO: links
-                dev = self::dev(&root, &container.manifest, &mut mounts).await;
+            manifest::Mount::Dev => {
+                dev = self::dev(&root, &container, &mut mounts).await;
             }
         }
     }
 
     // No dev configured in mounts: Use minimal version
-    if dev.is_none() {
-        dev = self::dev(&root, &container.manifest, &mut mounts).await;
+    if dev.is_none() && !manifest_mounts.contains_key(Path::new("/dev")) {
+        dev = self::dev(&root, &container, &mut mounts).await;
     }
 
     Ok((mounts, dev))
@@ -283,10 +284,13 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
     flags
 }
 
-async fn dev(root: &Path, manifest: &Manifest, mounts: &mut Vec<Mount>) -> Dev {
+async fn dev(root: &Path, container: &Container, mounts: &mut Vec<Mount>) -> Dev {
     let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
     debug!("Creating devfs in {}", dir.path().display());
-    task::block_in_place(|| dev_devices(dir.path(), manifest.uid, manifest.gid));
+
+    task::block_in_place(|| {
+        dev_devices(dir.path(), container.manifest.uid, container.manifest.gid)
+    });
     dev_symlinks(dir.path()).await;
 
     let flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
