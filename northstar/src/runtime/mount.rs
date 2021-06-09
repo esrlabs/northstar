@@ -13,7 +13,11 @@
 //   limitations under the License.
 
 use super::{
-    config::Config, device_mapper as dm, device_mapper, key::PublicKey, loopdev::LoopControl,
+    config::Config,
+    device_mapper as dm,
+    device_mapper::{self},
+    key::PublicKey,
+    loopdev::LoopControl,
 };
 use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
@@ -87,7 +91,7 @@ impl MountControl {
     /// Mounts the npk root fs to target and returns the device used to mount (loopback or device mapper)
     pub(super) async fn mount(
         &self,
-        npk: Npk,
+        npk: Arc<Npk>,
         target: &Path,
         key: Option<&PublicKey>,
     ) -> impl Future<Output = Result<PathBuf, Error>> {
@@ -157,7 +161,7 @@ async fn setup_and_mount(
     dm: Arc<dm::Dm>,
     lc: Arc<LoopControl>,
     device_mapper_dev: &str,
-    npk: Npk,
+    npk: Arc<Npk>,
     target: &Path,
     verity: bool,
 ) -> Result<PathBuf, Error> {
@@ -165,7 +169,7 @@ async fn setup_and_mount(
     let fsimg_offset = npk.fsimg_offset();
     let fsimg_size = npk.fsimg_size();
     let manifest = npk.manifest();
-    let name = format!(
+    let dm_name = format!(
         "northstar_{}_{}_{}",
         process::id(),
         manifest.name,
@@ -191,12 +195,12 @@ async fn setup_and_mount(
 
                 debug!("Loop device id is {}", loop_device_id);
 
-                let verity_device = verity_setup(
+                let verity_device = dmsetup(
                     dm.clone(),
                     device_mapper_dev,
                     &loop_device_id,
                     &header,
-                    &name,
+                    &dm_name,
                     hashes.fs_verity_hash.as_str(),
                     hashes.fs_verity_offset,
                 )
@@ -225,13 +229,13 @@ async fn setup_and_mount(
         &FS_TYPE,
         MountFlags::MS_RDONLY | MountFlags::MS_NODEV | MountFlags::MS_NOSUID,
         None,
-    )
-    .await?;
+    )?;
 
     // Set the device to auto-remove once unmounted
     if verity {
+        debug!("Enabling defered removal on device {}", dm_name);
         dm.device_remove(
-            &name.to_string(),
+            &dm_name,
             &device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
         )
         .await
@@ -241,7 +245,7 @@ async fn setup_and_mount(
     Ok(device.to_owned())
 }
 
-async fn verity_setup(
+async fn dmsetup(
     dm: Arc<dm::Dm>,
     device_mapper_dev: &str,
     dev: &str,
@@ -250,7 +254,7 @@ async fn verity_setup(
     verity_hash: &str,
     size: u64,
 ) -> Result<PathBuf, Error> {
-    debug!("Creating a read-only verity device (name: {})", &name);
+    debug!("Creating a read-only verity device {}", &name);
     let start = time::Instant::now();
 
     let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
@@ -271,8 +275,6 @@ async fn verity_setup(
     );
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
-    debug!("Creating verity device");
-
     let dm_device = dm
         .device_create(
             &name,
@@ -282,7 +284,7 @@ async fn verity_setup(
         .map_err(Error::DeviceMapper)?;
     let dm_dev = PathBuf::from(format!("{}{}", device_mapper_dev, dm_device.id() & 0xFF));
 
-    debug!("Using verity device {}", dm_dev.display());
+    debug!("Created verity device {}", dm_dev.display());
 
     dm.table_load_flags(
         name,
@@ -292,7 +294,7 @@ async fn verity_setup(
     .await
     .map_err(Error::DeviceMapper)?;
 
-    debug!("Resuming device");
+    debug!("Resuming device {}", dm_dev.display());
     dm.device_suspend(&name, &dm::DmOptions::new())
         .await
         .map_err(Error::DeviceMapper)?;
@@ -304,21 +306,20 @@ async fn verity_setup(
 
     let veritysetup_duration = start.elapsed();
     debug!(
-        "Verity setup took {:.03}s",
+        "Verity completed after {:.03}s",
         veritysetup_duration.as_fractional_secs()
     );
 
     Ok(dm_dev)
 }
 
-async fn mount(
+fn mount(
     dev: &Path,
     target: &Path,
     r#type: &str,
     flags: MountFlags,
     data: Option<&str>,
 ) -> Result<(), Error> {
-    let start = time::Instant::now();
     debug!(
         "Mounting {} fs on {} to {}",
         r#type,
@@ -328,9 +329,6 @@ async fn mount(
     task::block_in_place(|| {
         nix::mount::mount(Some(dev), target, Some(r#type), flags, data).map_err(Error::Os)
     })?;
-
-    let mount_duration = start.elapsed();
-    debug!("Mounting took {:.03}s", mount_duration.as_fractional_secs());
 
     Ok(())
 }

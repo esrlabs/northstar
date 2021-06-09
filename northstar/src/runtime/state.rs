@@ -157,10 +157,10 @@ impl<'a, L: Launcher> State<'a, L> {
         })
     }
 
-    fn npk(&self, container: &Container) -> Option<(&Path, &Manifest, Option<&PublicKey>)> {
+    fn npk(&self, container: &Container) -> Option<(&Path, Arc<Npk>, Option<&PublicKey>)> {
         for repository in self.repositories.values() {
-            if let Some((path, manifest)) = repository.containers.get(container) {
-                return Some((path, manifest, repository.key.as_ref()));
+            if let Some((path, npk)) = repository.containers.get(container) {
+                return Some((path, npk.clone(), repository.key.as_ref()));
             }
         }
         None
@@ -172,15 +172,10 @@ impl<'a, L: Launcher> State<'a, L> {
         container: &Container,
     ) -> Result<impl Future<Output = Result<MountedContainer<L::Process>, Error>>, Error> {
         // Find npk and optional key
-        let (npk, _, key) = self
+        let (_, npk, key) = self
             .npk(container)
             .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
 
-        // TODO: Reuse Npk stored in the repository and do not open again. This changed
-        // implies some lifetime changes due to the movement into the mount task.
-        // Load NPK
-        let npk = task::block_in_place(|| Npk::from_path(npk, key))
-            .map_err(|e| Error::Npk(npk.to_owned(), e))?;
         let manifest = npk.manifest().clone();
 
         // Try to mount the npk found. If this fails return with an error - nothing needs to
@@ -273,7 +268,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         let mut need_mount = HashSet::new();
 
-        if let Some((_, manifest, _)) = self.npk(container) {
+        if let Some((_, npk, _)) = self.npk(container) {
             // The the to be started container
             if let Some(mounted_container) = self.containers.get(container) {
                 // Check if the container is not a resource
@@ -292,7 +287,8 @@ impl<'a, L: Launcher> State<'a, L> {
             }
 
             // Find to be mounted resources
-            for resource in manifest
+            for resource in npk
+                .manifest()
                 .mounts
                 .values()
                 .filter_map(|m| match m {
@@ -342,14 +338,14 @@ impl<'a, L: Launcher> State<'a, L> {
 
         // Log mounts and insert into the list of mounted containers
         for (container, mounted_container) in ok {
-            debug!("Successfully mounted {}", container);
+            info!("Successfully mounted {}", container);
             self.containers
                 .insert(container.clone(), mounted_container.unwrap());
         }
 
         // Log failures
         for (container, err) in &failed {
-            debug!(
+            warn!(
                 "Failed to mount {}: {}",
                 container,
                 err.as_ref().err().unwrap()
@@ -625,7 +621,8 @@ impl<'a, L: Launcher> State<'a, L> {
                                             mounted_container,
                                         );
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
+                                        warn!("Failed to mount: {}", e);
                                         warn!(
                                             "Not yet implemented: error handling for bulk mounts"
                                         );
