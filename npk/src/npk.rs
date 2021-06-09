@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use crate::{
-    dm_verity,
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Manifest, Mount, MountFlag, Version},
 };
@@ -26,9 +25,9 @@ use rand::rngs::OsRng;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
+    fmt,
     fs::{self, File},
-    io,
-    io::{BufReader, Read, Seek, SeekFrom, Write},
+    io::{self, BufReader, Read, Seek, SeekFrom, Write},
     os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     process::Command,
@@ -53,17 +52,19 @@ const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
 const NPK_EXT: &str = "npk";
 
+type Zip = ZipArchive<BufReader<File>>;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Manifest error: {0}")]
     Manifest(String),
-    #[error("IO error: {context}")]
+    #[error("IO: {context}")]
     Io {
         context: String,
         #[source]
         error: io::Error,
     },
-    #[error("IO error: {context}")]
+    #[error("IO: {context}")]
     FsExtra {
         context: String,
         #[source]
@@ -148,17 +149,14 @@ pub struct Npk {
     version: Version,
     fs_img_offset: u64,
     fs_img_size: u64,
-    verity_header: Option<dm_verity::VerityHeader>,
+    verity_header: Option<VerityHeader>,
     hashes: Option<Hashes>,
 }
 
-fn extract_hashes(
-    mut zip: &mut ZipArchive<BufReader<File>>,
-    key: Option<&PublicKey>,
-) -> Result<Option<Hashes>, Error> {
+fn hashes(mut zip: &mut Zip, key: Option<&PublicKey>) -> Result<Option<Hashes>, Error> {
     match key {
         Some(k) => {
-            let signature_content = read_zip_file(&mut zip, SIGNATURE_NAME)?;
+            let signature_content = read_to_string(&mut zip, SIGNATURE_NAME)?;
             let mut sections = signature_content.split("---");
             let hashes_string = sections.next().unwrap_or_default();
 
@@ -173,10 +171,28 @@ fn extract_hashes(
     }
 }
 
-fn read_zip_file(zip: &mut ZipArchive<BufReader<File>>, name: &str) -> Result<String, Error> {
-    let mut file = zip.by_name(name).map_err(|e| Error::Zip {
+fn manifest(mut zip: &mut Zip, hashes: Option<&Hashes>) -> Result<Manifest, Error> {
+    let content = read_to_string(&mut zip, &MANIFEST_NAME)?;
+    if let Some(Hashes { manifest_hash, .. }) = &hashes {
+        let expected_hash = hex::decode(manifest_hash)
+            .map_err(|e| Error::Manifest(format!("Failed to parse manifest hash {}", e)))?;
+        let actual_hash = Sha256::digest(&content.as_bytes());
+        if expected_hash != actual_hash.as_slice() {
+            return Err(Error::Manifest(format!(
+                "Invalid manifest hash (expected={} actual={})",
+                manifest_hash,
+                hex::encode(actual_hash)
+            )));
+        }
+    }
+    Manifest::from_str(&content)
+        .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))
+}
+
+fn read_to_string(zip: &mut Zip, name: &str) -> Result<String, Error> {
+    let mut file = zip.by_name(name).map_err(|error| Error::Zip {
         context: format!("Failed to locate {} in ZIP file", name),
-        error: e,
+        error,
     })?;
     let mut content = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut content).map_err(|e| Error::Io {
@@ -208,13 +224,14 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
 
 impl Npk {
     pub fn new(npk: File, key: Option<&PublicKey>) -> Result<Self, Error> {
-        let mut archive = zip::ZipArchive::new(BufReader::new(npk)).map_err(|e| Error::Zip {
-            context: "Failed to parse ZIP format".to_string(),
-            error: e,
+        let npk = BufReader::new(npk);
+        let mut zip = Zip::new(npk).map_err(|error| Error::Zip {
+            context: "Failed to open NPK".to_string(),
+            error,
         })?;
 
         let version = {
-            let comment = &std::str::from_utf8(&archive.comment())
+            let comment = &std::str::from_utf8(&zip.comment())
                 .map_err(|e| Error::Manifest(format!("Failed to read NPK version string {}", e)))?;
             let version = comment
                 .split_whitespace()
@@ -227,50 +244,30 @@ impl Npk {
                 .map_err(|e| Error::Manifest(format!("Failed to parse NPK version {}", e)))?
         };
 
-        let hashes = extract_hashes(&mut archive, key)?;
-
-        let manifest = {
-            let content = read_zip_file(&mut archive, &MANIFEST_NAME)?;
-            if let Some(Hashes { manifest_hash, .. }) = &hashes {
-                let expected_hash = hex::decode(manifest_hash)
-                    .map_err(|e| Error::Manifest(format!("Failed to parse manifest hash {}", e)))?;
-                let actual_hash = Sha256::digest(&content.as_bytes());
-                if expected_hash != actual_hash.as_slice() {
-                    return Err(Error::Manifest(format!(
-                        "Invalid manifest hash (expected={} actual={})",
-                        manifest_hash,
-                        hex::encode(actual_hash)
-                    )));
-                }
-            }
-            Manifest::from_str(&content)
-                .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))?
-        };
-
+        let hashes = hashes(&mut zip, key)?;
+        let manifest = manifest(&mut zip, hashes.as_ref())?;
         let (fs_img_offset, fs_img_size) = {
-            let fs_img = &archive.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
+            let fs_img = &zip.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
                 context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
                 error: e,
             })?;
             (fs_img.data_start(), fs_img.size())
         };
 
-        let mut reader = archive.into_inner();
-
+        let mut file = zip.into_inner();
         let verity_header = match &hashes {
             Some(hs) => {
-                reader
-                    .seek(SeekFrom::Start(fs_img_offset + hs.fs_verity_offset))
+                file.seek(SeekFrom::Start(fs_img_offset + hs.fs_verity_offset))
                     .map_err(|e| Error::Io {
                         context: format!("{} too small to extract verity header", &FS_IMG_NAME),
                         error: e,
                     })?;
-                Some(VerityHeader::from_bytes(reader.by_ref()).map_err(Error::Verity)?)
+                Some(VerityHeader::from_bytes(&mut file).map_err(Error::Verity)?)
             }
             None => None,
         };
 
-        let file = reader.into_inner();
+        let file = file.into_inner();
 
         Ok(Self {
             file,
@@ -307,7 +304,7 @@ impl Npk {
         self.fs_img_size
     }
 
-    pub fn verity_header(&self) -> Option<&dm_verity::VerityHeader> {
+    pub fn verity_header(&self) -> Option<&VerityHeader> {
         self.verity_header.as_ref()
     }
 }
@@ -373,8 +370,8 @@ pub enum CompressionAlgorithm {
     Zstd,
 }
 
-impl std::fmt::Display for CompressionAlgorithm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for CompressionAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CompressionAlgorithm::Gzip => write!(f, "gzip"),
             CompressionAlgorithm::Lzma => write!(f, "lzma"),
@@ -387,6 +384,7 @@ impl std::fmt::Display for CompressionAlgorithm {
 
 impl FromStr for CompressionAlgorithm {
     type Err = Error;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "gzip" => Ok(CompressionAlgorithm::Gzip),
@@ -532,14 +530,14 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     assume_non_existing(&prv_key)?;
     write(&key_pair.public.to_bytes(), &pub_key)?;
     write(&key_pair.secret.to_bytes(), &prv_key)?;
+
     Ok(())
 }
 
 fn read_manifest(path: &Path) -> Result<Manifest, Error> {
     let file = open(&path)?;
-    let manifest = Manifest::from_reader(&file)
-        .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))?;
-    Ok(manifest)
+    Manifest::from_reader(&file)
+        .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
@@ -554,7 +552,9 @@ fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
         context: format!("Failed to derive secret key from '{}'", &key_file.display()),
         error: e,
     })?;
+
     let public_key = PublicKey::from(&secret_key);
+
     Ok(Keypair {
         secret: secret_key,
         public: public_key,
@@ -589,6 +589,7 @@ fn gen_hashes_yaml(
         hash.iter().format(""),
         fsimg_size
     );
+
     Ok(hashes)
 }
 
@@ -603,14 +604,15 @@ fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Err
     let key_pair = read_keypair(&key)?;
     let hashes_yaml = gen_hashes_yaml(&manifest, &fsimg, fsimg_size, &root_hash)?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
+
     Ok(signature_yaml)
 }
 
 /// Returns a temporary file with all the pseudo file definitions
 fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
-    let pseudo_file_entries = NamedTempFile::new().map_err(|e| Error::Io {
+    let pseudo_file_entries = NamedTempFile::new().map_err(|error| Error::Io {
         context: "Failed to create temporary file".to_string(),
-        error: e,
+        error,
     })?;
     let file = pseudo_file_entries.as_file();
     let uid = manifest.uid;
@@ -670,11 +672,10 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     let signature = key_pair.sign(hashes_yaml.as_bytes());
     let signature_base64 = base64::encode(signature);
     let key_id = "northstar";
-    let signature_yaml = format!(
+    format!(
         "{}---\nkey: {}\nsignature: {}",
         &hashes_yaml, &key_id, &signature_base64
-    );
-    signature_yaml
+    )
 }
 
 fn create_squashfs_img(
@@ -719,6 +720,7 @@ fn create_squashfs_img(
             &image.display()
         )));
     }
+
     Ok(())
 }
 
@@ -737,13 +739,15 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     cmd.arg("-dest")
         .arg(&squashfs_root.display().to_string())
         .arg(&image.display().to_string());
-    cmd.output().map_err(|e| {
-        Error::Squashfs(format!(
-            "Error while executing '{}': {}",
-            &UNSQUASHFS_BIN, e
-        ))
-    })?;
-    Ok(())
+
+    cmd.output()
+        .map_err(|e| {
+            Error::Squashfs(format!(
+                "Error while executing '{}': {}",
+                &UNSQUASHFS_BIN, e
+            ))
+        })
+        .map(drop)
 }
 
 fn write_npk<W: Write + Seek>(
@@ -795,26 +799,24 @@ fn write_npk<W: Write + Seek>(
             context: "Could create aligned zip-file".to_string(),
             error: e,
         })?;
-    io::copy(&mut fsimg, &mut zip).map_err(|e| Error::Io {
-        context: "Failed to write the filesystem image to the archive".to_string(),
-        error: e,
-    })?;
-
-    Ok(())
+    io::copy(&mut fsimg, &mut zip)
+        .map_err(|e| Error::Io {
+            context: "Failed to write the filesystem image to the archive".to_string(),
+            error: e,
+        })
+        .map(drop)
 }
 
-pub fn open_zip(file: &Path) -> Result<ZipArchive<File>, Error> {
-    let open_file = open(&file)?;
-    let zip = zip::ZipArchive::new(open_file).map_err(|e| Error::Zip {
+pub fn open_zip(file: &Path) -> Result<Zip, Error> {
+    zip::ZipArchive::new(BufReader::new(open(&file)?)).map_err(|error| Error::Zip {
         context: format!("Failed to parse ZIP format: '{}'", &file.display()),
-        error: e,
-    })?;
-    Ok(zip)
+        error,
+    })
 }
 
 fn open(path: &Path) -> Result<File, Error> {
-    File::open(&path).map_err(|e| Error::Io {
+    File::open(&path).map_err(|error| Error::Io {
         context: format!("Failed to open '{}'", &path.display()),
-        error: e,
+        error,
     })
 }
