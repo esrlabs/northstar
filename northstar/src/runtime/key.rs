@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use ed25519_dalek::SignatureError;
-use log::debug;
+use log::info;
 use std::path::Path;
 use thiserror::Error;
 use tokio::{fs, io};
@@ -31,7 +31,7 @@ pub enum Error {
 }
 
 pub(super) async fn load(path: &Path) -> Result<PublicKey, Error> {
-    debug!("Loading key {}", path.display());
+    info!("Loading key {}", path.display());
     if path.extension().filter(|ext| *ext == "pub").is_none() || !path.is_file() {
         return Err(Error::KeyFile(format!(
             "{} not a file or has '.pub' extension",

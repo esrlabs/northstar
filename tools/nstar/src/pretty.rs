@@ -174,7 +174,7 @@ pub fn response(response: &Response) -> i32 {
                 model::Error::InstallDuplicate(c) => {
                     eprintln!("failed to install {}: installed", c)
                 }
-                model::Error::Npk(e) => eprintln!("npk error: {}", e),
+                model::Error::Npk(npk, e) => eprintln!("npk error: {}: {}", npk, e),
                 model::Error::NpkArchive(e) => eprintln!("npk error: {}", e),
                 model::Error::Process(e) => eprintln!("process error: {}", e),
                 model::Error::Console(e) => eprintln!("console error: {}", e),

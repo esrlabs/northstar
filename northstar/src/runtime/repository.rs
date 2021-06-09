@@ -12,21 +12,21 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::{
-    collections::HashMap,
-    ffi::OsStr,
-    path::{Path, PathBuf},
-};
-
 use super::{
     error::Error,
     key::{self, PublicKey},
     Container, RepositoryId,
 };
+use floating_duration::TimeAsFloat;
 use futures::future::OptionFuture;
-use log::debug;
+use log::{debug, info};
 use npk::{manifest::Manifest, npk::Npk};
-use tokio::{fs, task};
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    path::{Path, PathBuf},
+};
+use tokio::{fs, task, time::Instant};
 
 #[derive(Debug)]
 pub(super) struct Repository {
@@ -42,31 +42,45 @@ impl Repository {
         dir: PathBuf,
         key: Option<&Path>,
     ) -> Result<Repository, Error> {
-        let key: OptionFuture<_> = key.map(|k| key::load(&k)).into();
         let mut containers = HashMap::new();
+
+        info!("Loading repository {}", dir.display());
 
         let mut readir = fs::read_dir(&dir)
             .await
             .map_err(|e| Error::Io("Repository read dir".into(), e))?;
 
+        let start = Instant::now();
         while let Ok(Some(entry)) = readir.next_entry().await {
             let npk_extension = Some(OsStr::new("npk"));
             if entry.path().extension() != npk_extension {
                 continue;
             }
 
+            debug!("Loading {}", entry.path().display());
             let npk = task::block_in_place(|| Npk::from_path(entry.path().as_path(), None))
-                .map_err(Error::Npk)?;
+                .map_err(|e| Error::Npk(entry.path(), e))?;
             let name = npk.manifest().name.clone();
             let version = npk.manifest().version.clone();
             let container = Container::new(name, version);
             containers.insert(container.clone(), (entry.path(), npk.manifest().clone()));
         }
+        let duration = start.elapsed();
+        info!(
+            "Loaded {} containers from {} in {:.03}s (avg: {:.03}s)",
+            containers.len(),
+            dir.display(),
+            duration.as_fractional_secs(),
+            duration.as_fractional_secs() / containers.len() as f64
+        );
+
+        let key: OptionFuture<_> = key.map(key::load).into();
+        let key = key.await.transpose().map_err(Error::Key)?;
 
         Ok(Repository {
             id,
             dir,
-            key: key.await.transpose().map_err(Error::Key)?,
+            key,
             containers,
         })
     }
@@ -86,8 +100,9 @@ impl Repository {
             .await
             .map_err(|e| Error::Io("Failed to copy npk to repository".into(), e))?;
 
-        let npk =
-            task::block_in_place(|| Npk::from_path(dest.as_path(), None)).map_err(Error::Npk)?;
+        debug!("Loading {}", dest.display());
+        let npk = task::block_in_place(|| Npk::from_path(dest.as_path(), None))
+            .map_err(|e| Error::Npk(dest.clone(), e))?;
         let name = npk.manifest().name.clone();
         let version = npk.manifest().version.clone();
         let container = Container::new(name, version);

@@ -14,7 +14,7 @@
 
 use super::{Container, RepositoryId};
 use crate::api;
-use std::io;
+use std::{io, path::PathBuf};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -47,8 +47,8 @@ pub enum Error {
     #[error("Failed to install {0}: Already installed")]
     InstallDuplicate(Container),
 
-    #[error("NPK error: {0:?}")]
-    Npk(npk::npk::Error),
+    #[error("NPK {0:?}: {1:?}")]
+    Npk(PathBuf, npk::npk::Error),
     #[error("Console: {0:?}")]
     Console(super::console::Error),
     #[error("Cgroups: {0}")]
@@ -98,7 +98,9 @@ impl From<Error> for api::model::Error {
                 api::model::Error::InvalidRepository(repository)
             }
             Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate(container),
-            Error::Npk(error) => api::model::Error::Npk(error.to_string()),
+            Error::Npk(npk, error) => {
+                api::model::Error::Npk(npk.display().to_string(), error.to_string())
+            }
             Error::Console(error) => api::model::Error::Console(error.to_string()),
             Error::Cgroups(error) => api::model::Error::Cgroups(error.to_string()),
             Error::Mount(error) => api::model::Error::Mount(error.to_string()),
