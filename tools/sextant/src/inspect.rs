@@ -12,10 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use ::npk::npk::Npk;
+use ::npk::npk::{open_zip, Npk, MANIFEST_NAME, SIGNATURE_NAME, UNSQUASHFS};
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
-use npk::npk;
+use npk::npk::FS_IMG_NAME;
 use std::{
     io::{self, Read},
     path::Path,
@@ -46,7 +46,7 @@ pub fn inspect_short(npk: &Path) -> Result<()> {
 }
 
 pub fn inspect_long(npk: &Path) -> Result<()> {
-    let mut zip = npk::open_zip(&npk)?;
+    let mut zip = open_zip(&npk)?;
     let mut print_buf: String = String::new();
     println!(
         "{}",
@@ -58,9 +58,9 @@ pub fn inspect_long(npk: &Path) -> Result<()> {
 
     // print manifest
     let mut man = zip
-        .by_name(npk::MANIFEST_NAME)
+        .by_name(MANIFEST_NAME)
         .context("Failed to find manifest in NPK")?;
-    println!("{}", format!("## {}", npk::MANIFEST_NAME).green());
+    println!("{}", format!("## {}", MANIFEST_NAME).green());
     man.read_to_string(&mut print_buf)
         .with_context(|| "Failed to read manifest")?;
     println!("{}", &print_buf);
@@ -69,9 +69,9 @@ pub fn inspect_long(npk: &Path) -> Result<()> {
     drop(man);
 
     // print signature
-    match zip.by_name(npk::SIGNATURE_NAME) {
+    match zip.by_name(SIGNATURE_NAME) {
         Ok(mut sig) => {
-            println!("{}", format!("## {}", npk::SIGNATURE_NAME).green());
+            println!("{}", format!("## {}", SIGNATURE_NAME).green());
             sig.read_to_string(&mut print_buf)
                 .with_context(|| "Failed to read signature")?;
             println!("{}", &print_buf);
@@ -86,7 +86,7 @@ pub fn inspect_long(npk: &Path) -> Result<()> {
     println!("{}", "## SquashFS listing".green());
     let mut dest_fsimage = tempfile::NamedTempFile::new().context("Failed to create tmp file")?;
     let mut src_fsimage = zip
-        .by_name(npk::FS_IMG_NAME)
+        .by_name(FS_IMG_NAME)
         .context("Failed to find filesystem image in NPK")?;
     io::copy(&mut src_fsimage, &mut dest_fsimage)?;
     let path = dest_fsimage.path();
@@ -96,15 +96,14 @@ pub fn inspect_long(npk: &Path) -> Result<()> {
 }
 
 fn print_squashfs(fsimg_path: &Path) -> Result<()> {
-    which::which(&npk::UNSQUASHFS_BIN)
-        .with_context(|| anyhow!("Failed to find '{}'", &npk::UNSQUASHFS_BIN))?;
+    which::which(&UNSQUASHFS).with_context(|| anyhow!("Failed to find '{}'", &UNSQUASHFS))?;
 
-    let mut cmd = Command::new(&npk::UNSQUASHFS_BIN);
+    let mut cmd = Command::new(&UNSQUASHFS);
     cmd.arg("-ll").arg(fsimg_path.display().to_string());
 
     let output = cmd
         .output()
-        .with_context(|| format!("Failed to execute '{}'", &npk::UNSQUASHFS_BIN))?;
+        .with_context(|| format!("Failed to execute '{}'", &UNSQUASHFS))?;
 
     println!("{}", String::from_utf8_lossy(&output.stdout));
 

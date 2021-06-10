@@ -64,7 +64,11 @@ impl Repository {
             let file = entry.path();
             if file.extension() == npk_extension {
                 let task = task::spawn_blocking(move || {
-                    debug!("Loading {}", file.display());
+                    debug!(
+                        "Loading {}{}",
+                        file.display(),
+                        if key.is_some() { " [verified]" } else { "" }
+                    );
                     let npk = Npk::from_path(&file, key.as_ref())
                         .map_err(|e| Error::Npk(file.clone(), e))?;
                     let name = npk.manifest().name.clone();
@@ -77,6 +81,8 @@ impl Repository {
                     Err(_) => panic!("Task error"),
                 });
                 loads.push(task);
+            } else {
+                debug!("Skipping {}", file.display());
             }
         }
 
