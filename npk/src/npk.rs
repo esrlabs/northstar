@@ -58,7 +58,7 @@ const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
 const NPK_EXT: &str = "npk";
 
-type Zip = ZipArchive<BufReader<File>>;
+type Zip<R> = ZipArchive<R>;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -159,9 +159,9 @@ impl FromStr for Hashes {
 }
 
 #[derive(Debug)]
-pub struct Npk {
+pub struct Npk<R> {
     meta: Meta,
-    file: File,
+    file: R,
     manifest: Manifest,
     fs_img_offset: u64,
     fs_img_size: u64,
@@ -169,10 +169,9 @@ pub struct Npk {
     hashes: Option<Hashes>,
 }
 
-impl Npk {
-    pub fn new(npk: File, key: Option<&PublicKey>) -> Result<Self, Error> {
-        let npk = BufReader::new(npk);
-        let mut zip = Zip::new(npk).map_err(|error| Error::Zip {
+impl<R: Read + Seek> Npk<R> {
+    pub fn from_reader(r: R, key: Option<&PublicKey>) -> Result<Self, Error> {
+        let mut zip = Zip::new(r).map_err(|error| Error::Zip {
             context: "Failed to open NPK".to_string(),
             error,
         })?;
@@ -206,8 +205,6 @@ impl Npk {
             None => None,
         };
 
-        let file = file.into_inner();
-
         Ok(Self {
             meta,
             file,
@@ -219,8 +216,14 @@ impl Npk {
         })
     }
 
-    pub fn from_path(npk: &Path, key: Option<&PublicKey>) -> Result<Self, Error> {
-        Npk::new(open(&npk)?, key)
+    pub fn from_path(npk: &Path, key: Option<&PublicKey>) -> Result<Npk<BufReader<File>>, Error> {
+        File::open(npk)
+            .map_err(|error| Error::Io {
+                context: format!("Open file {}", npk.display()),
+                error,
+            })
+            .map(BufReader::new)
+            .and_then(|r| Npk::from_reader(r, key))
     }
 
     pub fn meta(&self) -> &Meta {
@@ -252,17 +255,20 @@ impl Npk {
     }
 }
 
-impl AsRawFd for Npk {
+impl AsRawFd for Npk<BufReader<File>> {
     fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+        self.file.get_ref().as_raw_fd()
     }
 }
 
-fn meta(zip: &Zip) -> Result<Meta, Error> {
+fn meta<R: Read + Seek>(zip: &Zip<R>) -> Result<Meta, Error> {
     serde_yaml::from_slice(zip.comment()).map_err(|e| Error::MalformedComment(e.to_string()))
 }
 
-fn hashes(mut zip: &mut Zip, key: Option<&PublicKey>) -> Result<Option<Hashes>, Error> {
+fn hashes<R: Read + Seek>(
+    mut zip: &mut Zip<R>,
+    key: Option<&PublicKey>,
+) -> Result<Option<Hashes>, Error> {
     match key {
         Some(k) => {
             let signature_content = read_to_string(&mut zip, SIGNATURE_NAME)?;
@@ -280,7 +286,10 @@ fn hashes(mut zip: &mut Zip, key: Option<&PublicKey>) -> Result<Option<Hashes>, 
     }
 }
 
-fn manifest(mut zip: &mut Zip, hashes: Option<&Hashes>) -> Result<Manifest, Error> {
+fn manifest<R: Read + Seek>(
+    mut zip: &mut Zip<R>,
+    hashes: Option<&Hashes>,
+) -> Result<Manifest, Error> {
     let content = read_to_string(&mut zip, &MANIFEST_NAME)?;
     if let Some(Hashes { manifest_hash, .. }) = &hashes {
         let expected_hash = hex::decode(manifest_hash)
@@ -298,7 +307,7 @@ fn manifest(mut zip: &mut Zip, hashes: Option<&Hashes>) -> Result<Manifest, Erro
         .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))
 }
 
-fn read_to_string(zip: &mut Zip, name: &str) -> Result<String, Error> {
+fn read_to_string<R: Read + Seek>(zip: &mut Zip<R>, name: &str) -> Result<String, Error> {
     let mut file = zip.by_name(name).map_err(|error| Error::Zip {
         context: format!("Failed to locate {} in ZIP file", name),
         error,
@@ -815,7 +824,7 @@ fn write_npk<W: Write + Seek>(
         .map(drop)
 }
 
-pub fn open_zip(file: &Path) -> Result<Zip, Error> {
+pub fn open_zip(file: &Path) -> Result<Zip<BufReader<File>>, Error> {
     zip::ZipArchive::new(BufReader::new(open(&file)?)).map_err(|error| Error::Zip {
         context: format!("Failed to parse ZIP format: '{}'", &file.display()),
         error,

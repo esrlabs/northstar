@@ -15,10 +15,10 @@
 use itertools::Itertools;
 use model::ExitStatus;
 use northstar::api::model::{
-    self, Container, ContainerData, MountResult, Notification, Repository, RepositoryId, Response,
+    self, Container, ContainerData, MountResult, Notification, RepositoryId, Response,
 };
 use prettytable::{format, Attr, Cell, Row, Table};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use tokio::time;
 
 pub(crate) fn notification(notification: &Notification) {
@@ -91,20 +91,14 @@ pub(crate) fn containers(containers: &[ContainerData]) {
     table.printstd();
 }
 
-pub fn repositories(repositories: &HashMap<RepositoryId, Repository>) {
+pub fn repositories(repositories: &HashSet<RepositoryId>) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    table.set_titles(Row::new(vec![
-        Cell::new("Name").with_style(Attr::Bold),
-        Cell::new("Path").with_style(Attr::Bold),
-    ]));
-    for (id, repo) in repositories.iter().sorted_by_key(|(i, _)| (*i).clone())
-    // Sort by name
-    {
-        table.add_row(Row::new(vec![
-            Cell::new(&id).with_style(Attr::Bold),
-            Cell::new(&repo.dir.display().to_string()),
-        ]));
+    table.set_titles(Row::new(vec![Cell::new("Name").with_style(Attr::Bold)]));
+    for repository in repositories.iter().sorted_by_key(|i| (*i).clone()) {
+        table.add_row(Row::new(
+            vec![Cell::new(&repository).with_style(Attr::Bold)],
+        ));
     }
 
     table.printstd();
@@ -153,6 +147,7 @@ pub fn response(response: &Response) -> i32 {
         }
         Response::Err(e) => {
             match e {
+                model::Error::Configuration(cause) => eprintln!("invalid configuration: {}", cause),
                 model::Error::InvalidContainer(c) => eprintln!("invalid container {}", c),
                 model::Error::UmountBusy(c) => eprintln!("failed to umount {}: busy", c),
                 model::Error::StartContainerStarted(c) => {

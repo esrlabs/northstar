@@ -15,6 +15,7 @@
 use super::{
     error::Error,
     key::{self, PublicKey},
+    state::Npk,
     Container, RepositoryId,
 };
 use floating_duration::TimeAsFloat;
@@ -23,29 +24,52 @@ use futures::{
     FutureExt,
 };
 use log::{debug, info, warn};
-use npk::npk::Npk;
+use npk::npk;
 use std::{
     collections::HashMap,
-    ffi::OsStr,
+    ffi::{CStr, OsStr},
+    fmt,
+    io::{BufReader, Seek, SeekFrom, Write},
+    os::unix::prelude::{FromRawFd, RawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::{fs, task, time::Instant};
+use tokio::{fs, io, task, time::Instant};
 
-#[derive(Debug)]
-pub(super) struct Repository {
-    pub(super) id: RepositoryId,
-    pub(super) dir: PathBuf,
-    pub(super) key: Option<PublicKey>,
-    pub(super) containers: HashMap<Container, (PathBuf, Arc<Npk>)>,
+#[async_trait::async_trait]
+pub(super) trait Repository: fmt::Debug {
+    /// Add npk from `src` to repositoriy. Open the npk and parse content
+    async fn add(&mut self, src: &Path) -> Result<Container, Error>;
+
+    /// Add container from repository if present
+    async fn remove(&mut self, container: &Container) -> Result<(), Error>;
+
+    /// Return npk matching container if present
+    fn get(&self, container: &Container) -> Option<Arc<Npk>>;
+
+    /// Key of this repository
+    fn key(&self) -> Option<&PublicKey> {
+        None
+    }
+    /// All containers in this repositoriy
+    fn containers(&self) -> Vec<Arc<Npk>>;
 }
 
-impl Repository {
+/// Repository backed by a directory
+#[derive(Debug)]
+pub(super) struct DirRepository {
+    id: RepositoryId,
+    dir: PathBuf,
+    key: Option<PublicKey>,
+    containers: HashMap<Container, (PathBuf, Arc<Npk>)>,
+}
+
+impl DirRepository {
     pub async fn new(
         id: RepositoryId,
         dir: PathBuf,
         key: Option<&Path>,
-    ) -> Result<Repository, Error> {
+    ) -> Result<DirRepository, Error> {
         let mut containers = HashMap::new();
 
         info!("Loading repository {}", dir.display());
@@ -70,7 +94,7 @@ impl Repository {
                         if key.is_some() { " [verified]" } else { "" }
                     );
                     let npk = Npk::from_path(&file, key.as_ref())
-                        .map_err(|e| Error::Npk(file.clone(), e))?;
+                        .map_err(|e| Error::Npk(file.display().to_string(), e))?;
                     let name = npk.manifest().name.clone();
                     let version = npk.manifest().version.clone();
                     let container = Container::new(name, version);
@@ -105,50 +129,177 @@ impl Repository {
             duration.as_fractional_secs() / containers.len() as f64
         );
 
-        Ok(Repository {
+        Ok(DirRepository {
             id,
             dir,
             key,
             containers,
         })
     }
+}
 
-    pub async fn add(&mut self, container: &Container, src: &Path) -> Result<(), Error> {
-        let dest = self
-            .dir
-            .join(format!("{}-{}.npk", container.name(), container.version()));
-
-        // Check if the npk already in the repository
-        if dest.exists() {
-            return Err(Error::InstallDuplicate(container.clone()));
-        }
-
+#[async_trait::async_trait]
+impl<'a> Repository for DirRepository {
+    async fn add(&mut self, src: &Path) -> Result<Container, Error>
+    where
+        Self: Sized,
+    {
+        let dest = self.dir.join(format!("{}.npk", uuid::Uuid::new_v4()));
         // Copy the npk to the repository
         fs::copy(src, &dest)
             .await
             .map_err(|e| Error::Io("Failed to copy npk to repository".into(), e))?;
 
         debug!("Loading {}", dest.display());
-        let npk = task::block_in_place(|| Npk::from_path(dest.as_path(), self.key.as_ref()))
-            .map_err(|e| Error::Npk(dest.clone(), e))?;
+        let npk = match task::block_in_place(|| Npk::from_path(dest.as_path(), self.key.as_ref()))
+            .map_err(|e| Error::Npk(dest.display().to_string(), e))
+        {
+            Ok(n) => Ok(n),
+            Err(e) => {
+                fs::remove_file(&dest)
+                    .await
+                    .map_err(|e| Error::io("Remove file from repository", e))?;
+                Err(e)
+            }
+        }?;
         let name = npk.manifest().name.clone();
         let version = npk.manifest().version.clone();
         let container = Container::new(name, version);
+        if self.containers.contains_key(&container) {
+            fs::remove_file(&dest)
+                .await
+                .map_err(|e| Error::io("Remove file from repository", e))?;
+            return Err(Error::InstallDuplicate(container.clone()));
+        }
         self.containers
-            .insert(container, (dest.to_owned(), Arc::new(npk)));
+            .insert(container.clone(), (dest.to_owned(), Arc::new(npk)));
+        debug!("Loaded {}", container);
 
+        Ok(container)
+    }
+
+    async fn remove(&mut self, container: &Container) -> Result<(), Error>
+    where
+        Self: Sized,
+    {
+        if let Some((path, npk)) = self.containers.remove(&container) {
+            debug!("Removing {} from {}", path.display(), self.id);
+            drop(npk);
+            fs::remove_file(path)
+                .await
+                .map_err(|e| Error::io("Failed to remove npk", e))
+                .map(drop)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn get(&self, container: &Container) -> Option<Arc<Npk>>
+    where
+        Self: Sized,
+    {
+        self.containers.get(container).map(|(_, npk)| npk.clone())
+    }
+
+    fn key(&self) -> Option<&PublicKey>
+    where
+        Self: Sized,
+    {
+        self.key.as_ref()
+    }
+
+    fn containers(&self) -> Vec<Arc<Npk>>
+    where
+        Self: Sized,
+    {
+        self.containers
+            .values()
+            .map(|(_, npk)| npk.clone())
+            .collect()
+    }
+}
+
+/// In memory repository
+#[derive(Default, Debug)]
+pub(super) struct MemRepository {
+    id: RepositoryId,
+    containers: HashMap<Container, (Vec<u8>, Arc<Npk>)>,
+}
+
+impl MemRepository {
+    pub(super) async fn add_buf(&mut self, buf: &[u8]) -> Result<Container, Error> {
+        let data = Vec::from(buf);
+        let fd = Self::memfd_create().map_err(|e| Error::Os("Failed create memfd".into(), e))?;
+        let file = task::block_in_place(|| {
+            let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+            file.write_all(buf)
+                .map_err(|e| Error::io("Failed copy npk", e))?;
+            file.seek(SeekFrom::Start(0))
+                .map_err(|e| Error::io("Failed seek", e))?;
+            Result::<_, Error>::Ok(BufReader::new(file))
+        })?;
+        let npk = npk::Npk::from_reader(file, None).map_err(|e| Error::Npk("Memory".into(), e))?;
+        let manifest = npk.manifest();
+        let container = Container::new(manifest.name.clone(), manifest.version.clone());
+
+        self.containers
+            .insert(container.clone(), (data, Arc::new(npk)));
+
+        Ok(container)
+    }
+
+    #[cfg(target_os = "android")]
+    fn memfd_create() -> nix::Result<RawFd> {
+        let name = CStr::from_bytes_with_nul(b"foo\0").unwrap();
+        let res = unsafe { nix::libc::syscall(nix::libc::SYS_memfd_create, name.as_ptr(), 0) };
+        nix::errno::Errno::result(res).map(|r| r as RawFd)
+    }
+
+    #[cfg(not(target_os = "android"))]
+    pub fn memfd_create() -> nix::Result<RawFd> {
+        let name = CStr::from_bytes_with_nul(b"foo\0").unwrap();
+        nix::sys::memfd::memfd_create(&name, nix::sys::memfd::MemFdCreateFlag::empty())
+    }
+}
+
+#[async_trait::async_trait]
+impl<'a> Repository for MemRepository {
+    async fn add(&mut self, file: &Path) -> Result<Container, Error>
+    where
+        Self: Sized,
+    {
+        let mut file = fs::File::open(&file)
+            .await
+            .map_err(|e| Error::io("Failed open npk", e))?;
+        let mut data = Vec::new();
+        io::copy(&mut file, &mut data)
+            .await
+            .map_err(|e| Error::io("Failed copy npk", e))?;
+        self.add_buf(&data).await
+    }
+
+    async fn remove(&mut self, container: &Container) -> Result<(), Error>
+    where
+        Self: Sized,
+    {
+        self.containers.remove(container);
         Ok(())
     }
 
-    pub async fn remove(&mut self, container: &Container) -> Result<(), Error> {
-        if let Some((npk, _)) = self.containers.remove(&container) {
-            debug!("Removing {}", npk.display());
-            fs::remove_file(npk)
-                .await
-                .map_err(|e| Error::Io("Failed to remove npk".into(), e))
-                .map(drop)
-        } else {
-            Err(Error::InvalidContainer(container.clone()))
-        }
+    fn get(&self, container: &Container) -> Option<Arc<Npk>>
+    where
+        Self: Sized,
+    {
+        self.containers.get(container).map(|(_, npk)| npk.clone())
+    }
+
+    fn containers(&self) -> Vec<Arc<Npk>>
+    where
+        Self: Sized,
+    {
+        self.containers
+            .values()
+            .map(|(_, npk)| npk.clone())
+            .collect()
     }
 }

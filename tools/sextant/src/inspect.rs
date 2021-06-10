@@ -17,7 +17,8 @@ use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use npk::npk::FS_IMG_NAME;
 use std::{
-    io::{self, Read},
+    fs::File,
+    io::{self, BufReader, Read},
     path::Path,
     process::Command,
 };
@@ -31,7 +32,7 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
 }
 
 pub fn inspect_short(npk: &Path) -> Result<()> {
-    let npk = Npk::from_path(&npk, None)?;
+    let npk = Npk::<BufReader<File>>::from_path(npk, None)?;
     let manifest = npk.manifest();
     let name = manifest.name.to_string();
     let version = manifest.version.to_string();

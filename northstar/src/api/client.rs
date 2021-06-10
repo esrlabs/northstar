@@ -16,14 +16,14 @@ use super::{
     codec::{framed, Framed},
     model::{
         self, Connect, Container, ContainerData, Message, MountResult, Notification, Payload,
-        Repository, RepositoryId, Request, Response,
+        RepositoryId, Request, Response,
     },
 };
 use futures::{SinkExt, Stream, StreamExt};
 use log::{debug, info};
 use npk::manifest::Version;
 use std::{
-    collections::HashMap,
+    collections::HashSet,
     path::{Path, PathBuf},
     pin::Pin,
     task::Poll,
@@ -291,7 +291,7 @@ impl<'a> Client {
     /// println!("{:#?}", repositories);
     /// # }
     /// ```
-    pub async fn repositories(&self) -> Result<HashMap<RepositoryId, Repository>, Error> {
+    pub async fn repositories(&self) -> Result<HashSet<RepositoryId>, Error> {
         match self.request(Request::Repositories).await? {
             Response::Err(e) => Err(Error::Api(e)),
             Response::Repositories(repositories) => Ok(repositories),

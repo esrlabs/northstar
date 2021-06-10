@@ -13,10 +13,11 @@
 //   limitations under the License.
 
 use super::{
-    config::Config, console::Request, error::Error, key::PublicKey, mount::MountControl, Container,
-    Event, EventTx, ExitStatus, Launcher, Notification, Process, Repository, RepositoryId,
+    config::Config, console::Request, error::Error, key::PublicKey, mount::MountControl,
+    repository::DirRepository, Container, Event, EventTx, ExitStatus, Launcher, Notification,
+    Process, Repository, RepositoryId,
 };
-use crate::api;
+use crate::{api, runtime::repository::MemRepository};
 use api::model::Response;
 use floating_duration::TimeAsFloat;
 use futures::{
@@ -24,17 +25,21 @@ use futures::{
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
-use npk::{
-    manifest::{Manifest, Mount},
-    npk::Npk,
-};
+use npk::manifest::{Manifest, Mount};
 use std::{
     collections::{HashMap, HashSet},
+    fs::File,
+    io::BufReader,
     path::{Path, PathBuf},
     result,
     sync::Arc,
 };
 use tokio::{sync::oneshot, task, time};
+
+const INTERNAL_REPOSITORY: &str = "internal";
+
+type Repositories = HashMap<RepositoryId, Box<dyn Repository + Send + Sync>>;
+pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
 
 #[derive(Debug)]
 pub(super) struct State<'a, L>
@@ -45,11 +50,8 @@ where
     launcher: L,
     mount_control: Arc<MountControl>,
     events_tx: EventTx,
-    repositories: HashMap<RepositoryId, Repository>,
+    repositories: Repositories,
     containers: HashMap<Container, MountedContainer<L::Process>>,
-    /// hello-world demo repository tempdir
-    #[cfg(feature = "hello-world")]
-    internal_repository: tempfile::TempDir,
 }
 
 #[derive(Debug)]
@@ -114,28 +116,43 @@ impl<P: Process> ProcessContext<P> {
 impl<'a, L: Launcher> State<'a, L> {
     /// Create a new empty State instance
     pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a, L>, Error> {
-        let mut repositories = HashMap::new();
+        let mut repositories = Repositories::default();
 
-        // Internal test repository
+        // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
+        // feature is enabled
         #[cfg(feature = "hello-world")]
-        let internal_repository = {
-            let name = "hello-world".to_string();
-            let (dir, repository) = prepare_internal_repository(&name).await?;
-            repositories.insert(name, repository);
-            dir
-        };
+        if config.repositories.contains_key(INTERNAL_REPOSITORY) {
+            return Err(Error::Configuration(format!(
+                "Duplicate repository {}",
+                INTERNAL_REPOSITORY
+            )));
+        }
 
         // Build a map of repositories from the configuration
         for (id, repository) in &config.repositories {
             repositories.insert(
                 id.clone(),
-                Repository::new(
-                    id.clone(),
-                    repository.dir.clone(),
-                    repository.key.as_deref(),
-                )
-                .await?,
+                Box::new(
+                    DirRepository::new(
+                        id.clone(),
+                        repository.dir.clone(),
+                        repository.key.as_deref(),
+                    )
+                    .await?,
+                ),
             );
+        }
+
+        #[cfg(feature = "hello-world")]
+        {
+            info!("Adding hello-world to internal repository");
+            let mut internal = MemRepository::default();
+            let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello-world-0.0.1.npk"));
+            internal
+                .add_buf(hello_world)
+                .await
+                .expect("Failed to load hello-world");
+            repositories.insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
         }
 
         // TODO: Verify that the containers in all repositories are unique with name and version
@@ -152,15 +169,13 @@ impl<'a, L: Launcher> State<'a, L> {
             config,
             launcher,
             mount_control: Arc::new(mount_control),
-            #[cfg(feature = "hello-world")]
-            internal_repository,
         })
     }
 
-    fn npk(&self, container: &Container) -> Option<(&Path, Arc<Npk>, Option<&PublicKey>)> {
+    fn npk(&self, container: &Container) -> Option<(Arc<Npk>, Option<&PublicKey>)> {
         for repository in self.repositories.values() {
-            if let Some((path, npk)) = repository.containers.get(container) {
-                return Some((path, npk.clone(), repository.key.as_ref()));
+            if let Some(npk) = repository.get(container) {
+                return Some((npk, repository.key()));
             }
         }
         None
@@ -172,7 +187,7 @@ impl<'a, L: Launcher> State<'a, L> {
         container: &Container,
     ) -> Result<impl Future<Output = Result<MountedContainer<L::Process>, Error>>, Error> {
         // Find npk and optional key
-        let (_, npk, key) = self
+        let (npk, key) = self
             .npk(container)
             .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
 
@@ -268,7 +283,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         let mut need_mount = HashSet::new();
 
-        if let Some((_, npk, _)) = self.npk(container) {
+        if let Some((npk, _)) = self.npk(container) {
             // The the to be started container
             if let Some(mounted_container) = self.containers.get(container) {
                 // Check if the container is not a resource
@@ -485,37 +500,15 @@ impl<'a, L: Launcher> State<'a, L> {
     /// Install an NPK
     async fn install(&mut self, repository_id: &str, src: &Path) -> Result<(), Error> {
         debug!("Trying to install {}", src.display());
+
         // Find the repository
         let repository = self
             .repositories
-            .get(repository_id)
+            .get_mut(repository_id)
             .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
-        // Load the npk to identify name and version
-        let npk = task::block_in_place(|| Npk::from_path(src, repository.key.as_ref()))
-            .map_err(|e| Error::Npk(src.to_owned(), e))?;
-
-        // Construct a container key for the new npk
-        let manifest = npk.manifest();
-        let container = Container::new(manifest.name.clone(), manifest.version.clone());
-
-        // Check if the container already exists or if this is a duplicate install attempt
-        if self
-            .repositories
-            .values()
-            .any(|r| r.containers.contains_key(&container))
-        {
-            warn!("Container {} is already installed", container);
-            return Err(Error::InstallDuplicate(container.clone()));
-        }
-
-        debug!("NPK contains {}", container);
 
         // Add the npk to the repository
-        self.repositories
-            .get_mut(repository_id)
-            .unwrap()
-            .add(&container, src)
-            .await?;
+        let container = repository.add(src).await?;
 
         debug!("Successfully installed {}", container);
 
@@ -532,9 +525,7 @@ impl<'a, L: Launcher> State<'a, L> {
         }
 
         for repository in self.repositories.values_mut() {
-            if repository.containers.contains_key(container) {
-                repository.remove(container).await?;
-            }
+            repository.remove(container).await?;
         }
 
         debug!("Successfully uninstalled {}", container);
@@ -705,9 +696,7 @@ impl<'a, L: Launcher> State<'a, L> {
     async fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut containers = Vec::new();
         for (repository_name, repository) in &self.repositories {
-            for (npk, _) in repository.containers.values() {
-                let npk =
-                    task::block_in_place(|| Npk::from_path(npk, None).expect("Failed to read npk"));
+            for npk in repository.containers() {
                 let manifest = npk.manifest();
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let process = self
@@ -750,16 +739,8 @@ impl<'a, L: Launcher> State<'a, L> {
         containers
     }
 
-    fn list_repositories(&self) -> HashMap<RepositoryId, api::model::Repository> {
-        self.repositories
-            .iter()
-            .map(|(id, repository)| {
-                (
-                    id.clone(),
-                    api::model::Repository::new(repository.dir.clone()),
-                )
-            })
-            .collect()
+    fn list_repositories(&self) -> HashSet<RepositoryId> {
+        self.repositories.keys().cloned().collect()
     }
 
     async fn notification(&self, n: Notification) {
@@ -770,21 +751,4 @@ impl<'a, L: Launcher> State<'a, L> {
                 .expect("Internal channel error on main");
         }
     }
-}
-
-/// Dump the hello world npk created at compile time into a tmpdir that acts as internal
-/// repository.
-#[cfg(feature = "hello-world")]
-async fn prepare_internal_repository(name: &str) -> Result<(tempfile::TempDir, Repository), Error> {
-    let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello-world-0.0.1.npk"));
-    let tempdir = tokio::task::block_in_place(|| {
-        tempfile::tempdir().map_err(|e| Error::Io("Failed to create tmpdir".into(), e))
-    })?;
-    let dir = tempdir.path().to_owned();
-    let npk = dir.join("hello_world-0.0.1.npk");
-
-    tokio::fs::write(&npk, hello_world)
-        .await
-        .map_err(|e| Error::Io(format!("Failed to write {}", npk.display()), e))?;
-    Ok((tempdir, Repository::new(name.to_owned(), dir, None).await?))
 }

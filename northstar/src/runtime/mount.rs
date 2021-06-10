@@ -18,13 +18,14 @@ use super::{
     device_mapper::{self},
     key::PublicKey,
     loopdev::LoopControl,
+    state::Npk,
 };
 use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
 use futures::{future::ready, Future, FutureExt};
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
-use npk::{dm_verity::VerityHeader, npk::Npk};
+use npk::dm_verity::VerityHeader;
 use std::{
     io,
     os::unix::io::AsRawFd,
