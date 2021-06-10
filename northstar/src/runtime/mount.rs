@@ -24,7 +24,7 @@ use floating_duration::TimeAsFloat;
 use futures::{future::ready, Future, FutureExt};
 use log::{debug, info};
 pub use nix::mount::MsFlags as MountFlags;
-use npk::{dm_verity::VerityHeader, manifest::Manifest, npk::Npk};
+use npk::{dm_verity::VerityHeader, npk::Npk};
 use std::{
     io,
     os::unix::io::AsRawFd,
@@ -53,8 +53,6 @@ pub enum Error {
     DmVerity(npk::dm_verity::Error),
     #[error("NPK error: {0:?}")]
     Npk(npk::npk::Error),
-    #[error("NPK version mismatch")]
-    NpkVersionMismatch,
     #[error("UTF-8 conversion error: {0:?}")]
     Utf8Conversion(Utf8Error),
     #[error("Inotify timeout error {0}")]
@@ -103,23 +101,11 @@ impl MountControl {
 
         task::spawn(async move {
             let start = time::Instant::now();
-
             let manifest = npk.manifest();
+
             debug!("Mounting {}:{}", manifest.name, manifest.version);
-            let use_verity = key.is_some();
-
-            if npk.version() != &Manifest::VERSION {
-                return Err(Error::NpkVersionMismatch);
-            }
-            let manifest = npk.manifest().clone();
-
-            debug!("Loaded manifest of {}:{}", manifest.name, manifest.version);
-
-            let device =
-                setup_and_mount(dm, lc, &device_mapper_dev, npk, &target, use_verity).await?;
-
+            let device = attach(dm, lc, &device_mapper_dev, &npk, &target, key.is_some()).await?;
             let duration = start.elapsed();
-
             info!(
                 "Mounted {}:{} Mounting: {:.03}s",
                 manifest.name,
@@ -157,11 +143,11 @@ impl MountControl {
     }
 }
 
-async fn setup_and_mount(
+async fn attach(
     dm: Arc<dm::Dm>,
     lc: Arc<LoopControl>,
     device_mapper_dev: &str,
-    npk: Arc<Npk>,
+    npk: &Arc<Npk>,
     target: &Path,
     verity: bool,
 ) -> Result<PathBuf, Error> {

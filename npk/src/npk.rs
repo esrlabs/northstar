@@ -22,7 +22,7 @@ use ed25519_dalek::{
 };
 use itertools::Itertools;
 use rand::rngs::OsRng;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fmt,
@@ -37,12 +37,18 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 use zip::{result::ZipError, ZipArchive};
 
-// Binaries
-pub const MKSQUASHFS_BIN: &str = "mksquashfs";
-pub const UNSQUASHFS_BIN: &str = "unsquashfs";
+/// Manifest version supported by the runtime
+pub const VERSION: Version = Version(semver::Version {
+    major: 0,
+    minor: 0,
+    patch: 1,
+    pre: vec![],
+    build: vec![],
+});
 
-// First half of version string in ZIP comment
-pub const NPK_VERSION_STR: &str = "npk_version:";
+// Binaries
+pub const MKSQUASHFS: &str = "mksquashfs";
+pub const UNSQUASHFS: &str = "unsquashfs";
 
 // File name and directory components
 pub const FS_IMG_NAME: &str = "fs.img";
@@ -86,6 +92,8 @@ pub enum Error {
         #[source]
         error: SignatureError,
     },
+    #[error("Comment malformed: {0}")]
+    MalformedComment(String),
     #[error("Hashes malformed: {0}")]
     MalformedHashes(String),
     #[error("Signature malformed: {0}")]
@@ -94,6 +102,14 @@ pub enum Error {
     InvalidSignature(String),
     #[error("Invalid compression algorithm")]
     InvalidCompressionAlgorithm,
+    #[error("Version mismatch {0} vs {1}")]
+    Version(Version, Version),
+}
+
+/// NPK archive comment
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Meta {
+    pub version: Version,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -144,13 +160,106 @@ impl FromStr for Hashes {
 
 #[derive(Debug)]
 pub struct Npk {
+    meta: Meta,
     file: File,
     manifest: Manifest,
-    version: Version,
     fs_img_offset: u64,
     fs_img_size: u64,
     verity_header: Option<VerityHeader>,
     hashes: Option<Hashes>,
+}
+
+impl Npk {
+    pub fn new(npk: File, key: Option<&PublicKey>) -> Result<Self, Error> {
+        let npk = BufReader::new(npk);
+        let mut zip = Zip::new(npk).map_err(|error| Error::Zip {
+            context: "Failed to open NPK".to_string(),
+            error,
+        })?;
+
+        let meta = meta(&zip)?;
+        // TODO: Should we do semver comparison here?
+        if meta.version != VERSION {
+            return Err(Error::Version(meta.version, VERSION));
+        }
+
+        let hashes = hashes(&mut zip, key)?;
+        let manifest = manifest(&mut zip, hashes.as_ref())?;
+        let (fs_img_offset, fs_img_size) = {
+            let fs_img = &zip.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
+                context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
+                error: e,
+            })?;
+            (fs_img.data_start(), fs_img.size())
+        };
+
+        let mut file = zip.into_inner();
+        let verity_header = match &hashes {
+            Some(hs) => {
+                file.seek(SeekFrom::Start(fs_img_offset + hs.fs_verity_offset))
+                    .map_err(|e| Error::Io {
+                        context: format!("{} too small to extract verity header", &FS_IMG_NAME),
+                        error: e,
+                    })?;
+                Some(VerityHeader::from_bytes(&mut file).map_err(Error::Verity)?)
+            }
+            None => None,
+        };
+
+        let file = file.into_inner();
+
+        Ok(Self {
+            meta,
+            file,
+            manifest,
+            fs_img_offset,
+            fs_img_size,
+            verity_header,
+            hashes,
+        })
+    }
+
+    pub fn from_path(npk: &Path, key: Option<&PublicKey>) -> Result<Self, Error> {
+        Npk::new(open(&npk)?, key)
+    }
+
+    pub fn meta(&self) -> &Meta {
+        &self.meta
+    }
+
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    pub fn version(&self) -> &Version {
+        &self.meta.version
+    }
+
+    pub fn fsimg_offset(&self) -> u64 {
+        self.fs_img_offset
+    }
+
+    pub fn fsimg_size(&self) -> u64 {
+        self.fs_img_size
+    }
+
+    pub fn hashes(&self) -> Option<&Hashes> {
+        self.hashes.as_ref()
+    }
+
+    pub fn verity_header(&self) -> Option<&VerityHeader> {
+        self.verity_header.as_ref()
+    }
+}
+
+impl AsRawFd for Npk {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+}
+
+fn meta(zip: &Zip) -> Result<Meta, Error> {
+    serde_yaml::from_slice(zip.comment()).map_err(|e| Error::MalformedComment(e.to_string()))
 }
 
 fn hashes(mut zip: &mut Zip, key: Option<&PublicKey>) -> Result<Option<Hashes>, Error> {
@@ -220,99 +329,6 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
     ed25519_dalek::Signature::from_bytes(&signature).map_err(|e| {
         Error::MalformedSignature(format!("Failed to parse signature ed25519 format: {}", e))
     })
-}
-
-impl Npk {
-    pub fn new(npk: File, key: Option<&PublicKey>) -> Result<Self, Error> {
-        let npk = BufReader::new(npk);
-        let mut zip = Zip::new(npk).map_err(|error| Error::Zip {
-            context: "Failed to open NPK".to_string(),
-            error,
-        })?;
-
-        let version = {
-            let comment = &std::str::from_utf8(&zip.comment())
-                .map_err(|e| Error::Manifest(format!("Failed to read NPK version string {}", e)))?;
-            let version = comment
-                .split_whitespace()
-                .tuples()
-                .find(|(k, _)| k == &NPK_VERSION_STR)
-                .map(|(_, v)| v)
-                .ok_or_else(|| Error::Manifest("Missing NPK version value".to_string()))?;
-
-            Version::parse(&version)
-                .map_err(|e| Error::Manifest(format!("Failed to parse NPK version {}", e)))?
-        };
-
-        let hashes = hashes(&mut zip, key)?;
-        let manifest = manifest(&mut zip, hashes.as_ref())?;
-        let (fs_img_offset, fs_img_size) = {
-            let fs_img = &zip.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
-                context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
-                error: e,
-            })?;
-            (fs_img.data_start(), fs_img.size())
-        };
-
-        let mut file = zip.into_inner();
-        let verity_header = match &hashes {
-            Some(hs) => {
-                file.seek(SeekFrom::Start(fs_img_offset + hs.fs_verity_offset))
-                    .map_err(|e| Error::Io {
-                        context: format!("{} too small to extract verity header", &FS_IMG_NAME),
-                        error: e,
-                    })?;
-                Some(VerityHeader::from_bytes(&mut file).map_err(Error::Verity)?)
-            }
-            None => None,
-        };
-
-        let file = file.into_inner();
-
-        Ok(Self {
-            file,
-            manifest,
-            version,
-            fs_img_offset,
-            fs_img_size,
-            verity_header,
-            hashes,
-        })
-    }
-
-    pub fn from_path(npk: &Path, key: Option<&PublicKey>) -> Result<Self, Error> {
-        Npk::new(open(&npk)?, key)
-    }
-
-    pub fn manifest(&self) -> &Manifest {
-        &self.manifest
-    }
-
-    pub fn version(&self) -> &Version {
-        &self.version
-    }
-
-    pub fn hashes(&self) -> Option<&Hashes> {
-        self.hashes.as_ref()
-    }
-
-    pub fn fsimg_offset(&self) -> u64 {
-        self.fs_img_offset
-    }
-
-    pub fn fsimg_size(&self) -> u64 {
-        self.fs_img_size
-    }
-
-    pub fn verity_header(&self) -> Option<&VerityHeader> {
-        self.verity_header.as_ref()
-    }
-}
-
-impl AsRawFd for Npk {
-    fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
-    }
 }
 
 struct Builder {
@@ -686,8 +702,8 @@ fn create_squashfs_img(
 ) -> Result<(), Error> {
     let pseudo_files = gen_pseudo_files(&manifest)?;
 
-    which::which(&MKSQUASHFS_BIN)
-        .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS_BIN)))?;
+    which::which(&MKSQUASHFS)
+        .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS)))?;
     if !root.exists() {
         return Err(Error::Squashfs(format!(
             "Root directory '{}' does not exist",
@@ -695,7 +711,7 @@ fn create_squashfs_img(
         )));
     }
 
-    let mut cmd = Command::new(&MKSQUASHFS_BIN);
+    let mut cmd = Command::new(&MKSQUASHFS);
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
         .arg("-no-progress")
@@ -712,11 +728,11 @@ fn create_squashfs_img(
         cmd.arg("-b").arg(format!("{}", block_size));
     }
     cmd.output()
-        .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS_BIN, e)))?;
+        .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS, e)))?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "'{}' failed to create '{}'",
-            &MKSQUASHFS_BIN,
+            &MKSQUASHFS,
             &image.display()
         )));
     }
@@ -727,26 +743,21 @@ fn create_squashfs_img(
 fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     let squashfs_root = out.join("squashfs-root");
 
-    which::which(&UNSQUASHFS_BIN)
-        .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &UNSQUASHFS_BIN)))?;
+    which::which(&UNSQUASHFS)
+        .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &UNSQUASHFS)))?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "Squashfs image '{}' does not exist",
             &image.display()
         )));
     }
-    let mut cmd = Command::new(&UNSQUASHFS_BIN);
+    let mut cmd = Command::new(&UNSQUASHFS);
     cmd.arg("-dest")
         .arg(&squashfs_root.display().to_string())
         .arg(&image.display().to_string());
 
     cmd.output()
-        .map_err(|e| {
-            Error::Squashfs(format!(
-                "Error while executing '{}': {}",
-                &UNSQUASHFS_BIN, e
-            ))
-        })
+        .map_err(|e| Error::Squashfs(format!("Error while executing '{}': {}", &UNSQUASHFS, e)))
         .map(drop)
 }
 
@@ -763,11 +774,8 @@ fn write_npk<W: Write + Seek>(
         .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
 
     let mut zip = zip::ZipWriter::new(npk);
-    zip.set_comment(format!(
-        "{} {}",
-        &NPK_VERSION_STR,
-        &Manifest::VERSION.to_string()
-    ));
+    zip.set_comment(serde_yaml::to_string(&Meta { version: VERSION }).unwrap());
+
     if let Some(signature) = signature {
         || -> Result<(), io::Error> {
             zip.start_file(SIGNATURE_NAME, options)?;

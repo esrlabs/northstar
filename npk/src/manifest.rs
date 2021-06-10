@@ -500,15 +500,6 @@ pub enum Error {
 }
 
 impl Manifest {
-    /// Manifest version supported by the runtime
-    pub const VERSION: Version = Version(semver::Version {
-        major: 0,
-        minor: 0,
-        patch: 3,
-        pre: vec![],
-        build: vec![],
-    });
-
     pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
         let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)?;
         manifest.verify()?;
