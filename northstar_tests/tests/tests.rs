@@ -24,7 +24,7 @@ use northstar_tests::{
     logger,
     runtime::Northstar,
     test,
-    test_container::{TEST_CONTAINER, TEST_RESOURCE},
+    test_container::{test_container_npk, test_resource_npk, TEST_CONTAINER, TEST_RESOURCE},
 };
 use std::path::PathBuf;
 use tokio::{
@@ -61,6 +61,31 @@ test!(install_uninstall_test_container, {
         runtime.install_test_container().await?;
         runtime.uninstall_test_container().await?;
     }
+    runtime.shutdown().await
+});
+
+// Install test container and resource to internal in memory repository
+test!(install_uninstall_internal_repositoriy, {
+    let runtime = Northstar::launch().await?;
+    for _ in 0..2 {
+        runtime
+            .install(test_container_npk().await, "internal")
+            .await?;
+        runtime
+            .install(test_resource_npk().await, "internal")
+            .await?;
+
+        runtime.start(TEST_CONTAINER).await?;
+        assume("Sleeping", 5u64).await?;
+        runtime.stop(TEST_CONTAINER, 5).await?;
+
+        runtime.uninstall_test_container().await?;
+        runtime.uninstall_test_resource().await?;
+
+        // There shall just be the hello-world
+        assert!(runtime.containers().await?.len() == 1);
+    }
+
     runtime.shutdown().await
 });
 

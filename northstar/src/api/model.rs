@@ -14,7 +14,7 @@
 
 use derive_new::new;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashSet;
 
 pub use npk::manifest::{Manifest, Version};
 pub type Container = super::container::Container;
@@ -23,7 +23,7 @@ pub type Name = String;
 pub type Pid = u32;
 pub type RepositoryId = String;
 
-const VERSION: &str = "0.0.4";
+const VERSION: &str = "0.0.5";
 
 /// Protocol version
 /// TODO: Do some static initialization of the version struct
@@ -135,11 +135,6 @@ pub struct ContainerData {
     pub mounted: bool,
 }
 
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Repository {
-    pub dir: PathBuf,
-}
-
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Process {
     /// Process id
@@ -175,13 +170,14 @@ pub enum MountResult {
 pub enum Response {
     Ok(()),
     Containers(Vec<ContainerData>),
-    Repositories(HashMap<RepositoryId, Repository>),
+    Repositories(HashSet<RepositoryId>),
     Mount(Vec<(Container, MountResult)>),
     Err(Error),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
+    Configuration(String),
     InvalidContainer(Container),
     UmountBusy(Container),
     StartContainerStarted(Container),

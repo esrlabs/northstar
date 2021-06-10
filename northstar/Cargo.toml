@@ -36,7 +36,7 @@ thiserror = "1.0"
 tokio = { version = "1.5", features = ["full"] }
 tokio-util = { version = "0.6.6", features = ["codec"], optional = true }
 url = { version = "2.2", features = ["serde"] }
-uuid = { version = "0.8.2", features = ["v4"] }
+uuid = { version = "0.8.2", features = ["v4"], optional = true }
 
 [dev-dependencies]
 anyhow = "1.0"
@@ -45,7 +45,7 @@ proptest = "1.0"
 
 [features]
 default = []
-api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util"]
+api = ["bytes", "derive-new", "npk", "uuid", "serde_json", "tokio-util"]
 hello-world = []
 rt-island = ["caps", "memoffset", "runtime"]
 rt-minijail = ["runtime", "minijail"]
@@ -67,6 +67,7 @@ runtime = [
     "proc-mounts",
     "procinfo",
     "tempfile",
+    "uuid",
 ]
 
 [build-dependencies]
