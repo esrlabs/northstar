@@ -294,7 +294,7 @@ async fn runtime_task<L: Launcher>(
             // to the global state. Therefore the console server receives a tx handle to the
             // main loop and issues `Event::Console`. Processing of the command takes place
             // in the console module but with access to `state`.
-            Event::Console(msg, txr) => state.console_request(&msg, txr).await,
+            Event::Console(mut msg, txr) => state.console_request(&mut msg, txr).await,
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
             // If a out of memory condition occours this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
