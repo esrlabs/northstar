@@ -18,12 +18,14 @@ use super::{
     state::Npk,
     Container, RepositoryId,
 };
+use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
     future::{join_all, ready, OptionFuture},
     FutureExt,
 };
 use log::{debug, info, warn};
+use mpsc::Receiver;
 use npk::npk;
 use std::{
     collections::HashMap,
@@ -34,12 +36,12 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::{fs, io, task, time::Instant};
+use tokio::{fs, io::AsyncWriteExt, sync::mpsc, task, time::Instant};
 
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {
     /// Add npk from `src` to repositoriy. Open the npk and parse content
-    async fn add(&mut self, src: &Path) -> Result<Container, Error>;
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>;
 
     /// Add container from repository if present
     async fn remove(&mut self, container: &Container) -> Result<(), Error>;
@@ -140,15 +142,23 @@ impl DirRepository {
 
 #[async_trait::async_trait]
 impl<'a> Repository for DirRepository {
-    async fn add(&mut self, src: &Path) -> Result<Container, Error>
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>
     where
         Self: Sized,
     {
         let dest = self.dir.join(format!("{}.npk", uuid::Uuid::new_v4()));
-        // Copy the npk to the repository
-        fs::copy(src, &dest)
+        let mut file = fs::File::create(&dest)
             .await
-            .map_err(|e| Error::Io("Failed to copy npk to repository".into(), e))?;
+            .map_err(|e| Error::Io("Failed create npk in repository".into(), e))?;
+        while let Some(r) = rx.recv().await {
+            file.write_all(&r)
+                .await
+                .map_err(|e| Error::Io("Failed to write npk".into(), e))?;
+        }
+        file.flush()
+            .await
+            .map_err(|e| Error::Io("Failed to flush npk".into(), e))?;
+        drop(file);
 
         debug!("Loading {}", dest.display());
         let npk = match task::block_in_place(|| Npk::from_path(dest.as_path(), self.key.as_ref()))
@@ -173,7 +183,8 @@ impl<'a> Repository for DirRepository {
         }
         self.containers
             .insert(container.clone(), (dest.to_owned(), Arc::new(npk)));
-        debug!("Loaded {}", container);
+
+        info!("Loaded {} into {}", container, self.id);
 
         Ok(container)
     }
@@ -238,12 +249,15 @@ impl MemRepository {
                 .map_err(|e| Error::io("Failed seek", e))?;
             Result::<_, Error>::Ok(BufReader::new(file))
         })?;
+        debug!("Loading buffer");
         let npk = npk::Npk::from_reader(file, None).map_err(|e| Error::Npk("Memory".into(), e))?;
         let manifest = npk.manifest();
         let container = Container::new(manifest.name.clone(), manifest.version.clone());
 
         self.containers
             .insert(container.clone(), (data, Arc::new(npk)));
+
+        info!("Loaded {} into {}", container, self.id);
 
         Ok(container)
     }
@@ -264,18 +278,15 @@ impl MemRepository {
 
 #[async_trait::async_trait]
 impl<'a> Repository for MemRepository {
-    async fn add(&mut self, file: &Path) -> Result<Container, Error>
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>
     where
         Self: Sized,
     {
-        let mut file = fs::File::open(&file)
-            .await
-            .map_err(|e| Error::io("Failed open npk", e))?;
-        let mut data = Vec::new();
-        io::copy(&mut file, &mut data)
-            .await
-            .map_err(|e| Error::io("Failed copy npk", e))?;
-        self.add_buf(&data).await
+        let mut buffer = Vec::new();
+        while let Some(r) = rx.recv().await {
+            buffer.extend(&r);
+        }
+        self.add_buf(&buffer).await
     }
 
     async fn remove(&mut self, container: &Container) -> Result<(), Error>

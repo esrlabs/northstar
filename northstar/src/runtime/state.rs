@@ -19,6 +19,7 @@ use super::{
 };
 use crate::{api, runtime::repository::MemRepository};
 use api::model::Response;
+use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
     future::{join_all, ready},
@@ -30,11 +31,14 @@ use std::{
     collections::{HashMap, HashSet},
     fs::File,
     io::BufReader,
-    path::{Path, PathBuf},
+    path::PathBuf,
     result,
     sync::Arc,
 };
-use tokio::{sync::oneshot, task, time};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task, time,
+};
 
 const INTERNAL_REPOSITORY: &str = "internal";
 
@@ -498,9 +502,11 @@ impl<'a, L: Launcher> State<'a, L> {
     }
 
     /// Install an NPK
-    async fn install(&mut self, repository_id: &str, src: &Path) -> Result<(), Error> {
-        debug!("Trying to install {}", src.display());
-
+    async fn install(
+        &mut self,
+        repository_id: &str,
+        rx: &mut mpsc::Receiver<Bytes>,
+    ) -> Result<(), Error> {
         // Find the repository
         let repository = self
             .repositories
@@ -508,9 +514,9 @@ impl<'a, L: Launcher> State<'a, L> {
             .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
 
         // Add the npk to the repository
-        let container = repository.add(src).await?;
+        let container = repository.insert(rx).await?;
 
-        debug!("Successfully installed {}", container);
+        info!("Successfully installed {}", container);
 
         Ok(())
     }
@@ -518,7 +524,7 @@ impl<'a, L: Launcher> State<'a, L> {
     /// Remove and umount a specific app
     #[allow(clippy::blocks_in_if_conditions)]
     async fn uninstall(&mut self, container: &Container) -> result::Result<(), Error> {
-        debug!("Trying to uninstall {}", container);
+        info!("Trying to uninstall {}", container);
 
         if self.containers.contains_key(container) {
             self.umount(container).await?;
@@ -528,7 +534,7 @@ impl<'a, L: Launcher> State<'a, L> {
             repository.remove(container).await?;
         }
 
-        debug!("Successfully uninstalled {}", container);
+        info!("Successfully uninstalled {}", container);
 
         Ok(())
     }
@@ -580,7 +586,7 @@ impl<'a, L: Launcher> State<'a, L> {
     /// Process console events
     pub(super) async fn console_request(
         &mut self,
-        request: &Request,
+        request: &mut Request,
         response_tx: oneshot::Sender<api::model::Response>,
     ) -> Result<(), Error> {
         match request {
@@ -679,8 +685,8 @@ impl<'a, L: Launcher> State<'a, L> {
                     warn!("Received message is not a request");
                 }
             }
-            Request::Install(repository, path) => {
-                let payload = match self.install(&repository, &path).await {
+            Request::Install(repository, ref mut rx) => {
+                let payload = match self.install(&repository, rx).await {
                     Ok(_) => api::model::Response::Ok(()),
                     Err(e) => api::model::Response::Err(e.into()),
                 };

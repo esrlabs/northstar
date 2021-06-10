@@ -18,7 +18,7 @@ use crate::{
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
-use bytes::BytesMut;
+use bytes::Bytes;
 use futures::{
     future::join_all,
     sink::SinkExt,
@@ -26,26 +26,25 @@ use futures::{
     Future, StreamExt, TryFutureExt,
 };
 use log::{debug, error, info, trace, warn};
-use std::{fmt, io::Write, path::PathBuf, unreachable};
-use tempfile::NamedTempFile;
+use std::{fmt, path::PathBuf, unreachable};
 use thiserror::Error;
 use tokio::{
     fs,
-    io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, BufReader},
     net::{TcpListener, UnixListener},
     pin, select,
-    sync::{self, broadcast, oneshot},
+    sync::{self, broadcast, mpsc, oneshot},
     task::{self},
     time,
 };
-use tokio_util::{either::Either, sync::CancellationToken};
+use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
 // Request from the main loop to the console
 #[derive(Debug)]
 pub(crate) enum Request {
     Message(model::Message),
-    Install(RepositoryId, PathBuf),
+    Install(RepositoryId, mpsc::Receiver<Bytes>),
 }
 
 /// A console is responsible for monitoring and serving incoming client connections
@@ -278,84 +277,55 @@ async fn process_request<S>(
     stream: &mut S,
     stop: &CancellationToken,
     event_loop: &EventTx,
-    message: api::model::Message,
-) -> Result<api::model::Message, Error>
+    message: model::Message,
+) -> Result<model::Message, Error>
 where
     S: AsyncRead + Unpin,
 {
     let message_id = message.id.clone();
-    let (request, tmpfile) =
-        if let api::model::Payload::Request(api::model::Request::Install(repository, size)) =
-            message.payload
-        {
-            debug!(
-                "{}: Received installation request with size {}",
-                client_id,
-                bytesize::ByteSize::b(size)
-            );
-            info!("{}: Using repository \"{}\"", client_id, repository);
-            let tmpfile = stream_to_tmpfile(stream, size)
-                .await
-                .map_err(|e| Error::Io("Failed to receive bytes".to_string(), e))?;
-            let path = tmpfile.path().to_owned();
-
-            (Request::Install(repository, path), Some(tmpfile))
-        } else {
-            (Request::Message(message), None)
-        };
-
-    trace!("    {:?} -> event loop", request);
-
     let (reply_tx, reply_rx) = oneshot::channel();
-    event_loop
-        .send(Event::Console(request, reply_tx))
-        .map_err(|_| Error::Shutdown)
-        .await?;
+    if let model::Payload::Request(model::Request::Install(repository, size)) = message.payload {
+        debug!(
+            "{}: Received installation request with size {}",
+            client_id,
+            bytesize::ByteSize::b(size)
+        );
 
-    let response = select! {
-        reply = reply_rx => reply.map_err(|_| Error::Shutdown),
-        _ = stop.cancelled() => Err(Error::Shutdown), // There can be a shutdown while we're waiting for an reply
-    };
+        info!("{}: Using repository \"{}\"", client_id, repository);
 
-    trace!("    {:?} <- event loop", response);
+        // Send a Receiver<Bytes> to the runtime and forward n bytes to this channel
+        let (tx, rx) = mpsc::channel(10);
+        let request = Request::Install(repository, rx);
+        trace!("    {:?} -> event loop", request);
+        let event = Event::Console(request, reply_tx);
+        event_loop.send(event).map_err(|_| Error::Shutdown).await?;
 
-    // Remove tmpfile if this is an install request
-    drop(tmpfile);
-
-    response.map(|response| api::model::Message {
-        id: message_id,
-        payload: api::model::Payload::Response(response),
-    })
-}
-
-/// Copies size bytes to a named tempfile
-async fn stream_to_tmpfile<S: AsyncRead + Unpin>(
-    stream: S,
-    size: u64,
-) -> io::Result<NamedTempFile> {
-    let mut tmpfile = NamedTempFile::new()?;
-    let start = time::Instant::now();
-    let mut stream = io::BufReader::new(stream).take(size);
-    let mut buf = BytesMut::with_capacity(16 * 1024);
-    loop {
-        let n = stream.read_buf(&mut buf).await?;
-        task::block_in_place(|| tmpfile.write_all(&buf[..]))?;
-        if n != 0 || !buf.is_empty() {
-            buf.clear();
-        } else {
-            break;
+        // If the connections breaks: just break. If the receiver is dropp: just break.
+        let mut take = ReaderStream::new(BufReader::new(stream.take(size)));
+        while let Some(Ok(buf)) = take.next().await {
+            if tx.send(buf).await.is_err() {
+                break;
+            }
         }
+    } else {
+        let request = Request::Message(message);
+        trace!("    {:?} -> event loop", request);
+        let event = Event::Console(request, reply_tx);
+        event_loop.send(event).map_err(|_| Error::Shutdown).await?;
     }
 
-    task::block_in_place(|| tmpfile.flush())?;
-
-    debug!(
-        "Received {} in {:?}",
-        bytesize::ByteSize::b(size),
-        start.elapsed()
-    );
-
-    Ok(tmpfile)
+    (select! {
+        reply = reply_rx => reply.map_err(|_| Error::Shutdown),
+        _ = stop.cancelled() => Err(Error::Shutdown), // There can be a shutdown while we're waiting for an reply
+    })
+    .map(|response| {
+        trace!("    {:?} <- event loop", response);
+        response
+    })
+    .map(|response| model::Message {
+        id: message_id,
+        payload: model::Payload::Response(response),
+    })
 }
 
 /// Types of listeners for console connections
