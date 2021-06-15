@@ -267,9 +267,7 @@ impl Console {
 ///
 /// # Errors
 ///
-/// Installing requests will cause this function to create a temporary file where to copy the
-/// incoming npk file. It can potentially produce an `Error::Io`.
-///
+/// If the streamed NPK is not valid and parseable a `Error::Npk(..)` is returned.
 /// If the event loop is closed due to shutdown, this function will return `Error::EventLoopClosed`.
 ///
 async fn process_request<S>(
@@ -300,7 +298,7 @@ where
         let event = Event::Console(request, reply_tx);
         event_loop.send(event).map_err(|_| Error::Shutdown).await?;
 
-        // If the connections breaks: just break. If the receiver is dropp: just break.
+        // If the connections breaks: just break. If the receiver is dropped: just break.
         let mut take = ReaderStream::new(BufReader::new(stream.take(size)));
         while let Some(Ok(buf)) = take.next().await {
             if tx.send(buf).await.is_err() {
