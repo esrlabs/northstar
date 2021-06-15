@@ -40,7 +40,7 @@ use tokio::{fs, io::AsyncWriteExt, sync::mpsc, task, time::Instant};
 
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {
-    /// Add npk from `src` to repositoriy. Open the npk and parse content
+    /// Stream an npk from `rx` into the repository and load it
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>;
 
     /// Add container from repository if present
