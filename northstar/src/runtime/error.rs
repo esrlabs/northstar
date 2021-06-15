@@ -26,7 +26,7 @@ pub enum Error {
     #[error("Invalid container {0}")]
     InvalidContainer(Container),
     /// The container cannot be started because it's already running
-    #[error("Container {0} cannot be umounted: busy")]
+    #[error("Container {0} cannot be unmounted: busy")]
     UmountBusy(Container),
     /// The container cannot be started because it's already running
     #[error("Container {0} failed to start: Already started")]

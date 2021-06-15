@@ -36,28 +36,19 @@ const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_AARCH64;
 #[cfg(all(target_arch = "x86_64"))]
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
-/// Syscalls used by northstar after the secomp rules are applied and before the actual execve is done.
+/// Syscalls used by northstar after the seccomp rules are applied and before the actual execve is done.
 const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 
-/// Construct a whitelist syscall filter that is applies post clone.
+/// Construct a whitelist syscall filter that is applied post clone.
 pub(super) fn seccomp_filter(
     filter: impl Iterator<Item = (impl ToString, impl ToString)>,
 ) -> AllowList {
     let mut builder = Builder::new();
     for (name, _) in filter {
         if let Err(e) = builder.allow_syscall_name(&name.to_string()) {
-            // TODO: This is an error that is cause by a malicious container. It's not the runtimes fault if
-            // the manifest contains a syscall name that is not known here. This cannot be checked at container assembly
-            // time since this normally doesn't happen on the target architecture.
-            //
-            // Return an error here. Extend runtime::Error with an error: InvalidManifest
-            warn!(
-                "Failed to whitelist {}: {}. Disabling seccomp",
-                &name.to_string(),
-                e
-            );
-            return AllowList::default();
-        };
+            // Continue here as a missing syscall on the allow list does not lead to insecure behaviour
+            warn!("Failed to allow syscall {}: {}", &name.to_string(), e);
+        }
     }
     builder.build()
 }

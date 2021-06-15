@@ -141,11 +141,7 @@ impl Launcher for Island {
         let tripwire = self.tripwire_read.clone();
         let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
         let groups = groups(manifest);
-        let seccomp = container
-            .manifest
-            .seccomp
-            .as_ref()
-            .map(|l| seccomp::seccomp_filter(l.iter()));
+        let seccomp = seccomp_filter(&container);
 
         // Do not close child tripwire fd as it will be needed to detect if the runtime process died
         fds.retain(|(read_fd, _)| read_fd != &self.tripwire_read.as_raw_fd());
@@ -474,6 +470,14 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
     } else {
         Vec::with_capacity(0)
     }
+}
+
+fn seccomp_filter(container: &Container) -> Option<seccomp::AllowList> {
+    container
+        .manifest
+        .seccomp
+        .as_ref()
+        .map(|seccomp| seccomp::seccomp_filter(seccomp.iter()))
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

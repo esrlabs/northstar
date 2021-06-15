@@ -42,6 +42,8 @@ pub(super) struct Mount {
     pub err_str: String,
 }
 
+// TODO: The container could be malformed and the mountpoint might be missing.
+// This is not a fault of the RT so don't expect it.
 impl Mount {
     /// Execute this mount call
     pub(super) fn mount(&self) -> Result<(), ()> {
