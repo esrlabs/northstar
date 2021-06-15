@@ -213,7 +213,7 @@ pub enum Mount {
     /// Mount a rw host directory dedicated to this container rw
     #[serde(rename = "persist")]
     Persist,
-    /// Mount a directory from a resouce
+    /// Mount a directory from a resource
     #[serde(rename = "resource")]
     Resource(Resource),
     /// Mount a tmpfs with size

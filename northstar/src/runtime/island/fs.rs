@@ -39,15 +39,12 @@ pub(super) struct Mount {
     pub fstype: Option<&'static str>,
     pub flags: MsFlags,
     pub data: Option<String>,
+    pub err_str: String,
 }
 
 impl Mount {
     /// Execute this mount call
-    pub(super) fn mount(&self) {
-        if !self.target.exists() {
-            panic!("Missing mount point {}", self.target.display())
-        }
-
+    pub(super) fn mount(&self) -> Result<(), ()> {
         nix::mount::mount(
             self.source.as_ref(),
             &self.target,
@@ -55,7 +52,8 @@ impl Mount {
             self.flags,
             self.data.as_deref(),
         )
-        .unwrap_or_else(|_| panic!("Failed to mount {:?}", self));
+        .expect(&self.err_str);
+        Ok(())
     }
 }
 
@@ -114,6 +112,7 @@ pub(super) async fn prepare_mounts(
 fn proc(root: &Path) -> Mount {
     debug!("Mounting /proc");
     let target = root.join("proc");
+    let err_str = format!("Failed to mount {}", &target.display());
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
     Mount {
         source: Some(PathBuf::from("proc")),
@@ -121,6 +120,7 @@ fn proc(root: &Path) -> Mount {
         fstype: Some("proc"),
         flags,
         data: None,
+        err_str,
     }
 }
 
@@ -135,6 +135,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
             options.iter().collect::<Vec<_>>(),
         );
         let target = root.join_strip(target);
+        let err_str = format!("Failed to mount {}", &target.display());
         let mut flags = options_to_flags(&options);
         flags.set(MsFlags::MS_BIND, true);
         mounts.push(Mount {
@@ -143,6 +144,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
             fstype: None,
             flags: MsFlags::MS_BIND | flags,
             data: None,
+            err_str: err_str.clone(),
         });
 
         if !rw {
@@ -152,6 +154,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
                 fstype: None,
                 flags: MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | flags,
                 data: None,
+                err_str,
             });
         }
         mounts
@@ -199,12 +202,16 @@ async fn persist(
 
     debug!("Mounting {} on {}", dir.display(), target.display(),);
 
+    let target = root.join_strip(target);
+    let err_str = format!("Failed to mount {}", &target.display());
+    let flags = MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
     Ok(Mount {
         source: Some(dir),
-        target: root.join_strip(target),
+        target,
         fstype: None,
-        flags: MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
+        flags,
         data: None,
+        err_str,
     })
 }
 
@@ -247,12 +254,14 @@ fn resource(
     flags |= MsFlags::MS_RDONLY | MsFlags::MS_BIND;
 
     let target = root.join_strip(target);
+    let err_str = format!("Failed to mount {}", &target.display());
     let mount = Mount {
         source: Some(src.clone()),
         target: target.clone(),
         fstype: None,
         flags,
         data: None,
+        err_str: err_str.clone(),
     };
 
     // Remount ro
@@ -262,6 +271,7 @@ fn resource(
         fstype: None,
         flags: MsFlags::MS_REMOUNT | flags,
         data: None,
+        err_str,
     };
     Ok((mount, remount_ro))
 }
@@ -272,12 +282,15 @@ fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
         bytesize::ByteSize::b(size),
         target.display()
     );
+    let target = root.join_strip(target);
+    let err_str = format!("Failed to mount {}", &target.display());
     Mount {
         source: None,
-        target: root.join_strip(target),
+        target,
         fstype: Some("tmpfs"),
         flags: MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
         data: Some(format!("size={},mode=1777", size)),
+        err_str,
     }
 }
 
@@ -304,6 +317,7 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
     dev_symlinks(dir.path()).await;
 
     let flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
+    let err_str = format!("Failed to mount {}", &root.join("dev").display());
 
     let mount = Mount {
         source: Some(dir.path().into()),
@@ -311,6 +325,7 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
         fstype: None,
         flags,
         data: None,
+        err_str: err_str.clone(),
     };
 
     let remount = Mount {
@@ -319,6 +334,7 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
         fstype: None,
         flags: MsFlags::MS_REMOUNT | flags,
         data: None,
+        err_str,
     };
     (Some(dir), mount, remount)
 }
