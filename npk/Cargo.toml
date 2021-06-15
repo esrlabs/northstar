@@ -24,7 +24,7 @@ tempfile = "3.2.0"
 thiserror = "1.0"
 uuid = { version = "0.8.2", features = ["v4"] }
 which = "4.1"
-zip = { git = "https://github.com/zip-rs/zip.git", rev = "3fd44ff", features = ["unreserved"] }
+zip = { version = "0.5.13", features = ["unreserved"] }
 
 [dev-dependencies]
 anyhow = "1.0"
