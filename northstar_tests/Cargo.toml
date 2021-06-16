@@ -28,5 +28,5 @@ npk = { path = "../npk" }
 
 [features]
 default = ["rt-minijail"]
-rt-island = ["northstar/rt-island"]
-rt-minijail = ["northstar/rt-minijail"]
+rt-island = ["northstar/rt-island", "northstar/hello-world"]
+rt-minijail = ["northstar/rt-minijail", "northstar/hello-world"]
