@@ -123,7 +123,7 @@ impl Launcher for Island {
         let env = env(manifest);
         let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
         let (checkpoint_parent, checkpoint_child) = checkpoints();
-        let (mounts, dev) = fs::mounts(&self.config, &container).await?;
+        let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
         let groups = groups(manifest);
         let seccomp = seccomp::seccomp_filter(container.manifest.seccomp.as_ref());
 
@@ -495,7 +495,6 @@ impl Checkpoint {
         task::block_in_place(|| self.wait(c));
     }
 }
-
 
 #[test]
 fn sync() {
