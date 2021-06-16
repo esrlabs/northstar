@@ -26,9 +26,7 @@ use futures::{
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
-use npk::{
-    manifest::{Manifest, Mount, Resource},
-};
+use npk::manifest::{Manifest, Mount, Resource};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
