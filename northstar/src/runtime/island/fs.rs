@@ -73,51 +73,61 @@ pub(super) async fn prepare_mounts(
         .canonicalize()
         .map_err(|e| Error::io("Canonicalize root", e))?;
 
-    proc(&root, &mut mounts);
+    mounts.push(proc(&root));
 
     let manifest_mounts = &container.manifest.mounts;
 
     for (target, mount) in manifest_mounts {
         match &mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
-                bind(&root, target, host, options, &mut mounts)
+                mounts.extend(bind(&root, target, host, options));
             }
             manifest::Mount::Persist => {
-                persist(&root, target, config, container, &mut mounts).await?
+                mounts.push(persist(&root, target, config, container).await?);
             }
             manifest::Mount::Resource(res) => {
-                resource(&root, target, config, container, res, &mut mounts)?;
+                let (mount, remount_ro) = resource(&root, target, config, container, res)?;
+                mounts.push(mount);
+                mounts.push(remount_ro);
             }
-            manifest::Mount::Tmpfs(Tmpfs { size }) => tmpfs(&root, target, *size, &mut mounts),
+            manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(&root, target, *size)),
             manifest::Mount::Dev => {
-                dev = self::dev(&root, &container, &mut mounts).await;
+                let (d, mount, remount) = self::dev(&root, &container).await;
+                mounts.push(mount);
+                mounts.push(remount);
+                dev = d
             }
         }
     }
 
     // No dev configured in mounts: Use minimal version
     if dev.is_none() && !manifest_mounts.contains_key(Path::new("/dev")) {
-        dev = self::dev(&root, &container, &mut mounts).await;
+        let (d, mount, remount) = self::dev(&root, &container).await;
+        mounts.push(mount);
+        mounts.push(remount);
+        dev = d;
     }
 
     Ok((mounts, dev))
 }
 
-fn proc(root: &Path, mounts: &mut Vec<Mount>) {
+fn proc(root: &Path) -> Mount {
     debug!("Mounting /proc");
     let target = root.join("proc");
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
-    mounts.push(Mount {
+    Mount {
         source: Some(PathBuf::from("proc")),
         target,
         fstype: Some("proc"),
         flags,
         data: None,
-    });
+    }
 }
 
-fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions, mounts: &mut Vec<Mount>) {
+fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<Mount> {
     if host.exists() {
+        let rw = options.contains(&MountOption::Rw);
+        let mut mounts = Vec::with_capacity(if rw { 2 } else { 1 });
         debug!(
             "Mounting {} on {} with {:?}",
             host.display(),
@@ -135,7 +145,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions, mounts:
             data: None,
         });
 
-        if !options.contains(&MountOption::Rw) {
+        if !rw {
             mounts.push(Mount {
                 source: Some(host.to_owned()),
                 target,
@@ -144,12 +154,14 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions, mounts:
                 data: None,
             });
         }
+        mounts
     } else {
         debug!(
             "Skipping bind mount of nonexitent source {} to {}",
             host.display(),
             target.display()
         );
+        vec![]
     }
 }
 
@@ -158,8 +170,7 @@ async fn persist(
     target: &Path,
     config: &Config,
     container: &Container,
-    mounts: &mut Vec<Mount>,
-) -> Result<(), Error> {
+) -> Result<Mount, Error> {
     let uid = container.manifest.uid;
     let gid = container.manifest.gid;
     let dir = config.data_dir.join(&container.manifest.name);
@@ -188,14 +199,13 @@ async fn persist(
 
     debug!("Mounting {} on {}", dir.display(), target.display(),);
 
-    mounts.push(Mount {
+    Ok(Mount {
         source: Some(dir),
         target: root.join_strip(target),
         fstype: None,
         flags: MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
         data: None,
-    });
-    Ok(())
+    })
 }
 
 fn resource(
@@ -204,8 +214,7 @@ fn resource(
     config: &Config,
     container: &Container,
     resource: &Resource,
-    mounts: &mut Vec<Mount>,
-) -> Result<(), Error> {
+) -> Result<(Mount, Mount), Error> {
     let src = {
         // Join the source of the resource container with the mount dir
         let resource_root = config
@@ -238,38 +247,38 @@ fn resource(
     flags |= MsFlags::MS_RDONLY | MsFlags::MS_BIND;
 
     let target = root.join_strip(target);
-    mounts.push(Mount {
+    let mount = Mount {
         source: Some(src.clone()),
         target: target.clone(),
         fstype: None,
         flags,
         data: None,
-    });
+    };
 
     // Remount ro
-    mounts.push(Mount {
+    let remount_ro = Mount {
         source: Some(src),
         target,
         fstype: None,
         flags: MsFlags::MS_REMOUNT | flags,
         data: None,
-    });
-    Ok(())
+    };
+    Ok((mount, remount_ro))
 }
 
-fn tmpfs(root: &Path, target: &Path, size: u64, mounts: &mut Vec<Mount>) {
+fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
     debug!(
         "Mounting tmpfs with size {} on {}",
         bytesize::ByteSize::b(size),
         target.display()
     );
-    mounts.push(Mount {
+    Mount {
         source: None,
         target: root.join_strip(target),
         fstype: Some("tmpfs"),
         flags: MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC,
         data: Some(format!("size={},mode=1777", size)),
-    });
+    }
 }
 
 fn options_to_flags(opt: &MountOptions) -> MsFlags {
@@ -285,7 +294,7 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
     flags
 }
 
-async fn dev(root: &Path, container: &Container, mounts: &mut Vec<Mount>) -> Dev {
+async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
     let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
     debug!("Creating devfs in {}", dir.path().display());
 
@@ -296,22 +305,22 @@ async fn dev(root: &Path, container: &Container, mounts: &mut Vec<Mount>) -> Dev
 
     let flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
 
-    mounts.push(Mount {
+    let mount = Mount {
         source: Some(dir.path().into()),
         target: root.join("dev"),
         fstype: None,
         flags,
         data: None,
-    });
+    };
 
-    mounts.push(Mount {
+    let remount = Mount {
         source: Some(dir.path().into()),
         target: root.join("dev"),
         fstype: None,
         flags: MsFlags::MS_REMOUNT | flags,
         data: None,
-    });
-    Some(dir)
+    };
+    (Some(dir), mount, remount)
 }
 
 fn dev_devices(dir: &Path, uid: u32, gid: u32) {
