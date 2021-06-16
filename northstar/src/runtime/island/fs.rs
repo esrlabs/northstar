@@ -60,8 +60,9 @@ impl Mount {
 }
 
 /// Iterate the mounts of a container and assemble a list of `mount` calls to be
-/// performed by init.
-pub(super) async fn mounts(
+/// performed by init. Prepare an options persist dir. This fn fails if a resource
+/// is referenced that does not exist.
+pub(super) async fn prepare_mounts(
     config: &Config,
     container: &Container,
 ) -> Result<(Vec<Mount>, Dev), Error> {
