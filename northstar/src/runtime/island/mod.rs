@@ -44,7 +44,6 @@ use task::block_in_place as block;
 use tokio::{sync::mpsc::error::TrySendError, task, time};
 use Signal::SIGCHLD;
 
-mod args;
 mod clone;
 mod fs;
 mod init;
@@ -52,8 +51,11 @@ mod io;
 mod seccomp;
 mod utils;
 
+/// Environment variable name passed to the container with the containers name
 const ENV_NAME: &str = "NAME";
+/// Environment variable name passed to the container with the containers versio
 const ENV_VERSION: &str = "VERSION";
+/// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;
 
 type Container = MountedContainer<IslandProcess>;
@@ -117,23 +119,17 @@ impl Launcher for Island {
 
     async fn create(&self, container: &Container) -> Result<Self::Process, Error> {
         let manifest = &container.manifest;
+        let (init, argv) = init_argv(manifest);
+        let env = env(manifest);
         let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
-        let (checkpoint_parent, checkpoint_child) =
-            checkpoints().expect("Failed to create pipes between parent and child processes");
-
-        // Calculating init, argv and env allocates. Do that before `clone`.
-        let (init, argv, env) =
-            args::args(manifest).expect("Failed to extract container arguments");
+        let (checkpoint_parent, checkpoint_child) = checkpoints();
+        let (mounts, dev) = fs::mounts(&self.config, &container).await?;
+        let groups = groups(manifest);
+        let seccomp = seccomp::seccomp_filter(container.manifest.seccomp.as_ref());
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
         debug!("{} env is {:?}", manifest.name, env);
-
-        // Prepare a list of mounts and groups that need to be applied to the child. Prepare the list here
-        // to avoid any allocation in the child
-        let (mounts, dev) = fs::mounts(&self.config, &container).await?;
-        let groups = groups(manifest);
-        let seccomp = seccomp::seccomp_filter(container.manifest.seccomp.as_ref());
 
         // Clone init
         let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
@@ -382,44 +378,60 @@ fn wait(
     })
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-enum Start {
-    // Signal the child to go
-    Start,
-    // Signal the parent that go is received
-    Started,
+/// Construct the init and argv argument for the containers execve
+fn init_argv(manifest: &Manifest) -> (CString, Vec<CString>) {
+    // A container without an init shall not be started
+    // Validation of init is done in `Manifest`
+    let init = CString::new(
+        manifest
+            .init
+            .as_ref()
+            .expect("Attempt to use init from resource container")
+            .to_str()
+            .expect("Invalid init. This a bug in the manifest validation"),
+    )
+    .expect("Invalid init");
+
+    // argv that is passed to execve must start with init
+    let argv = if let Some(ref args) = manifest.args {
+        let mut argv = Vec::with_capacity(1 + args.len());
+        argv.push(init.clone());
+        argv.extend({
+            args.iter().map(|arg| {
+                CString::new(arg.as_bytes())
+                    .expect("Invalid arg. This is a bug in the manifest validation")
+            })
+        });
+        argv
+    } else {
+        vec![init.clone()]
+    };
+
+    // argv
+    (init, argv)
 }
 
-pub(super) struct Checkpoint(PipeRead, PipeWrite);
+/// Construct the env argument for the containers execve
+fn env(manifest: &Manifest) -> Vec<CString> {
+    let mut env = Vec::with_capacity(2);
+    env.push(
+        CString::new(format!("{}={}", ENV_NAME, manifest.name.to_string()))
+            .expect("Invalid container name. This is a bug in the manifest validation"),
+    );
+    env.push(CString::new(format!("{}={}", ENV_VERSION, manifest.version)).unwrap());
 
-fn checkpoints() -> Option<(Checkpoint, Checkpoint)> {
-    let a = pipe::pipe().ok()?;
-    let b = pipe::pipe().ok()?;
+    if let Some(ref e) = manifest.env {
+        env.extend({
+            e.iter().map(|(k, v)| {
+                CString::new(format!("{}={}", k, v))
+                    .expect("Invalid env. This is a bug in the manifest validation")
+            })
+        })
+    }
 
-    Some((Checkpoint(a.0, b.1), Checkpoint(b.0, a.1)))
+    env
 }
 
-impl Checkpoint {
-    fn send(&mut self, c: Start) {
-        self.1.send(c).expect("Pipe error");
-    }
-
-    fn wait(&mut self, c: Start) {
-        match self.0.recv::<Start>() {
-            Ok(n) if n == c => (),
-            Ok(n) => panic!("Invalid value {:?}. Expected {:?}", n, c),
-            Err(e) => panic!("Pipe error: {}", e),
-        }
-    }
-
-    async fn async_send(&mut self, c: Start) {
-        task::block_in_place(move || self.send(c));
-    }
-
-    async fn async_wait(&mut self, c: Start) {
-        task::block_in_place(|| self.wait(c));
-    }
-}
 /// Generate a list of supplementary gids if the groups info can be retrieved. This
 /// must happen before the init `clone` because the group information cannot be gathered
 /// without `/etc` etc...
@@ -445,10 +457,49 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+enum Start {
+    // Signal the child to go
+    Start,
+    // Signal the parent that go is received
+    Started,
+}
+
+pub(super) struct Checkpoint(PipeRead, PipeWrite);
+
+fn checkpoints() -> (Checkpoint, Checkpoint) {
+    let a = pipe::pipe().expect("Failed to create pipe");
+    let b = pipe::pipe().expect("Failed to create pipe");
+
+    (Checkpoint(a.0, b.1), Checkpoint(b.0, a.1))
+}
+
+impl Checkpoint {
+    fn send(&mut self, c: Start) {
+        self.1.send(c).expect("Pipe error");
+    }
+
+    fn wait(&mut self, c: Start) {
+        match self.0.recv::<Start>() {
+            Ok(n) if n == c => (),
+            Ok(n) => panic!("Invalid value {:?}. Expected {:?}", n, c),
+            Err(e) => panic!("Pipe error: {}", e),
+        }
+    }
+
+    async fn async_send(&mut self, c: Start) {
+        task::block_in_place(move || self.send(c));
+    }
+
+    async fn async_wait(&mut self, c: Start) {
+        task::block_in_place(|| self.wait(c));
+    }
+}
+
+
 #[test]
 fn sync() {
-    let (mut child, mut parent) =
-        checkpoints().expect("Failed to create pipes between parent and child processes");
+    let (mut child, mut parent) = checkpoints();
     parent.send(Start::Start);
     child.wait(Start::Start);
 
