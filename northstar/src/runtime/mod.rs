@@ -13,20 +13,19 @@
 //   limitations under the License.
 
 use crate::api;
-use config::Config;
 use derive_new::new;
 use error::Error;
+use fmt::Debug;
 use log::debug;
-
-use async_trait::async_trait;
 use nix::{
     sys::{signal, stat},
     unistd,
 };
 use proc_mounts::MountIter;
+use repository::Repository;
 use state::State;
 use std::{
-    fmt::Display,
+    fmt::{self},
     future::Future,
     path::Path,
     pin::Pin,
@@ -36,7 +35,7 @@ use sync::mpsc;
 use tokio::{
     fs, io,
     sync::{self, oneshot},
-    task, time,
+    task,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -55,60 +54,43 @@ mod pipe;
 mod repository;
 mod state;
 
+/// Container identification
+pub use api::container::Container;
+
+use self::config::Config;
+
 type EventTx = mpsc::Sender<Event>;
 type RepositoryId = String;
-pub use api::container::*;
-use repository::Repository;
-use state::MountedContainer;
 type ExitCode = i32;
 type Pid = u32;
 
 /// Buffer size of the main loop channel
 const MAIN_BUFFER: usize = 1000;
 
-type RuntimeLauncher = island::Island;
-
-#[async_trait]
-trait Process: Sized {
-    fn pid(&self) -> Pid;
-    async fn start(mut self) -> Result<Self, Error>;
-    async fn stop(mut self, timeout: time::Duration) -> Result<(Self, ExitStatus), Error>;
-    async fn destroy(mut self) -> Result<(), Error>;
-}
-
-#[async_trait]
-trait Launcher {
-    type Process: Process + Send + 'static;
-
-    async fn start(event_tx: EventTx, config: Config) -> Result<Self, Error>
-    where
-        Self: Sized;
-    async fn shutdown(mut self) -> Result<(), Error>
-    where
-        Self: Sized;
-
-    async fn create(
-        &self,
-        container: &MountedContainer<Self::Process>,
-    ) -> Result<Self::Process, Error>;
+#[derive(Debug)]
+enum Event {
+    /// Incomming console command
+    Console(console::Request, oneshot::Sender<api::model::Response>),
+    /// A instance exited with return code
+    Exit(Container, ExitStatus),
+    /// Out of memory event occured
+    Oom(Container),
+    /// Northstar shall shut down
+    Shutdown,
+    /// Notification events
+    Notification(Notification),
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum ExitStatus {
+enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
     /// Process was terminated by a signal
     Signaled(signal::Signal),
 }
 
-impl Display for ExitStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(new, Clone, Debug)]
-pub(crate) enum Notification {
+enum Notification {
     OutOfMemory(Container),
     Exit {
         container: Container,
@@ -116,20 +98,6 @@ pub(crate) enum Notification {
     },
     Started(Container),
     Stopped(Container),
-}
-
-#[derive(Debug)]
-enum Event {
-    /// Incoming command
-    Console(console::Request, oneshot::Sender<api::model::Response>),
-    /// A instance exited with return code
-    Exit(Container, ExitStatus),
-    /// Out of memory event occurred
-    Oom(Container),
-    /// Northstar shall shut down
-    Shutdown,
-    /// Notification events
-    Notification(Notification),
 }
 
 /// Result of a Runtime action
@@ -148,6 +116,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    /// Start runtime with configuration `config`
     pub async fn start(config: Config) -> Result<Runtime, Error> {
         let stop = CancellationToken::new();
         let (stopped_tx, stopped_rx) = oneshot::channel();
@@ -197,7 +166,7 @@ impl Runtime {
         {
             let stop = stop.clone();
             task::spawn(async move {
-                match runtime_task::<RuntimeLauncher>(&config, stop).await {
+                match runtime_task(&config, stop).await {
                     Err(e) => {
                         log::error!("Runtime error: {}", e);
                         stopped_tx.send(Err(e)).ok();
@@ -255,14 +224,10 @@ impl Future for Runtime {
     }
 }
 
-async fn runtime_task<L: Launcher>(
-    config: &'_ Config,
-    stop: CancellationToken,
-) -> Result<(), Error> {
+async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(), Error> {
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(MAIN_BUFFER);
-
-    let mut state = State::<L>::new(config, event_tx.clone()).await?;
+    let mut state = State::new(config, event_tx.clone()).await?;
 
     // Initialize the console if configured
     let console = if let Some(url) = config.console.as_ref() {

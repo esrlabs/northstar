@@ -22,14 +22,18 @@ use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use northstar::{
     api::{client::Client, model::Notification},
-    runtime::{self, config, config::Config, Container},
+    runtime::{
+        self,
+        config::{self, Config},
+        Container,
+    },
 };
 use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
 use tokio::{fs, pin, select, time};
 
 pub struct Northstar {
-    config: config::Config,
+    config: Config,
     client: northstar::api::client::Client,
     runtime: runtime::Runtime,
     tmpdir: TempDir,

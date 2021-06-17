@@ -17,8 +17,8 @@ use super::{
     config::Config,
     error::Error,
     pipe::{self, pipe, PipeRead, PipeRecv, PipeSend, PipeWrite, RawFdExt},
-    state::MountedContainer,
-    Event, EventTx, ExitStatus, Launcher, Pid,
+    state::{MountedContainer, Process},
+    Event, EventTx, ExitStatus, Pid,
 };
 use async_trait::async_trait;
 use futures::{Future, TryFutureExt};
@@ -59,7 +59,7 @@ const ENV_VERSION: &str = "VERSION";
 /// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;
 
-type Container = MountedContainer<IslandProcess>;
+type Container = MountedContainer;
 
 #[derive(Debug)]
 pub(super) struct Island {
@@ -104,14 +104,8 @@ impl fmt::Debug for IslandProcess {
     }
 }
 
-#[async_trait]
-impl Launcher for Island {
-    type Process = IslandProcess;
-
-    async fn start(tx: EventTx, config: Config) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
+impl Island {
+    pub async fn start(tx: EventTx, config: Config) -> Result<Self, Error> {
         let (tripwire_read, tripwire_write) =
             block(pipe).map_err(|e| Error::io("Open tripwire pipe", e))?;
         block(|| tripwire_read.set_cloexec(true))
@@ -125,14 +119,11 @@ impl Launcher for Island {
         })
     }
 
-    async fn shutdown(mut self) -> Result<(), Error>
-    where
-        Self: Sized,
-    {
+    pub async fn shutdown(self) -> Result<(), Error> {
         Ok(())
     }
 
-    async fn create(&self, container: &Container) -> Result<Self::Process, Error> {
+    pub async fn create(&self, container: &Container) -> Result<Box<dyn Process>, Error> {
         let manifest = &container.manifest;
         let (init, argv) = init_argv(manifest);
         let env = env(manifest);
@@ -171,13 +162,13 @@ impl Launcher for Island {
                     let pid = child.as_raw() as Pid;
                     let exit_status = Box::new(wait(container, pid, self.tx.clone()));
 
-                    Ok(IslandProcess::Created {
+                    Ok(Box::new(IslandProcess::Created {
                         pid,
                         exit_status,
                         io: (stdout, stderr),
                         checkpoint: checkpoint_runtime,
                         _dev: dev,
-                    })
+                    }))
                 }
                 unistd::ForkResult::Child => {
                     drop(checkpoint_runtime);
@@ -202,8 +193,8 @@ impl Launcher for Island {
 }
 
 #[async_trait]
-impl super::Process for IslandProcess {
-    fn pid(&self) -> Pid {
+impl Process for IslandProcess {
+    async fn pid(&self) -> Pid {
         match self {
             IslandProcess::Created { pid, .. } => *pid,
             IslandProcess::Started { pid, .. } => *pid,
@@ -211,25 +202,25 @@ impl super::Process for IslandProcess {
         }
     }
 
-    async fn start(mut self) -> Result<Self, Error> {
-        info!("Starting {}", self.pid());
-        match self {
+    async fn start(self: Box<Self>) -> Result<Box<dyn Process>, Error> {
+        info!("Starting {}", self.pid().await);
+        match *self {
             IslandProcess::Created {
                 pid,
                 exit_status,
-                io: _io,
+                io,
                 _dev,
                 mut checkpoint,
             } => {
                 checkpoint.async_send(Start::Start).await;
                 checkpoint.async_wait(Start::Started).await;
 
-                Ok(IslandProcess::Started {
+                Ok(Box::new(IslandProcess::Started {
                     pid,
                     exit_status,
-                    io: _io,
+                    io,
                     _dev,
-                })
+                }))
             }
             _ => unreachable!(),
         }
@@ -238,10 +229,10 @@ impl super::Process for IslandProcess {
     /// Send a SIGTERM to the application. If the application does not terminate with a timeout
     /// it is SIGKILLed.
     async fn stop(
-        mut self,
+        self: Box<Self>,
         timeout: time::Duration,
-    ) -> Result<(Self, ExitStatus), super::error::Error> {
-        let (pid, mut exit_status, io) = match self {
+    ) -> Result<(Box<dyn Process>, ExitStatus), super::error::Error> {
+        let (pid, mut exit_status, io) = match *self {
             IslandProcess::Created {
                 pid,
                 exit_status,
@@ -293,11 +284,11 @@ impl super::Process for IslandProcess {
             io.stop().await?;
         }
 
-        Ok((IslandProcess::Stopped, exit_status))
+        Ok((Box::new(IslandProcess::Stopped), exit_status))
     }
 
-    async fn destroy(mut self) -> Result<(), Error> {
-        match self {
+    async fn destroy(self: Box<Self>) -> Result<(), Error> {
+        match *self {
             IslandProcess::Created { io, .. } | IslandProcess::Started { io, .. } => {
                 if let Some(io) = io.0 {
                     io.stop().await?;
