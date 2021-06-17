@@ -15,8 +15,7 @@ desc 'Check'
 task :check do
   sh 'cargo +nightly fmt -- --color=always --check'
   sh 'cargo clippy'
-  sh 'cargo test'
-  sh 'cargo test --features rt-island --no-default-features -p northstar_tests'
+  sh 'cargo test --all-features'
 
   targets.each do |target|
     sh "cross build --target #{target}"

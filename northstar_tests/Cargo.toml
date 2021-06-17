@@ -13,7 +13,7 @@ futures = "0.3.14"
 lazy_static = "1.4"
 log = "0.4.14"
 nix = "0.20.0"
-northstar = { path = "../northstar", features = ["api", "hello-world"] }
+northstar = { path = "../northstar", features = ["api", "runtime", "hello-world"] }
 npk = { path = "../npk" }
 regex = "1.4"
 rusty-fork = "0.3.0"
@@ -25,8 +25,3 @@ url = "2.2"
 tempfile = "3.2"
 escargot = "0.5.2"
 npk = { path = "../npk" }
-
-[features]
-default = ["rt-minijail"]
-rt-island = ["northstar/rt-island", "northstar/hello-world"]
-rt-minijail = ["northstar/rt-minijail", "northstar/hello-world"]

@@ -32,9 +32,9 @@ jobs:
           use-cross: true
           command: build
           args: --target=${{ matrix.target }}
-      - name: Build Runtime Island
+      - name: Build
         uses: actions-rs/cargo@v1
         with:
           use-cross: true
           command: build
-          args: --target=${{ matrix.target }} -p main --features rt-island --no-default-features
+          args: --target=${{ matrix.target }} --all-features 

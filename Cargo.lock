@@ -1010,13 +1010,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56d855069fafbb9b344c0f962150cd2c1187975cb1c22c1522c240d8c4986714"
 
 [[package]]
-name = "libcap-sys"
-version = "0.2.45"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "libloading"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1089,25 +1082,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f83fb6581e8ed1f85fd45c116db8405483899489e38406156c25eb743554361d"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "minijail"
-version = "0.2.1"
-dependencies = [
- "libc",
- "minijail-sys",
-]
-
-[[package]]
-name = "minijail-sys"
-version = "0.0.11"
-dependencies = [
- "cc",
- "itertools",
- "libc",
- "libcap-sys",
- "regex",
 ]
 
 [[package]]
@@ -1211,7 +1185,6 @@ dependencies = [
  "lazy_static",
  "log",
  "memoffset",
- "minijail",
  "nix",
  "npk",
  "page_size",

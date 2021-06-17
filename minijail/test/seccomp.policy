@@ -1,4 +1,0 @@
-read: 1
-write: 1
-rt_sigreturn: 1
-exit: 1
