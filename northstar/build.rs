@@ -12,18 +12,16 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use std::{env, fs, io::Write, path};
+
 fn main() {
-    #[cfg(feature = "rt-island")]
     generate_seccomp();
 
     #[cfg(feature = "hello-world")]
     package_hello_example().expect("Failed to package hello-world");
 }
 
-#[cfg(feature = "rt-island")]
 fn generate_seccomp() {
-    use std::{env, fs, io::Write, path};
-
     fn generate() -> anyhow::Result<()> {
         let target = std::env::var("TARGET").unwrap();
 
@@ -108,7 +106,7 @@ fn generate_seccomp() {
 pub fn package_hello_example() -> anyhow::Result<()> {
     use anyhow::Context;
     use npk::npk;
-    use std::{env, fs, path::Path};
+    use std::path::Path;
 
     const MANIFEST: &str = r#"name: hello-world
 version: 0.0.1

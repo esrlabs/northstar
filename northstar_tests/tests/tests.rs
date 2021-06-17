@@ -18,13 +18,13 @@ use log::debug;
 use logger::assume;
 use northstar::api::{
     self,
-    model::{self, ConnectNack, Notification},
+    model::{self, ConnectNack, ExitStatus, Notification},
 };
 use northstar_tests::{
     logger,
     runtime::Northstar,
     test,
-    test_container::{test_container_npk, test_resource_npk, TEST_CONTAINER, TEST_RESOURCE},
+    test_container::{TEST_CONTAINER, TEST_RESOURCE},
 };
 use std::path::PathBuf;
 use tokio::{
@@ -64,62 +64,28 @@ test!(install_uninstall_test_container, {
     runtime.shutdown().await
 });
 
-// Install test container and resource to internal in memory repository
-test!(install_uninstall_internal_repositoriy, {
-    let runtime = Northstar::launch().await?;
-    for _ in 0..2 {
-        runtime
-            .install(test_container_npk().await, "internal")
-            .await?;
-        runtime
-            .install(test_resource_npk().await, "internal")
-            .await?;
-
-        runtime.start(TEST_CONTAINER).await?;
-        assume("Sleeping", 5u64).await?;
-        runtime.stop(TEST_CONTAINER, 5).await?;
-
-        runtime.uninstall_test_container().await?;
-        runtime.uninstall_test_resource().await?;
-
-        // There shall just be the hello-world
-        assert!(runtime.containers().await?.len() == 1);
-    }
-
-    runtime.shutdown().await
-});
-
 // Start and stop a container multiple times
 test!(start_stop_test_container_with_waiting, {
-    #[cfg(not(feature = "rt-minijail"))]
     let mut runtime = Northstar::launch_install_test_container().await?;
-    #[cfg(feature = "rt-minijail")]
-    let runtime = Northstar::launch_install_test_container().await?;
 
     for _ in 0..10u32 {
         runtime.start(TEST_CONTAINER).await?;
         assume("Sleeping", 5u64).await?;
         runtime.stop(TEST_CONTAINER, 5).await?;
 
-        // Minijail behaves wrong here - skip this check
-        #[cfg(not(feature = "rt-minijail"))]
-        {
-            assume(
-                "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+        assume(
+            "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+            5,
+        )
+        .await?;
+        runtime
+            .assume_notification(
+                move |n| {
+                    n == &Notification::Stopped(northstar_tests::test_container::test_container())
+                },
                 5,
             )
             .await?;
-            runtime
-                .assume_notification(
-                    move |n| {
-                        n == &Notification::Stopped(
-                            northstar_tests::test_container::test_container(),
-                        )
-                    },
-                    5,
-                )
-                .await?;
-        }
     }
 
     runtime.shutdown().await
@@ -127,34 +93,25 @@ test!(start_stop_test_container_with_waiting, {
 
 // Start and stop a container without waiting
 test!(start_stop_test_container_without_waiting, {
-    #[cfg(not(feature = "rt-minijail"))]
     let mut runtime = Northstar::launch_install_test_container().await?;
-    #[cfg(feature = "rt-minijail")]
-    let runtime = Northstar::launch_install_test_container().await?;
 
     for _ in 0..10u32 {
         runtime.start(TEST_CONTAINER).await?;
         runtime.stop(TEST_CONTAINER, 1).await?;
 
-        // Minijail behaves wrong here - skip this check
-        #[cfg(not(feature = "rt-minijail"))]
-        {
-            assume(
-                "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+        assume(
+            "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+            5,
+        )
+        .await?;
+        runtime
+            .assume_notification(
+                move |n| {
+                    n == &Notification::Stopped(northstar_tests::test_container::test_container())
+                },
                 5,
             )
             .await?;
-            runtime
-                .assume_notification(
-                    move |n| {
-                        n == &Notification::Stopped(
-                            northstar_tests::test_container::test_container(),
-                        )
-                    },
-                    5,
-                )
-                .await?;
-        }
     }
     runtime.shutdown().await
 });
@@ -284,10 +241,13 @@ test!(container_crash_exit, {
         runtime
             .assume_notification(
                 |n| {
-                    match n {
-                        Notification::Exit { .. } => true, // TODO: Fix this once island and minijail are aligned.
-                        _ => false,
-                    }
+                    matches!(
+                        n,
+                        Notification::Exit {
+                            status: ExitStatus::Signaled(6),
+                            ..
+                        }
+                    )
                 },
                 15,
             )
@@ -329,16 +289,13 @@ test!(container_ppid_must_be_init, {
     runtime.shutdown().await
 });
 
-// Check session id which needs to be pid of init or none for minijail
+// Check session id which needs to be pid of init
 test!(container_sid_must_be_init_or_none, {
     let runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
 
-    #[cfg(features = "rt-island")]
     assume("getsid: 1", 5).await?;
-    #[cfg(features = "rt-minijail")]
-    assume("getsid: 0", 5).await?;
 
     runtime.shutdown().await
 });
@@ -397,13 +354,7 @@ test!(container_shall_only_have_configured_fds, {
     assume("/proc/self/fd/0: /dev/null", 5).await?;
     assume("/proc/self/fd/1: pipe:.*", 5).await?;
     assume("/proc/self/fd/2: /dev/null", 5).await?;
-
-    #[cfg(features = "rt-island")]
     assume("total: 3", 5).await?;
-
-    // Minijail does not close it's pipes properly
-    #[cfg(features = "rt-minijail")]
-    assume("total: 6", 5).await?;
 
     runtime.shutdown().await
 });
@@ -417,34 +368,6 @@ test!(proc_is_mounted_ro, {
     runtime.shutdown().await
 });
 
-// Check proc mount options
-test!(proc_mount_options, {
-    let runtime = Northstar::launch_install_test_container().await?;
-    runtime.test_cmds("inspect").await;
-    runtime.start(TEST_CONTAINER).await?;
-    assume("proc /proc proc ro,nosuid,nodev", 5).await?;
-    runtime.shutdown().await
-});
-
-// Check if the resource is mounted with the options from the manifest
-test!(resource_mount_options, {
-    let runtime = Northstar::launch_install_test_container().await?;
-    runtime.test_cmds("inspect").await;
-    runtime.start(TEST_CONTAINER).await?;
-    #[cfg(feature = "rt-island")]
-    assume("resource squashfs ro,nosuid,nodev,noexec,", 5).await?;
-    runtime.shutdown().await
-});
-
-// Check if the bind mounts have the options from the manifest
-test!(bind_mount_options, {
-    let runtime = Northstar::launch_install_test_container().await?;
-    runtime.test_cmds("inspect").await;
-    runtime.start(TEST_CONTAINER).await?;
-    #[cfg(feature = "rt-island")]
-    assume("/lib .* ro,nosuid,nodev", 5).await?;
-    runtime.shutdown().await
-});
 // Open many connections to the runtime
 test!(open_many_connections_to_the_runtime_and_shutdown, {
     let runtime = Northstar::launch().await?;

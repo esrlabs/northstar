@@ -47,12 +47,9 @@ mod debug;
 #[allow(unused)]
 mod device_mapper;
 mod error;
-#[cfg(feature = "rt-island")]
 mod island;
 mod key;
 mod loopdev;
-#[cfg(feature = "rt-minijail")]
-mod minijail;
 mod mount;
 mod pipe;
 mod repository;
@@ -69,11 +66,7 @@ type Pid = u32;
 /// Buffer size of the main loop channel
 const MAIN_BUFFER: usize = 1000;
 
-#[cfg(feature = "rt-island")]
 type RuntimeLauncher = island::Island;
-
-#[cfg(all(feature = "rt-minijail", not(feature = "rt-island")))]
-type RuntimeLauncher = minijail::Minijail;
 
 #[async_trait]
 trait Process: Sized {
