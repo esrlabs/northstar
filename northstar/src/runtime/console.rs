@@ -90,7 +90,7 @@ impl Console {
 
     /// Open a TCP socket and listen for incoming connections
     /// spawn a task for each connection
-    pub(crate) async fn listen(&mut self) -> Result<(), Error> {
+    pub(super) async fn listen(&mut self) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
         // Stop token for self *and* the connections
@@ -113,14 +113,14 @@ impl Console {
     }
 
     /// Stop the listeners and wait for their shutdown
-    pub async fn shutdown(self) -> Result<(), Error> {
+    pub(super) async fn shutdown(self) -> Result<(), Error> {
         self.stop.cancel();
         join_all(self.tasks).await;
         Ok(())
     }
 
     /// Send a notification to the notification broadcast
-    pub async fn notification(&self, notification: Notification) {
+    pub(super) async fn notification(&self, notification: Notification) {
         self.notification_tx.send(notification).ok();
     }
 

@@ -13,12 +13,13 @@
 //   limitations under the License.
 
 use super::{
-    config::Config, console::Request, error::Error, key::PublicKey, mount::MountControl,
-    repository::DirRepository, Container, Event, EventTx, ExitStatus, Launcher, Notification,
-    Process, Repository, RepositoryId,
+    cgroups, config::Config, console::Request, error::Error, island::Island, key::PublicKey,
+    mount::MountControl, repository::DirRepository, Container, Event, EventTx, ExitStatus,
+    Notification, Pid, Repository, RepositoryId,
 };
 use crate::{api, runtime::repository::MemRepository};
 use api::model::Response;
+use async_trait::async_trait;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
@@ -29,6 +30,7 @@ use log::{debug, error, info, warn};
 use npk::manifest::{Manifest, Mount, Resource};
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Debug,
     fs::File,
     io::BufReader,
     path::PathBuf,
@@ -45,17 +47,25 @@ const INTERNAL_REPOSITORY: &str = "internal";
 type Repositories = HashMap<RepositoryId, Box<dyn Repository + Send + Sync>>;
 pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
 
+#[async_trait]
+pub(super) trait Process: Send + Sync + Debug {
+    async fn pid(&self) -> Pid;
+    async fn start(self: Box<Self>) -> Result<Box<dyn Process>, Error>;
+    async fn stop(
+        self: Box<Self>,
+        timeout: time::Duration,
+    ) -> Result<(Box<dyn Process>, ExitStatus), Error>;
+    async fn destroy(self: Box<Self>) -> Result<(), Error>;
+}
+
 #[derive(Debug)]
-pub(super) struct State<'a, L>
-where
-    L: Launcher,
-{
+pub(super) struct State<'a> {
     config: &'a Config,
-    launcher: L,
-    mount_control: Arc<MountControl>,
     events_tx: EventTx,
     repositories: Repositories,
-    containers: HashMap<Container, MountedContainer<L::Process>>,
+    containers: HashMap<Container, MountedContainer>,
+    mount_control: Arc<MountControl>,
+    launcher_island: Island,
 }
 
 #[derive(Debug)]
@@ -65,23 +75,23 @@ pub(super) enum BlockDevice {
 }
 
 #[derive(Debug)]
-pub(super) struct MountedContainer<P> {
+pub(super) struct MountedContainer {
     pub(super) container: Container,
     pub(super) manifest: Manifest,
     pub(super) root: PathBuf,
     pub(super) device: BlockDevice,
-    pub(super) process: Option<ProcessContext<P>>,
+    pub(super) process: Option<ProcessContext>,
 }
 
 #[derive(Debug)]
-pub(super) struct ProcessContext<P> {
-    process: P,
+pub(super) struct ProcessContext {
+    process: Box<dyn Process>,
     started: time::Instant,
     debug: super::debug::Debug,
-    cgroups: Option<super::cgroups::CGroups>,
+    cgroups: Option<cgroups::CGroups>,
 }
 
-impl<P: Process> ProcessContext<P> {
+impl ProcessContext {
     async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
         let (process, status) = self
             .process
@@ -117,9 +127,9 @@ impl<P: Process> ProcessContext<P> {
     }
 }
 
-impl<'a, L: Launcher> State<'a, L> {
+impl<'a> State<'a> {
     /// Create a new empty State instance
-    pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a, L>, Error> {
+    pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
         let mut repositories = Repositories::default();
 
         // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
@@ -161,7 +171,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         // TODO: Verify that the containers in all repositories are unique with name and version
 
-        let launcher = L::start(events_tx.clone(), config.clone())
+        let launcher_island = Island::start(events_tx.clone(), config.clone())
             .await
             .expect("Failed to start launcher");
         let mount_control = MountControl::new(&config).await.map_err(Error::Mount)?;
@@ -171,7 +181,7 @@ impl<'a, L: Launcher> State<'a, L> {
             repositories,
             containers: HashMap::new(),
             config,
-            launcher,
+            launcher_island,
             mount_control: Arc::new(mount_control),
         })
     }
@@ -189,7 +199,7 @@ impl<'a, L: Launcher> State<'a, L> {
     async fn mount(
         &self,
         container: &Container,
-    ) -> Result<impl Future<Output = Result<MountedContainer<L::Process>, Error>>, Error> {
+    ) -> Result<impl Future<Output = Result<MountedContainer, Error>>, Error> {
         // Find npk and optional key
         let (npk, key) = self
             .npk(container)
@@ -382,7 +392,7 @@ impl<'a, L: Launcher> State<'a, L> {
 
         // Spawn process
         info!("Creating {}", container);
-        let process = match self.launcher.create(&mounted_container).await {
+        let process = match self.launcher_island.create(&mounted_container).await {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -393,21 +403,24 @@ impl<'a, L: Launcher> State<'a, L> {
         };
 
         // Debug
-        let debug =
-            super::debug::Debug::new(&self.config, &mounted_container.manifest, process.pid())
-                .await?;
+        let debug = super::debug::Debug::new(
+            &self.config,
+            &mounted_container.manifest,
+            process.pid().await,
+        )
+        .await?;
 
         // CGroups
         let cgroups = if let Some(ref c) = mounted_container.manifest.cgroups {
             debug!("Configuring CGroups of {}", container);
             let cgroups =
                 // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
-                super::cgroups::CGroups::new(&self.config.cgroups, &container, c, self.events_tx.clone())
+                cgroups::CGroups::new(&self.config.cgroups, &container, c, self.events_tx.clone())
                     .await.expect("Failed to create cgroup");
 
             // Assigning a pid to a cgroup created by us must work otherwise we did something wrong.
             cgroups
-                .assign(process.pid())
+                .assign(process.pid().await)
                 .await
                 .expect("Failed to assign PID to cgroups");
             Some(cgroups)
@@ -469,7 +482,7 @@ impl<'a, L: Launcher> State<'a, L> {
             self.notification(Notification::Stopped(container.clone()))
                 .await;
 
-            info!("Stopped {} with status {}", container, exit_status);
+            info!("Stopped {} with status {:?}", container, exit_status);
 
             Ok(())
         } else {
@@ -498,7 +511,7 @@ impl<'a, L: Launcher> State<'a, L> {
             self.umount(container).await?;
         }
 
-        self.launcher.shutdown().await
+        self.launcher_island.shutdown().await
     }
 
     /// Install an NPK
@@ -709,27 +722,28 @@ impl<'a, L: Launcher> State<'a, L> {
                     .containers
                     .get(&container)
                     .and_then(|c| c.process.as_ref())
-                    .map(|f| api::model::Process {
-                        pid: f.process.pid(),
-                        uptime: f.started.elapsed().as_nanos() as u64,
-                        resources: api::model::Resources {
-                            memory: {
-                                {
-                                    let page_size = page_size::get();
-                                    let pid = f.process.pid();
-
-                                    procinfo::pid::statm(pid as i32).ok().map(|statm| {
-                                        api::model::Memory {
-                                            size: (statm.size * page_size) as u64,
-                                            resident: (statm.resident * page_size) as u64,
-                                            shared: (statm.share * page_size) as u64,
-                                            text: (statm.text * page_size) as u64,
-                                            data: (statm.data * page_size) as u64,
-                                        }
-                                    })
-                                }
+                    .map(|f| {
+                        let pid = futures::executor::block_on(f.process.pid());
+                        api::model::Process {
+                            pid,
+                            uptime: f.started.elapsed().as_nanos() as u64,
+                            resources: api::model::Resources {
+                                memory: {
+                                    {
+                                        let page_size = page_size::get();
+                                        procinfo::pid::statm(pid as i32).ok().map(|statm| {
+                                            api::model::Memory {
+                                                size: (statm.size * page_size) as u64,
+                                                resident: (statm.resident * page_size) as u64,
+                                                shared: (statm.share * page_size) as u64,
+                                                text: (statm.text * page_size) as u64,
+                                                data: (statm.data * page_size) as u64,
+                                            }
+                                        })
+                                    }
+                                },
                             },
-                        },
+                        }
                     });
                 let mounted = self.containers.contains_key(&container);
                 let c = api::model::ContainerData::new(
