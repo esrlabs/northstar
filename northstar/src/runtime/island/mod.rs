@@ -125,7 +125,11 @@ impl Launcher for Island {
         let (checkpoint_parent, checkpoint_child) = checkpoints();
         let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
         let groups = groups(manifest);
-        let seccomp = seccomp::seccomp_filter(container.manifest.seccomp.as_ref());
+        let seccomp = container
+            .manifest
+            .seccomp
+            .as_ref()
+            .map(|l| seccomp::seccomp_filter(l.iter()));
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
