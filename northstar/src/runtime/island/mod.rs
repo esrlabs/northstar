@@ -21,13 +21,13 @@ use super::{
     Event, EventTx, ExitStatus, Pid,
 };
 use async_trait::async_trait;
-use futures::{Future, TryFutureExt};
+use futures::{Future, FutureExt};
 use log::{debug, info, warn};
 use nix::{
     errno::Errno,
     libc::c_int,
     sched,
-    sys::{self, signal::Signal},
+    sys::{self, signal::Signal, wait::WaitPidFlag},
     unistd,
 };
 use npk::manifest::Manifest;
@@ -39,10 +39,10 @@ use std::{
     fmt,
     os::unix::io::AsRawFd,
     ptr::null,
-    thread,
 };
+use sys::wait;
 use task::block_in_place as block;
-use tokio::{sync::mpsc::error::TrySendError, task, time};
+use tokio::{signal, sync::mpsc::error::TrySendError, task, time};
 use Signal::SIGCHLD;
 
 mod clone;
@@ -60,6 +60,7 @@ const ENV_VERSION: &str = "VERSION";
 const SIGNAL_OFFSET: i32 = 128;
 
 type Container = MountedContainer;
+type ExitStatusFuture = Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpin>;
 
 #[derive(Debug)]
 pub(super) struct Island {
@@ -74,14 +75,14 @@ pub(super) struct Island {
 pub(super) enum IslandProcess {
     Created {
         pid: Pid,
-        exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
+        exit_status: ExitStatusFuture,
         io: (Option<io::Log>, Option<io::Log>),
         checkpoint: Checkpoint,
         _dev: Dev,
     },
     Started {
         pid: Pid,
-        exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
+        exit_status: ExitStatusFuture,
         io: (Option<io::Log>, Option<io::Log>),
         _dev: Dev,
     },
@@ -161,7 +162,7 @@ impl Island {
                         log
                     });
                     let pid = child.as_raw() as Pid;
-                    let exit_status = Box::new(wait(container, pid, self.tx.clone()));
+                    let exit_status = Box::new(waitpid(container, pid, &self.tx));
 
                     Ok(Box::new(IslandProcess::Created {
                         pid,
@@ -254,6 +255,7 @@ impl Process for IslandProcess {
         let exit_status = match sys::signal::kill(process_group, sigterm) {
             Ok(_) => {
                 match time::timeout(timeout, &mut exit_status).await {
+                    Ok(exit_status) => Ok(exit_status),
                     Err(_) => {
                         warn!(
                             "Process {} did not exit within {:?}. Sending SIGKILL...",
@@ -264,16 +266,14 @@ impl Process for IslandProcess {
                         sys::signal::kill(process_group, sigkill)
                             .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
 
-                        (&mut exit_status).await
+                        Ok(exit_status.await)
                     }
-                    Ok(exit_status) => exit_status,
                 }
             }
             // The process is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == Errno::ESRCH => {
                 debug!("Process {} already exited. Waiting for status", pid);
-                let exit_status = exit_status.await?;
-                Ok(exit_status)
+                Ok(exit_status.await)
             }
             Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", process_group), e)),
         }?;
@@ -304,85 +304,90 @@ impl Process for IslandProcess {
     }
 }
 
-/// Spawn a task that waits for the process to exit. This resolves to the exit status
-/// of `pid`.
-fn wait(
-    container: &Container,
-    pid: Pid,
-    tx: EventTx,
-) -> impl Future<Output = Result<ExitStatus, Error>> {
+/// Spawn a task that waits for the process to exit. Resolves to the exit status of `pid`.
+fn waitpid(container: &Container, pid: Pid, tx: &EventTx) -> impl Future<Output = ExitStatus> {
     let container = container.container.clone();
-    task::spawn_blocking(move || {
-        let pid = unistd::Pid::from_raw(pid as i32);
-        let status = loop {
-            match sys::wait::waitpid(Some(pid), None) {
-                // The process exited normally (as with exit() or returning from main) with the given exit code.
-                // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
-                Ok(sys::wait::WaitStatus::Exited(pid, code)) => {
-                    // There is no way to make the "init" exit with a signal status. Use a defined
-                    // offset to get the original signal. This is the sad way everyone does it...
-                    if SIGNAL_OFFSET <= code {
-                        let signal =
-                            Signal::try_from(code - SIGNAL_OFFSET).expect("Invalid signal offset");
-                        debug!("Process {} exit status is signal {}", pid, signal);
-                        break ExitStatus::Signaled(signal);
-                    } else {
-                        debug!("Process {} exit code is {}", pid, code);
-                        break ExitStatus::Exit(code);
-                    }
-                }
+    let tx = tx.clone();
 
-                // The process was killed by the given signal.
-                // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
-                Ok(sys::wait::WaitStatus::Signaled(pid, signal, _dump)) => {
-                    debug!("Process {} exit status is signal {}", pid, signal);
-                    break ExitStatus::Signaled(signal);
-                }
+    task::spawn(async move {
+        let mut sigchld = signal::unix::signal(signal::unix::SignalKind::child())
+            .expect("Failed to set up signal handle for SIGCHLD");
 
-                // The process is alive, but was stopped by the given signal.
-                // This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
-                Ok(sys::wait::WaitStatus::Stopped(_pid, _signal)) => continue,
-
-                // The traced process was stopped by a PTRACE_EVENT_* event.
-                // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                Ok(sys::wait::WaitStatus::PtraceEvent(_pid, _signal, _)) => continue,
-
-                // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
-                // See ptrace(2) for more information.
-                #[cfg(any(target_os = "linux", target_os = "android"))]
-                Ok(sys::wait::WaitStatus::PtraceSyscall(_pid)) => continue,
-
-                // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
-                // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
-                Ok(sys::wait::WaitStatus::Continued(_pid)) => continue,
-
-                // There are currently no state changes to report in any awaited child process.
-                // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
-                Ok(sys::wait::WaitStatus::StillAlive) => continue,
-                // Retry the waitpid call if waitpid fails with EINTR
-                Err(e) if e == nix::Error::Sys(Errno::EINTR) => continue,
-                Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
+        // Check the status of the process after every SIGCHLD is received
+        let exit_status = loop {
+            sigchld.recv().await;
+            if let Some(exit) = exit_status(pid) {
+                break exit;
             }
         };
 
         // Send notification to main loop
         loop {
-            match tx.try_send(Event::Exit(container.clone(), status.clone())) {
+            match tx.try_send(Event::Exit(container.clone(), exit_status.clone())) {
                 Ok(_) => break,
                 Err(TrySendError::Closed(_)) => break, // The main loop is shutting down. Noone would receive this message...
-                Err(TrySendError::Full(_)) => thread::sleep(time::Duration::from_millis(1)),
+                Err(TrySendError::Full(_)) => time::sleep(time::Duration::from_millis(1)).await,
+            }
+        }
+        exit_status
+    })
+    .map(|r| r.expect("Task error"))
+}
+
+/// Get exit status of process with `pid` or None
+fn exit_status(pid: Pid) -> Option<ExitStatus> {
+    let pid = unistd::Pid::from_raw(pid as i32);
+    match task::block_in_place(|| wait::waitpid(Some(pid), Some(WaitPidFlag::WNOHANG))) {
+        // The process exited normally (as with exit() or returning from main) with the given exit code.
+        // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
+        Ok(wait::WaitStatus::Exited(pid, code)) => {
+            // There is no way to make the "init" exit with a signal status. Use a defined
+            // offset to get the original signal. This is the sad way everyone does it...
+            if SIGNAL_OFFSET <= code {
+                let signal = Signal::try_from(code - SIGNAL_OFFSET).expect("Invalid signal offset");
+                debug!("Process {} exit status is signal {}", pid, signal);
+                Some(ExitStatus::Signaled(signal))
+            } else {
+                debug!("Process {} exit code is {}", pid, code);
+                Some(ExitStatus::Exit(code))
             }
         }
 
-        status
-    })
-    .map_err(|e| {
-        Error::io(
-            "Task join error",
-            std::io::Error::new(std::io::ErrorKind::Other, e),
-        )
-    })
+        // The process was killed by the given signal.
+        // The third field indicates whether the signal generated a core dump. This case matches the C macro WIFSIGNALED(status); the last two fields correspond to WTERMSIG(status) and WCOREDUMP(status).
+        Ok(wait::WaitStatus::Signaled(pid, signal, _dump)) => {
+            debug!("Process {} exit status is signal {}", pid, signal);
+            Some(ExitStatus::Signaled(signal))
+        }
+
+        // The process is alive, but was stopped by the given signal.
+        // This is only reported if WaitPidFlag::WUNTRACED was passed. This case matches the C macro WIFSTOPPED(status); the second field is WSTOPSIG(status).
+        Ok(wait::WaitStatus::Stopped(_pid, _signal)) => None,
+
+        // The traced process was stopped by a PTRACE_EVENT_* event.
+        // See nix::sys::ptrace and ptrace(2) for more information. All currently-defined events use SIGTRAP as the signal; the third field is the PTRACE_EVENT_* value of the event.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        Ok(wait::WaitStatus::PtraceEvent(_pid, _signal, _)) => None,
+
+        // The traced process was stopped by execution of a system call, and PTRACE_O_TRACESYSGOOD is in effect.
+        // See ptrace(2) for more information.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        Ok(wait::WaitStatus::PtraceSyscall(_pid)) => None,
+
+        // The process was previously stopped but has resumed execution after receiving a SIGCONT signal.
+        // This is only reported if WaitPidFlag::WCONTINUED was passed. This case matches the C macro WIFCONTINUED(status).
+        Ok(wait::WaitStatus::Continued(_pid)) => None,
+
+        // There are currently no state changes to report in any awaited child process.
+        // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
+        Ok(wait::WaitStatus::StillAlive) => None,
+        // Retry the waitpid call if waitpid fails with EINTR
+        Err(e) if e == nix::Error::Sys(Errno::EINTR) => None,
+        Err(e) if e == nix::Error::Sys(Errno::ECHILD) => {
+            panic!("Waitpid returned ECHILD. This is bug.");
+        }
+        Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
+    }
 }
 
 /// Construct the init and argv argument for the containers execve
