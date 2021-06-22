@@ -452,7 +452,7 @@ impl<'a> Client {
     pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version)>>(
         &self,
         containers: I,
-    ) -> Result<Vec<(Container, MountResult)>, Error> {
+    ) -> Result<Vec<MountResult>, Error> {
         let containers = containers
             .into_iter()
             .map(|(name, version)| Container::new(name.to_string(), version.clone()))

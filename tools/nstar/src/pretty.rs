@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use model::ExitStatus;
 use northstar::api::model::{
-    self, Container, ContainerData, MountResult, Notification, RepositoryId, Response,
+    self, ContainerData, MountResult, Notification, RepositoryId, Response,
 };
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::collections::HashSet;
@@ -104,24 +104,29 @@ pub fn repositories(repositories: &HashSet<RepositoryId>) {
     table.printstd();
 }
 
-pub fn mounts(mounts: &[(Container, MountResult)]) {
+pub fn mounts(mounts: &[MountResult]) {
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![
         Cell::new("Name").with_style(Attr::Bold),
         Cell::new("Path").with_style(Attr::Bold),
     ]));
-    for (container, result) in mounts
-        .iter()
-        .sorted_by_key(|(container, _)| (*container).to_string())
-    {
-        table.add_row(Row::new(vec![
-            Cell::new(&container.to_string()).with_style(Attr::Bold),
-            Cell::new(match result {
-                MountResult::Ok => "ok",
-                MountResult::Err(_) => "failed",
-            }),
-        ]));
+    for result in mounts {
+        let row = match result {
+            MountResult::Ok(c) => {
+                vec![
+                    Cell::new(&c.to_string()).with_style(Attr::Bold),
+                    Cell::new("ok"),
+                ]
+            }
+            MountResult::Err((c, e)) => {
+                vec![
+                    Cell::new(&c.to_string()).with_style(Attr::Bold),
+                    Cell::new(&format_err(e)),
+                ]
+            }
+        };
+        table.add_row(Row::new(row));
     }
 
     table.printstd();
@@ -146,40 +151,45 @@ pub fn response(response: &Response) -> i32 {
             0
         }
         Response::Err(e) => {
-            match e {
-                model::Error::Configuration(cause) => eprintln!("invalid configuration: {}", cause),
-                model::Error::InvalidContainer(c) => eprintln!("invalid container {}", c),
-                model::Error::UmountBusy(c) => eprintln!("failed to umount {}: busy", c),
-                model::Error::StartContainerStarted(c) => {
-                    eprintln!("failed to start container {}: already started", c)
-                }
-                model::Error::StartContainerResource(c) => {
-                    eprintln!("failed to start container {}: resource", c)
-                }
-                model::Error::StartContainerMissingResource(c, r) => {
-                    eprintln!("failed to start container {}: missing resource {}", c, r)
-                }
-                model::Error::StartContainerFailed(c, r) => {
-                    eprintln!("failed to start container {}: {}", c, r)
-                }
-                model::Error::StopContainerNotStarted(c) => {
-                    eprintln!("failed to stop container {}: not started", c)
-                }
-                model::Error::InvalidRepository(r) => eprintln!("invalid repository {}", r),
-                model::Error::InstallDuplicate(c) => {
-                    eprintln!("failed to install {}: installed", c)
-                }
-                model::Error::Npk(npk, e) => eprintln!("npk error: {}: {}", npk, e),
-                model::Error::NpkArchive(e) => eprintln!("npk error: {}", e),
-                model::Error::Process(e) => eprintln!("process error: {}", e),
-                model::Error::Console(e) => eprintln!("console error: {}", e),
-                model::Error::Cgroups(e) => eprintln!("cgroups error: {}", e),
-                model::Error::Mount(e) => eprintln!("mount error: {}", e),
-                model::Error::Key(e) => eprintln!("key error: {}", e),
-                model::Error::Io(e) => eprintln!("io error: {}", e),
-                model::Error::Os(e) => eprintln!("os error: {}", e),
-            };
+            eprintln!("{}", format_err(e));
             1
         }
+    }
+}
+
+fn format_err(err: &model::Error) -> String {
+    match err {
+        model::Error::Configuration(cause) => format!("invalid configuration: {}", cause),
+        model::Error::InvalidContainer(c) => format!("invalid container {}", c),
+        model::Error::MountBusy(c) => format!("failed to mount {}: busy", c),
+        model::Error::UmountBusy(c) => format!("failed to umount {}: busy", c),
+        model::Error::StartContainerStarted(c) => {
+            format!("failed to start container {}: already started", c)
+        }
+        model::Error::StartContainerResource(c) => {
+            format!("failed to start container {}: resource", c)
+        }
+        model::Error::StartContainerMissingResource(c, r) => {
+            format!("failed to start container {}: missing resouce {}", c, r)
+        }
+        model::Error::StartContainerFailed(c, r) => {
+            format!("failed to start container {}: {}", c, r)
+        }
+        model::Error::StopContainerNotStarted(c) => {
+            format!("failed to stop container {}: not started", c)
+        }
+        model::Error::InvalidRepository(r) => format!("invalid repository {}", r),
+        model::Error::InstallDuplicate(c) => {
+            format!("failed to install {}: installed", c)
+        }
+        model::Error::Npk(npk, e) => format!("npk error: {}: {}", npk, e),
+        model::Error::NpkArchive(e) => format!("npk error: {}", e),
+        model::Error::Process(e) => format!("process error: {}", e),
+        model::Error::Console(e) => format!("console error: {}", e),
+        model::Error::Cgroups(e) => format!("cgroups error: {}", e),
+        model::Error::Mount(e) => format!("mount error: {}", e),
+        model::Error::Key(e) => format!("key error: {}", e),
+        model::Error::Io(e) => format!("io error: {}", e),
+        model::Error::Os(e) => format!("os error: {}", e),
     }
 }

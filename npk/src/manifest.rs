@@ -51,7 +51,8 @@ pub struct Manifest {
     /// Environment passed to container
     pub env: Option<HashMap<String, String>>,
     /// Autostart this container upon northstar startup
-    pub autostart: Option<bool>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub autostart: bool,
     /// CGroup config
     pub cgroups: Option<CGroups>,
     /// Seccomp configuration
@@ -98,6 +99,13 @@ impl Manifest {
         if self.init.is_none() && self.args.is_some() {
             return Err(Error::Invalid(
                 "Arguments not allowed in resource container".to_string(),
+            ));
+        }
+
+        // The autostart option is only valid for startable containers
+        if self.autostart && self.init.is_none() {
+            return Err(Error::Invalid(
+                "Autostart cannot be enabled on resource containers".to_string(),
             ));
         }
 
@@ -243,6 +251,10 @@ pub enum Output {
     /// Forward output to the logging system with level and optional tag
     #[serde(rename = "log")]
     Log { level: log::Level, tag: String },
+}
+
+fn is_default<T: Default + PartialEq>(t: &T) -> bool {
+    t == &T::default()
 }
 
 mod mount_options {
@@ -445,7 +457,7 @@ seccomp:
         assert_eq!(args[0], "one");
         assert_eq!(args[1], "two");
 
-        assert!(manifest.autostart.unwrap());
+        assert!(manifest.autostart);
         let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
         assert_eq!(
             env.get("LD_LIBRARY_PATH"),
