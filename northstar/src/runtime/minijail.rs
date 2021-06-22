@@ -127,7 +127,7 @@ impl Launcher for Minijail {
         })
     }
 
-    async fn shutdown(&mut self) -> Result<(), Error>
+    async fn shutdown(mut self) -> Result<(), Error>
     where
         Self: Sized,
     {

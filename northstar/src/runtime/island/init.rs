@@ -13,9 +13,9 @@
 //   limitations under the License.
 
 use super::{
-    clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Checkpoint, Container, SIGNAL_OFFSET,
+    clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Checkpoint, Container, PipeRead, Start,
+    SIGNAL_OFFSET,
 };
-use crate::runtime::island::Start;
 use nix::{
     errno::Errno,
     libc::{self, c_int, c_ulong},
@@ -27,7 +27,9 @@ use nix::{
     unistd::{self, Uid},
 };
 use sched::CloneFlags;
-use std::{collections::HashSet, env, ffi::CString, os::unix::prelude::RawFd, process::exit};
+use std::{
+    collections::HashSet, env, ffi::CString, io::Read, os::unix::prelude::RawFd, process::exit,
+};
 use sys::wait::{waitpid, WaitStatus};
 
 // Init function. Pid 1.
@@ -42,6 +44,7 @@ pub(super) fn init(
     groups: &[u32],
     seccomp: Option<AllowList>,
     mut checkpoint: Checkpoint,
+    tripwire: PipeRead,
 ) -> ! {
     // Install a "default signal handler" that exits on any signal. This process is the "init"
     // process of this pid ns and therefore doesn't have any own signal handlers. This handler that just exits
@@ -52,6 +55,7 @@ pub(super) fn init(
     // Become a session group leader
     setsid();
 
+    // Sync with parent
     checkpoint.wait(Start::Start);
     checkpoint.send(Start::Started);
     drop(checkpoint);
@@ -82,14 +86,8 @@ pub(super) fn init(
     // Supplementary groups
     setgroups(groups);
 
-    //println!("Setting no new privs");
+    // No new privileges
     set_no_new_privs(true);
-
-    // Set the parent process death signal of the calling process to arg2
-    // (either a signal value in the range 1..maxsig, or 0 to clear).
-    // TODO: remove or reactivate
-    //println!("Setting parent death signal to SIGKILL");
-    //set_parent_death_signal(SIGKILL);
 
     // Capabilities
     drop_capabilities(manifest.capabilities.as_ref());
@@ -97,13 +95,12 @@ pub(super) fn init(
     // Close and dup fds
     file_descriptors(fds);
 
-    // Setting the parent death signal *must* be done *after* changing uid/gid which clear this flag.
-    // TODO: Fix the "we're spawned from a thread that times out" issue
-    //set_parent_death_signal(SIGKILL);
-
+    // Clone
     match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
         Ok(result) => match result {
             unistd::ForkResult::Parent { child } => {
+                wait_for_parent_death(tripwire);
+
                 reset_signal_handlers();
 
                 // Wait for the child to exit
@@ -123,6 +120,7 @@ pub(super) fn init(
                 }
             }
             unistd::ForkResult::Child => {
+                drop(tripwire);
                 set_parent_death_signal(SIGKILL);
 
                 // TODO: Post Linux 5.5 there's a nice clone flag that allows to reset the signal handler during the clone.
@@ -157,7 +155,6 @@ fn mount(mounts: &[Mount]) {
 fn file_descriptors(map: &[(RawFd, Fd)]) {
     for (fd, value) in map {
         match value {
-            Fd::Inherit => (),
             Fd::Close => {
                 unistd::close(*fd).ok();
             } // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
@@ -179,7 +176,7 @@ fn set_child_subreaper(value: bool) {
     let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .expect("Failed to set PR_SET_PDEATHSIG");
+        .expect("Failed to set PR_SET_CHILD_SUBREAPER");
 }
 
 fn set_parent_death_signal(signal: Signal) {
@@ -192,6 +189,18 @@ fn set_parent_death_signal(signal: Signal) {
     Errno::result(result)
         .map(drop)
         .expect("Failed to set PR_SET_PDEATHSIG");
+}
+
+/// Wait in a separate thread for the parent (runtime) process to terminate. This should normally
+/// not happen. If it does, we (init) need to terminate ourselves or we will be adopted by system
+/// init. Setting PR_SET_PDEATHSIG is not an option here as we were spawned from a short lived tokio
+/// thread (not process) that would trigger the signal once the thread terminates.
+/// Performing this step before calling setgroups results in a SIGABRT.
+fn wait_for_parent_death(mut tripwire: PipeRead) {
+    std::thread::spawn(move || {
+        tripwire.read_exact(&mut [0u8, 1]).ok();
+        panic!("Runtime died");
+    });
 }
 
 fn set_no_new_privs(value: bool) {
@@ -217,7 +226,7 @@ fn pr_set_name_init() {
     let result = unsafe { libc::prctl(PR_SET_NAME, cname.as_ptr() as c_ulong, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .expect("Failed to set PR_SET_KEEPCAPS");
+        .expect("Failed to set PR_SET_NAME");
 }
 
 /// Install default signal handler
@@ -288,7 +297,7 @@ fn setgroups(groups: &[u32]) {
 
     Errno::result(result)
         .map(drop)
-        .expect("Failed to set PR_SET_PDEATHSIG");
+        .expect("Failed to set supplementary groups");
 }
 
 /// Drop capabilities
