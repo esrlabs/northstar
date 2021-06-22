@@ -90,7 +90,7 @@ trait Launcher {
     async fn start(event_tx: EventTx, config: Config) -> Result<Self, Error>
     where
         Self: Sized;
-    async fn shutdown(&mut self) -> Result<(), Error>
+    async fn shutdown(mut self) -> Result<(), Error>
     where
         Self: Sized;
 
@@ -127,11 +127,11 @@ pub(crate) enum Notification {
 
 #[derive(Debug)]
 enum Event {
-    /// Incomming command
+    /// Incoming command
     Console(console::Request, oneshot::Sender<api::model::Response>),
     /// A instance exited with return code
     Exit(Container, ExitStatus),
-    /// Out of memory event occured
+    /// Out of memory event occurred
     Oom(Container),
     /// Northstar shall shut down
     Shutdown,
@@ -271,7 +271,7 @@ async fn runtime_task<L: Launcher>(
 
     let mut state = State::<L>::new(config, event_tx.clone()).await?;
 
-    // Inititalize the console if configured
+    // Initialize the console if configured
     let console = if let Some(url) = config.console.as_ref() {
         let mut console = console::Console::new(url, event_tx.clone());
         console.listen().await.map_err(Error::Console)?;
@@ -296,7 +296,7 @@ async fn runtime_task<L: Launcher>(
             // in the console module but with access to `state`.
             Event::Console(mut msg, txr) => state.console_request(&mut msg, txr).await,
             // The OOM event is signaled by the cgroup memory monitor if configured in a manifest.
-            // If a out of memory condition occours this is signaled with `Event::Oom` which
+            // If a out of memory condition occurs this is signaled with `Event::Oom` which
             // carries the id of the container that is oom.
             Event::Oom(container) => state.on_oom(&container).await,
             // A container process existed. Check `process::wait_exit` for details.

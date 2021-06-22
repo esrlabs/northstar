@@ -16,7 +16,7 @@ use self::fs::Dev;
 use super::{
     config::Config,
     error::Error,
-    pipe::{self, PipeRead, PipeRecv, PipeSend, PipeWrite},
+    pipe::{self, pipe, PipeRead, PipeRecv, PipeSend, PipeWrite, RawFdExt},
     state::MountedContainer,
     Event, EventTx, ExitStatus, Launcher, Pid,
 };
@@ -37,6 +37,7 @@ use std::{
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
+    os::unix::io::AsRawFd,
     ptr::null,
     thread,
 };
@@ -64,6 +65,10 @@ type Container = MountedContainer<IslandProcess>;
 pub(super) struct Island {
     tx: EventTx,
     config: Config,
+    /// Used by child process to detect if the parent process has died
+    tripwire_read: PipeRead,
+    /// Unused writing end of the tripwire pipe. Keep it in Island for a proper close on `shutdown`
+    tripwire_write: PipeWrite,
 }
 
 pub(super) enum IslandProcess {
@@ -71,8 +76,8 @@ pub(super) enum IslandProcess {
         pid: Pid,
         exit_status: Box<dyn Future<Output = Result<ExitStatus, Error>> + Unpin + Send + Sync>,
         io: (Option<io::Log>, Option<io::Log>),
-        _dev: Dev,
         checkpoint: Checkpoint,
+        _dev: Dev,
     },
     Started {
         pid: Pid,
@@ -107,10 +112,20 @@ impl Launcher for Island {
     where
         Self: Sized,
     {
-        Ok(Island { tx, config })
+        let (tripwire_read, tripwire_write) =
+            block(pipe).map_err(|e| Error::io("Open tripwire pipe", e))?;
+        block(|| tripwire_read.set_cloexec(true))
+            .map_err(|e| Error::io("Setting cloexec on tripwire fd", e))?;
+
+        Ok(Island {
+            tx,
+            config,
+            tripwire_read,
+            tripwire_write,
+        })
     }
 
-    async fn shutdown(&mut self) -> Result<(), Error>
+    async fn shutdown(mut self) -> Result<(), Error>
     where
         Self: Sized,
     {
@@ -121,8 +136,9 @@ impl Launcher for Island {
         let manifest = &container.manifest;
         let (init, argv) = init_argv(manifest);
         let env = env(manifest);
-        let (stdout, stderr, fds) = io::from_manifest(manifest).await?;
-        let (checkpoint_parent, checkpoint_child) = checkpoints();
+        let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
+        let (checkpoint_runtime, checkpoint_init) = checkpoints();
+        let tripwire = self.tripwire_read.clone();
         let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
         let groups = groups(manifest);
         let seccomp = container
@@ -131,6 +147,9 @@ impl Launcher for Island {
             .as_ref()
             .map(|l| seccomp::seccomp_filter(l.iter()));
 
+        // Do not close child tripwire fd as it will be needed to detect if the runtime process died
+        fds.retain(|(read_fd, _)| read_fd != &self.tripwire_read.as_raw_fd());
+
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
         debug!("{} env is {:?}", manifest.name, env);
@@ -138,15 +157,10 @@ impl Launcher for Island {
         // Clone init
         let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
 
-        // Do not call this clone from a `block_in_place` to avoid the child to be spawned
-        // from a short lived thread that is terminated by a timeout. This termination would
-        // cause the child to be signalled with the signal specified as parent death signal.
-        // TODO: actually there's currently no way to ensure this future to be processes from
-        // an persistent thread.
         match clone::clone(flags, Some(SIGCHLD as c_int)) {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
-                    block(|| drop(checkpoint_child));
+                    block(|| drop(checkpoint_init));
                     debug!("Created {} with pid {}", container.container, child);
 
                     // Close writing part of log forwards if any
@@ -165,12 +179,12 @@ impl Launcher for Island {
                         pid,
                         exit_status,
                         io: (stdout, stderr),
-                        checkpoint: checkpoint_parent,
+                        checkpoint: checkpoint_runtime,
                         _dev: dev,
                     })
                 }
                 unistd::ForkResult::Child => {
-                    drop(checkpoint_parent);
+                    drop(checkpoint_runtime);
 
                     init::init(
                         container,
@@ -181,7 +195,8 @@ impl Launcher for Island {
                         &fds,
                         &groups,
                         seccomp,
-                        checkpoint_child,
+                        checkpoint_init,
+                        tripwire,
                     );
                 }
             },
@@ -241,7 +256,7 @@ impl super::Process for IslandProcess {
                 pid,
                 exit_status,
                 io,
-                ..
+                _dev,
             } => (pid, exit_status, io),
             IslandProcess::Stopped { .. } => unreachable!(),
         };
@@ -467,6 +482,8 @@ enum Start {
     Start,
     // Signal the parent that go is received
     Started,
+    // Signal the child that the parent has terminated
+    Died,
 }
 
 pub(super) struct Checkpoint(PipeRead, PipeWrite);

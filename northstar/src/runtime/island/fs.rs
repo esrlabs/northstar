@@ -28,7 +28,7 @@ use tempfile::TempDir;
 use tokio::{fs::symlink, task};
 
 /// The minimal version of the /dev is maintained in a tmpdir. This tmpdir
-/// must be held for the lifetime of the IslandProzess
+/// must be held for the lifetime of the IslandProcess
 pub(crate) type Dev = Option<TempDir>;
 
 /// Mount systemcall instruction done in init

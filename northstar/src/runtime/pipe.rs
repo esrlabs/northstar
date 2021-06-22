@@ -22,84 +22,95 @@ use std::{
     mem,
     os::unix::io::{AsRawFd, IntoRawFd, RawFd},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
 
-/// Opens a pipe(2) with both ends blocking
-pub(crate) fn pipe() -> Result<(PipeRead, PipeWrite)> {
-    unistd::pipe()
-        .map_err(from_nix)
-        .map(|(read, write)| (PipeRead { fd: read }, PipeWrite { fd: write }))
+#[derive(Debug)]
+struct Inner {
+    fd: RawFd,
 }
 
-/// Read end of a pipe(2)
-#[derive(Debug)]
+impl Drop for Inner {
+    fn drop(&mut self) {
+        unistd::close(self.fd).ok();
+    }
+}
+
+impl From<RawFd> for Inner {
+    fn from(fd: RawFd) -> Self {
+        Inner { fd }
+    }
+}
+
+/// Opens a pipe(2) with both ends blocking
+pub(crate) fn pipe() -> Result<(PipeRead, PipeWrite)> {
+    unistd::pipe().map_err(from_nix).map(|(read, write)| {
+        (
+            PipeRead {
+                inner: Arc::new(read.into()),
+            },
+            PipeWrite {
+                inner: Arc::new(write.into()),
+            },
+        )
+    })
+}
+
+/// Read end of a pipe(2). Last dropped clone closes the pipe
+#[derive(Clone, Debug)]
 pub(crate) struct PipeRead {
-    fd: RawFd,
+    inner: Arc<Inner>,
 }
 
 impl io::Read for PipeRead {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        unistd::read(self.fd, buf).map_err(from_nix)
+        unistd::read(self.as_raw_fd(), buf).map_err(from_nix)
     }
 }
 
 impl AsRawFd for PipeRead {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd
+        self.inner.fd
     }
 }
 
 impl IntoRawFd for PipeRead {
     fn into_raw_fd(self) -> RawFd {
-        let fd = self.fd;
+        let fd = self.inner.fd;
         mem::forget(self);
         fd
     }
 }
 
-impl Drop for PipeRead {
-    fn drop(&mut self) {
-        // Ignore close errors
-        unistd::close(self.fd).ok();
-    }
-}
-
-/// Write end of a pipe(2)
-#[derive(Debug)]
+/// Write end of a pipe(2). Last dropped clone closes the pipe
+#[derive(Clone, Debug)]
 pub(crate) struct PipeWrite {
-    fd: RawFd,
+    inner: Arc<Inner>,
 }
 
 impl io::Write for PipeWrite {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        unistd::write(self.fd, buf).map_err(from_nix)
+        unistd::write(self.as_raw_fd(), buf).map_err(from_nix)
     }
 
     fn flush(&mut self) -> Result<()> {
-        unistd::fsync(self.fd).map_err(from_nix)
+        unistd::fsync(self.as_raw_fd()).map_err(from_nix)
     }
 }
 
 impl AsRawFd for PipeWrite {
     fn as_raw_fd(&self) -> RawFd {
-        self.fd
+        self.inner.fd
     }
 }
 
 impl IntoRawFd for PipeWrite {
     fn into_raw_fd(self) -> RawFd {
-        let fd = self.fd;
+        let fd = self.inner.fd;
         mem::forget(self);
         fd
-    }
-}
-
-impl Drop for PipeWrite {
-    fn drop(&mut self) {
-        // Ignore close errors
-        unistd::close(self.fd).ok();
     }
 }
 

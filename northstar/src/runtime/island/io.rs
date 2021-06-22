@@ -151,8 +151,6 @@ impl AsyncWrite for LogSink {
 
 #[derive(Debug)]
 pub(super) enum Fd {
-    /// Do not close this fd and use as it is
-    Inherit,
     // Close the fd
     Close,
     // Dup2 the the fd to fd
@@ -177,10 +175,7 @@ pub(super) async fn from_manifest(
 
     if let Some(io) = manifest.io.as_ref() {
         let stdout = match io.stdout {
-            Some(npk::manifest::Output::Pipe) => {
-                fd_configuration.insert(libc::STDOUT_FILENO, Fd::Inherit);
-                None
-            }
+            Some(npk::manifest::Output::Pipe) => None,
             Some(npk::manifest::Output::Log { level, ref tag }) => {
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
@@ -194,10 +189,7 @@ pub(super) async fn from_manifest(
             None => None,
         };
         let stderr = match io.stderr {
-            Some(npk::manifest::Output::Pipe) => {
-                fd_configuration.insert(libc::STDERR_FILENO, Fd::Inherit);
-                None
-            }
+            Some(npk::manifest::Output::Pipe) => None,
             Some(npk::manifest::Output::Log { level, ref tag }) => {
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
