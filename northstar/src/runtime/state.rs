@@ -17,13 +17,16 @@ use super::{
     mount::MountControl, repository::DirRepository, Container, Event, EventTx, ExitStatus,
     Notification, Pid, Repository, RepositoryId,
 };
-use crate::{api, runtime::repository::MemRepository};
+use crate::{
+    api::{self, model::MountResult},
+    runtime::repository::MemRepository,
+};
 use api::model::Response;
 use async_trait::async_trait;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
-    future::{join_all, ready},
+    future::{join_all, ready, Either},
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
@@ -33,6 +36,7 @@ use std::{
     fmt::Debug,
     fs::File,
     io::BufReader,
+    iter::FromIterator,
     path::PathBuf,
     result,
     sync::Arc,
@@ -130,12 +134,35 @@ impl ProcessContext {
 impl<'a> State<'a> {
     /// Create a new empty State instance
     pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
-        let mut repositories = Repositories::default();
+        let repositories = Repositories::default();
+        let mount_control = Arc::new(MountControl::new(&config).await.map_err(Error::Mount)?);
+        let launcher_island = Island::start(events_tx.clone(), config.clone())
+            .await
+            .expect("Failed to start launcher");
 
+        let mut state = State {
+            events_tx,
+            repositories,
+            containers: HashMap::new(),
+            config,
+            launcher_island,
+            mount_control,
+        };
+
+        // Initialize repositories
+        state.init_repositories().await?;
+
+        // Start containers flagged with autostart
+        state.autostart().await?;
+
+        Ok(state)
+    }
+
+    async fn init_repositories(&mut self) -> Result<(), Error> {
         // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
         // feature is enabled
         #[cfg(feature = "hello-world")]
-        if config.repositories.contains_key(INTERNAL_REPOSITORY) {
+        if self.config.repositories.contains_key(INTERNAL_REPOSITORY) {
             return Err(Error::Configuration(format!(
                 "Duplicate repository {}",
                 INTERNAL_REPOSITORY
@@ -143,8 +170,8 @@ impl<'a> State<'a> {
         }
 
         // Build a map of repositories from the configuration
-        for (id, repository) in &config.repositories {
-            repositories.insert(
+        for (id, repository) in &self.config.repositories {
+            self.repositories.insert(
                 id.clone(),
                 Box::new(
                     DirRepository::new(
@@ -166,24 +193,44 @@ impl<'a> State<'a> {
                 .add_buf(hello_world)
                 .await
                 .expect("Failed to load hello-world");
-            repositories.insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
+            self.repositories
+                .insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
         }
 
-        // TODO: Verify that the containers in all repositories are unique with name and version
+        Ok(())
+    }
 
-        let launcher_island = Island::start(events_tx.clone(), config.clone())
-            .await
-            .expect("Failed to start launcher");
-        let mount_control = MountControl::new(&config).await.map_err(Error::Mount)?;
+    async fn autostart(&mut self) -> Result<(), Error> {
+        // List of containers from all repositories with the autostart flag set
+        let autostart = self
+            .repositories
+            .iter()
+            .map(|(_, r)| r.containers())
+            .flatten()
+            .filter(|n| n.manifest().autostart)
+            .map(|n| Container::new(n.manifest().name.clone(), n.manifest().version.clone()))
+            .collect::<Vec<_>>();
 
-        Ok(State {
-            events_tx,
-            repositories,
-            containers: HashMap::new(),
-            config,
-            launcher_island,
-            mount_control: Arc::new(mount_control),
-        })
+        // Mount (parallel)
+        let mounts = self.mount_all(&autostart).await;
+
+        for (result, container) in mounts.iter().zip(autostart) {
+            match result {
+                Ok(_) => {
+                    info!("Autostarting {}", container);
+                    if let Err(e) = self.start(&container).await {
+                        warn!("Failed to autostart {}: {}", container, e);
+                        // TODO: What shall we do with this error?
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to mount {}: {}", container, e);
+                    // TODO: What shall we do with this error?
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn npk(&self, container: &Container) -> Option<(Arc<Npk>, Option<&PublicKey>)> {
@@ -297,49 +344,47 @@ impl<'a> State<'a> {
 
         let mut need_mount = HashSet::new();
 
-        if let Some((npk, _)) = self.npk(container) {
-            // The the to be started container
-            if let Some(mounted_container) = self.containers.get(container) {
-                // Check if the container is not a resource
-                if mounted_container.manifest.init.is_none() {
-                    warn!("Container {} is a resource", container);
-                    return Err(Error::StartContainerResource(container.clone()));
-                }
-
-                // Check if the container is already started
-                if mounted_container.process.is_some() {
-                    warn!("Application {} is already running", container);
-                    return Err(Error::StartContainerStarted(container.clone()));
-                }
-            } else {
-                need_mount.insert(container.clone());
-            }
-
-            // Find to be mounted resources
-            for resource in npk
-                .manifest()
-                .mounts
-                .values()
-                .filter_map(|m| match m {
-                    Mount::Resource(Resource { name, version, .. }) => {
-                        Some(Container::new(name.clone(), version.clone()))
-                    }
-                    _ => None,
-                })
-                .filter(|resource| !self.containers.contains_key(resource))
-            // Only not yet mounted ones
-            {
-                // Check if the resource is available
-                if self.npk(&resource).is_none() {
-                    return Err(Error::StartContainerMissingResource(
-                        container.clone(),
-                        resource,
-                    ));
-                }
-                need_mount.insert(resource.clone());
-            }
+        let npk = if let Some((npk, _)) = self.npk(container) {
+            npk
         } else {
             return Err(Error::InvalidContainer(container.clone()));
+        };
+
+        // Check if the container is not a resource
+        if npk.manifest().init.is_none() {
+            warn!("Container {} is a resource", container);
+            return Err(Error::StartContainerResource(container.clone()));
+        }
+
+        // The container to be started
+        if let Some(mounted_container) = self.containers.get(container) {
+            // Check if the container is already started
+            if mounted_container.process.is_some() {
+                warn!("Application {} is already running", container);
+                return Err(Error::StartContainerStarted(container.clone()));
+            }
+        } else if !self.containers.contains_key(&container) {
+            need_mount.insert(container.clone());
+        }
+
+        // Find resources
+        for resource in npk.manifest().mounts.values().filter_map(|m| match m {
+            Mount::Resource(Resource { name, version, .. }) => {
+                Some(Container::new(name.clone(), version.clone()))
+            }
+            _ => None,
+        }) {
+            // Check if the resource is available
+            if self.npk(&resource).is_none() {
+                return Err(Error::StartContainerMissingResource(
+                    container.clone(),
+                    resource,
+                ));
+            }
+
+            if !self.containers.contains_key(&resource) {
+                need_mount.insert(resource.clone());
+            }
         }
 
         info!(
@@ -348,43 +393,14 @@ impl<'a> State<'a> {
             container
         );
 
-        // Prepare a list of futures that actually mount
-        let mut mounts = Vec::new();
-        for to_be_mounted in &need_mount {
-            let mount = self
-                .mount(&to_be_mounted)
-                .await?
-                .map(move |r| (to_be_mounted, r)); // Add the container identification to the futures result
-            mounts.push(mount);
-        }
-
-        // Mount :-)
-        let mounts = join_all(mounts).await;
-
-        // Split into successful and failed ones
-        let (ok, mut failed): (Vec<_>, Vec<_>) =
-            mounts.into_iter().partition(|(_, result)| !result.is_err());
-
-        // Log mounts and insert into the list of mounted containers
-        for (container, mounted_container) in ok {
-            info!("Successfully mounted {}", container);
-            self.containers
-                .insert(container.clone(), mounted_container.unwrap());
-        }
-
-        // Log failures
-        for (container, err) in &failed {
-            warn!(
-                "Failed to mount {}: {}",
-                container,
-                err.as_ref().err().unwrap()
-            );
-        }
-
-        // At least one mount failed. Abort...
-        // TODO: All the errors should be returned
-        if let Some((_, Err(e))) = failed.pop() {
-            return Err(e);
+        for mount in self.mount_all(&Vec::from_iter(need_mount)).await {
+            match mount {
+                Ok(_) => (),
+                Err(e) => {
+                    warn!("Failed to mount: {}", e);
+                    return Err(e);
+                }
+            }
         }
 
         // This must exist
@@ -596,6 +612,46 @@ impl<'a> State<'a> {
         Ok(())
     }
 
+    async fn mount_all(&mut self, containers: &[Container]) -> Vec<Result<Container, Error>> {
+        let mut mounts = Vec::with_capacity(containers.len());
+
+        // Create mount futures
+        for c in containers {
+            // Containers cannot be mounted twice
+            if self.containers.contains_key(c) {
+                mounts.push(Either::Right(ready(Err(Error::MountBusy(c.clone())))));
+            } else {
+                let m = match self.mount(c).await {
+                    Ok(m) => Either::Left(m),
+                    Err(e) => Either::Right(ready(Err(e))),
+                };
+                mounts.push(m);
+            }
+        }
+
+        // Insert all mounted containers into containers map
+        join_all(mounts)
+            .await
+            .drain(..)
+            .zip(containers)
+            .map(|(r, c)| {
+                match r {
+                    Ok(c) => {
+                        // Add mounted container to our internal housekeeping
+                        info!("Mounted {}", c.container);
+                        let container = c.container.clone();
+                        self.containers.insert(container.clone(), c);
+                        Ok(container)
+                    }
+                    Err(e) => {
+                        warn!("Failed to mount {}: {}", c, e);
+                        Err(e)
+                    }
+                }
+            })
+            .collect()
+    }
+
     /// Process console events
     pub(super) async fn console_request(
         &mut self,
@@ -612,34 +668,17 @@ impl<'a> State<'a> {
                         }
                         api::model::Request::Install(_, _) => unreachable!(),
                         api::model::Request::Mount(containers) => {
-                            // Collect mount futures
-                            let mut mounts = vec![];
-                            for container in containers {
-                                mounts.push(self.mount(container).await?);
-                            }
-
-                            // Mount ;-)
-                            let results = join_all(mounts).await;
-
-                            for result in results {
-                                match result {
-                                    Ok(mounted_container) => {
-                                        // Add mounted container to our internal housekeeping
-                                        info!("Mounted {}", mounted_container.container);
-                                        self.containers.insert(
-                                            mounted_container.container.clone(),
-                                            mounted_container,
-                                        );
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to mount: {}", e);
-                                        warn!(
-                                            "Not yet implemented: error handling for bulk mounts"
-                                        );
-                                    }
-                                }
-                            }
-                            Response::Mount(vec![])
+                            let result = self
+                                .mount_all(containers)
+                                .await
+                                .drain(..)
+                                .zip(containers)
+                                .map(|(r, c)| match r {
+                                    Ok(r) => MountResult::Ok(r),
+                                    Err(e) => MountResult::Err((c.clone(), e.into())),
+                                })
+                                .collect();
+                            Response::Mount(result)
                         }
                         api::model::Request::Repositories => {
                             Response::Repositories(self.list_repositories())

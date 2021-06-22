@@ -23,12 +23,18 @@ pub type Name = String;
 pub type Pid = u32;
 pub type RepositoryId = String;
 
-const VERSION: &str = "0.0.5";
+const VERSION: Version = Version {
+    major: 0,
+    minor: 0,
+    patch: 6,
+    pre: vec![],
+    build: vec![],
+};
 
 /// Protocol version
 /// TODO: Do some static initialization of the version struct
 pub fn version() -> Version {
-    Version::parse(VERSION).unwrap()
+    VERSION
 }
 
 pub type ExitCode = i32;
@@ -162,8 +168,8 @@ pub struct Memory {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum MountResult {
-    Ok,
-    Err(Error),
+    Ok(Container),
+    Err((Container, Error)),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -171,7 +177,7 @@ pub enum Response {
     Ok(()),
     Containers(Vec<ContainerData>),
     Repositories(HashSet<RepositoryId>),
-    Mount(Vec<(Container, MountResult)>),
+    Mount(Vec<MountResult>),
     Err(Error),
 }
 
@@ -179,6 +185,7 @@ pub enum Response {
 pub enum Error {
     Configuration(String),
     InvalidContainer(Container),
+    MountBusy(Container),
     UmountBusy(Container),
     StartContainerStarted(Container),
     StartContainerResource(Container),

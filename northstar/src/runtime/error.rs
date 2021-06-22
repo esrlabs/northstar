@@ -19,34 +19,26 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    /// The container is not known to the system
     #[error("Invalid configuration: {0}")]
     Configuration(String),
-    /// The container is not known to the system
     #[error("Invalid container {0}")]
     InvalidContainer(Container),
-    /// The container cannot be started because it's already running
+    #[error("Container {0} cannot be mounted because it is already mounted")]
+    MountBusy(Container),
     #[error("Container {0} cannot be unmounted: busy")]
     UmountBusy(Container),
-    /// The container cannot be started because it's already running
     #[error("Container {0} failed to start: Already started")]
     StartContainerStarted(Container),
-    /// The container cannot be started because it's a resource container
     #[error("Container {0} failed to start: Resources cannot be started")]
     StartContainerResource(Container),
-    /// The container cannot be started because it's missing a running resource container
     #[error("Container {0} failed to start: Resource {1} is missing")]
     StartContainerMissingResource(Container, Container),
-    /// The container cannot be started
     #[error("Container {0} failed to start: {1}")]
     StartContainerFailed(Container, String),
-    /// The container cannot be started because it's already running
     #[error("Container {0} failed to stop: Not started")]
     StopContainerNotStarted(Container),
-    /// The container is not known to the system
     #[error("Invalid repository {0}")]
     InvalidRepository(RepositoryId),
-    /// The container is not known to the system
     #[error("Failed to install {0}: Already installed")]
     InstallDuplicate(Container),
 
@@ -82,6 +74,7 @@ impl From<Error> for api::model::Error {
         match error {
             Error::Configuration(cause) => api::model::Error::Configuration(cause),
             Error::InvalidContainer(container) => api::model::Error::InvalidContainer(container),
+            Error::MountBusy(container) => api::model::Error::MountBusy(container),
             Error::UmountBusy(container) => api::model::Error::UmountBusy(container),
             Error::StartContainerStarted(container) => {
                 api::model::Error::StartContainerStarted(container)
