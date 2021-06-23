@@ -31,7 +31,7 @@ use tokio::{fs::symlink, task};
 /// must be held for the lifetime of the IslandProcess
 pub(crate) type Dev = Option<TempDir>;
 
-/// Mount systemcall instruction done in init
+/// Instructions for mount system call done in init
 #[derive(Debug)]
 pub(super) struct Mount {
     pub source: Option<PathBuf>,

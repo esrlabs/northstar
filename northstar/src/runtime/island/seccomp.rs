@@ -57,8 +57,8 @@ pub(super) fn seccomp_filter(
 pub enum Error {
     #[error("Invalid arguments")]
     InvalidArguments,
-    #[error("Unknown systemcall {0}")]
-    UnknownSystemcall(String),
+    #[error("Unknown system call {0}")]
+    UnknownSyscall(String),
     #[error("OS error: {0}")]
     Os(nix::Error),
 }
@@ -159,7 +159,7 @@ impl Builder {
     pub fn allow_syscall_name(&mut self, name: &str) -> Result<&mut Builder, Error> {
         match translate_syscall(name) {
             Some(nr) => Ok(self.allow_syscall_nr(nr)),
-            None => Err(Error::UnknownSystemcall(name.into())),
+            None => Err(Error::UnknownSyscall(name.into())),
         }
     }
 
@@ -184,7 +184,7 @@ impl Builder {
     }
 }
 
-/// Get number of systemcall for a name
+/// Get number of system call by name
 fn translate_syscall(name: &str) -> Option<u32> {
     SYSCALL_MAP.get(name).cloned()
 }
