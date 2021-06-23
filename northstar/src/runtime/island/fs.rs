@@ -42,8 +42,6 @@ pub(super) struct Mount {
     pub error_msg: String,
 }
 
-// TODO: The container could be malformed and the mountpoint might be missing.
-// This is not a fault of the RT so don't expect it.
 impl Mount {
     pub fn new(
         source: Option<PathBuf>,
@@ -71,7 +69,7 @@ impl Mount {
     }
 
     /// Execute this mount call
-    pub(super) fn mount(&self) -> Result<(), ()> {
+    pub(super) fn mount(&self) {
         nix::mount::mount(
             self.source.as_ref(),
             &self.target,
@@ -80,7 +78,6 @@ impl Mount {
             self.data.as_deref(),
         )
         .expect(&self.error_msg);
-        Ok(())
     }
 }
 
