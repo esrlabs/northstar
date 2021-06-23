@@ -72,7 +72,7 @@ pub(super) fn init(
         .expect("Failed to canonicalize root");
 
     // Mount
-    mount(&mounts).expect("Failed to mount");
+    mount(&mounts);
 
     // Chroot
     unistd::chroot(&root).expect("Failed to chroot");
@@ -145,11 +145,10 @@ pub(super) fn init(
 }
 
 /// Execute list of mount calls
-fn mount(mounts: &[Mount]) -> Result<(), ()> {
+fn mount(mounts: &[Mount]) {
     for mount in mounts {
-        mount.mount()?;
+        mount.mount();
     }
-    Ok(())
 }
 
 /// Apply file descriptor configuration
