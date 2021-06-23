@@ -54,7 +54,7 @@ mod utils;
 
 /// Environment variable name passed to the container with the containers name
 const ENV_NAME: &str = "NAME";
-/// Environment variable name passed to the container with the containers versio
+/// Environment variable name passed to the container with the containers version
 const ENV_VERSION: &str = "VERSION";
 /// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;

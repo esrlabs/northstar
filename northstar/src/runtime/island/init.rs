@@ -268,10 +268,10 @@ fn reset_effective_caps() {
 
 /// Set uid/gid
 fn setid(uid: u32, gid: u32) {
-    let rt_priveleged = unistd::geteuid() == Uid::from_raw(0);
+    let rt_privileged = unistd::geteuid() == Uid::from_raw(0);
 
     // If running as uid 0 save our caps across the uid/gid drop
-    if rt_priveleged {
+    if rt_privileged {
         caps::securebits::set_keepcaps(true).expect("Failed to set keep caps");
     }
 
@@ -281,7 +281,7 @@ fn setid(uid: u32, gid: u32) {
     let uid = unistd::Uid::from_raw(uid);
     unistd::setresuid(uid, uid, uid).expect("Failed to set resuid");
 
-    if rt_priveleged {
+    if rt_privileged {
         reset_effective_caps();
         caps::securebits::set_keepcaps(false).expect("Failed to set keep caps");
     }
