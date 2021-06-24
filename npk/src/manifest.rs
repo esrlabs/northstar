@@ -169,6 +169,7 @@ pub enum MountOption {
 
 /// Resource mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Resource {
     pub name: String,
     pub version: Version,
@@ -183,6 +184,7 @@ pub struct Resource {
 
 /// Bind mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Bind {
     pub host: PathBuf,
     #[serde(
@@ -223,6 +225,7 @@ pub enum Mount {
 
 /// IO configuration for stdin, stdout, stderr
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Io {
     /// stdout configuration
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -632,7 +635,6 @@ seccomp:
 capabilities:
   - CAP_NET_ADMIN
 io:
-  stdin: pipe
   stdout: 
     log:
       level: DEBUG
