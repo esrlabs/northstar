@@ -1,9 +1,14 @@
 FROM rustembedded/cross:aarch64-linux-android
 
-RUN rm -r /android-ndk
+RUN apt-get update
+RUN apt-get install --assume-yes --no-install-recommends --fix-missing squashfs-tools libclang-dev wget unzip
 
-COPY android-ndk.sh /
-RUN /android-ndk.sh
+RUN rm -r /android-ndk
+RUN curl --retry 3 -sSfL "https://dl.google.com/android/repository/android-ndk-r19c-linux-x86_64.zip" -O
+RUN unzip -q android-ndk-*.zip
+RUN rm android-ndk-*.zip
+RUN mv android-ndk-r19c/toolchains/llvm/prebuilt/linux-x86_64 /android-ndk
+RUN rm -r android-ndk-r19c
 
 ENV PATH=/android-ndk/bin:$PATH
 ENV CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=aarch64-linux-android28-clang
