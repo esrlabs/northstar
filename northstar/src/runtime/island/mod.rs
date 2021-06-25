@@ -135,7 +135,8 @@ impl Island {
         let seccomp = seccomp_filter(&container);
 
         // Do not close child tripwire fd as it will be needed to detect if the runtime process died
-        fds.retain(|(read_fd, _)| read_fd != &self.tripwire_read.as_raw_fd());
+        fds.remove(&self.tripwire_read.as_raw_fd());
+        let fds = fds.drain().collect::<Vec<_>>();
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);

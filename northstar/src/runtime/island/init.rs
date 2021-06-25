@@ -156,8 +156,9 @@ fn file_descriptors(map: &[(RawFd, Fd)]) {
     for (fd, value) in map {
         match value {
             Fd::Close => {
+                // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
                 unistd::close(*fd).ok();
-            } // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
+            }
             Fd::Dup(n) => {
                 unistd::dup2(*n, *fd).expect("Failed to dup2");
                 unistd::close(*n).expect("Failed to close");

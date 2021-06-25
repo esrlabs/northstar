@@ -159,7 +159,14 @@ pub(super) enum Fd {
 
 pub(super) async fn from_manifest(
     manifest: &Manifest,
-) -> Result<(Option<(Log, RawFd)>, Option<(Log, RawFd)>, Vec<(RawFd, Fd)>), Error> {
+) -> Result<
+    (
+        Option<(Log, RawFd)>,
+        Option<(Log, RawFd)>,
+        HashMap<RawFd, Fd>,
+    ),
+    Error,
+> {
     let mut fd_configuration = HashMap::new();
 
     // The default of all fds inherited from the parent is to close it
@@ -175,7 +182,11 @@ pub(super) async fn from_manifest(
 
     if let Some(io) = manifest.io.as_ref() {
         let stdout = match io.stdout {
-            Some(npk::manifest::Output::Pipe) => None,
+            Some(npk::manifest::Output::Pipe) => {
+                // Do nothing with the stdout fd
+                fd_configuration.remove(&libc::STDOUT_FILENO);
+                None
+            }
             Some(npk::manifest::Output::Log { level, ref tag }) => {
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
@@ -189,7 +200,11 @@ pub(super) async fn from_manifest(
             None => None,
         };
         let stderr = match io.stderr {
-            Some(npk::manifest::Output::Pipe) => None,
+            Some(npk::manifest::Output::Pipe) => {
+                // Do nothing with the stderr fd
+                fd_configuration.remove(&libc::STDERR_FILENO);
+                None
+            }
             Some(npk::manifest::Output::Log { level, ref tag }) => {
                 let (log, fd) = Log::new(level, tag).await?;
                 // The read fd shall be closed in the child
@@ -202,8 +217,8 @@ pub(super) async fn from_manifest(
             }
             None => None,
         };
-        Ok((stdout, stderr, fd_configuration.drain().collect()))
+        Ok((stdout, stderr, fd_configuration))
     } else {
-        Ok((None, None, fd_configuration.drain().collect()))
+        Ok((None, None, fd_configuration))
     }
 }
