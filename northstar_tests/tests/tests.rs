@@ -59,6 +59,14 @@ test!(install_uninstall_test_container, {
     runtime.shutdown().await
 });
 
+// Install a container that already exists with the same name and version
+test!(install_duplicate, {
+    let mut runtime = Northstar::launch().await?;
+    runtime.install_test_container().await?;
+    assert!(runtime.install_test_container().await.is_err());
+    runtime.shutdown().await
+});
+
 // Start and stop a container multiple times
 test!(start_stop_test_container_with_waiting, {
     let mut runtime = Northstar::launch_install_test_container().await?;

@@ -28,8 +28,8 @@ use log::{debug, info, warn};
 use mpsc::Receiver;
 use npk::npk;
 use std::{
-    collections::HashMap,
-    ffi::{CStr, OsStr},
+    collections::{HashMap, HashSet},
+    ffi::CStr,
     fmt,
     io::{BufReader, Seek, SeekFrom, Write},
     os::unix::prelude::{FromRawFd, RawFd},
@@ -55,6 +55,9 @@ pub(super) trait Repository: fmt::Debug {
     }
     /// All containers in this repositoriy
     fn containers(&self) -> Vec<Arc<Npk>>;
+
+    /// List of all containers
+    fn list(&self) -> Vec<Container>;
 }
 
 /// Repository backed by a directory
@@ -71,6 +74,7 @@ impl DirRepository {
         id: RepositoryId,
         dir: PathBuf,
         key: Option<&Path>,
+        blacklist: &HashSet<Container>,
     ) -> Result<DirRepository, Error> {
         let mut containers = HashMap::new();
 
@@ -85,38 +89,46 @@ impl DirRepository {
 
         let start = Instant::now();
         let mut loads = vec![];
-        let npk_extension = Some(OsStr::new("npk"));
+        let blacklist = Arc::new(blacklist.clone());
         while let Ok(Some(entry)) = readir.next_entry().await {
             let file = entry.path();
-            if file.extension() == npk_extension {
-                let task = task::spawn_blocking(move || {
-                    debug!(
-                        "Loading {}{}",
-                        file.display(),
-                        if key.is_some() { " [verified]" } else { "" }
-                    );
-                    let npk = Npk::from_path(&file, key.as_ref())
-                        .map_err(|e| Error::Npk(file.display().to_string(), e))?;
-                    let name = npk.manifest().name.clone();
-                    let version = npk.manifest().version.clone();
-                    let container = Container::new(name, version);
-                    Result::<_, Error>::Ok((container, file, npk))
-                })
-                .then(|r| match r {
-                    Ok(r) => ready(r),
-                    Err(_) => panic!("Task error"),
-                });
-                loads.push(task);
-            } else {
-                debug!("Skipping {}", file.display());
-            }
+            let blacklist = blacklist.clone();
+            let task = task::spawn_blocking(move || {
+                debug!(
+                    "Loading {}{}",
+                    file.display(),
+                    if key.is_some() { " [verified]" } else { "" }
+                );
+                let npk = Npk::from_path(&file, key.as_ref())
+                    .map_err(|e| Error::Npk(file.display().to_string(), e))?;
+                let name = npk.manifest().name.clone();
+                let version = npk.manifest().version.clone();
+                let container = Container::new(name, version);
+
+                if blacklist.contains(&container) {
+                    Err(Error::DuplicateContainer(container))
+                } else {
+                    Ok((container, file, npk))
+                }
+            })
+            .then(|r| match r {
+                Ok(r) => ready(r),
+                Err(_) => panic!("Task error"),
+            });
+            loads.push(task);
         }
 
         let results = join_all(loads).await;
         for result in results {
             match result {
                 Ok((container, file, npk)) => {
-                    containers.insert(container, (file, Arc::new(npk)));
+                    // If the container name/version is already in there remove the present
+                    // container and skip the newly parsed one.
+                    if containers.remove(&container).is_some() {
+                        warn!("Skipping duplicate container {}", container);
+                    } else {
+                        containers.insert(container, (file, Arc::new(npk)));
+                    }
                 }
                 Err(e) => warn!("Failed to load: {}", e),
             }
@@ -228,16 +240,30 @@ impl<'a> Repository for DirRepository {
             .map(|(_, npk)| npk.clone())
             .collect()
     }
+
+    fn list(&self) -> Vec<Container>
+    where
+        Self: Sized,
+    {
+        self.containers.keys().cloned().collect()
+    }
 }
 
 /// In memory repository
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(super) struct MemRepository {
     id: RepositoryId,
     containers: HashMap<Container, (Vec<u8>, Arc<Npk>)>,
 }
 
 impl MemRepository {
+    pub fn new(id: RepositoryId) -> MemRepository {
+        MemRepository {
+            id,
+            containers: HashMap::new(),
+        }
+    }
+
     pub(super) async fn add_buf(&mut self, buf: &[u8]) -> Result<Container, Error> {
         let data = Vec::from(buf);
         let fd = Self::memfd_create().map_err(|e| Error::Os("Failed create memfd".into(), e))?;
@@ -312,5 +338,12 @@ impl<'a> Repository for MemRepository {
             .values()
             .map(|(_, npk)| npk.clone())
             .collect()
+    }
+
+    fn list(&self) -> Vec<Container>
+    where
+        Self: Sized,
+    {
+        self.containers.keys().cloned().collect()
     }
 }

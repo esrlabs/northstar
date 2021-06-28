@@ -188,7 +188,7 @@ async fn persist(
 ) -> Result<Mount, Error> {
     let uid = container.manifest.uid;
     let gid = container.manifest.gid;
-    let dir = config.data_dir.join(&container.manifest.name);
+    let dir = config.data_dir.join(container.manifest.name.to_string());
 
     if !dir.exists() {
         debug!("Creating {}", dir.display());
@@ -201,8 +201,8 @@ async fn persist(
     task::block_in_place(|| {
         unistd::chown(
             dir.as_os_str(),
-            Some(unistd::Uid::from_raw(uid)),
-            Some(unistd::Gid::from_raw(gid)),
+            Some(unistd::Uid::from_raw(uid as u32)),
+            Some(unistd::Gid::from_raw(gid as u32)),
         )
     })
     .map_err(|e| {
@@ -297,7 +297,11 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
     debug!("Creating devfs in {}", dir.path().display());
 
     task::block_in_place(|| {
-        dev_devices(dir.path(), container.manifest.uid, container.manifest.gid)
+        dev_devices(
+            dir.path(),
+            container.manifest.uid as u32,
+            container.manifest.gid as u32,
+        )
     });
     dev_symlinks(dir.path()).await;
 

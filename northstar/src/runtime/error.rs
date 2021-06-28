@@ -25,6 +25,8 @@ pub enum Error {
     InvalidContainer(Container),
     #[error("Container {0} cannot be mounted because it is already mounted")]
     MountBusy(Container),
+    #[error("Duplicate container {0}")]
+    DuplicateContainer(Container),
     #[error("Container {0} cannot be unmounted: busy")]
     UmountBusy(Container),
     #[error("Container {0} failed to start: Already started")]
@@ -75,6 +77,9 @@ impl From<Error> for api::model::Error {
     fn from(error: Error) -> api::model::Error {
         match error {
             Error::Configuration(cause) => api::model::Error::Configuration(cause),
+            Error::DuplicateContainer(container) => {
+                api::model::Error::DuplicateContainer(container)
+            }
             Error::InvalidContainer(container) => api::model::Error::InvalidContainer(container),
             Error::MountBusy(container) => api::model::Error::MountBusy(container),
             Error::UmountBusy(container) => api::model::Error::UmountBusy(container),

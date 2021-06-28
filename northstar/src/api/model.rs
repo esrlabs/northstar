@@ -150,6 +150,7 @@ pub enum Response {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
     Configuration(String),
+    DuplicateContainer(Container),
     InvalidContainer(Container),
     MountBusy(Container),
     UmountBusy(Container),
