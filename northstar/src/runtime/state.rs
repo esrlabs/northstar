@@ -158,42 +158,42 @@ impl<'a> State<'a> {
     }
 
     async fn init_repositories(&mut self) -> Result<(), Error> {
-        // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
-        // feature is enabled
+        let mut blacklist = HashSet::new();
+
         #[cfg(feature = "hello-world")]
-        if self.config.repositories.contains_key(INTERNAL_REPOSITORY) {
-            return Err(Error::Configuration(format!(
-                "Duplicate repository {}",
-                INTERNAL_REPOSITORY
-            )));
+        {
+            // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
+            // feature is enabled
+            if self.config.repositories.contains_key(INTERNAL_REPOSITORY) {
+                return Err(Error::Configuration(format!(
+                    "Duplicate repository {}",
+                    INTERNAL_REPOSITORY
+                )));
+            }
+
+            info!("Adding hello-world to internal repository");
+            let mut internal = MemRepository::new("internal".into());
+            let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello-world-0.0.1.npk"));
+            let hello_world = internal
+                .add_buf(hello_world)
+                .await
+                .expect("Failed to load hello-world");
+            blacklist.insert(hello_world);
+            self.repositories
+                .insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
         }
 
         // Build a map of repositories from the configuration
         for (id, repository) in &self.config.repositories {
-            self.repositories.insert(
+            let repository = DirRepository::new(
                 id.clone(),
-                Box::new(
-                    DirRepository::new(
-                        id.clone(),
-                        repository.dir.clone(),
-                        repository.key.as_deref(),
-                    )
-                    .await?,
-                ),
-            );
-        }
-
-        #[cfg(feature = "hello-world")]
-        {
-            info!("Adding hello-world to internal repository");
-            let mut internal = MemRepository::default();
-            let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello-world-0.0.1.npk"));
-            internal
-                .add_buf(hello_world)
-                .await
-                .expect("Failed to load hello-world");
-            self.repositories
-                .insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
+                repository.dir.clone(),
+                repository.key.as_deref(),
+                &blacklist,
+            )
+            .await?;
+            blacklist.extend(repository.list());
+            self.repositories.insert(id.clone(), Box::new(repository));
         }
 
         Ok(())

@@ -81,7 +81,7 @@ pub(super) fn init(
     env::set_current_dir("/").expect("Failed to set cwd to /");
 
     // UID / GID
-    setid(manifest.uid, manifest.gid);
+    setid(manifest.uid as u32, manifest.gid as u32);
 
     // Supplementary groups
     setgroups(groups);

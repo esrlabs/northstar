@@ -169,6 +169,9 @@ pub fn response(response: &Response) -> i32 {
 fn format_err(err: &model::Error) -> String {
     match err {
         model::Error::Configuration(cause) => format!("invalid configuration: {}", cause),
+        model::Error::DuplicateContainer(container) => {
+            format!("duplicate container name and version {}", container)
+        }
         model::Error::InvalidContainer(c) => format!("invalid container {}", c),
         model::Error::MountBusy(c) => format!("failed to mount {}: busy", c),
         model::Error::UmountBusy(c) => format!("failed to umount {}: busy", c),
