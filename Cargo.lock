@@ -281,10 +281,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "capabilities"
-version = "0.0.1"
-
-[[package]]
 name = "caps"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -501,10 +497,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "datarw"
-version = "0.1.0"
 
 [[package]]
 name = "derive-new"
@@ -1246,6 +1238,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1404,6 +1397,10 @@ name = "percent-encoding"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
+
+[[package]]
+name = "persistence"
+version = "0.1.0"
 
 [[package]]
 name = "pest"

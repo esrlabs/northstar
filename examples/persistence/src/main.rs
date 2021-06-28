@@ -28,7 +28,7 @@ fn main() -> io::Result<()> {
 
     // Read
     let text = fs::read_to_string(&file)?;
-    println!("Context of {}: {}", file.display(), text);
+    println!("Content of {}: {}", file.display(), text);
 
     Ok(())
 }

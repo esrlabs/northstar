@@ -37,4 +37,4 @@ device_mapper_dev = "/dev/dm-"
 
 [repositories.default]
 dir = "target/northstar/repository"
-key = "examples/keys/northstar.pub"
+key = "examples/northstar.pub"

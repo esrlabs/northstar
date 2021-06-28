@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+pub mod containers;
 pub mod logger;
 pub mod macros;
 pub mod runtime;
-pub mod test_container;

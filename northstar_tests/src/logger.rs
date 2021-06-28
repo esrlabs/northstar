@@ -24,14 +24,8 @@ use std::{
 use tokio::{pin, select, time};
 
 lazy_static! {
-    static ref QUEUE: (
-        std::sync::Mutex<flume::Sender<String>>,
-        tokio::sync::Mutex<flume::Receiver<String>>
-    ) = {
-        let (tx, rx) = flume::unbounded();
-        (std::sync::Mutex::new(tx), tokio::sync::Mutex::new(rx))
-    };
     static ref START: Instant = Instant::now();
+    static ref QUEUE: (flume::Sender<String>, flume::Receiver<String>) = flume::unbounded();
 }
 
 pub fn init() {
@@ -39,7 +33,7 @@ pub fn init() {
     builder.parse_filters("debug");
 
     builder.format(|buf, record| {
-        let tx = QUEUE.0.lock().unwrap();
+        let tx = &QUEUE.0;
         tx.send(record.args().to_string()).expect("Channel error");
 
         let timestamp = buf.timestamp_millis();
@@ -65,14 +59,13 @@ pub fn init() {
     builder.init()
 }
 
-/// Assume the runtime to log a line matching `pattern` within
-/// `timeout` seconds.
+/// Assume the runtime to log a line matching `pattern` within `timeout` seconds.
 pub async fn assume<T: ToString + fmt::Display>(pattern: T, timeout: u64) -> Result<()> {
     let regex = Regex::new(&pattern.to_string()).context("Invalid regex")?;
     let timeout = time::sleep(Duration::from_secs(timeout));
     pin!(timeout);
 
-    let rx = QUEUE.1.lock().await;
+    let rx = &QUEUE.1;
 
     loop {
         select! {

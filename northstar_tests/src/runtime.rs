@@ -14,10 +14,7 @@
 
 //! Controls Northstar runtime instances
 
-use super::{
-    logger,
-    test_container::{test_container_npk, test_resource_npk},
-};
+use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use northstar::{
@@ -56,15 +53,6 @@ impl std::ops::DerefMut for Northstar {
 }
 
 impl Northstar {
-    /// Launches an instance of Northstar with the test container and
-    /// resource installed.
-    pub async fn launch_install_test_container() -> Result<Northstar> {
-        let mut runtime = Self::launch().await?;
-        runtime.install_test_resource().await?;
-        runtime.install_test_container().await?;
-        Ok(runtime)
-    }
-
     /// Launches an instance of Northstar
     pub async fn launch() -> Result<Northstar> {
         let pid = std::process::id();
@@ -74,13 +62,9 @@ impl Northstar {
         let data_dir = tmpdir.path().join("data");
         let log_dir = tmpdir.path().join("log");
         let test_repository = tmpdir.path().join("test");
-        let example_key = tmpdir.path().join("key.pub");
         fs::create_dir(&test_repository).await?;
-        fs::write(
-            &example_key,
-            include_bytes!("../../examples/keys/northstar.pub"),
-        )
-        .await?;
+        let example_key = tmpdir.path().join("key.pub");
+        fs::write(&example_key, include_bytes!("../../examples/northstar.pub")).await?;
 
         let mut repositories = HashMap::new();
         repositories.insert(
@@ -147,6 +131,15 @@ impl Northstar {
         })
     }
 
+    /// Launches an instance of Northstar with the test container and
+    /// resource installed.
+    pub async fn launch_install_test_container() -> Result<Northstar> {
+        let mut runtime = Self::launch().await?;
+        runtime.install_test_resource().await?;
+        runtime.install_test_container().await?;
+        Ok(runtime)
+    }
+
     pub async fn shutdown(self) -> Result<()> {
         // Dropping the client closes the connection to the runtime
         drop(self.client);
@@ -204,7 +197,7 @@ impl Northstar {
     /// Install the test container and wait for the notification
     pub async fn install_test_container(&mut self) -> Result<()> {
         self.client
-            .install(test_container_npk().await, "test")
+            .install(TEST_CONTAINER_NPK.as_path(), "test")
             .await
             .context("Failed to install test container")?;
 
@@ -227,7 +220,7 @@ impl Northstar {
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
         self.client
-            .install(test_resource_npk().await, "test")
+            .install(TEST_RESOURCE_NPK.as_path(), "test")
             .await
             .context("Failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)

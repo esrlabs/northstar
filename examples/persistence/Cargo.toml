@@ -1,5 +1,5 @@
 [package]
-name = "datarw"
+name = "persistence"
 version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2018"

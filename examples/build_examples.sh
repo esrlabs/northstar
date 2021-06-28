@@ -10,7 +10,7 @@ this_script=$(basename $0)
 bold=$(tput bold)
 normal=$(tput sgr0)
 CLONES=""
-KEY="./examples/keys/northstar.key"
+KEY="./examples/northstar.key"
 
 usage() {
     echo "USAGE:"
@@ -139,26 +139,25 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant --release -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "./examples/keys/northstar.key" --comp "${COMPRESSION_ALGORITHM}"
+  exe cargo run --bin sextant --release -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "${KEY}" --comp "${COMPRESSION_ALGORITHM}"
 }
 
 main() {
   assert_is_toplevel_dir
 
   local EXAMPLES=(
-    "./examples/container/capabilities"
-    "./examples/container/cpueater"
-    "./examples/container/crashing"
-    "./examples/container/datarw"
-    "./examples/container/hello-world"
-    "./examples/container/inspect"
-    "./examples/container/memeater"
-    "./examples/container/resource/ferris"
-    "./examples/container/resource/hello-ferris"
-    "./examples/container/resource/hello-resource"
-    "./examples/container/resource/message-0.0.1"
-    "./examples/container/resource/message-0.0.2"
-    "./examples/container/seccomp"
+    "./examples/cpueater"
+    "./examples/crashing"
+    "./examples/ferris"
+    "./examples/hello-ferris"
+    "./examples/hello-resource"
+    "./examples/hello-world"
+    "./examples/inspect"
+    "./examples/memeater"
+    "./examples/message-0.0.1"
+    "./examples/message-0.0.2"
+    "./examples/persistence"
+    "./examples/seccomp"
   )
 
   local OUTPUT_DIR="./target/northstar/repository"
