@@ -20,6 +20,7 @@ rusty-fork = "0.3.0"
 tempfile = "3.2"
 tokio = { version = "1.5", features = ["full"] }
 url = "2.2"
+uuid = { version = "0.8.2", features = ["v4"] }
 
 [build-dependencies]
 tempfile = "3.2"

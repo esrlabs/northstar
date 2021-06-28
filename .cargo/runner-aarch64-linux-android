@@ -11,7 +11,7 @@ if [[ $BIN == "northstar" ]]; then
     adb shell stop northstar
     adb push android/northstar.rc /system/etc/init/northstar.rc
     adb push android/northstar.toml /system/etc/northstar.toml
-    adb push examples/keys/northstar.pub /system/etc/northstar/system.pub
+    adb push examples/northstar.pub /system/etc/northstar/system.pub
     adb shell mkdir -p /system/northstar/system
     adb push $1 /system/bin/northstar
     adb shell start northstar

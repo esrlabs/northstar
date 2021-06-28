@@ -1,6 +1,6 @@
-name: datarw
+name: persistence
 version: 0.0.1
-init: /datarw
+init: /persistence
 uid: 1000
 gid: 1000
 mounts:
@@ -19,4 +19,4 @@ io:
   stdout:
     log:
       level: DEBUG
-      tag: datarw
+      tag: persistence

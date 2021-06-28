@@ -9,7 +9,7 @@ The command requires the following input:
 ## The Manifest File
 
 The manifest is a YAML file that references all necessary data to mount and execute the container.
-An example `manifest.yaml` of the `hello-world` container (found in `examples/container/hello-world/manifest.yaml`) looks as follows:
+An example `manifest.yaml` of the `hello-world` container (found in `examples/hello-world/manifest.yaml`) looks as follows:
 
 ```yaml
 name: hello-world
@@ -50,7 +50,7 @@ First, we build the `hello-world` binary from the northstar directory using carg
 
 ```bash
 $ cargo build --release --bin hello-world
-Compiling hello-world v0.1.0 (/home/nori/dev/northstar/examples/container/hello-world)
+Compiling hello-world v0.1.0 (/home/nori/dev/northstar/examples/hello-world)
 Finished release [optimized] target(s) in 2.77s
 ```
 
@@ -73,7 +73,7 @@ Finally, we are able to call `sextant` and create the NPK:
 
 ```bash
 $ target/debug/sextant pack \
---manifest examples/container/hello-world/manifest.yaml \
+--manifest examples/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --out target/northstar/repository
 ```
@@ -93,7 +93,7 @@ To create a signed version of our container we have to specify the required priv
 
 ```bash
 $ target/debug/sextant pack \
---manifest examples/container/hello-world/manifest.yaml \
+--manifest examples/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --key ./examples/keys/northstar.key \
 --out target/northstar/repository

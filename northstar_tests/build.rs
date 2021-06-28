@@ -15,46 +15,67 @@
 use escargot::CargoBuild;
 use std::{env, fs, path::Path};
 
-const CARGO_MANIFEST: &str = "test_container/Cargo.toml";
-const TEST_CONTAINER_MANIFEST: &str = "test_container/manifest.yaml";
-const TEST_RESOURCE_MANIFEST: &str = "test_resource/manifest.yaml";
-const KEY: &str = "../examples/keys/northstar.key";
+const KEY: &str = "../examples/northstar.key";
 
 fn main() {
-    let tmpdir = tempfile::TempDir::new().expect("Failed to create tmpdir");
-    let npk = tmpdir.path().join("npk");
-    let root = npk.join("root");
-    fs::create_dir_all(&root).expect("Failed to create npk root");
-
-    // Build the test container binary
-    let bin = CargoBuild::new()
-        .manifest_path(CARGO_MANIFEST)
-        .current_release()
-        .target(env::var("TARGET").unwrap())
-        .target_dir("target")
-        .run()
-        .expect("Failed to build")
-        .path()
-        .to_owned();
-    fs::copy(&bin, &root.join("test_container")).expect("failed to copy bin");
-
     let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = Path::new(&out_dir);
 
-    // Pack test container npk
-    npk::npk::pack(
-        Path::new(TEST_CONTAINER_MANIFEST),
-        &npk.join("root"),
-        Path::new(&out_dir),
-        Some(Path::new(KEY)),
-    )
-    .expect("Failed to create test container npk");
+    for dir in &[
+        "../examples/cpueater",
+        "../examples/crashing",
+        "../examples/ferris",
+        "../examples/hello-ferris",
+        "../examples/hello-resource",
+        "../examples/hello-world",
+        "../examples/inspect",
+        "../examples/memeater",
+        "../examples/message-0.0.1",
+        "../examples/message-0.0.2",
+        "../examples/persistence",
+        "../examples/seccomp",
+        "test_container",
+        "test_resource",
+    ] {
+        let dir = Path::new(dir);
+        // Build crate if a Cargo manfiest is included in the directory
+        let cargo_manifest = dir.join("Cargo.toml");
 
-    // Pack test resource npk
-    npk::npk::pack(
-        Path::new(TEST_RESOURCE_MANIFEST),
-        &Path::new("test_resource").join("root"),
-        Path::new(&out_dir),
-        Some(Path::new(KEY)),
-    )
-    .expect("Failed to create test resource npk");
+        let (root, tmpdir) = if cargo_manifest.exists() {
+            println!("Building {}", cargo_manifest.display());
+            let bin = CargoBuild::new()
+                .manifest_path(cargo_manifest)
+                .current_release()
+                .target(env::var("TARGET").unwrap())
+                .target_dir(Path::new("target").join("tests")) // Cannot reuse target because it's in use
+                .run()
+                .expect("Failed to build")
+                .path()
+                .to_owned();
+
+            println!("Binary is {}", bin.display());
+            let tmpdir = tempfile::TempDir::new().expect("Failed to create tmpdir");
+            let npk = tmpdir.path().join("npk");
+            let root = npk.join("root");
+            fs::create_dir_all(&root).expect("Failed to create npk root");
+            fs::copy(&bin, root.join(dir.file_name().unwrap())).expect("failed to copy bin");
+            (root, Some(tmpdir))
+        } else {
+            let root = dir.join("root");
+            if root.exists() {
+                (root, None)
+            } else {
+                (dir.to_owned(), None)
+            }
+        };
+
+        npk::npk::pack(
+            &dir.join(Path::new("manifest.yaml")),
+            &root,
+            out_dir,
+            Some(Path::new(KEY)),
+        )
+        .expect("Failed to pack npk");
+        drop(tmpdir);
+    }
 }

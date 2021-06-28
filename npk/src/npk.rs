@@ -455,8 +455,8 @@ impl Default for SquashfsOpts {
 /// To build the 'hello' example container:
 ///
 /// sextant pack \
-/// --manifest examples/container/hello/manifest.yaml \
-/// --root examples/container/hello/root \
+/// --manifest examples/hello/manifest.yaml \
+/// --root examples/hello/root \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
@@ -479,8 +479,8 @@ pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Res
 /// To build the 'hello' example container:
 ///
 /// sextant pack \
-/// --manifest examples/container/hello/manifest.yaml \
-/// --root examples/container/hello/root \
+/// --manifest examples/hello/manifest.yaml \
+/// --root examples/hello/root \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 /// --comp xz \
