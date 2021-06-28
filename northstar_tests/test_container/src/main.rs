@@ -15,9 +15,11 @@
 use anyhow::{Context, Result};
 use nix::unistd::{self, Gid};
 use std::{
-    env, fs,
+    env,
+    ffi::c_void,
+    fs,
     io::{self, Write},
-    iter, mem,
+    iter,
     path::{Path, PathBuf},
     process, thread, time,
 };
@@ -115,11 +117,12 @@ fn touch(path: &Path) -> Result<()> {
 }
 
 fn leak_memory() {
-    for _ in 0..9_999_999 {
-        println!("Eating a Megabyte...");
-        let chunk: Vec<u8> = (0..1_000_000).map(|n| (n % 8) as u8).collect();
-        mem::forget(chunk);
-        thread::sleep(time::Duration::from_millis(400));
+    extern "C" {
+        fn malloc(size: usize) -> *mut c_void;
+    }
+
+    loop {
+        unsafe { malloc(1_000) };
     }
 }
 

@@ -236,6 +236,8 @@ impl Future for Runtime {
 }
 
 async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(), Error> {
+    cgroups::init(&config.cgroups).await?;
+
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(MAIN_BUFFER);
     let mut state = State::new(config, event_tx.clone()).await?;
@@ -291,6 +293,8 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             break Err(e);
         }
     }?;
+
+    cgroups::shutdown(&config.cgroups).await?;
 
     task::block_in_place(|| nix::mount::umount(&config.run_dir))
         .map_err(|e| Error::Mount(mount::Error::Os(e)))?;

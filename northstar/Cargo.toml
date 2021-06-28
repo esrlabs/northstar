@@ -33,6 +33,7 @@ serde_json = { version = "1.0", optional = true }
 tempfile = { version = "3.2", optional = true }
 thiserror = "1.0"
 tokio = { version = "1.5", features = ["full"] }
+tokio-eventfd = { version = "0.2.0", optional = true }
 tokio-util = { version = "0.6.6", features = ["codec", "io"], optional = true }
 url = { version = "2.2", features = ["serde"] }
 uuid = { version = "0.8.2", features = ["v4"], optional = true }
@@ -66,6 +67,7 @@ runtime = [
     "proc-mounts",
     "procinfo",
     "tempfile",
+    "tokio-eventfd",
     "tokio-util",
     "uuid",
 ]
