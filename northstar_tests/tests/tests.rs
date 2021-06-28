@@ -428,18 +428,19 @@ test!(check_api_version_on_connect, {
     runtime.shutdown().await
 });
 
-// test!(cgroups_memory, {
-//     let runtime = Northstar::launch().await?;
+test!(cgroups_memory, {
+    let runtime = Northstar::launch_install_test_container().await?;
 
-//     runtime.install_test_container().await?;
-//     runtime.install_test_resource().await?;
+    for _ in 0..10 {
+        runtime.test_cmds("leak-memory").await;
+        runtime.start(TEST_CONTAINER).await?;
+        assume("Process test_container:0.0.1 is out of memory", 10).await?;
+        assume(
+            "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+            10,
+        )
+        .await?;
+    }
 
-//     runtime.test_cmds("leak-memory").await;
-
-//     runtime.start(TEST_CONTAINER).await?;
-//     assume("Eating a Megabyte", 5).await?;
-
-//     // TODO: Add assertion about the test_containers ooms
-
-//     runtime.shutdown().await
-// });
+    runtime.shutdown().await
+});

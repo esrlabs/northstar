@@ -108,7 +108,7 @@ impl ProcessContext {
         self.debug.destroy().await?;
 
         if let Some(cgroups) = self.cgroups.take() {
-            cgroups.destroy().await.expect("Failed to destroy cgroups")
+            cgroups.destroy().await;
         }
 
         Ok(status)
@@ -126,7 +126,7 @@ impl ProcessContext {
             .expect("Failed to destroy debug utilities");
 
         if let Some(cgroups) = self.cgroups.take() {
-            cgroups.destroy().await.expect("Failed to destroy cgroups")
+            cgroups.destroy().await;
         }
     }
 }
@@ -149,7 +149,6 @@ impl<'a> State<'a> {
             mount_control,
         };
 
-        // Initialize repositories
         state.init_repositories().await?;
 
         // Start containers flagged with autostart
@@ -436,29 +435,27 @@ impl<'a> State<'a> {
                 return Err(e);
             }
         };
+        let pid = process.pid().await;
 
         // Debug
-        let debug = super::debug::Debug::new(
-            &self.config,
-            &mounted_container.manifest,
-            process.pid().await,
-        )
-        .await?;
+        let debug =
+            super::debug::Debug::new(&self.config, &mounted_container.manifest, pid).await?;
 
         // CGroups
-        let cgroups = if let Some(ref c) = mounted_container.manifest.cgroups {
-            debug!("Configuring CGroups of {}", container);
-            let cgroups =
-                // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
-                cgroups::CGroups::new(&self.config.cgroups, &container, c, self.events_tx.clone())
-                    .await.expect("Failed to create cgroup");
-
-            // Assigning a pid to a cgroup created by us must work otherwise we did something wrong.
-            cgroups
-                .assign(process.pid().await)
+        let cgroups = if let Some(ref cgroup) = mounted_container.manifest.cgroups {
+            debug!("Configuring CGroups for {}", container);
+            // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
+            Some(
+                cgroups::CGroups::new(
+                    &self.config.cgroups,
+                    self.events_tx.clone(),
+                    &container,
+                    cgroup,
+                    pid,
+                )
                 .await
-                .expect("Failed to assign PID to cgroups");
-            Some(cgroups)
+                .expect("Failed to create cgroup"),
+            )
         } else {
             None
         };
@@ -467,10 +464,10 @@ impl<'a> State<'a> {
         let process = match process.start().await {
             result::Result::Ok(process) => process,
             result::Result::Err(e) => {
-                warn!("Failed to start {}: {}", container, e);
+                warn!("Failed to start {} ({}): {}", container, pid, e);
                 debug.destroy().await.expect("Failed to destroy debug");
                 if let Some(cgroups) = cgroups {
-                    cgroups.destroy().await.expect("Failed to destroy cgroups");
+                    cgroups.destroy().await;
                 }
                 return Err(e);
             }
@@ -487,8 +484,9 @@ impl<'a> State<'a> {
         });
 
         info!(
-            "Started {} in {:.03}s",
+            "Started {} ({}) in {:.03}s",
             container,
+            pid,
             start.elapsed().as_fractional_secs()
         );
 
@@ -546,7 +544,9 @@ impl<'a> State<'a> {
             self.umount(container).await?;
         }
 
-        self.launcher_island.shutdown().await
+        self.launcher_island.shutdown().await?;
+
+        Ok(())
     }
 
     /// Install an NPK

@@ -12,21 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#[allow(clippy::all)]
 fn main() {
-    let mut mem = vec![];
-    for _ in 0..9_999_999 {
-        println!("Eating a Megabyte... have {}", mem.len());
-        let mut chunk = vec![];
-        for i in 0..1_000_000 {
-            chunk.push((i % 8) as u8);
-        }
-        mem.push(chunk);
-        std::thread::sleep(std::time::Duration::from_millis(400));
-    }
-
-    // just something to make the compiler not optimize....
-    for x in &mem {
-        println!("{}", x[0]);
+    let mut data = Vec::new();
+    for n in 0..u64::MAX {
+        data.push(n);
     }
 }
