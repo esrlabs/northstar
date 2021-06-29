@@ -72,6 +72,8 @@ async fn run(config: Config) -> Result<(), Error> {
         .context("Failed to install sigint handler")?;
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
         .context("Failed to install sigterm handler")?;
+    let mut sighup = tokio::signal::unix::signal(SignalKind::hangup())
+        .context("Failed to install sighup handler")?;
 
     let status = select! {
         _ = sigint.recv() => {
@@ -80,6 +82,10 @@ async fn run(config: Config) -> Result<(), Error> {
         }
         _ = sigterm.recv() => {
             info!("Received SIGTERM. Stopping Northstar runtime");
+            runtime.shutdown().await
+        }
+        _ = sighup.recv() => {
+            info!("Received SIGHUP. Stopping Northstar runtime");
             runtime.shutdown().await
         }
         status = &mut runtime => status,
