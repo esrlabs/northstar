@@ -12,7 +12,7 @@ mounts:
     host: /lib64
   /message:
     type: resource
-    name: msesage
+    name: message
     version: 0.0.2
     dir: /
   /system:
