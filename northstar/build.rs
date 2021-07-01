@@ -77,6 +77,7 @@ fn generate_seccomp() {
 #include <linux/filter.h>
 #include <linux/audit.h>"#,
             )
+            .layout_tests(false)
             .clang_arg(extra_arg)
             .allowlist_type("seccomp_data")
             .allowlist_type("sock_fprog")
