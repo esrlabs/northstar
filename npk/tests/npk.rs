@@ -40,16 +40,16 @@ env:
   HELLO: north
 ";
 
-    fn create_test_npk(dest: &PathBuf, manifest_name: Option<&str>) -> PathBuf {
+    fn create_test_npk(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src.path().to_path_buf(), manifest_name);
-        let (_pub_key, prv_key) = gen_test_key(&key_dir.path().to_path_buf());
-        pack(&manifest, &src.path().to_path_buf(), &dest, Some(&prv_key)).expect("Pack NPK");
+        let manifest = create_test_manifest(&src.path(), manifest_name);
+        let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
+        pack(&manifest, &src.path(), &dest, Some(&prv_key)).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
-    fn create_test_manifest(dest: &PathBuf, manifest_name: Option<&str>) -> PathBuf {
+    fn create_test_manifest(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
         let manifest = dest
             .join(manifest_name.unwrap_or("manifest"))
             .with_extension("yaml");
@@ -76,13 +76,13 @@ env:
     #[test]
     fn pack_npk() {
         let dest = create_tmp_dir();
-        create_test_npk(&dest.path().to_path_buf(), None);
+        create_test_npk(&dest.path(), None);
     }
 
     #[test]
     fn pack_npk_nonstandard_name() {
         let dest = create_tmp_dir();
-        create_test_npk(&dest.path().to_path_buf(), Some("different_manifest_name"));
+        create_test_npk(&dest.path(), Some("different_manifest_name"));
     }
 
     #[test]
@@ -91,14 +91,8 @@ env:
         let dest = create_tmp_dir();
         let key_dir = create_tmp_dir();
         let manifest = Path::new("invalid");
-        let (_pub_key, prv_key) = gen_test_key(&key_dir.path().to_path_buf());
-        pack(
-            &manifest,
-            &src.path().to_path_buf(),
-            &dest.path().to_path_buf(),
-            Some(&prv_key),
-        )
-        .expect_err("Invalid manifest");
+        let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
+        pack(&manifest, &src.path(), &dest.path(), Some(&prv_key)).expect_err("Invalid manifest");
     }
 
     #[test]
@@ -106,34 +100,27 @@ env:
         let src = create_tmp_dir();
         let dest = Path::new("invalid");
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src.path().to_path_buf(), None);
-        let (_pub_key, prv_key) = gen_test_key(&key_dir.path().to_path_buf());
-        pack(&manifest, &src.path().to_path_buf(), &dest, Some(&prv_key))
-            .expect_err("Invalid destination dir");
+        let manifest = create_test_manifest(&src.path(), None);
+        let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
+        pack(&manifest, &src.path(), &dest, Some(&prv_key)).expect_err("Invalid destination dir");
     }
 
     #[test]
     fn pack_npk_no_keys() {
         let src = create_tmp_dir();
         let dest = create_tmp_dir();
-        let manifest = create_test_manifest(&src.path().to_path_buf(), None);
+        let manifest = create_test_manifest(&src.path(), None);
         let prv_key = Path::new("invalid");
-        pack(
-            &manifest,
-            &src.path().to_path_buf(),
-            &dest.path().to_path_buf(),
-            Some(prv_key),
-        )
-        .expect_err("Invalid key dir");
+        pack(&manifest, &src.path(), &dest.path(), Some(prv_key)).expect_err("Invalid key dir");
     }
 
     #[test]
     fn unpack_npk() {
         let npk_dest = create_tmp_dir();
-        let npk = create_test_npk(&npk_dest.path().to_path_buf(), None);
+        let npk = create_test_npk(&npk_dest.path(), None);
         assert!(npk.exists());
         let unpack_dest = create_tmp_dir();
-        unpack(&npk, &unpack_dest.path().to_path_buf()).expect("Unpack NPK");
+        unpack(&npk, &unpack_dest.path()).expect("Unpack NPK");
         let manifest = unpack_dest.path().join("manifest").with_extension("yaml");
         assert!(manifest.exists());
         let manifest = std::fs::read_to_string(&manifest).expect("Failed to parse manifest");
@@ -144,7 +131,7 @@ env:
     #[test]
     fn gen_key_pair() {
         let dest = create_tmp_dir();
-        gen_test_key(&dest.path().to_path_buf());
+        gen_test_key(&dest.path());
     }
 
     #[test]
@@ -155,8 +142,8 @@ env:
     #[test]
     fn do_not_overwrite_keys() -> Result<(), anyhow::Error> {
         let dest = create_tmp_dir();
-        gen_key(&TEST_KEY_NAME, &dest.path().to_path_buf()).expect("Generate keys");
-        gen_key(&TEST_KEY_NAME, &dest.path().to_path_buf()).expect_err("Cannot overwrite keys");
+        gen_key(&TEST_KEY_NAME, &dest.path()).expect("Generate keys");
+        gen_key(&TEST_KEY_NAME, &dest.path()).expect_err("Cannot overwrite keys");
         Ok(())
     }
 }
