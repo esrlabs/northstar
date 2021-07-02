@@ -13,28 +13,26 @@
 //   limitations under the License.
 
 use crate::api;
+use config::Config;
 use derive_new::new;
 use error::Error;
 use fmt::Debug;
+use futures::{future::ready, FutureExt};
 use log::debug;
 use nix::{
     libc::{EXIT_FAILURE, EXIT_SUCCESS},
-    sys::{signal, stat},
-    unistd,
+    sys::signal,
 };
-use proc_mounts::MountIter;
 use repository::Repository;
 use state::State;
 use std::{
     fmt::{self},
     future::Future,
-    path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
 use sync::mpsc;
 use tokio::{
-    fs, io,
     sync::{self, oneshot},
     task,
 };
@@ -57,8 +55,6 @@ mod state;
 
 /// Container identification
 pub use api::container::Container;
-
-use self::config::Config;
 
 type EventTx = mpsc::Sender<Event>;
 type RepositoryId = String;
@@ -123,100 +119,48 @@ pub struct Runtime {
     // channel. If a error happens during normal operation the error is also
     // sent to this channel.
     stopped: oneshot::Receiver<RuntimeResult>,
+    // Runtime task
+    task: task::JoinHandle<()>,
 }
 
 impl Runtime {
     /// Start runtime with configuration `config`
     pub async fn start(config: Config) -> Result<Runtime, Error> {
+        config.check().await?;
+
         let stop = CancellationToken::new();
-        let (stopped_tx, stopped_rx) = oneshot::channel();
-
-        mkdir_p_rw(&config.run_dir).await?;
-
-        // To avoid setting the mount propagation on the parent mount, we bind
-        // mount config.run_dir to config.run_dir and specify the mount
-        // propagation there. The reason why the mount propagation is set to
-        // MS_PRIVATE is to make the kernel umount everything mounted in this
-        // mount namespace when the past process in this namespace exits.
-        if !is_self_bind_mounted(&config.run_dir).await? {
-            debug!("Bind mounting run dir");
-            // Turn the run directory into a mount point
-            task::block_in_place(|| {
-                nix::mount::mount(
-                    Some(&config.run_dir),
-                    config.run_dir.as_os_str(),
-                    Option::<&str>::None,
-                    nix::mount::MsFlags::MS_BIND,
-                    Option::<&'static [u8]>::None,
-                )
-                .map_err(|e| Error::Mount(mount::Error::Os(e)))
-            })?;
-        }
-
-        // Mark set the mount propagation on run_dir to MS_PRIVATE
-        task::block_in_place(|| {
-            debug!(
-                "Setting mount propagation to MS_PRIVATE on {}",
-                config.run_dir.display()
-            );
-            nix::mount::mount(
-                Some(&config.run_dir),
-                config.run_dir.as_os_str(),
-                Option::<&str>::None,
-                nix::mount::MsFlags::MS_PRIVATE | nix::mount::MsFlags::MS_REC,
-                Option::<&'static [u8]>::None,
-            )
-            .map_err(|e| Error::Mount(mount::Error::Os(e)))
-        })?;
-
-        mkdir_p_rw(&config.data_dir).await?;
-        mkdir_p_rw(&config.log_dir).await?;
+        let (stopped_tx, stopped) = oneshot::channel();
 
         // Start a task that drives the main loop and wait for shutdown results
-        {
-            let stop = stop.clone();
-            task::spawn(async move {
-                match runtime_task(&config, stop).await {
-                    Err(e) => {
-                        log::error!("Runtime error: {}", e);
-                        stopped_tx.send(Err(e)).ok();
-                    }
-                    Ok(_) => drop(stopped_tx.send(Ok(()))),
-                };
-            });
-        }
+        let stop_task = stop.clone();
+        let task = task::spawn(async move {
+            match runtime_task(&config, stop_task).await {
+                Err(e) => {
+                    log::error!("Runtime error: {}", e);
+                    stopped_tx.send(Err(e)).ok();
+                }
+                Ok(_) => drop(stopped_tx.send(Ok(()))),
+            };
+        });
 
         Ok(Runtime {
             stop,
-            stopped: stopped_rx,
+            stopped,
+            task,
         })
     }
 
     /// Stop the runtime and wait for the termination
     pub fn shutdown(self) -> impl Future<Output = RuntimeResult> {
         self.stop.cancel();
-        self
+        let stopped = self.stopped;
+        self.task.then(|_| {
+            stopped.then(|n| match n {
+                Ok(n) => ready(n),
+                Err(_) => ready(Ok(())),
+            })
+        })
     }
-}
-
-/// Try to determine if a mount point exists that points to the given path
-/// TODO: It's not needed that the mount in run dir is a bind mount to itself. In
-/// theory any mount can be used.
-async fn is_self_bind_mounted(run_dir: &Path) -> Result<bool, Error> {
-    let mounts =
-        task::block_in_place(MountIter::new).map_err(|e| Error::Io("Mount iter".into(), e))?;
-    let run_dir = fs::canonicalize(&run_dir)
-        .await
-        .map_err(|e| Error::Io("Canonicalize path".into(), e))?;
-    task::block_in_place(|| {
-        for mount in mounts {
-            let mount = mount.map_err(|e| Error::Io("Mount iter".into(), e))?;
-            if mount.dest == run_dir {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    })
 }
 
 impl Future for Runtime {
@@ -295,51 +239,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
 
     cgroups::shutdown(&config.cgroups).await?;
 
-    task::block_in_place(|| nix::mount::umount(&config.run_dir))
-        .map_err(|e| Error::Mount(mount::Error::Os(e)))?;
-
     debug!("Shutdown complete");
 
     Ok(())
-}
-
-/// Create path if it does not exist. Ensure that it is
-/// read and writeable
-async fn mkdir_p_rw(path: &Path) -> Result<(), Error> {
-    if path.exists() && !is_rw(&path) {
-        let context = format!("Directory {} is not read and writeable", path.display());
-        Err(Error::Io(
-            context.clone(),
-            io::Error::new(io::ErrorKind::PermissionDenied, context),
-        ))
-    } else {
-        debug!("Creating {}", path.display());
-        fs::create_dir_all(&path).await.map_err(|error| {
-            Error::Io(
-                format!("Failed to create directory {}", path.display()),
-                error,
-            )
-        })
-    }
-}
-
-/// Return true if path is read and writeable
-fn is_rw(path: &Path) -> bool {
-    match stat::stat(path.as_os_str()) {
-        Ok(stat) => {
-            let same_uid = stat.st_uid == unistd::getuid().as_raw();
-            let same_gid = stat.st_gid == unistd::getgid().as_raw();
-            let mode = stat::Mode::from_bits_truncate(stat.st_mode);
-
-            let is_readable = (same_uid && mode.contains(stat::Mode::S_IRUSR))
-                || (same_gid && mode.contains(stat::Mode::S_IRGRP))
-                || mode.contains(stat::Mode::S_IROTH);
-            let is_writable = (same_uid && mode.contains(stat::Mode::S_IWUSR))
-                || (same_gid && mode.contains(stat::Mode::S_IWGRP))
-                || mode.contains(stat::Mode::S_IWOTH);
-
-            is_readable && is_writable
-        }
-        Err(_) => false,
-    }
 }

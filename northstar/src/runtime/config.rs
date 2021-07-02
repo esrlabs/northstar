@@ -12,7 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::RepositoryId;
+use super::{Error, RepositoryId};
+use crate::util::is_rw;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;
@@ -104,5 +105,51 @@ pub mod debug {
         pub path: Option<PathBuf>,
         /// Optional additional flags
         pub flags: Option<String>,
+    }
+}
+
+impl Config {
+    /// Validate the configuration
+    pub(crate) async fn check(&self) -> Result<(), Error> {
+        // Check run_dir for existence and rw
+        if !self.run_dir.exists() {
+            return Err(Error::Configuration(format!(
+                "Configured run_dir {} does not exist",
+                self.run_dir.display()
+            )));
+        } else if !is_rw(&self.run_dir).await {
+            return Err(Error::Configuration(format!(
+                "Configured run_dir {} is not read and/or writeable",
+                self.run_dir.display()
+            )));
+        }
+
+        // Check data_dir for existence and rw
+        if !self.data_dir.exists() {
+            return Err(Error::Configuration(format!(
+                "Configured data_dir {} does not exist",
+                self.data_dir.display()
+            )));
+        } else if !is_rw(&self.data_dir).await {
+            return Err(Error::Configuration(format!(
+                "Configured data_dir {} is not read and/or writeable",
+                self.data_dir.display()
+            )));
+        }
+
+        // Check log_dir for existence and rw
+        if !self.log_dir.exists() {
+            return Err(Error::Configuration(format!(
+                "Configured data_dir {} does not exist",
+                self.log_dir.display()
+            )));
+        } else if !is_rw(&self.log_dir).await {
+            return Err(Error::Configuration(format!(
+                "Configured log_dir {} is not read and/or writeable",
+                self.log_dir.display()
+            )));
+        }
+
+        Ok(())
     }
 }
