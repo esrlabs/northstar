@@ -12,8 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Container, RepositoryId};
-use crate::api;
+use super::{Container, ExitStatus, RepositoryId};
+use crate::api::{self};
 use std::io;
 use thiserror::Error;
 
@@ -41,6 +41,8 @@ pub enum Error {
     InvalidRepository(RepositoryId),
     #[error("Failed to install {0}: Already installed")]
     InstallDuplicate(Container),
+    #[error("Critical container failure")]
+    CriticalContainer(Container, ExitStatus),
 
     #[error("NPK {0:?}: {1:?}")]
     Npk(String, npk::npk::Error),
@@ -95,6 +97,9 @@ impl From<Error> for api::model::Error {
                 api::model::Error::InvalidRepository(repository)
             }
             Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate(container),
+            Error::CriticalContainer(container, status) => {
+                api::model::Error::CriticalContainer(container, status.into())
+            }
             Error::Npk(cause, error) => api::model::Error::Npk(cause, error.to_string()),
             Error::Console(error) => api::model::Error::Console(error.to_string()),
             Error::Cgroups(error) => api::model::Error::Cgroups(error.to_string()),

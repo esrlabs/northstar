@@ -18,6 +18,7 @@ use error::Error;
 use fmt::Debug;
 use log::debug;
 use nix::{
+    libc::{EXIT_FAILURE, EXIT_SUCCESS},
     sys::{signal, stat},
     unistd,
 };
@@ -82,11 +83,21 @@ enum Event {
 }
 
 #[derive(Clone, Debug)]
-enum ExitStatus {
+pub enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
     /// Process was terminated by a signal
     Signaled(signal::Signal),
+}
+
+impl ExitStatus {
+    pub const SUCCESS: ExitCode = EXIT_SUCCESS;
+    pub const FAILURE: ExitCode = EXIT_FAILURE;
+
+    /// Returns true if the exist status is sueccess
+    pub fn success(&self) -> bool {
+        matches!(self, ExitStatus::Exit(code) if *code == Self::SUCCESS)
+    }
 }
 
 #[derive(new, Clone, Debug)]
@@ -258,7 +269,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             // carries the id of the container that is oom.
             Event::Oom(container) => state.on_oom(&container).await,
             // A container process existed. Check `process::wait_exit` for details.
-            Event::Exit(container, exit_status) => state.on_exit(&container, &exit_status).await,
+            Event::Exit(container, exit_status) => state.on_exit(container, exit_status).await,
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => {
                 debug!("Shutting down Northstar runtime");

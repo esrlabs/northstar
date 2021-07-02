@@ -30,7 +30,7 @@ use futures::{
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
-use npk::manifest::{Manifest, Mount, Resource};
+use npk::manifest::{Autostart, Manifest, Mount, Resource};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -207,26 +207,45 @@ impl<'a> State<'a> {
             .iter()
             .map(|(_, r)| r.containers())
             .flatten()
-            .filter(|n| n.manifest().autostart)
-            .map(|n| Container::new(n.manifest().name.clone(), n.manifest().version.clone()))
+            .filter(|n| n.manifest().autostart.is_some())
+            .map(|n| {
+                (
+                    Container::new(n.manifest().name.clone(), n.manifest().version.clone()),
+                    n.manifest().autostart.as_ref().unwrap().clone(),
+                )
+            })
             .collect::<Vec<_>>();
 
         // Mount (parallel)
-        let mounts = self.mount_all(&autostart).await;
+        let mut mounts = self
+            .mount_all(&autostart.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>())
+            .await;
 
-        for (result, container) in mounts.iter().zip(autostart) {
+        for (result, (container, autostart)) in mounts.drain(..).zip(autostart) {
             match result {
                 Ok(_) => {
-                    info!("Autostarting {}", container);
+                    info!("Autostarting {} ({:?})", container, autostart);
                     if let Err(e) = self.start(&container).await {
-                        warn!("Failed to autostart {}: {}", container, e);
-                        // TODO: What shall we do with this error?
+                        match autostart {
+                            Autostart::Relaxed => {
+                                warn!("Failed to autostart relaxed {}: {}", container, e);
+                            }
+                            Autostart::Critical => {
+                                error!("Failed to autostart critical {}: {}", container, e);
+                                return Err(e);
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to mount {}: {}", container, e);
-                    // TODO: What shall we do with this error?
-                }
+                Err(e) => match autostart {
+                    Autostart::Relaxed => {
+                        warn!("Failed to mount relaxed {}: {}", container, e);
+                    }
+                    Autostart::Critical => {
+                        error!("Failed to mount critical {}: {}", container, e);
+                        return Err(e);
+                    }
+                },
             }
         }
 
@@ -572,17 +591,27 @@ impl<'a> State<'a> {
     /// to be removed and handled externally
     pub(super) async fn on_exit(
         &mut self,
-        container: &Container,
-        exit_status: &ExitStatus,
+        container: Container,
+        exit_status: ExitStatus,
     ) -> Result<(), Error> {
         if let Some(mounted_container) = self.containers.get_mut(&container) {
             if let Some(process) = mounted_container.process.take() {
-                info!(
-                    "Process {} exited after {:?} with status {:?}",
-                    container,
-                    process.started.elapsed(),
-                    exit_status,
-                );
+                let critical = mounted_container.manifest.autostart == Some(Autostart::Critical);
+                if critical {
+                    error!(
+                        "Critical process {} exited after {:?} with status {:?}",
+                        container,
+                        process.started.elapsed(),
+                        exit_status,
+                    );
+                } else {
+                    info!(
+                        "Process {} exited after {:?} with status {:?}",
+                        container,
+                        process.started.elapsed(),
+                        exit_status,
+                    );
+                }
 
                 process.destroy().await;
 
@@ -591,6 +620,11 @@ impl<'a> State<'a> {
                     status: exit_status.clone(),
                 })
                 .await;
+
+                // This is a critical flagged container that exited with a error exit code. That's not good...
+                if !exit_status.success() && critical {
+                    return Err(Error::CriticalContainer(container, exit_status));
+                }
             }
         }
         Ok(())
