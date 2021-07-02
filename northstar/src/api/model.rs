@@ -194,6 +194,7 @@ pub enum Error {
     StopContainerNotStarted(Container),
     InvalidRepository(RepositoryId),
     InstallDuplicate(Container),
+    CriticalContainer(Container, ExitStatus),
 
     Npk(String, String),
     NpkArchive(String),

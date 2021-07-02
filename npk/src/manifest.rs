@@ -51,8 +51,7 @@ pub struct Manifest {
     /// Environment passed to container
     pub env: Option<HashMap<String, String>>,
     /// Autostart this container upon northstar startup
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub autostart: bool,
+    pub autostart: Option<Autostart>,
     /// CGroup config
     pub cgroups: Option<CGroups>,
     /// Seccomp configuration
@@ -103,7 +102,7 @@ impl Manifest {
         }
 
         // The autostart option is only valid for startable containers
-        if self.autostart && self.init.is_none() {
+        if self.autostart.is_some() && self.init.is_none() {
             return Err(Error::Invalid(
                 "Autostart cannot be enabled on resource containers".to_string(),
             ));
@@ -156,6 +155,18 @@ pub enum Error {
     Invalid(String),
     #[error("Failed to parse: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
+}
+
+/// Autostart options
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+pub enum Autostart {
+    /// Ignore errors when starting this container. Ignore the containers termination result
+    #[serde(rename = "relaxed")]
+    Relaxed,
+    /// Exit the runtime if starting this containers fails or the container exits with a non zero exit code.
+    /// Use this varant to propagate errors with a container to the system above the runtime e.g init.
+    #[serde(rename = "critical")]
+    Critical,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
@@ -251,10 +262,6 @@ pub enum Output {
     /// Forward output to the logging system with level and optional tag
     #[serde(rename = "log")]
     Log { level: log::Level, tag: String },
-}
-
-fn is_default<T: Default + PartialEq>(t: &T) -> bool {
-    t == &T::default()
 }
 
 mod mount_options {
@@ -437,7 +444,7 @@ mounts:
     version: 1.0.0
     dir: /bin/foo
     options: noexec
-autostart: true
+autostart: critical
 cgroups:
   memory:
     limit_in_bytes: 30
@@ -457,7 +464,7 @@ seccomp:
         assert_eq!(args[0], "one");
         assert_eq!(args[1], "two");
 
-        assert!(manifest.autostart);
+        assert_eq!(manifest.autostart, Some(Autostart::Critical));
         let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
         assert_eq!(
             env.get("LD_LIBRARY_PATH"),
@@ -635,7 +642,7 @@ mounts:
   /tmp:
     type: tmpfs
     size: 42
-autostart: true
+autostart: relaxed
 cgroups:
   memory:
     limit_in_bytes: 30

@@ -182,6 +182,16 @@ fn format_err(err: &model::Error) -> String {
         model::Error::InstallDuplicate(c) => {
             format!("failed to install {}: installed", c)
         }
+        model::Error::CriticalContainer(c, s) => {
+            format!(
+                "crititcal container {} exited with: {}",
+                c,
+                match s {
+                    ExitStatus::Exit(c) => format!("exit code {}", c),
+                    ExitStatus::Signaled(s) => format!("signaled {}", s),
+                }
+            )
+        }
         model::Error::Npk(npk, e) => format!("npk error: {}: {}", npk, e),
         model::Error::NpkArchive(e) => format!("npk error: {}", e),
         model::Error::Process(e) => format!("process error: {}", e),
