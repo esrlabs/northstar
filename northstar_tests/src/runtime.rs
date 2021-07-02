@@ -66,9 +66,9 @@ impl Northstar {
         let run_dir = tmpdir.path().join("run");
         let data_dir = tmpdir.path().join("data");
         let log_dir = tmpdir.path().join("log");
-        let test_repositority = tmpdir.path().join("test");
+        let test_repository = tmpdir.path().join("test");
         let example_key = tmpdir.path().join("key.pub");
-        fs::create_dir(&test_repositority).await?;
+        fs::create_dir(&test_repository).await?;
         fs::write(
             &example_key,
             include_bytes!("../../examples/keys/northstar.pub"),
@@ -79,7 +79,7 @@ impl Northstar {
         repositories.insert(
             "test".into(),
             config::Repository {
-                dir: test_repositority,
+                dir: test_repository,
                 key: Some(example_key.clone()),
             },
         );
@@ -128,7 +128,7 @@ impl Northstar {
 
         // Connect to the runtime
         let client = Client::new(&console_url, Some(1000), time::Duration::from_secs(30)).await?;
-        // Wait until a successfull connection
+        // Wait until a successful connection
         logger::assume("Client .* connected", 5u64).await?;
 
         Ok(Northstar {
@@ -227,7 +227,7 @@ impl Northstar {
             .context("Failed to uninstall test resource")
     }
 
-    // TOOD: Queue the notifications in the runtime struct. Currently there's a race
+    // TODO: Queue the notifications in the runtime struct. Currently there's a race
     // if the notification is faster.
     pub async fn assume_notification<F>(&mut self, mut pred: F, timeout: u64) -> Result<()>
     where

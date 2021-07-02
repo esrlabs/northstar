@@ -120,6 +120,7 @@ mod test {
         io::Write,
         path::{Path, PathBuf},
     };
+    use tempfile::TempDir;
 
     const TEST_KEY_NAME: &str = "test_key";
     const TEST_MANIFEST: &str = "name: hello
@@ -141,12 +142,12 @@ mounts:
       type: bind
       host: /system";
 
-    fn create_test_npk(dest: &Path) -> PathBuf {
+    fn create_test_npk(dest: &PathBuf) -> PathBuf {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src);
-        let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&manifest, &src, &dest, Some(&prv_key)).expect("Pack NPK");
+        let manifest = create_test_manifest(&src.path().to_path_buf());
+        let (_pub_key, prv_key) = gen_test_key(&key_dir.path().to_path_buf());
+        pack(&manifest, &src.path().to_path_buf(), &dest, Some(&prv_key)).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
@@ -159,10 +160,8 @@ mounts:
         manifest
     }
 
-    fn create_tmp_dir() -> PathBuf {
-        tempfile::TempDir::new()
-            .expect("Create tmp dir")
-            .into_path()
+    fn create_tmp_dir() -> TempDir {
+        TempDir::new().expect("Create tmp dir")
     }
 
     fn gen_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
@@ -176,7 +175,8 @@ mounts:
 
     #[test]
     fn inspect_npk() {
-        let npk = create_test_npk(&create_tmp_dir());
+        let dest = create_tmp_dir();
+        let npk = create_test_npk(&dest.path().to_path_buf());
         assert!(npk.exists());
         inspect(&npk, true).expect("Inspect NPK");
         inspect(&npk, false).expect("Inspect NPK");
