@@ -59,8 +59,11 @@ impl Northstar {
         let tmpdir = tempfile::TempDir::new()?;
 
         let run_dir = tmpdir.path().join("run");
+        fs::create_dir(&run_dir).await?;
         let data_dir = tmpdir.path().join("data");
+        fs::create_dir(&data_dir).await?;
         let log_dir = tmpdir.path().join("log");
+        fs::create_dir(&log_dir).await?;
         let test_repository = tmpdir.path().join("test");
         fs::create_dir(&test_repository).await?;
         let example_key = tmpdir.path().join("key.pub");

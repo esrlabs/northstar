@@ -22,3 +22,7 @@ pub mod api;
 #[cfg(feature = "runtime")]
 /// The Northstar runtime core.
 pub mod runtime;
+
+/// Northstar internal utilities
+#[cfg(feature = "runtime")]
+mod util;
