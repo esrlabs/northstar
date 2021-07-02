@@ -12,13 +12,24 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use anyhow::{Context, Result};
 use escargot::CargoBuild;
-use std::{env, fs, path::Path};
+use npk::manifest::Manifest;
+use std::{env, fs, io::BufReader, path::Path};
 
 const CARGO_MANIFEST: &str = "test_container/Cargo.toml";
 const TEST_CONTAINER_MANIFEST: &str = "test_container/manifest.yaml";
 const TEST_RESOURCE_MANIFEST: &str = "test_resource/manifest.yaml";
 const KEY: &str = "../examples/keys/northstar.key";
+
+fn load_manifest<P: AsRef<Path>>(path: P) -> Result<Manifest> {
+    let manifest = fs::File::open(&path).context(format!(
+        "Failed to open manifest file {}",
+        path.as_ref().display()
+    ))?;
+    let reader = BufReader::new(manifest);
+    serde_yaml::from_reader(reader).context("Failed to deserialize Manifest from file content")
+}
 
 fn main() {
     let tmpdir = tempfile::TempDir::new().expect("Failed to create tmpdir");
@@ -40,10 +51,13 @@ fn main() {
 
     let out_dir = env::var("OUT_DIR").unwrap();
 
+    let container_manifest = load_manifest(TEST_CONTAINER_MANIFEST).unwrap();
+    let resource_manifest = load_manifest(TEST_RESOURCE_MANIFEST).unwrap();
+
     // Pack test container npk
     npk::npk::pack(
-        Path::new(TEST_CONTAINER_MANIFEST),
-        &npk.join("root"),
+        container_manifest,
+        npk.join("root"),
         Path::new(&out_dir),
         Some(Path::new(KEY)),
     )
@@ -51,7 +65,7 @@ fn main() {
 
     // Pack test resource npk
     npk::npk::pack(
-        Path::new(TEST_RESOURCE_MANIFEST),
+        resource_manifest,
         &Path::new("test_resource").join("root"),
         Path::new(&out_dir),
         Some(Path::new(KEY)),

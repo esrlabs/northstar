@@ -47,7 +47,7 @@ fn generate_seccomp() {
         let out_path = path::PathBuf::from(env::var("OUT_DIR")?);
         let mut f = fs::File::create(&out_path.join("syscall_bindings.rs"))?;
 
-        f.write_all(&lines.join("\n").as_bytes())?;
+        f.write_all(lines.join("\n").as_bytes())?;
         writeln!(f)?;
         writeln!(f)?;
 
@@ -157,9 +157,9 @@ mounts:
         "android" => MANIFEST_ANDROID,
         _ => MANIFEST,
     };
-    let manifest_file = out_dir.join("manifest.yaml");
-    std::fs::write(&manifest_file, &manifest).context("Failed to create manifest")?;
 
-    npk::pack(&manifest_file, &root_dir, &out_dir, None)?;
+    let manifest = serde_yaml::from_str(manifest)?;
+
+    npk::pack(manifest, root_dir, &out_dir, None)?;
     Ok(())
 }

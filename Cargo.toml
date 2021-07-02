@@ -15,6 +15,7 @@ members = [
     "northstar_tests",
     "northstar_tests/test_container",
     "npk",
+    "oci_spec",
     "tools/nstar",
     "tools/sextant",
     "tools/stress",

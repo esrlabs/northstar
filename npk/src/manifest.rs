@@ -150,7 +150,7 @@ pub enum Error {
     SerdeYaml(#[from] serde_yaml::Error),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 /// Mount options
 pub enum MountOption {
     /// Bind mount
@@ -635,7 +635,7 @@ seccomp:
 capabilities:
   - CAP_NET_ADMIN
 io:
-  stdout: 
+  stdout:
     log:
       level: DEBUG
       tag: test

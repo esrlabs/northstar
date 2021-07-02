@@ -459,7 +459,16 @@ impl Default for SquashfsOpts {
 /// --root examples/container/hello/root \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
+pub fn pack<Rootfs, OutDir>(
+    manifest: Manifest,
+    root: Rootfs,
+    out: OutDir,
+    key: Option<&Path>,
+) -> Result<(), Error>
+where
+    Rootfs: AsRef<Path>,
+    OutDir: AsRef<Path>,
+{
     pack_with(manifest, root, out, key, &SquashfsOpts::default())
 }
 
@@ -485,23 +494,27 @@ pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Res
 /// --key examples/keys/northstar.key \
 /// --comp xz \
 /// --block-size 65536 \
-pub fn pack_with(
-    manifest: &Path,
-    root: &Path,
-    out: &Path,
+pub fn pack_with<Rootfs, OutDir>(
+    manifest: Manifest,
+    root: Rootfs,
+    out: OutDir,
     key: Option<&Path>,
     squashfs_opts: &SquashfsOpts,
-) -> Result<(), Error> {
-    let manifest = read_manifest(manifest)?;
+) -> Result<(), Error>
+where
+    Rootfs: AsRef<Path>,
+    OutDir: AsRef<Path>,
+{
     let name = manifest.name.clone();
     let version = manifest.version.clone();
-    let mut builder = Builder::new(root, manifest);
+    let mut builder = Builder::new(root.as_ref(), manifest);
     if let Some(key) = key {
         builder = builder.key(&key);
     }
     builder = builder.squashfs_opts(&squashfs_opts);
 
     let npk_dest = out
+        .as_ref()
         .join(format!("{}-{}.", &name, &version.to_string()))
         .with_extension(&NPK_EXT);
     let npk = File::create(&npk_dest).map_err(|e| Error::Io {
@@ -557,12 +570,6 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     write(&key_pair.secret.to_bytes(), &prv_key)?;
 
     Ok(())
-}
-
-fn read_manifest(path: &Path) -> Result<Manifest, Error> {
-    let file = open(&path)?;
-    Manifest::from_reader(&file)
-        .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {

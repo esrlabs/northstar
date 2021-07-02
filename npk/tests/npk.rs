@@ -14,21 +14,18 @@
 
 #[cfg(test)]
 mod npk {
-    use npk::npk::{gen_key, pack, unpack};
+    use lazy_static::lazy_static;
+    use npk::{
+        manifest::Manifest,
+        npk::{gen_key, pack, unpack},
+    };
     use std::{
-        fs::File,
-        io::Write,
         path::{Path, PathBuf},
+        str::FromStr,
     };
 
     const TEST_KEY_NAME: &str = "test_key";
-    const TEST_MANIFEST: &str = "name: hello
-version: 0.0.2
-init: /hello
-uid: 100
-gid: 1
-env:
-  HELLO: north";
+
     const TEST_MANIFEST_UNPACKED: &str = "---
 name: hello
 version: 0.0.2
@@ -39,24 +36,27 @@ env:
   HELLO: north
 ";
 
-    fn create_test_npk(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
-        let src = create_tmp_dir();
-        let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src, manifest_name);
-        let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&manifest, &src, &dest, Some(&prv_key)).expect("Pack NPK");
-        dest.join("hello-0.0.2.npk")
+    lazy_static! {
+        static ref TEST_MANIFEST: Manifest = {
+            Manifest::from_str(
+                "name: hello
+version: 0.0.2
+init: /hello
+uid: 100
+gid: 1
+env:
+  HELLO: north",
+            )
+            .unwrap()
+        };
     }
 
-    fn create_test_manifest(dest: &PathBuf, manifest_name: Option<&str>) -> PathBuf {
-        let manifest = dest
-            .join(manifest_name.unwrap_or("manifest"))
-            .with_extension("yaml");
-        File::create(&manifest)
-            .expect("Create test manifest file")
-            .write_all(TEST_MANIFEST.as_ref())
-            .expect("Write test manifest");
-        manifest
+    fn create_test_npk(dest: &Path) -> PathBuf {
+        let src = create_tmp_dir();
+        let key_dir = create_tmp_dir();
+        let (_pub_key, prv_key) = gen_test_key(&key_dir);
+        pack(TEST_MANIFEST.clone(), &src, &dest, Some(&prv_key)).expect("Pack NPK");
+        dest.join("hello-0.0.2.npk")
     }
 
     fn create_tmp_dir() -> PathBuf {
@@ -76,22 +76,7 @@ env:
 
     #[test]
     fn pack_npk() {
-        create_test_npk(&create_tmp_dir(), None);
-    }
-
-    #[test]
-    fn pack_npk_nonstandard_name() {
-        create_test_npk(&create_tmp_dir(), Some("different_manifest_name"));
-    }
-
-    #[test]
-    fn pack_npk_no_manifest() {
-        let src = create_tmp_dir();
-        let dest = create_tmp_dir();
-        let key_dir = create_tmp_dir();
-        let manifest = Path::new("invalid");
-        let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&manifest, &src, &dest, Some(&prv_key)).expect_err("Invalid manifest");
+        create_test_npk(&create_tmp_dir());
     }
 
     #[test]
@@ -99,23 +84,22 @@ env:
         let src = create_tmp_dir();
         let dest = Path::new("invalid");
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src, None);
         let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&manifest, &src, &dest, Some(&prv_key)).expect_err("Invalid destination dir");
+        pack(TEST_MANIFEST.clone(), &src, &dest, Some(&prv_key))
+            .expect_err("Invalid destination dir");
     }
 
     #[test]
     fn pack_npk_no_keys() {
         let src = create_tmp_dir();
         let dest = create_tmp_dir();
-        let manifest = create_test_manifest(&src, None);
         let prv_key = Path::new("invalid");
-        pack(&manifest, &src, &dest, Some(prv_key)).expect_err("Invalid key dir");
+        pack(TEST_MANIFEST.clone(), &src, &dest, Some(prv_key)).expect_err("Invalid key dir");
     }
 
     #[test]
     fn unpack_npk() {
-        let npk = create_test_npk(&create_tmp_dir(), None);
+        let npk = create_test_npk(&create_tmp_dir());
         assert!(npk.exists());
         let unpack_dest = create_tmp_dir();
         unpack(&npk, &unpack_dest).expect("Unpack NPK");

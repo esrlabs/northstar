@@ -953,7 +953,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caps",
- "nix",
+ "nix 0.20.0",
  "proc-mounts",
  "signal-hook",
 ]
@@ -1052,7 +1052,7 @@ dependencies = [
  "anyhow",
  "env_logger",
  "log",
- "nix",
+ "nix 0.20.0",
  "northstar",
  "structopt",
  "tokio",
@@ -1137,6 +1137,18 @@ dependencies = [
 
 [[package]]
 name = "nix"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2ccba0cfe4fdf15982d1674c69b1fd80bad427d293849982668dfe454bd61f2"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if 1.0.0",
+ "libc",
+]
+
+[[package]]
+name = "nix"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa9b4819da1bc61c0ea48b63b7bc8604064dd43013e7cc325df098d49cd7c18a"
@@ -1185,7 +1197,7 @@ dependencies = [
  "lazy_static",
  "log",
  "memoffset",
- "nix",
+ "nix 0.20.0",
  "npk",
  "page_size",
  "proc-mounts",
@@ -1193,6 +1205,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "thiserror",
  "tokio",
@@ -1213,11 +1226,12 @@ dependencies = [
  "futures",
  "lazy_static",
  "log",
- "nix",
+ "nix 0.20.0",
  "northstar",
  "npk",
  "regex",
  "rusty-fork",
+ "serde_yaml",
  "tempfile",
  "tokio",
  "url",
@@ -1236,11 +1250,14 @@ dependencies = [
  "hex",
  "humanize-rs",
  "itertools",
+ "lazy_static",
  "log",
+ "oci_spec",
  "rand 0.7.3",
  "regex",
  "semver 0.11.0",
  "serde",
+ "serde_json",
  "serde_with",
  "serde_yaml",
  "sha2",
@@ -1299,6 +1316,17 @@ name = "object"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d3b63360ec3cb337817c2dbd47ab4a0f170d285d8e5a2064600f3def1402397"
+
+[[package]]
+name = "oci_spec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "caps",
+ "nix 0.19.1",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "once_cell"
@@ -1877,8 +1905,10 @@ dependencies = [
  "colored",
  "ed25519-dalek",
  "env_logger",
+ "lazy_static",
  "log",
  "npk",
+ "serde_yaml",
  "structopt",
  "tempfile",
  "which 4.1.0",
@@ -2160,7 +2190,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caps",
- "nix",
+ "nix 0.20.0",
  "structopt",
  "url",
 ]

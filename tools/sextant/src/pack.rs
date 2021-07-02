@@ -16,9 +16,9 @@ use anyhow::{Context, Result};
 use npk::{
     manifest::Manifest,
     npk::{pack_with, CompressionAlgorithm},
+    oci::{convert_oci_spec_to_manifest, load_oci_spec},
 };
 use std::{fs, path::Path};
-use tempfile::tempdir;
 
 pub(crate) fn pack(
     manifest: &Path,
@@ -30,29 +30,33 @@ pub(crate) fn pack(
     clones: Option<u32>,
 ) -> Result<()> {
     let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-    // Create clones npks with the number appended to the name
-    if let Some(clones) = clones {
+
+    // Tries to check if the input manifest is an OCI spec
+    let manifest = if let Ok(oci_spec) = load_oci_spec(&manifest) {
+        convert_oci_spec_to_manifest(oci_spec)?
+    } else {
         let manifest_file = manifest;
         let reader = fs::File::open(&manifest_file).context("Failed to open manifest")?;
-        let mut manifest = Manifest::from_reader(reader).context("Failed to read manifest")?;
+        Manifest::from_reader(reader).context("Failed to read manifest")?
+    };
 
+    // Create clones npks with the number appended to the name
+    if let Some(clones) = clones {
         // Resource containers cannot be cloned
         if manifest.init.is_some() {
-            let tmpdir = tempdir().context("Failed to create  tempdir")?;
             let name = manifest.name.clone();
             let num = clones.to_string().chars().count() - 1;
             for n in 0..clones {
+                let mut manifest = manifest.clone();
                 manifest.name = format!("{}-{:0m$}", name, n, m = num);
-                let m = tmpdir.path().join(n.to_string());
-                fs::write(&m, manifest.to_string()).context("Failed to write manifest")?;
-                pack_with(&m, &root, &out, key.as_deref(), &squashfs_opts)?;
+                pack_with(manifest, &root, &out, key.as_deref(), &squashfs_opts)?;
             }
         } else {
             let key = key.as_deref();
-            pack_with(&manifest_file, &root, &out, key, &squashfs_opts)?;
+            pack_with(manifest, &root, &out, key, &squashfs_opts)?;
         }
     } else {
-        pack_with(&manifest, &root, &out, key.as_deref(), &squashfs_opts)?;
+        pack_with(manifest, &root, &out, key.as_deref(), &squashfs_opts)?;
     }
 
     Ok(())

@@ -15,3 +15,7 @@ npk = { path = "../../npk" }
 structopt = "0.3.21"
 tempfile = "3.2"
 which = "4.1"
+
+[dev-dependencies]
+lazy_static = "1.4"
+serde_yaml = "0.8.17"

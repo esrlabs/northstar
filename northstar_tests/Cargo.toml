@@ -22,6 +22,8 @@ tokio = { version = "1.5", features = ["full"] }
 url = "2.2"
 
 [build-dependencies]
-tempfile = "3.2"
 escargot = "0.5.2"
 npk = { path = "../npk" }
+serde_yaml = "0.8.17"
+tempfile = "3.2"
+anyhow = "1.0"

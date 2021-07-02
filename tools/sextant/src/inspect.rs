@@ -114,49 +114,49 @@ fn print_squashfs(fsimg_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::inspect;
-    use npk::npk::{gen_key, pack};
-    use std::{
-        fs::File,
-        io::Write,
-        path::{Path, PathBuf},
+    use lazy_static::lazy_static;
+    use npk::{
+        manifest::Manifest,
+        npk::{gen_key, pack},
     };
+    use std::path::{Path, PathBuf};
 
     const TEST_KEY_NAME: &str = "test_key";
-    const TEST_MANIFEST: &str = "name: hello
-version: 0.0.2
-init: /hello
-env:
-  HELLO: north
-# autostart: true
-uid: 1000
-gid: 1000
-mounts:
-    /lib:
-      type: bind
-      host: /lib
-    /lib64:
-      type: bind
-      host: /lib64
-    /system:
-      type: bind
-      host: /system";
+
+    lazy_static! {
+        static ref TEST_MANIFEST: Manifest = {
+            serde_yaml::from_str(
+                r#"
+                    name: hello
+                    version: 0.0.2
+                    init: /hello
+                    env:
+                      HELLO: north
+                    # autostart: true
+                    uid: 1000
+                    gid: 1000
+                    mounts:
+                        /lib:
+                          type: bind
+                          host: /lib
+                        /lib64:
+                          type: bind
+                          host: /lib64
+                        /system:
+                          type: bind
+                          host: /system
+                    "#,
+            )
+            .unwrap()
+        };
+    }
 
     fn create_test_npk(dest: &Path) -> PathBuf {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src);
         let (_pub_key, prv_key) = gen_test_key(&key_dir);
-        pack(&manifest, &src, &dest, Some(&prv_key)).expect("Pack NPK");
+        pack(TEST_MANIFEST.clone(), &src, &dest, Some(&prv_key)).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
-    }
-
-    fn create_test_manifest(src: &PathBuf) -> PathBuf {
-        let manifest = src.join("manifest").with_extension("yaml");
-        File::create(&manifest)
-            .expect("Create manifest.yaml")
-            .write_all(TEST_MANIFEST.as_ref())
-            .expect("Write test manifest");
-        manifest
     }
 
     fn create_tmp_dir() -> PathBuf {

@@ -76,3 +76,4 @@ bindgen = "0.58.1"
 lazy_static = "1.4.0"
 nix = "0.20.0"
 npk = { path = "../npk" }
+serde_yaml = "0.8.17"

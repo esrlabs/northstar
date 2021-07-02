@@ -26,7 +26,7 @@ mod pack;
 enum Opt {
     /// Pack Northstar containers
     Pack {
-        /// Manifest path
+        /// Path to a Northstar Manifest or an OCI config spec
         #[structopt(short, long)]
         manifest: PathBuf,
         /// Container source directory

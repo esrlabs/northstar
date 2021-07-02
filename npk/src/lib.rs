@@ -15,3 +15,4 @@
 pub mod dm_verity;
 pub mod manifest;
 pub mod npk;
+pub mod oci;
