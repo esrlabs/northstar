@@ -38,12 +38,12 @@ pub(crate) fn pack(
 
         // Resource containers cannot be cloned
         if manifest.init.is_some() {
-            let tmpdir = tempdir().context("Failed to create  tempdir")?;
+            let tmp = tempdir().context("Failed to create  tempdir")?;
             let name = manifest.name.clone();
             let num = clones.to_string().chars().count() - 1;
             for n in 0..clones {
                 manifest.name = format!("{}-{:0m$}", name, n, m = num);
-                let m = tmpdir.path().join(n.to_string());
+                let m = tmp.path().join(n.to_string());
                 fs::write(&m, manifest.to_string()).context("Failed to write manifest")?;
                 pack_with(&m, &root, &out, key.as_deref(), &squashfs_opts)?;
             }
