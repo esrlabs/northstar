@@ -23,6 +23,7 @@ mod npk {
     use tempfile::TempDir;
 
     const TEST_KEY_NAME: &str = "test_key";
+    const TEST_CONTAINER_NAME: &str = "hello-0.0.2.npk";
     const TEST_MANIFEST: &str = "name: hello
 version: 0.0.2
 init: /hello
@@ -40,13 +41,12 @@ env:
   HELLO: north
 ";
 
-    fn create_test_npk(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
+    fn create_test_npk(dest: &Path, manifest_name: Option<&str>) {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
         let manifest = create_test_manifest(&src.path(), manifest_name);
         let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
         pack(&manifest, &src.path(), &dest, Some(&prv_key)).expect("Pack NPK");
-        dest.join("hello-0.0.2.npk")
     }
 
     fn create_test_manifest(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
@@ -96,13 +96,10 @@ env:
     }
 
     #[test]
-    fn pack_npk_no_dest() {
-        let src = create_tmp_dir();
-        let dest = Path::new("invalid");
-        let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src.path(), None);
-        let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
-        pack(&manifest, &src.path(), &dest, Some(&prv_key)).expect_err("Invalid destination dir");
+    fn pack_npk_file_as_dest() {
+        let tmp = create_tmp_dir();
+        let dest = tmp.path().join("file.npk");
+        create_test_npk(&dest.as_path(), None);
     }
 
     #[test]
@@ -117,7 +114,8 @@ env:
     #[test]
     fn unpack_npk() {
         let npk_dest = create_tmp_dir();
-        let npk = create_test_npk(&npk_dest.path(), None);
+        create_test_npk(&npk_dest.path(), None);
+        let npk = npk_dest.path().join(TEST_CONTAINER_NAME);
         assert!(npk.exists());
         let unpack_dest = create_tmp_dir();
         unpack(&npk, &unpack_dest.path()).expect("Unpack NPK");

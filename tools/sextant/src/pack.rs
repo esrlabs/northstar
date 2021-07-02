@@ -30,15 +30,15 @@ pub(crate) fn pack(
     clones: Option<u32>,
 ) -> Result<()> {
     let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
-    // Create clones npks with the number appended to the name
+    // Create npk clones with the number appended to the name
     if let Some(clones) = clones {
         let manifest_file = manifest;
         let reader = fs::File::open(&manifest_file).context("Failed to open manifest")?;
         let mut manifest = Manifest::from_reader(reader).context("Failed to read manifest")?;
 
-        // Resource containers cannot be cloned
+        // Only clone non-resource containers
         if manifest.init.is_some() {
-            let tmp = tempdir().context("Failed to create  tempdir")?;
+            let tmp = tempdir().context("Failed to create temporary directory")?;
             let name = manifest.name.clone();
             let num = clones.to_string().chars().count() - 1;
             for n in 0..clones {

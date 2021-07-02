@@ -501,9 +501,13 @@ pub fn pack_with(
     }
     builder = builder.squashfs_opts(&squashfs_opts);
 
-    let npk_dest = out
-        .join(format!("{}-{}.", &name, &version.to_string()))
-        .with_extension(&NPK_EXT);
+    let mut npk_dest = out.to_path_buf();
+    if Path::is_dir(out) {
+        // Append filename from manifest if only a directory path was given
+        npk_dest = out
+            .join(format!("{}-{}.", &name, &version.to_string()))
+            .with_extension(&NPK_EXT);
+    }
     let npk = File::create(&npk_dest).map_err(|e| Error::Io {
         context: format!("Failed to create NPK: '{}'", &npk_dest.display()),
         error: e,
