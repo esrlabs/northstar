@@ -142,16 +142,16 @@ mounts:
       type: bind
       host: /system";
 
-    fn create_test_npk(dest: &PathBuf) -> PathBuf {
+    fn create_test_npk(dest: &Path) -> PathBuf {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src.path().to_path_buf());
-        let (_pub_key, prv_key) = gen_test_key(&key_dir.path().to_path_buf());
-        pack(&manifest, &src.path().to_path_buf(), &dest, Some(&prv_key)).expect("Pack NPK");
+        let manifest = create_test_manifest(&src.path());
+        let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
+        pack(&manifest, &src.path(), &dest, Some(&prv_key)).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
-    fn create_test_manifest(src: &PathBuf) -> PathBuf {
+    fn create_test_manifest(src: &Path) -> PathBuf {
         let manifest = src.join("manifest").with_extension("yaml");
         File::create(&manifest)
             .expect("Create manifest.yaml")
