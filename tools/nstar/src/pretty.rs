@@ -63,7 +63,7 @@ pub(crate) fn containers(containers: &[ContainerData]) {
     ]));
     for container in containers
         .iter()
-        .sorted_by_key(|c| &c.manifest.name) // Sort by name
+        .sorted_by_key(|c| c.manifest.name.to_string())
         .sorted_by_key(|c| c.manifest.init.is_none())
     {
         table.add_row(Row::new(vec![
@@ -182,7 +182,7 @@ fn format_err(err: &model::Error) -> String {
             format!("failed to start container {}: resource", c)
         }
         model::Error::StartContainerMissingResource(c, r) => {
-            format!("failed to start container {}: missing resouce {}", c, r)
+            format!("failed to start container {}: missing resource {}", c, r)
         }
         model::Error::StartContainerFailed(c, r) => {
             format!("failed to start container {}: {}", c, r)
@@ -196,7 +196,7 @@ fn format_err(err: &model::Error) -> String {
         }
         model::Error::CriticalContainer(c, s) => {
             format!(
-                "crititcal container {} exited with: {}",
+                "critical container {} exited with: {}",
                 c,
                 match s {
                     ExitStatus::Exit(c) => format!("exit code {}", c),
@@ -205,7 +205,6 @@ fn format_err(err: &model::Error) -> String {
             )
         }
         model::Error::Npk(npk, e) => format!("npk error: {}: {}", npk, e),
-        model::Error::NpkArchive(e) => format!("npk error: {}", e),
         model::Error::Process(e) => format!("process error: {}", e),
         model::Error::Console(e) => format!("console error: {}", e),
         model::Error::Cgroups(e) => format!("cgroups error: {}", e),
@@ -213,5 +212,6 @@ fn format_err(err: &model::Error) -> String {
         model::Error::Key(e) => format!("key error: {}", e),
         model::Error::Io(e) => format!("io error: {}", e),
         model::Error::Os(e) => format!("os error: {}", e),
+        model::Error::Name(e) => format!("name error: {}", e),
     }
 }

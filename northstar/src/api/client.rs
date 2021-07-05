@@ -21,9 +21,10 @@ use super::{
 };
 use futures::{SinkExt, Stream, StreamExt};
 use log::debug;
-use npk::manifest::Version;
+use npk::manifest::{Name, Version};
 use std::{
     collections::{HashSet, VecDeque},
+    convert::TryFrom,
     path::Path,
     pin::Pin,
     task::Poll,
@@ -56,6 +57,8 @@ pub enum Error {
     InvalidConsoleAddress(String),
     #[error("Notification consumer lagged")]
     LaggedNotifications,
+    #[error("Invalid name {0}")]
+    Name(String),
 }
 
 /// Client for a Northstar runtime instance.
@@ -276,7 +279,7 @@ impl<'a> Client {
     pub async fn start(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Start(Container::new(
-                name.to_string(),
+                Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
                 version.clone(),
             )))
             .await?
@@ -311,7 +314,10 @@ impl<'a> Client {
     ) -> Result<(), Error> {
         match self
             .request(Request::Stop(
-                Container::new(name.to_string(), version.clone()),
+                Container::new(
+                    Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
+                    version.clone(),
+                ),
                 timeout.as_secs(),
             ))
             .await?
@@ -400,7 +406,7 @@ impl<'a> Client {
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Uninstall(Container::new(
-                name.to_string(),
+                Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
                 version.clone(),
             )))
             .await?
@@ -446,11 +452,14 @@ impl<'a> Client {
         containers: I,
     ) -> Result<Vec<MountResult>, Error> {
         self.fused()?;
-        let containers = containers
-            .into_iter()
-            .map(|(name, version)| Container::new(name.to_string(), version.clone()))
-            .collect();
-        match self.request(Request::Mount(containers)).await? {
+        let mut valid_containers = vec![];
+        for c in containers {
+            valid_containers.push(Container::new(
+                Name::try_from(c.0.to_string()).map_err(|_| Error::Name(c.0.to_string()))?,
+                c.1.clone(),
+            ))
+        }
+        match self.request(Request::Mount(valid_containers)).await? {
             Response::Mount(mounts) => Ok(mounts),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
@@ -477,7 +486,7 @@ impl<'a> Client {
     pub async fn umount(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Umount(Container::new(
-                name.to_string(),
+                Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
                 version.clone(),
             )))
             .await?

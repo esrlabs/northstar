@@ -19,7 +19,7 @@ use std::collections::HashSet;
 pub use npk::manifest::{Manifest, Version};
 pub type Container = super::container::Container;
 pub type MessageId = String; // UUID
-pub type Name = String;
+pub type Name = npk::manifest::Name;
 pub type Pid = u32;
 pub type RepositoryId = String;
 
@@ -164,11 +164,11 @@ pub enum Error {
     CriticalContainer(Container, ExitStatus),
 
     Npk(String, String),
-    NpkArchive(String),
     Process(String),
     Console(String),
     Cgroups(String),
     Mount(String),
+    Name(String),
     Key(String),
 
     Io(String),

@@ -17,7 +17,7 @@ use api::{client::Client, model::Message};
 use futures::{sink::SinkExt, StreamExt};
 use northstar::api::{
     self,
-    model::{Container, Request, Version},
+    model::{Container, Name, Request, Version},
 };
 use std::{convert::TryFrom, path::PathBuf, process, str::FromStr, time};
 use structopt::{clap, clap::AppSettings, StructOpt};
@@ -145,20 +145,26 @@ impl TryFrom<Subcommand> for Request {
         match command {
             Subcommand::Containers => Ok(Request::Containers),
             Subcommand::Repositories => Ok(Request::Repositories),
-            Subcommand::Mount { name, version } => {
-                Ok(Request::Mount(vec![Container::new(name, version)]))
-            }
-            Subcommand::Umount { name, version } => {
-                Ok(Request::Umount(Container::new(name, version)))
-            }
-            Subcommand::Start { name, version } => {
-                Ok(Request::Start(Container::new(name, version)))
-            }
+            Subcommand::Mount { name, version } => Ok(Request::Mount(vec![Container::new(
+                Name::try_from(name)?,
+                version,
+            )])),
+            Subcommand::Umount { name, version } => Ok(Request::Umount(Container::new(
+                Name::try_from(name)?,
+                version,
+            ))),
+            Subcommand::Start { name, version } => Ok(Request::Start(Container::new(
+                Name::try_from(name)?,
+                version,
+            ))),
             Subcommand::Stop {
                 name,
                 version,
                 timeout,
-            } => Ok(Request::Stop(Container::new(name, version), timeout)),
+            } => Ok(Request::Stop(
+                Container::new(Name::try_from(name)?, version),
+                timeout,
+            )),
             Subcommand::Install {
                 npk,
                 repository: repo_id,
@@ -166,9 +172,10 @@ impl TryFrom<Subcommand> for Request {
                 let size = npk.metadata().map(|m| m.len())?;
                 Ok(Request::Install(repo_id, size))
             }
-            Subcommand::Uninstall { name, version } => {
-                Ok(Request::Uninstall(Container::new(name, version)))
-            }
+            Subcommand::Uninstall { name, version } => Ok(Request::Uninstall(Container::new(
+                Name::try_from(name)?,
+                version,
+            ))),
             Subcommand::Shutdown => Ok(Request::Shutdown),
             Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
         }
