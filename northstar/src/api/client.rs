@@ -171,7 +171,7 @@ impl<'a> Client {
         })
     }
 
-    /// Perform a request reponse sequence
+    /// Perform a request response sequence
     ///
     /// ```no_run
     /// # use futures::StreamExt;

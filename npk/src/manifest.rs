@@ -274,7 +274,7 @@ pub enum MountOption {
     // Mount nosuid
     #[serde(rename = "nosuid")]
     NoSuid,
-    // Mount nonodev
+    // Mount nodev
     #[serde(rename = "nodev")]
     NoDev,
 }
