@@ -29,6 +29,7 @@ use std::{
 };
 use thiserror::Error;
 
+// TODO: move out of manifest.rs
 #[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct Name(String);
 
@@ -46,7 +47,6 @@ impl Display for Name {
 
 impl Deref for Name {
     type Target = String;
-
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -67,9 +67,56 @@ impl TryFrom<String> for Name {
     }
 }
 
+// TODO: move out of manifest.rs
+#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+pub struct NonNullString(String);
+
+#[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum NonNullStringError {
+    #[error("Invalid null byte in string")]
+    NonNullStringError,
+}
+
+impl Display for NonNullString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl AsRef<[u8]> for NonNullString {
+    fn as_ref(&self) -> &[u8] {
+        &self.0.as_bytes()
+    }
+}
+
+impl Deref for NonNullString {
+    type Target = String;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for NonNullString {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other.to_string()
+    }
+}
+
+impl TryFrom<String> for NonNullString {
+    type Error = NonNullStringError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.chars().any(|c| matches!(c, '\0')) {
+            Err(NonNullStringError::NonNullStringError)
+        } else {
+            Ok(NonNullString(value))
+        }
+    }
+}
+
 pub type Capability = caps::Capability;
-pub type CGroupConfig = HashMap<String, String>;
-pub type CGroups = HashMap<String, CGroupConfig>;
+pub type CGroupConfig = HashMap<NonNullString, NonNullString>;
+pub type CGroups = HashMap<NonNullString, CGroupConfig>;
 pub type MountOptions = HashSet<MountOption>;
 pub type Version = semver::Version;
 
@@ -84,17 +131,17 @@ pub struct Manifest {
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
-    pub args: Option<Vec<String>>, // TODO: check for \0 char (create NoNullString type)
+    pub args: Option<Vec<NonNullString>>,
     /// UID
-    pub uid: u16, // TODO: verify range (1-INT16_MAX)
+    pub uid: u16,
     /// GID
-    pub gid: u16, // TODO: verify range (1-INT16_MAX)
+    pub gid: u16,
     /// Environment passed to container
-    pub env: Option<HashMap<String, String>>, // TODO: check for \0 char (create NoNullString type)
+    pub env: Option<HashMap<NonNullString, NonNullString>>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup config
-    pub cgroups: Option<CGroups>, // TODO: check for \0 char (create NoNullString type) (both key and value string)
+    pub cgroups: Option<CGroups>,
     /// Seccomp configuration
     pub seccomp: Option<HashMap<String, String>>,
     /// List of bind mounts and resources
@@ -149,9 +196,12 @@ impl Manifest {
             ));
         }
 
-        // Check for invalid uid 0
+        // Check for invalid uid or gid of 0
         if self.uid == 0 {
-            return Err(Error::Invalid("Invalid uid 0".to_string()));
+            return Err(Error::Invalid("Invalid uid of 0".to_string()));
+        }
+        if self.gid == 0 {
+            return Err(Error::Invalid("Invalid gid of 0".to_string()));
         }
 
         // Check for null bytes in suppl groups. Rust Strings allow null bytes in Strings.
@@ -445,7 +495,7 @@ mod serde_caps {
 mod tests {
     use crate::manifest::*;
     use anyhow::{anyhow, Result};
-    use std::iter::FromIterator;
+    use std::{convert::TryInto, iter::FromIterator};
 
     #[test]
     fn parse() -> Result<()> {
@@ -502,14 +552,14 @@ seccomp:
         assert_eq!(manifest.name.to_string(), "hello");
         let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
         assert_eq!(args.len(), 2);
-        assert_eq!(args[0], "one");
-        assert_eq!(args[1], "two");
+        assert_eq!(args[0].to_string(), "one");
+        assert_eq!(args[1].to_string(), "two");
 
         assert_eq!(manifest.autostart, Some(Autostart::Critical));
         let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
         assert_eq!(
-            env.get("LD_LIBRARY_PATH"),
-            Some("/lib".to_string()).as_ref()
+            env.get(&"LD_LIBRARY_PATH".to_string().try_into()?),
+            Some("/lib".to_string().try_into()?).as_ref()
         );
         assert_eq!(manifest.uid, 1000);
         assert_eq!(manifest.gid, 1001);
@@ -538,10 +588,16 @@ seccomp:
         let mut cgroups = HashMap::new();
         let mut mem = HashMap::new();
         let mut cpu = HashMap::new();
-        mem.insert("limit_in_bytes".to_string(), "30".to_string());
-        cpu.insert("shares".to_string(), "100".to_string());
-        cgroups.insert("memory".to_string(), mem);
-        cgroups.insert("cpu".to_string(), cpu);
+        mem.insert(
+            "limit_in_bytes".to_string().try_into()?,
+            "30".to_string().try_into()?,
+        );
+        cpu.insert(
+            "shares".to_string().try_into()?,
+            "100".to_string().try_into()?,
+        );
+        cgroups.insert("memory".to_string().try_into()?, mem);
+        cgroups.insert("cpu".to_string().try_into()?, cpu);
 
         assert_eq!(manifest.cgroups, Some(cgroups));
 

@@ -128,7 +128,7 @@ impl CGroups {
             let mount_point = mount_point(controller)?;
             let subdir = configuration
                 .get(controller)
-                .ok_or_else(|| Error::UnknownController(controller.into()))?;
+                .ok_or_else(|| Error::UnknownController(controller.to_string()))?;
             let path = mount_point.join(subdir).join(container.name().to_string());
 
             // Create cgroup

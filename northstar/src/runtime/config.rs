@@ -14,6 +14,7 @@
 
 use super::{Error, RepositoryId};
 use crate::util::is_rw;
+use npk::manifest::NonNullString;
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;
@@ -49,7 +50,7 @@ pub struct Repository {
 /// This map specifies the root cgroup under which the application cgroups are inserted.
 /// The directory is created if it does not exist.
 /// If not set for a specific cgroup, it defaults to "north".
-pub type CGroups = HashMap<String, PathBuf>;
+pub type CGroups = HashMap<NonNullString, PathBuf>;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Devices {

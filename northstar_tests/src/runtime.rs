@@ -79,8 +79,14 @@ impl Northstar {
         );
 
         let mut cgroups = HashMap::new();
-        cgroups.insert("memory".into(), PathBuf::from(format!("northstar-{}", pid)));
-        cgroups.insert("cpu".into(), PathBuf::from(format!("northstar-{}", pid)));
+        cgroups.insert(
+            "memory".to_string().try_into()?,
+            PathBuf::from(format!("northstar-{}", pid)),
+        );
+        cgroups.insert(
+            "cpu".to_string().try_into()?,
+            PathBuf::from(format!("northstar-{}", pid)),
+        );
 
         let console = format!(
             "unix://{}/northstar-{}",
