@@ -81,7 +81,7 @@ pub(super) fn init(
     env::set_current_dir("/").expect("Failed to set cwd to /");
 
     // UID / GID
-    setid(manifest.uid as u32, manifest.gid as u32);
+    setid(manifest.uid, manifest.gid);
 
     // Supplementary groups
     setgroups(groups);
@@ -268,7 +268,7 @@ fn reset_effective_caps() {
 }
 
 /// Set uid/gid
-fn setid(uid: u32, gid: u32) {
+fn setid(uid: u16, gid: u16) {
     let rt_privileged = unistd::geteuid() == Uid::from_raw(0);
 
     // If running as uid 0 save our caps across the uid/gid drop
@@ -276,10 +276,10 @@ fn setid(uid: u32, gid: u32) {
         caps::securebits::set_keepcaps(true).expect("Failed to set keep caps");
     }
 
-    let gid = unistd::Gid::from_raw(gid);
+    let gid = unistd::Gid::from_raw(gid.into());
     unistd::setresgid(gid, gid, gid).expect("Failed to set resgid");
 
-    let uid = unistd::Uid::from_raw(uid);
+    let uid = unistd::Uid::from_raw(uid.into());
     unistd::setresuid(uid, uid, uid).expect("Failed to set resuid");
 
     if rt_privileged {

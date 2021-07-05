@@ -86,9 +86,9 @@ pub struct Manifest {
     /// Additional arguments for the application invocation
     pub args: Option<Vec<String>>, // TODO: check for \0 char (create NoNullString type)
     /// UID
-    pub uid: u32, // TODO: change to u16 and verify range (1-INT16_MAX)
+    pub uid: u16, // TODO: verify range (1-INT16_MAX)
     /// GID
-    pub gid: u32, // TODO: change to u16 and verify range (1-INT16_MAX)
+    pub gid: u16, // TODO: verify range (1-INT16_MAX)
     /// Environment passed to container
     pub env: Option<HashMap<String, String>>, // TODO: check for \0 char (create NoNullString type)
     /// Autostart this container upon northstar startup

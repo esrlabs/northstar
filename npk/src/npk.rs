@@ -649,9 +649,9 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     fn add_directory(
         mut file: &File,
         directory: &Path,
-        mode: u32,
-        uid: u32,
-        gid: u32,
+        mode: u16,
+        uid: u16,
+        gid: u16,
     ) -> Result<(), Error> {
         writeln!(file, "{} d {} {} {}", directory.display(), mode, uid, gid).map_err(|e| {
             Error::Io {

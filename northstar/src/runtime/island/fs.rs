@@ -201,8 +201,8 @@ async fn persist(
     task::block_in_place(|| {
         unistd::chown(
             dir.as_os_str(),
-            Some(unistd::Uid::from_raw(uid as u32)),
-            Some(unistd::Gid::from_raw(gid as u32)),
+            Some(unistd::Uid::from_raw(uid.into())),
+            Some(unistd::Gid::from_raw(gid.into())),
         )
     })
     .map_err(|e| {
@@ -299,8 +299,8 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
     task::block_in_place(|| {
         dev_devices(
             dir.path(),
-            container.manifest.uid as u32,
-            container.manifest.gid as u32,
+            container.manifest.uid,
+            container.manifest.gid,
         )
     });
     dev_symlinks(dir.path()).await;
@@ -315,7 +315,7 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
     (Some(dir), mount, remount)
 }
 
-fn dev_devices(dir: &Path, uid: u32, gid: u32) {
+fn dev_devices(dir: &Path, uid: u16, gid: u16) {
     use nix::sys::stat::mknod;
 
     for (dev, major, minor) in &[
@@ -331,8 +331,8 @@ fn dev_devices(dir: &Path, uid: u32, gid: u32) {
         mknod(dev_path.as_path(), SFlag::S_IFCHR, Mode::all(), dev).expect("Failed to mknod");
         chown(
             dev_path.as_path(),
-            Some(Uid::from_raw(uid)),
-            Some(Gid::from_raw(gid)),
+            Some(Uid::from_raw(uid.into())),
+            Some(Gid::from_raw(gid.into())),
         )
         .expect("Failed to chown");
     }
