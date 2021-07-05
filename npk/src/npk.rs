@@ -447,7 +447,7 @@ impl Default for SquashfsOpts {
 /// # Arguments
 /// * `manifest` - Path to the container's manifest file
 /// * `root` - Path to the container's root directory
-/// * `out` - Directory where the resulting NPK will be written to
+/// * `out` - Target directory or filename of the packed NPK
 /// * `key` - Path to the key used to sign the package
 ///
 /// # Example
@@ -470,7 +470,7 @@ pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Res
 /// # Arguments
 /// * `manifest` - Path to the container's manifest file
 /// * `root` - Path to the container's root directory
-/// * `out` - Directory where the resulting NPK will be written to
+/// * `out` - Target directory or filename of the packed NPK
 /// * `key` - Path to the key used to sign the package
 /// * `squashfs_opts` - Options for `mksquashfs`
 ///
@@ -501,15 +501,14 @@ pub fn pack_with(
     }
     builder = builder.squashfs_opts(&squashfs_opts);
 
-    let mut npk_dest = out.to_path_buf();
+    let mut dest = out.to_path_buf();
+    // Append filename from manifest if only a directory path was given
     if Path::is_dir(out) {
-        // Append filename from manifest if only a directory path was given
-        npk_dest = out
-            .join(format!("{}-{}.", &name, &version.to_string()))
-            .with_extension(&NPK_EXT);
+        dest.push(format!("{}-{}.", &name, &version.to_string()));
+        dest.set_extension(&NPK_EXT);
     }
-    let npk = File::create(&npk_dest).map_err(|e| Error::Io {
-        context: format!("Failed to create NPK: '{}'", &npk_dest.display()),
+    let npk = File::create(&dest).map_err(|e| Error::Io {
+        context: format!("Failed to create NPK: '{}'", &dest.display()),
         error: e,
     })?;
     builder.build(npk)
