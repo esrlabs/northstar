@@ -110,7 +110,7 @@ pub enum Subcommand {
     },
     /// Shell completion script generation
     Completion {
-        /// Output diretory where to generate completions into
+        /// Output directory where to generate completions into
         #[structopt(short, long)]
         output: PathBuf,
         /// Generate completions for shell type
