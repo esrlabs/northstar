@@ -14,10 +14,10 @@
 
 use anyhow::{Context, Result};
 use npk::{
-    manifest::{Manifest, Name},
+    manifest::Manifest,
     npk::{pack_with, CompressionAlgorithm},
 };
-use std::{convert::TryFrom, fs, path::Path};
+use std::{convert::TryInto, fs, path::Path};
 use tempfile::tempdir;
 
 pub(crate) fn pack(
@@ -42,7 +42,8 @@ pub(crate) fn pack(
             let name = manifest.name.clone();
             let num = clones.to_string().chars().count() - 1;
             for n in 0..clones {
-                manifest.name = Name::try_from(format!("{}-{:0m$}", name, n, m = num))
+                manifest.name = format!("{}-{:0m$}", name, n, m = num)
+                    .try_into()
                     .context("Failed to parse name")?;
                 let m = tmp.path().join(n.to_string());
                 fs::write(&m, manifest.to_string()).context("Failed to write manifest")?;
