@@ -24,7 +24,7 @@ use log::debug;
 use npk::manifest::{Name, Version};
 use std::{
     collections::{HashSet, VecDeque},
-    convert::TryFrom,
+    convert::TryInto,
     path::Path,
     pin::Pin,
     task::Poll,
@@ -279,7 +279,9 @@ impl<'a> Client {
     pub async fn start(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Start(Container::new(
-                Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
+                name.to_string()
+                    .try_into()
+                    .map_err(|_| Error::Name(name.to_string()))?,
                 version.clone(),
             )))
             .await?
@@ -315,7 +317,9 @@ impl<'a> Client {
         match self
             .request(Request::Stop(
                 Container::new(
-                    Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
+                    name.to_string()
+                        .try_into()
+                        .map_err(|_| Error::Name(name.to_string()))?,
                     version.clone(),
                 ),
                 timeout.as_secs(),
@@ -406,7 +410,9 @@ impl<'a> Client {
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Uninstall(Container::new(
-                Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
+                name.to_string()
+                    .try_into()
+                    .map_err(|_| Error::Name(name.to_string()))?,
                 version.clone(),
             )))
             .await?
@@ -455,7 +461,9 @@ impl<'a> Client {
         let mut valid_containers = vec![];
         for c in containers {
             valid_containers.push(Container::new(
-                Name::try_from(c.0.to_string()).map_err(|_| Error::Name(c.0.to_string()))?,
+                c.0.to_string()
+                    .try_into()
+                    .map_err(|_| Error::Name(c.0.to_string()))?,
                 c.1.clone(),
             ))
         }
@@ -486,7 +494,9 @@ impl<'a> Client {
     pub async fn umount(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Umount(Container::new(
-                Name::try_from(name.to_string()).map_err(|_| Error::Name(name.to_string()))?,
+                name.to_string()
+                    .try_into()
+                    .map_err(|_| Error::Name(name.to_string()))?,
                 version.clone(),
             )))
             .await?

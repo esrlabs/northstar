@@ -17,9 +17,15 @@ use api::{client::Client, model::Message};
 use futures::{sink::SinkExt, StreamExt};
 use northstar::api::{
     self,
-    model::{Container, Name, Request, Version},
+    model::{Container, Request, Version},
 };
-use std::{convert::TryFrom, path::PathBuf, process, str::FromStr, time};
+use std::{
+    convert::{TryFrom, TryInto},
+    path::PathBuf,
+    process,
+    str::FromStr,
+    time,
+};
 use structopt::{clap, clap::AppSettings, StructOpt};
 use tokio::{
     fs,
@@ -146,23 +152,21 @@ impl TryFrom<Subcommand> for Request {
             Subcommand::Containers => Ok(Request::Containers),
             Subcommand::Repositories => Ok(Request::Repositories),
             Subcommand::Mount { name, version } => Ok(Request::Mount(vec![Container::new(
-                Name::try_from(name)?,
+                name.try_into()?,
                 version,
             )])),
-            Subcommand::Umount { name, version } => Ok(Request::Umount(Container::new(
-                Name::try_from(name)?,
-                version,
-            ))),
-            Subcommand::Start { name, version } => Ok(Request::Start(Container::new(
-                Name::try_from(name)?,
-                version,
-            ))),
+            Subcommand::Umount { name, version } => {
+                Ok(Request::Umount(Container::new(name.try_into()?, version)))
+            }
+            Subcommand::Start { name, version } => {
+                Ok(Request::Start(Container::new(name.try_into()?, version)))
+            }
             Subcommand::Stop {
                 name,
                 version,
                 timeout,
             } => Ok(Request::Stop(
-                Container::new(Name::try_from(name)?, version),
+                Container::new(name.try_into()?, version),
                 timeout,
             )),
             Subcommand::Install {
@@ -173,7 +177,7 @@ impl TryFrom<Subcommand> for Request {
                 Ok(Request::Install(repo_id, size))
             }
             Subcommand::Uninstall { name, version } => Ok(Request::Uninstall(Container::new(
-                Name::try_from(name)?,
+                name.try_into()?,
                 version,
             ))),
             Subcommand::Shutdown => Ok(Request::Shutdown),

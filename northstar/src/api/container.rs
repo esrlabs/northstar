@@ -15,7 +15,7 @@
 use npk::manifest::{Name, Version};
 use serde::{Deserialize, Serialize};
 use std::{
-    convert::TryFrom,
+    convert::{TryFrom, TryInto},
     fmt::{self, Display},
     sync::Arc,
 };
@@ -62,7 +62,11 @@ impl TryFrom<&str> for Container {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut split = value.split(':');
-        let name = Name::try_from(split.next().ok_or(Error::MissingName)?.to_string())
+        let name = split
+            .next()
+            .ok_or(Error::MissingName)?
+            .to_string()
+            .try_into()
             .map_err(|_| Error::InvalidName)?;
         let version = split.next().ok_or(Error::MissingVersion)?;
         let version = Version::parse(&version).map_err(|_| Error::InvalidVersion)?;

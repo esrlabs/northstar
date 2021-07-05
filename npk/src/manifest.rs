@@ -47,6 +47,7 @@ impl Display for Name {
 
 impl Deref for Name {
     type Target = String;
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -91,6 +92,7 @@ impl AsRef<[u8]> for NonNullString {
 
 impl Deref for NonNullString {
     type Target = String;
+
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -575,7 +577,7 @@ seccomp:
         mounts.insert(
             PathBuf::from("/resource"),
             Mount::Resource(Resource {
-                name: Name::try_from("bla-blah.foo".to_string())?,
+                name: "bla-blah.foo".to_string().try_into()?,
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
                 options: [MountOption::NoExec].iter().cloned().collect(),
