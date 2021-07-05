@@ -297,11 +297,7 @@ async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
     debug!("Creating devfs in {}", dir.path().display());
 
     task::block_in_place(|| {
-        dev_devices(
-            dir.path(),
-            container.manifest.uid,
-            container.manifest.gid,
-        )
+        dev_devices(dir.path(), container.manifest.uid, container.manifest.gid)
     });
     dev_symlinks(dir.path()).await;
 
