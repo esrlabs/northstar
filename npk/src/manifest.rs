@@ -108,7 +108,7 @@ impl TryFrom<String> for NonNullString {
     type Error = NonNullStringError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.chars().any(|c| matches!(c, '\0')) {
+        if value.contains('\0') {
             Err(NonNullStringError::NonNullStringError)
         } else {
             Ok(NonNullString(value))
@@ -158,7 +158,7 @@ pub struct Manifest {
     #[serde(default, with = "serde_caps")]
     pub capabilities: Option<HashSet<Capability>>,
     /// String containing group names to give to new container
-    pub suppl_groups: Option<Vec<String>>,
+    pub suppl_groups: Option<Vec<NonNullString>>,
     /// IO configuration
     pub io: Option<Io>,
 }
@@ -204,19 +204,6 @@ impl Manifest {
         }
         if self.gid == 0 {
             return Err(Error::Invalid("Invalid gid of 0".to_string()));
-        }
-
-        // Check for null bytes in suppl groups. Rust Strings allow null bytes in Strings.
-        // For passing the group names to getgrnam they need to be C string compliant.
-        if let Some(suppl_groups) = self.suppl_groups.as_ref() {
-            for suppl_group in suppl_groups {
-                if suppl_group.contains('\0') {
-                    return Err(Error::Invalid(format!(
-                        "Null byte in suppl group {}",
-                        suppl_group
-                    )));
-                }
-            }
         }
 
         Ok(())
@@ -621,7 +608,10 @@ seccomp:
         );
         assert_eq!(
             manifest.suppl_groups,
-            Some(vec!("inet".to_string(), "log".to_string()))
+            Some(vec!(
+                "inet".to_string().try_into()?,
+                "log".to_string().try_into()?
+            ))
         );
 
         Ok(())
