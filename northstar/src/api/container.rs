@@ -19,6 +19,7 @@ use std::{
     fmt::{self, Display},
     sync::Arc,
 };
+use thiserror::Error;
 
 #[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct Container {
@@ -44,15 +45,28 @@ impl Container {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Missing container name")]
+    MissingName,
+    #[error("Invalid container name")]
+    InvalidName,
+    #[error("Missing container version")]
+    MissingVersion,
+    #[error("Invalid container version")]
+    InvalidVersion,
+}
+
 impl TryFrom<&str> for Container {
-    type Error = &'static str;
+    type Error = Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let mut split = value.split(':');
-        let name = split.next().ok_or("Missing container name")?;
-        let version = split.next().ok_or("Missing container version")?;
-        let version = Version::parse(&version).map_err(|_| "Invalid version")?;
-        Ok(Container::new(name.into(), version))
+        let name = Name::try_from(split.next().ok_or(Error::MissingName)?.to_string())
+            .map_err(|_| Error::InvalidName)?;
+        let version = split.next().ok_or(Error::MissingVersion)?;
+        let version = Version::parse(&version).map_err(|_| Error::InvalidVersion)?;
+        Ok(Container::new(name, version))
     }
 }
 

@@ -188,7 +188,7 @@ async fn persist(
 ) -> Result<Mount, Error> {
     let uid = container.manifest.uid;
     let gid = container.manifest.gid;
-    let dir = config.data_dir.join(container.manifest.name.to_string());
+    let dir = config.data_dir.join(&container.manifest.name.to_string());
 
     if !dir.exists() {
         debug!("Creating {}", dir.display());

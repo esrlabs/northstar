@@ -19,13 +19,54 @@ use serde::{
 use serde_with::skip_serializing_none;
 use std::{
     collections::{HashMap, HashSet},
-    fmt, io,
+    convert::TryFrom,
+    fmt,
+    fmt::{Display, Formatter},
+    io,
+    ops::Deref,
     path::PathBuf,
     str::FromStr,
 };
 use thiserror::Error;
 
-pub type Name = String;
+#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+pub struct Name(String);
+
+#[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum NameError {
+    #[error("Invalid character(s) in name")]
+    NameError,
+}
+
+impl Display for Name {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Deref for Name {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for Name {
+    type Error = NameError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value
+            .chars()
+            .all(|c| matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'))
+        {
+            Ok(Name(value))
+        } else {
+            Err(NameError::NameError)
+        }
+    }
+}
+
 pub type Capability = caps::Capability;
 pub type CGroupConfig = HashMap<String, String>;
 pub type CGroups = HashMap<String, CGroupConfig>;
@@ -43,17 +84,17 @@ pub struct Manifest {
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
-    pub args: Option<Vec<String>>,
+    pub args: Option<Vec<String>>, // TODO: check for \0 char (create NoNullString type)
     /// UID
-    pub uid: u32,
+    pub uid: u32, // TODO: change to u16 and verify range (1-INT16_MAX)
     /// GID
-    pub gid: u32,
+    pub gid: u32, // TODO: change to u16 and verify range (1-INT16_MAX)
     /// Environment passed to container
-    pub env: Option<HashMap<String, String>>,
+    pub env: Option<HashMap<String, String>>, // TODO: check for \0 char (create NoNullString type)
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup config
-    pub cgroups: Option<CGroups>,
+    pub cgroups: Option<CGroups>, // TODO: check for \0 char (create NoNullString type) (both key and value string)
     /// Seccomp configuration
     pub seccomp: Option<HashMap<String, String>>,
     /// List of bind mounts and resources
@@ -190,7 +231,7 @@ pub enum MountOption {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Resource {
-    pub name: String,
+    pub name: Name,
     pub version: Version,
     pub dir: PathBuf,
     #[serde(
@@ -458,7 +499,7 @@ seccomp:
         let manifest = Manifest::from_str(&manifest)?;
 
         assert_eq!(manifest.init, Some(PathBuf::from("/binary")));
-        assert_eq!(manifest.name, "hello");
+        assert_eq!(manifest.name.to_string(), "hello");
         let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
         assert_eq!(args.len(), 2);
         assert_eq!(args[0], "one");
@@ -484,7 +525,7 @@ seccomp:
         mounts.insert(
             PathBuf::from("/resource"),
             Mount::Resource(Resource {
-                name: "bla-blah.foo".to_string(),
+                name: Name::try_from("bla-blah.foo".to_string())?,
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
                 options: [MountOption::NoExec].iter().cloned().collect(),
