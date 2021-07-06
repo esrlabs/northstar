@@ -36,10 +36,8 @@ use thiserror::Error;
 pub struct Name(String);
 
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum NameError {
-    #[error("Invalid character(s) in name")]
-    NameError,
-}
+#[error("Invalid character(s) in name")]
+pub struct NameError;
 
 impl Display for Name {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
@@ -65,7 +63,7 @@ impl TryFrom<String> for Name {
         {
             Ok(Name(value))
         } else {
-            Err(NameError::NameError)
+            Err(NameError)
         }
     }
 }
@@ -89,10 +87,8 @@ impl Name {
 pub struct NonNullString(String);
 
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum NonNullStringError {
-    #[error("Invalid null byte in string")]
-    NonNullStringError,
-}
+#[error("Invalid null byte in string")]
+pub struct InvalidNullChar(usize);
 
 impl Display for NonNullString {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
@@ -115,11 +111,11 @@ impl Deref for NonNullString {
 }
 
 impl TryFrom<String> for NonNullString {
-    type Error = NonNullStringError;
+    type Error = InvalidNullChar;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.contains('\0') {
-            Err(NonNullStringError::NonNullStringError)
+        if let Some(pos) = value.find('\0') {
+            Err(InvalidNullChar(pos))
         } else {
             Ok(NonNullString(value))
         }
@@ -133,10 +129,16 @@ impl NonNullString {
 }
 
 impl TryFrom<&str> for NonNullString {
-    type Error = NonNullStringError;
+    type Error = InvalidNullChar;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         value.to_string().try_into()
+    }
+}
+
+impl InvalidNullChar {
+    pub fn nul_position(&self) -> usize {
+        self.0
     }
 }
 
