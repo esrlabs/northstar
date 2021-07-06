@@ -179,16 +179,21 @@ impl Manifest {
     }
 
     fn verify(&self) -> Result<(), Error> {
-        if self.init.is_none() && (self.args.is_some() || self.env.is_some()) {
+        // Most optionals in the manifest are not valid for a resource container
+        if self.init.is_none()
+            && (self.args.is_some()
+                || self.env.is_some()
+                || self.autostart.is_some()
+                || self.cgroups.is_some()
+                || self.seccomp.is_some()
+                || self.capabilities.is_some()
+                || self.suppl_groups.is_some()
+                || self.io.is_some())
+        {
             return Err(Error::Invalid(
-                "Arguments and environment are not allowed in resource container".to_string(),
-            ));
-        }
-
-        // The autostart option is only valid for startable containers
-        if self.autostart.is_some() && self.init.is_none() {
-            return Err(Error::Invalid(
-                "Autostart cannot be enabled on resource containers".to_string(),
+                "Resource containers must not define any of the following manifest entries:\
+                args, env, autostart, cgroups, seccomp, capabilities, suppl_groups, io"
+                    .to_string(),
             ));
         }
 
