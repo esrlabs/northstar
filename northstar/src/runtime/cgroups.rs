@@ -166,7 +166,7 @@ impl CGroups {
                 .unwrap_or_else(|_| panic!("Failed to write to {}", path.display()));
 
             // Start a monitor for the memory controller
-            let group = if controller == CONTROLLER_MEMORY {
+            let group = if controller.to_string() == CONTROLLER_MEMORY {
                 let (stop, task) = memory_monitor(container.clone(), &path, tx.clone()).await;
                 CGroup::Memory {
                     dir: path,
