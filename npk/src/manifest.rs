@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use core::convert::TryFrom;
 use itertools::Itertools;
 use serde::{
     de::{Deserializer, Visitor},
@@ -20,7 +21,7 @@ use serde::{
 use serde_with::skip_serializing_none;
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryFrom,
+    convert::TryInto,
     fmt,
     fmt::{Display, Formatter},
     io,
@@ -69,6 +70,14 @@ impl TryFrom<String> for Name {
     }
 }
 
+impl TryFrom<&str> for Name {
+    type Error = NameError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.to_string().try_into()
+    }
+}
+
 // TODO: move out of manifest.rs
 #[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct NonNullString(String);
@@ -108,6 +117,14 @@ impl TryFrom<String> for NonNullString {
         } else {
             Ok(NonNullString(value))
         }
+    }
+}
+
+impl TryFrom<&str> for NonNullString {
+    type Error = NonNullStringError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.to_string().try_into()
     }
 }
 
@@ -572,8 +589,8 @@ seccomp:
         assert_eq!(manifest.autostart, Some(Autostart::Critical));
         let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
         assert_eq!(
-            env.get(&"LD_LIBRARY_PATH".to_string().try_into()?),
-            Some("/lib".to_string().try_into()?).as_ref()
+            env.get(&"LD_LIBRARY_PATH".try_into()?),
+            Some("/lib".try_into()?).as_ref()
         );
         assert_eq!(manifest.uid, 1000);
         assert_eq!(manifest.gid, 1001);
@@ -589,7 +606,7 @@ seccomp:
         mounts.insert(
             PathBuf::from("/resource"),
             Mount::Resource(Resource {
-                name: "bla-blah.foo".to_string().try_into()?,
+                name: "bla-blah.foo".try_into()?,
                 version: Version::parse("1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
                 options: [MountOption::NoExec].iter().cloned().collect(),
@@ -602,16 +619,10 @@ seccomp:
         let mut cgroups = HashMap::new();
         let mut mem = HashMap::new();
         let mut cpu = HashMap::new();
-        mem.insert(
-            "limit_in_bytes".to_string().try_into()?,
-            "30".to_string().try_into()?,
-        );
-        cpu.insert(
-            "shares".to_string().try_into()?,
-            "100".to_string().try_into()?,
-        );
-        cgroups.insert("memory".to_string().try_into()?, mem);
-        cgroups.insert("cpu".to_string().try_into()?, cpu);
+        mem.insert("limit_in_bytes".try_into()?, "30".try_into()?);
+        cpu.insert("shares".try_into()?, "100".try_into()?);
+        cgroups.insert("memory".try_into()?, mem);
+        cgroups.insert("cpu".try_into()?, cpu);
 
         assert_eq!(manifest.cgroups, Some(cgroups));
 
@@ -633,10 +644,7 @@ seccomp:
         );
         assert_eq!(
             manifest.suppl_groups,
-            Some(vec!(
-                "inet".to_string().try_into()?,
-                "log".to_string().try_into()?
-            ))
+            Some(vec!("inet".try_into()?, "log".try_into()?))
         );
 
         Ok(())
