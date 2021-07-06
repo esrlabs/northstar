@@ -504,7 +504,7 @@ pub fn pack_with(
     let mut dest = out.to_path_buf();
     // Append filename from manifest if only a directory path was given
     if Path::is_dir(out) {
-        dest.push(format!("{}-{}.", &name, &version.to_string()));
+        dest.push(format!("{}-{}.", &name, &version));
         dest.set_extension(&NPK_EXT);
     }
     let npk = File::create(&dest).map_err(|e| Error::Io {

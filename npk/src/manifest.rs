@@ -12,6 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use itertools::Itertools;
 use serde::{
     de::{Deserializer, Visitor},
     Deserialize, Serialize,
@@ -24,7 +25,7 @@ use std::{
     fmt::{Display, Formatter},
     io,
     ops::Deref,
-    path::PathBuf,
+    path::{Component, Component::RootDir, PathBuf},
     str::FromStr,
 };
 use thiserror::Error;
@@ -95,12 +96,6 @@ impl Deref for NonNullString {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-impl PartialEq<str> for NonNullString {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other.to_string()
     }
 }
 
@@ -184,10 +179,9 @@ impl Manifest {
     }
 
     fn verify(&self) -> Result<(), Error> {
-        // TODO: check for none on env, autostart, cgroups, seccomp
-        if self.init.is_none() && self.args.is_some() {
+        if self.init.is_none() && (self.args.is_some() || self.env.is_some()) {
             return Err(Error::Invalid(
-                "Arguments not allowed in resource container".to_string(),
+                "Arguments and environment are not allowed in resource container".to_string(),
             ));
         }
 
@@ -206,6 +200,32 @@ impl Manifest {
             return Err(Error::Invalid("Invalid gid of 0".to_string()));
         }
 
+        // Check for relative bind mounts
+        let sorted_bind_mounts: Vec<&PathBuf> = self
+            .mounts
+            .iter()
+            .filter(|(_, m)| matches!(m, Mount::Bind(_)))
+            .map(|(p, _)| p)
+            .sorted()
+            .collect();
+        if sorted_bind_mounts.iter().any(|p| p.is_relative()) {
+            return Err(Error::Invalid(
+                "Mount points must not be relative".to_string(),
+            ));
+        }
+
+        // Check for overlapping bind mounts paths by checking if one path is the prefix of the next one
+        let mut prev_comps = vec![RootDir];
+        for p in sorted_bind_mounts {
+            let curr_comps: Vec<Component> = p.components().into_iter().collect();
+            let prev_too_short = prev_comps.len() <= 1; // Two mount paths both starting with '/' is not considered an overlap
+            let prev_too_long = prev_comps.len() > curr_comps.len(); // A longer path cannot be the prefix of a shorter one
+
+            if !prev_too_short && !prev_too_long && prev_comps == curr_comps[..prev_comps.len()] {
+                return Err(Error::Invalid("Mount points must not overlap".to_string()));
+            }
+            prev_comps = curr_comps;
+        }
         Ok(())
     }
 }
@@ -244,7 +264,7 @@ pub enum Autostart {
     #[serde(rename = "relaxed")]
     Relaxed,
     /// Exit the runtime if starting this containers fails or the container exits with a non zero exit code.
-    /// Use this varant to propagate errors with a container to the system above the runtime e.g init.
+    /// Use this variant to propagate errors with a container to the system above the runtime e.g init.
     #[serde(rename = "critical")]
     Critical,
 }
@@ -628,7 +648,50 @@ mounts:
     type: dev
 ";
         assert!(Manifest::from_str(manifest).is_err());
+        Ok(())
+    }
 
+    /// Overlapping mounts are invalid
+    #[test]
+    fn overlapping_mount() -> Result<()> {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
+mounts:
+  /lib/overlapping:
+    type: bind
+    host: /lib
+  /lib/non_overlapping1:
+    type: bind
+    host: /lib
+  /lib/non_overlapping2:
+    type: bind
+    host: /lib
+  /lib/overlapping:
+    type: bind
+    host: /lib
+";
+        assert!(Manifest::from_str(manifest).is_err());
+        Ok(())
+    }
+
+    /// Non-overlapping mounts are invalid
+    #[test]
+    fn non_overlapping_mount() -> Result<()> {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
+mounts:
+  /other_lib1:
+    type: bind
+    host: /lib
+  /lib/non_overlapping1:
+    type: bind
+    host: /lib
+  /other_lib2:
+    type: bind
+    host: /lib
+  /lib/non_overlapping2:
+    type: bind
+    host: /lib
+";
+        assert!(Manifest::from_str(manifest).is_ok());
         Ok(())
     }
 
