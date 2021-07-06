@@ -78,6 +78,12 @@ impl TryFrom<&str> for Name {
     }
 }
 
+impl Name {
+    pub fn to_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 // TODO: move out of manifest.rs
 #[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct NonNullString(String);
@@ -117,6 +123,12 @@ impl TryFrom<String> for NonNullString {
         } else {
             Ok(NonNullString(value))
         }
+    }
+}
+
+impl NonNullString {
+    pub fn to_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
