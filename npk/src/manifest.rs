@@ -37,7 +37,7 @@ pub struct Name(String);
 
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[error("Invalid character(s) in name")]
-pub struct NameError;
+pub struct InvalidNameChar(usize);
 
 impl Display for Name {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
@@ -54,22 +54,21 @@ impl Deref for Name {
 }
 
 impl TryFrom<String> for Name {
-    type Error = NameError;
+    type Error = InvalidNameChar;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value
-            .chars()
-            .all(|c| matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'))
+        if let Some(pos) =
+            value.find(|c: char| !matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'))
         {
-            Ok(Name(value))
+            Err(InvalidNameChar(pos))
         } else {
-            Err(NameError)
+            Ok(Name(value))
         }
     }
 }
 
 impl TryFrom<&str> for Name {
-    type Error = NameError;
+    type Error = InvalidNameChar;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         value.to_string().try_into()
@@ -79,6 +78,12 @@ impl TryFrom<&str> for Name {
 impl Name {
     pub fn to_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+impl InvalidNameChar {
+    pub fn nul_position(&self) -> usize {
+        self.0
     }
 }
 
@@ -122,17 +127,17 @@ impl TryFrom<String> for NonNullString {
     }
 }
 
-impl NonNullString {
-    pub fn to_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
 impl TryFrom<&str> for NonNullString {
     type Error = InvalidNullChar;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         value.to_string().try_into()
+    }
+}
+
+impl NonNullString {
+    pub fn to_str(&self) -> &str {
+        self.0.as_str()
     }
 }
 
@@ -236,32 +241,31 @@ impl Manifest {
             return Err(Error::Invalid("Invalid gid of 0".to_string()));
         }
 
-        // Check for relative bind mounts
-        let sorted_bind_mounts: Vec<&PathBuf> = self
-            .mounts
+        // Check for relative and overlapping bind mounts
+        let mut prev_comps = vec![RootDir];
+        self.mounts
             .iter()
             .filter(|(_, m)| matches!(m, Mount::Bind(_)))
             .map(|(p, _)| p)
             .sorted()
-            .collect();
-        if sorted_bind_mounts.iter().any(|p| p.is_relative()) {
-            return Err(Error::Invalid(
-                "Mount points must not be relative".to_string(),
-            ));
-        }
+            .try_for_each(|p| {
+                if p.is_relative() {
+                    return Err(Error::Invalid(
+                        "Mount points must not be relative".to_string(),
+                    ));
+                }
+                // Check for overlapping bind mount paths by checking if one path is the prefix of the next one
+                let curr_comps: Vec<Component> = p.components().into_iter().collect();
+                let prev_too_short = prev_comps.len() <= 1; // Two mount paths both starting with '/' is not considered an overlap
+                let prev_too_long = prev_comps.len() > curr_comps.len(); // A longer path cannot be the prefix of a shorter one
 
-        // Check for overlapping bind mounts paths by checking if one path is the prefix of the next one
-        let mut prev_comps = vec![RootDir];
-        for p in sorted_bind_mounts {
-            let curr_comps: Vec<Component> = p.components().into_iter().collect();
-            let prev_too_short = prev_comps.len() <= 1; // Two mount paths both starting with '/' is not considered an overlap
-            let prev_too_long = prev_comps.len() > curr_comps.len(); // A longer path cannot be the prefix of a shorter one
-
-            if !prev_too_short && !prev_too_long && prev_comps == curr_comps[..prev_comps.len()] {
-                return Err(Error::Invalid("Mount points must not overlap".to_string()));
-            }
-            prev_comps = curr_comps;
-        }
+                if !prev_too_short && !prev_too_long && prev_comps == curr_comps[..prev_comps.len()]
+                {
+                    return Err(Error::Invalid("Mount points must not overlap".to_string()));
+                }
+                prev_comps = curr_comps;
+                Ok(())
+            })?;
         Ok(())
     }
 }
@@ -858,6 +862,30 @@ io:
         assert!(v1_1 > v1);
         let v1_1_1 = Version::parse("1.1.1")?;
         assert!(v1_1_1 > v1_1);
+        Ok(())
+    }
+
+    #[test]
+    fn valid_container_name() -> Result<()> {
+        assert!(Name::try_from("test_container-name.valid").is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_container_name() -> Result<()> {
+        assert!(Name::try_from("test+invalid").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn valid_non_null_string() -> Result<()> {
+        assert!(NonNullString::try_from("test_non_null.string").is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_non_null_string() -> Result<()> {
+        assert!(NonNullString::try_from("test_null\0.string").is_err());
         Ok(())
     }
 }
