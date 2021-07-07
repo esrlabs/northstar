@@ -152,7 +152,7 @@ The command requires the following input:</p>
 </ol>
 <h2 id="the-manifest-file"><a class="header" href="#the-manifest-file">The Manifest File</a></h2>
 <p>The manifest is a YAML file that references all necessary data to mount and execute the container.
-An example <code>manifest.yaml</code> of the <code>hello-world</code> container (found in <code>examples/container/hello-world/manifest.yaml</code>) looks as follows:</p>
+An example <code>manifest.yaml</code> of the <code>hello-world</code> container (found in <code>examples/hello-world/manifest.yaml</code>) looks as follows:</p>
 <pre><code class="language-yaml">name: hello-world
 version: 0.0.1
 init: /hello-world
@@ -184,7 +184,7 @@ This image file will be mounted by the northstar runtime when the container is r
 <p>Let us <code>pack</code> the <code>hello-world</code> example container under Linux.
 First, we build the <code>hello-world</code> binary from the northstar directory using cargo:</p>
 <pre><code class="language-bash">$ cargo build --release --bin hello-world
-Compiling hello-world v0.1.0 (/home/nori/dev/northstar/examples/container/hello-world)
+Compiling hello-world v0.1.0 (/home/nori/dev/northstar/examples/hello-world)
 Finished release [optimized] target(s) in 2.77s
 </code></pre>
 <p>The resulting binary is found in the <code>target/release</code> directory:</p>
@@ -198,7 +198,7 @@ This default is configured in <code>northstar.toml</code>.</p>
 </code></pre>
 <p>Finally, we are able to call <code>sextant</code> and create the NPK:</p>
 <pre><code class="language-bash">$ target/debug/sextant pack \
---manifest examples/container/hello-world/manifest.yaml \
+--manifest examples/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --out target/northstar/repository
 </code></pre>
@@ -211,7 +211,7 @@ hello-world-0.0.1.npk
 If your runtime is configured to check NPK signatures then containers with missing or invalid signatures will not be accepted.
 To create a signed version of our container we have to specify the required private key:</p>
 <pre><code class="language-bash">$ target/debug/sextant pack \
---manifest examples/container/hello-world/manifest.yaml \
+--manifest examples/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --key ./examples/keys/northstar.key \
 --out target/northstar/repository
