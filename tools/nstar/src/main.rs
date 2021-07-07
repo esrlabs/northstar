@@ -252,9 +252,8 @@ async fn main() -> Result<()> {
                     .next()
                     .await
                     .ok_or_else(|| anyhow!("Failed to receive response"))??
-                    .payload
                 {
-                    api::model::Payload::Response(response) => pretty::response(&response),
+                    api::model::Message::Response(response) => pretty::response(&response),
                     _ => unreachable!(),
                 };
                 process::exit(exit);

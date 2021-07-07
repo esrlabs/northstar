@@ -28,6 +28,7 @@ use northstar::{
         Container,
     },
 };
+use npk::manifest::Version;
 use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
 use tokio::{fs, pin, select, time};
@@ -48,11 +49,17 @@ impl std::ops::Deref for Northstar {
     }
 }
 
+impl std::ops::DerefMut for Northstar {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
 impl Northstar {
     /// Launches an instance of Northstar with the test container and
     /// resource installed.
     pub async fn launch_install_test_container() -> Result<Northstar> {
-        let runtime = Self::launch().await?;
+        let mut runtime = Self::launch().await?;
         runtime.install_test_resource().await?;
         runtime.install_test_container().await?;
         Ok(runtime)
@@ -141,7 +148,8 @@ impl Northstar {
     }
 
     pub async fn shutdown(self) -> Result<()> {
-        // TODO: Stop and disconnect the client
+        // Dropping the client closes the connection to the runtime
+        drop(self.client);
 
         // Stop the runtime
         self.runtime
@@ -161,7 +169,7 @@ impl Northstar {
     }
 
     /// Start a container
-    pub async fn start(&self, container: &str) -> Result<()> {
+    pub async fn start(&mut self, container: &str) -> Result<()> {
         let container: Container = container.try_into().expect("Invalid container str");
         self.client
             .start(container.name(), container.version())
@@ -170,7 +178,7 @@ impl Northstar {
     }
 
     /// Stop a container
-    pub async fn stop(&self, container: &str, timeout: u64) -> Result<()> {
+    pub async fn stop(&mut self, container: &str, timeout: u64) -> Result<()> {
         let container: Container = container.try_into().expect("Invalid container str");
         self.client
             .stop(
@@ -183,8 +191,8 @@ impl Northstar {
         Ok(())
     }
 
-    /// Umount
-    pub async fn umount(&self, container: &str) -> Result<()> {
+    /// Umount a container
+    pub async fn umount(&mut self, container: &str) -> Result<()> {
         let container: Container = container.try_into().expect("Invalid container str");
         self.client
             .umount(container.name(), container.version())
@@ -193,42 +201,52 @@ impl Northstar {
         Ok(())
     }
 
-    pub async fn install_test_container(&self) -> Result<()> {
+    /// Install the test container and wait for the notification
+    pub async fn install_test_container(&mut self) -> Result<()> {
         self.client
             .install(test_container_npk().await, "test")
             .await
-            .context("Failed to install test container")
-    }
+            .context("Failed to install test container")?;
 
-    pub async fn uninstall_test_container(&self) -> Result<()> {
-        self.client
-            .uninstall(
-                "test_container",
-                &npk::manifest::Version::parse("0.0.1").unwrap(),
-            )
+        self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
             .await
-            .context("Failed to uninstall test container")
+            .context("Failed to wait for test contaioner install notification")
     }
 
-    pub async fn install_test_resource(&self) -> Result<()> {
+    /// Uninstall the test container and wait for the notification
+    pub async fn uninstall_test_container(&mut self) -> Result<()> {
+        self.client
+            .uninstall("test_container", &Version::parse("0.0.1").unwrap())
+            .await
+            .context("Failed to uninstall test container")?;
+        self.assume_notification(|n| matches!(n, Notification::Uninstall(_)), 15)
+            .await
+            .context("Failed to wait for test container uninstall notification")
+    }
+
+    /// Install the test resource and wait for the notification
+    pub async fn install_test_resource(&mut self) -> Result<()> {
         self.client
             .install(test_resource_npk().await, "test")
             .await
-            .context("Failed to install test resource")
-    }
-
-    pub async fn uninstall_test_resource(&self) -> Result<()> {
-        self.client
-            .uninstall(
-                "test_resource",
-                &npk::manifest::Version::parse("0.0.1").unwrap(),
-            )
+            .context("Failed to install test resource")?;
+        self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
             .await
-            .context("Failed to uninstall test resource")
+            .context("Failed to wait for test resource install notification")
     }
 
-    // TODO: Queue the notifications in the runtime struct. Currently there's a race
-    // if the notification is faster.
+    /// Uninstall the test resource and wait for the notification
+    pub async fn uninstall_test_resource(&mut self) -> Result<()> {
+        self.client
+            .uninstall("test_resource", &Version::parse("0.0.1").unwrap())
+            .await
+            .context("Failed to uninstall test resource")?;
+        self.assume_notification(|n| matches!(n, Notification::Uninstall(_)), 15)
+            .await
+            .context("Failed to wait for test resource uninstall notification")
+    }
+
+    /// Wait for a notification that matches `pred`. Notifications are buffered in the `Client`.
     pub async fn assume_notification<F>(&mut self, mut pred: F, timeout: u64) -> Result<()>
     where
         F: FnMut(&Notification) -> bool,
@@ -250,6 +268,8 @@ impl Northstar {
         }
     }
 
+    /// Write `cmd` string into the persist folder of the test container
+    /// Check the test container main about the supported commands.
     pub async fn test_cmds(&self, cmd: &str) {
         let data = self.data_dir.join("test_container");
         fs::create_dir_all(&data)

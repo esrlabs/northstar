@@ -511,11 +511,11 @@ impl<'a> State<'a> {
             info!("Terminating {}", container);
             let exit_status = process.terminate(timeout).await.expect("Failed to stop");
 
-            // Send notification to main loop
-            self.notification(Notification::Stopped(container.clone()))
-                .await;
-
             info!("Stopped {} with status {:?}", container, exit_status);
+
+            // Send notification to main loop
+            self.notification(Notification::Stopped(container.clone(), exit_status))
+                .await;
 
             Ok(())
         } else {
@@ -566,6 +566,8 @@ impl<'a> State<'a> {
 
         info!("Successfully installed {}", container);
 
+        self.notification(Notification::Install(container)).await;
+
         Ok(())
     }
 
@@ -583,6 +585,9 @@ impl<'a> State<'a> {
         }
 
         info!("Successfully uninstalled {}", container);
+
+        self.notification(Notification::Uninstall(container.clone()))
+            .await;
 
         Ok(())
     }
@@ -615,11 +620,8 @@ impl<'a> State<'a> {
 
                 process.destroy().await;
 
-                self.notification(Notification::Exit {
-                    container: container.clone(),
-                    status: exit_status.clone(),
-                })
-                .await;
+                self.notification(Notification::Exit(container.clone(), exit_status.clone()))
+                    .await;
 
                 // This is a critical flagged container that exited with a error exit code. That's not good...
                 if !exit_status.success() && critical {
@@ -694,8 +696,7 @@ impl<'a> State<'a> {
     ) -> Result<(), Error> {
         match request {
             Request::Message(message) => {
-                let payload = &message.payload;
-                if let api::model::Payload::Request(ref request) = payload {
+                if let api::model::Message::Request(ref request) = message {
                     let response = match request {
                         api::model::Request::Containers => {
                             Response::Containers(self.list_containers().await)
