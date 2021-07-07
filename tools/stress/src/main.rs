@@ -17,8 +17,11 @@ use futures::{
     future::{pending, ready, try_join_all},
     FutureExt, StreamExt,
 };
-use northstar::api::{client, model};
-use std::{path::PathBuf, str::FromStr};
+use northstar::api::{
+    client,
+    model::{self, Container},
+};
+use std::{convert::TryInto, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 use tokio::{pin, select, task, time};
 use tokio_util::{either::Either, sync::CancellationToken};
@@ -114,13 +117,14 @@ async fn main() -> Result<()> {
         let random = opt.random;
         let url = opt.address.clone();
         let mode = opt.mode.clone();
+        let container = Container::new(app.clone().try_into().unwrap(), version.clone());
 
         let task = task::spawn(async move {
             let mut client = client::Client::new(&url, None, timeout).await?;
             let mut iterations = 0;
             loop {
                 if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
-                    client.mount(vec![(app.as_str(), &version)]).await?;
+                    client.mount(vec![container.clone()]).await?;
                 }
 
                 if mode != Mode::MountUmount {

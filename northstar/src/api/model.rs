@@ -18,6 +18,7 @@ use std::collections::HashSet;
 
 pub use npk::manifest::{Manifest, Version};
 pub type Container = super::container::Container;
+pub type ContainerError = super::container::Error;
 pub type MessageId = String; // UUID
 pub type Name = npk::manifest::Name;
 pub type Pid = u32;

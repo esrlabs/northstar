@@ -106,11 +106,10 @@ test!(mount_umount_test_container_via_client, {
     let mut runtime = Northstar::launch_install_test_container().await?;
 
     // Mount
-    let containers = runtime.containers().await?;
-    let containers = containers
-        .iter()
-        .map(|c| (c.container.name().as_str(), c.container.version()));
-    (*runtime).mount(containers).await?;
+    let mut containers = runtime.containers().await?;
+    runtime
+        .mount(containers.drain(..).map(|c| c.container))
+        .await?;
 
     // Umount
     let containers = &mut runtime.containers().await?;
