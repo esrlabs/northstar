@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use npk::manifest::{Name, Version};
+use npk::manifest::{InvalidNameChar, Name, Version};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -50,7 +50,7 @@ pub enum Error {
     #[error("Missing container name")]
     MissingName,
     #[error("Invalid container name")]
-    InvalidName,
+    InvalidName(InvalidNameChar),
     #[error("Missing container version")]
     MissingVersion,
     #[error("Invalid container version")]
@@ -67,7 +67,7 @@ impl TryFrom<&str> for Container {
             .ok_or(Error::MissingName)?
             .to_string()
             .try_into()
-            .map_err(|_| Error::InvalidName)?;
+            .map_err(Error::InvalidName)?;
         let version = split.next().ok_or(Error::MissingVersion)?;
         let version = Version::parse(&version).map_err(|_| Error::InvalidVersion)?;
         Ok(Container::new(name, version))
@@ -89,7 +89,7 @@ struct Inner {
 #[test]
 fn try_from() {
     assert_eq!(
-        Container::new("test".into(), Version::parse("0.0.1").unwrap()),
+        Container::new("test".try_into().unwrap(), Version::parse("0.0.1").unwrap()),
         std::convert::TryInto::try_into("test:0.0.1").unwrap()
     );
 }

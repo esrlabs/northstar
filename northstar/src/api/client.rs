@@ -15,13 +15,13 @@
 use super::{
     codec::{self, framed},
     model::{
-        self, Connect, Container, ContainerData, Message, MountResult, Notification, RepositoryId,
-        Request, Response,
+        self, Connect, Container, ContainerData, ContainerError, Message, MountResult,
+        Notification, RepositoryId, Request, Response,
     },
 };
 use futures::{SinkExt, Stream, StreamExt};
 use log::debug;
-use npk::manifest::{Name, Version};
+use npk::manifest::{InvalidNameChar, Version};
 use std::{
     collections::{HashSet, VecDeque},
     convert::TryInto,
@@ -58,7 +58,9 @@ pub enum Error {
     #[error("Notification consumer lagged")]
     LaggedNotifications,
     #[error("Invalid name {0}")]
-    Name(String),
+    Name(InvalidNameChar),
+    #[error("Invalid container {0}")]
+    Container(ContainerError),
 }
 
 /// Client for a Northstar runtime instance.
@@ -279,9 +281,7 @@ impl<'a> Client {
     pub async fn start(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Start(Container::new(
-                name.to_string()
-                    .try_into()
-                    .map_err(|_| Error::Name(name.to_string()))?,
+                name.try_into().map_err(Error::Name)?,
                 version.clone(),
             )))
             .await?
@@ -316,12 +316,7 @@ impl<'a> Client {
     ) -> Result<(), Error> {
         match self
             .request(Request::Stop(
-                Container::new(
-                    name.to_string()
-                        .try_into()
-                        .map_err(|_| Error::Name(name.to_string()))?,
-                    version.clone(),
-                ),
+                Container::new(name.try_into().map_err(Error::Name)?, version.clone()),
                 timeout.as_secs(),
             ))
             .await?
@@ -410,9 +405,7 @@ impl<'a> Client {
     pub async fn uninstall(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Uninstall(Container::new(
-                name.to_string()
-                    .try_into()
-                    .map_err(|_| Error::Name(name.to_string()))?,
+                name.to_string().try_into().map_err(Error::Name)?,
                 version.clone(),
             )))
             .await?
@@ -444,30 +437,24 @@ impl<'a> Client {
     /// # use std::time::Duration;
     /// # use npk::manifest::Version;
     /// # use std::path::Path;
+    /// # use std::convert::TryInto;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
     /// let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let version = Version::parse("0.0.2").unwrap();
-    /// let to_mount = vec!(("hello", &version), ("test", &version));
-    /// client.mount(to_mount).await.expect("Failed to mount");
+    /// let container = "test:0.0.2".try_into().unwrap();
+    /// client.mount(vec!(container)).await.expect("Failed to mount");
     /// # }
     /// ```
-    pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version)>>(
-        &mut self,
-        containers: I,
-    ) -> Result<Vec<MountResult>, Error> {
+    pub async fn mount<I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
+    where
+        I: 'a + IntoIterator<Item = Container>,
+    {
         self.fused()?;
-        let mut valid_containers = vec![];
-        for c in containers {
-            valid_containers.push(Container::new(
-                c.0.to_string()
-                    .try_into()
-                    .map_err(|_| Error::Name(c.0.to_string()))?,
-                c.1.clone(),
-            ))
-        }
-        match self.request(Request::Mount(valid_containers)).await? {
+        match self
+            .request(Request::Mount(containers.into_iter().collect()))
+            .await?
+        {
             Response::Mount(mounts) => Ok(mounts),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
@@ -494,9 +481,7 @@ impl<'a> Client {
     pub async fn umount(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Umount(Container::new(
-                name.to_string()
-                    .try_into()
-                    .map_err(|_| Error::Name(name.to_string()))?,
+                name.to_string().try_into().map_err(Error::Name)?,
                 version.clone(),
             )))
             .await?

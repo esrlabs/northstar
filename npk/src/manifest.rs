@@ -39,6 +39,12 @@ pub struct Name(String);
 #[error("Invalid character(s) in name")]
 pub struct InvalidNameChar(usize);
 
+impl InvalidNameChar {
+    pub fn nul_position(&self) -> usize {
+        self.0
+    }
+}
+
 impl Display for Name {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", self.0)
@@ -76,14 +82,9 @@ impl TryFrom<&str> for Name {
 }
 
 impl Name {
+    /// &str representation of a Name
     pub fn to_str(&self) -> &str {
         self.0.as_str()
-    }
-}
-
-impl InvalidNameChar {
-    pub fn nul_position(&self) -> usize {
-        self.0
     }
 }
 
