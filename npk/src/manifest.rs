@@ -868,7 +868,7 @@ io:
 
     #[test]
     fn valid_container_name() -> Result<()> {
-        assert!(Name::try_from("test_container-name.valid").is_ok());
+        assert!(Name::try_from("test-container-name.valid").is_ok());
         Ok(())
     }
 

@@ -27,8 +27,8 @@ pub const EXAMPLE_MESSAGE_0_0_1: &str = "message:0.0.1";
 pub const EXAMPLE_MESSAGE_0_0_2: &str = "message:0.0.2";
 pub const EXAMPLE_PERSISTENCE: &str = "persistence:0.0.1";
 pub const EXAMPLE_SECCOMP: &str = "seccomp:0.0.1";
-pub const TEST_CONTAINER: &str = "test_container:0.0.1";
-pub const TEST_RESOURCE: &str = "test_resource:0.0.1";
+pub const TEST_CONTAINER: &str = "test-container:0.0.1";
+pub const TEST_RESOURCE: &str = "test-resource:0.0.1";
 
 fn dump(src: &[u8]) -> PathBuf {
     let npk = TMPDIR.path().join(uuid::Uuid::new_v4().to_string());
@@ -83,11 +83,11 @@ lazy_static! {
         dump(src)
     };
     pub static ref TEST_CONTAINER_NPK: PathBuf = {
-        let src = include_bytes!(concat!(env!("OUT_DIR"), "/test_container-0.0.1.npk"));
+        let src = include_bytes!(concat!(env!("OUT_DIR"), "/test-container-0.0.1.npk"));
         dump(src)
     };
     pub static ref TEST_RESOURCE_NPK: PathBuf = {
-        let src = include_bytes!(concat!(env!("OUT_DIR"), "/test_resource-0.0.1.npk"));
+        let src = include_bytes!(concat!(env!("OUT_DIR"), "/test-resource-0.0.1.npk"));
         dump(src)
     };
 }

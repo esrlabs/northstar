@@ -76,7 +76,7 @@ test!(start_stop_test_container_with_waiting, {
         assume("Sleeping", 5u64).await?;
         runtime.stop(TEST_CONTAINER, 5).await?;
         assume(
-            "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+            "Stopped test-container:0.0.1 with status Signaled\\(SIGTERM\\)",
             5,
         )
         .await?;
@@ -93,7 +93,7 @@ test!(start_stop_test_container_without_waiting, {
         runtime.start(TEST_CONTAINER).await?;
         runtime.stop(TEST_CONTAINER, 1).await?;
         assume(
-            "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+            "Stopped test-container:0.0.1 with status Signaled\\(SIGTERM\\)",
             5,
         )
         .await?;
@@ -178,7 +178,7 @@ test!(try_to_uninstall_a_started_container, {
     runtime.install_test_resource().await?;
 
     runtime.start(TEST_CONTAINER).await?;
-    assume("test_container: Sleeping...", 5u64).await?;
+    assume("test-container: Sleeping...", 5u64).await?;
 
     let result = runtime.uninstall_test_container().await;
     assert!(result.is_err());
@@ -196,14 +196,14 @@ test!(start_mounted_container_with_not_mounted_resource, {
 
     // Start a container that depends on a resource.
     runtime.start(TEST_CONTAINER).await?;
-    assume("test_container: Sleeping...", 5u64).await?;
+    assume("test-container: Sleeping...", 5u64).await?;
     runtime.stop(TEST_CONTAINER, 5).await?;
 
     // Umount the resource and start the container again.
     runtime.umount(TEST_RESOURCE).await?;
 
     runtime.start(TEST_CONTAINER).await?;
-    assume("test_container: Sleeping...", 5u64).await?;
+    assume("test-container: Sleeping...", 5u64).await?;
 
     runtime.stop(TEST_CONTAINER, 5).await?;
 
@@ -307,7 +307,7 @@ test!(
         let mut runtime = Northstar::launch_install_test_container().await?;
 
         runtime.start(TEST_CONTAINER).await?;
-        assume("test_container: Sleeping", 5).await?;
+        assume("test-container: Sleeping", 5).await?;
         runtime.stop(TEST_CONTAINER, 5).await?;
 
         let result = runtime.shutdown().await;
@@ -409,9 +409,9 @@ test!(cgroups_memory, {
     for _ in 0..10 {
         runtime.test_cmds("leak-memory").await;
         runtime.start(TEST_CONTAINER).await?;
-        assume("Process test_container:0.0.1 is out of memory", 10).await?;
+        assume("Process test-container:0.0.1 is out of memory", 10).await?;
         assume(
-            "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
+            "Stopped test-container:0.0.1 with status Signaled\\(SIGTERM\\)",
             10,
         )
         .await?;

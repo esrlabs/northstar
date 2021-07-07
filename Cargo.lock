@@ -1220,7 +1220,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "northstar_tests"
+name = "northstar-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2184,7 +2184,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_container"
+name = "test-container"
 version = "0.1.0"
 dependencies = [
  "anyhow",

@@ -34,8 +34,8 @@ fn main() {
         "../examples/message-0.0.2",
         "../examples/persistence",
         "../examples/seccomp",
-        "test_container",
-        "test_resource",
+        "test-container",
+        "test-resource",
     ] {
         let dir = Path::new(dir);
         // Build crate if a Cargo manfiest is included in the directory

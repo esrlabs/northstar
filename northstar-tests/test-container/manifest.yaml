@@ -1,6 +1,6 @@
-name: test_container
+name: test-container
 version: 0.0.1
-init: /test_container
+init: /test-container
 uid: 1000
 gid: 1000
 cgroups:
@@ -29,7 +29,7 @@ mounts:
     size: 20480000
   /resource:
     type: resource
-    name: test_resource
+    name: test-resource
     version: 0.0.1
     dir: test
     options: nosuid,nodev,noexec
@@ -37,4 +37,4 @@ io:
   stdout:
     log:
       level: DEBUG
-      tag: test_container
+      tag: test-container

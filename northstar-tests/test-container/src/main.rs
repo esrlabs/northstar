@@ -60,7 +60,7 @@ fn main() -> Result<()> {
 
         for line in commands.lines() {
             println!("Executing \"{}\"", line);
-            let command = iter::once("test_container").chain(line.split_whitespace());
+            let command = iter::once("test-container").chain(line.split_whitespace());
             match TestCommands::from_iter(command) {
                 TestCommands::Cat { path } => cat(&path)?,
                 TestCommands::Crash => crash(),
