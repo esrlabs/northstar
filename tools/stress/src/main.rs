@@ -14,14 +14,14 @@
 
 use anyhow::{anyhow, Context, Result};
 use futures::{
-    future::{ready, try_join_all},
-    FutureExt,
+    future::{pending, ready, try_join_all},
+    FutureExt, StreamExt,
 };
-use northstar::api::client;
-use std::str::FromStr;
+use northstar::api::{client, model};
+use std::{path::PathBuf, str::FromStr};
 use structopt::StructOpt;
-use tokio::{select, task, time};
-use tokio_util::sync::CancellationToken;
+use tokio::{pin, select, task, time};
+use tokio_util::{either::Either, sync::CancellationToken};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Mode {
@@ -29,6 +29,7 @@ enum Mode {
     StartStop,
     StartStopUmount,
     MountStartStopUmount,
+    InstallUninstall,
 }
 
 impl FromStr for Mode {
@@ -40,6 +41,7 @@ impl FromStr for Mode {
             "start-stop" => Ok(Mode::StartStop),
             "start-stop-umount" => Ok(Mode::StartStopUmount),
             "mount-start-stop-umount" => Ok(Mode::StartStopUmount),
+            "install-uninstall" => Ok(Mode::InstallUninstall),
             _ => Err("Invalid mode"),
         }
     }
@@ -66,6 +68,14 @@ struct Opt {
     /// Mode
     #[structopt(short, long, default_value = "start-stop")]
     mode: Mode,
+
+    /// Npk for install-uninstall mode
+    #[structopt(long, required_if("mode", "install-uninstall"))]
+    npk: Option<PathBuf>,
+
+    /// Repository for install-uninstall mode
+    #[structopt(long, required_if("mode", "install-uninstall"))]
+    repository: Option<String>,
 }
 
 #[tokio::main]
@@ -74,8 +84,12 @@ async fn main() -> Result<()> {
     let opt = Opt::from_args();
     let timeout = time::Duration::from_secs(30);
 
+    if opt.mode == Mode::InstallUninstall {
+        return install_uninstall(&opt).await;
+    }
+
     // Get a list of installed applications
-    let client = client::Client::new(&opt.address, None, timeout).await?;
+    let mut client = client::Client::new(&opt.address, None, timeout).await?;
     let apps = client
         .containers()
         .await?
@@ -102,7 +116,7 @@ async fn main() -> Result<()> {
         let mode = opt.mode.clone();
 
         let task = task::spawn(async move {
-            let client = client::Client::new(&url, None, timeout).await?;
+            let mut client = client::Client::new(&url, None, timeout).await?;
             let mut iterations = 0;
             loop {
                 if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
@@ -173,4 +187,47 @@ async fn main() -> Result<()> {
 
     println!("Total iterations: {}", result?.iter().sum::<u32>());
     Ok(())
+}
+
+/// Install and uninstall an npk in a loop
+async fn install_uninstall(opt: &Opt) -> Result<()> {
+    let timeout = time::Duration::from_secs(30);
+    let mut client = client::Client::new(&opt.address, Some(10), timeout).await?;
+
+    let timeout = opt
+        .duration
+        .map(|d| Either::Left(time::sleep(time::Duration::from_secs(d))))
+        .unwrap_or_else(|| Either::Right(pending()));
+    pin!(timeout);
+
+    let npk = opt
+        .npk
+        .as_ref()
+        .ok_or_else(|| anyhow!("Missing npk argument"))?;
+    let repository = opt
+        .repository
+        .as_ref()
+        .ok_or_else(|| anyhow!("Missing repository argument"))?;
+
+    // Initial install - everyhing beyond is notification triggered
+    client.install(npk, repository).await?;
+
+    loop {
+        select! {
+            _ = &mut timeout => break Ok(()),
+            n = client.next() => {
+                match n {
+                    Some(Ok(model::Notification::Install(container))) => {
+                        client.uninstall(&container.name(), &container.version()).await?;
+                    }
+                    Some(Ok(model::Notification::Uninstall(_))) => {
+                        client.install(npk, repository).await?;
+                    }
+                    Some(Ok(_)) => continue,
+                    Some(Err(e)) => break Err(e.into()),
+                    None => break Err(anyhow!("Runtime closed the connection")),
+                }
+            }
+        }
+    }
 }

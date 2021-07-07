@@ -24,18 +24,27 @@ use tokio::time;
 pub(crate) fn notification(notification: &Notification) {
     match notification {
         Notification::OutOfMemory(c) => println!("container {} is out of memory", c),
-        Notification::Exit { container, status } => println!(
+        Notification::Exit(container, status) => println!(
             "container {} exited with status {}",
             container,
             match status {
-                ExitStatus::Exit(c) => format!("exit code {}", c),
-                ExitStatus::Signaled(s) => format!("signaled {}", s),
+                ExitStatus::Exit(code) => format!("exit code {}", code),
+                ExitStatus::Signaled(signal) => format!("signaled {}", signal),
             }
         ),
-        Notification::Install(c, v) => println!("installed {}:{}", c, v),
-        Notification::Uninstalled(c, v) => println!("uninstalled {}:{}", c, v),
-        Notification::Started(c) => println!("started {}", c),
-        Notification::Stopped(c) => println!("stopped {}", c),
+        Notification::Install(container) => println!("installed {}", container),
+        Notification::Uninstall(container) => println!("uninstalled {}", container),
+        Notification::Started(container) => println!("started {}", container),
+        Notification::Stopped(container, status) => {
+            println!(
+                "stopped {} with status {}",
+                container,
+                match status {
+                    ExitStatus::Exit(code) => format!("exit code {}", code),
+                    ExitStatus::Signaled(signal) => format!("signaled {}", signal),
+                }
+            )
+        }
         Notification::Shutdown => println!("shutting down"),
     }
 }

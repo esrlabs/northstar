@@ -67,3 +67,11 @@ struct Inner {
     name: Name,
     version: Version,
 }
+
+#[test]
+fn try_from() {
+    assert_eq!(
+        Container::new("test".into(), Version::parse("0.0.1").unwrap()),
+        std::convert::TryInto::try_into("test:0.0.1").unwrap()
+    );
+}

@@ -103,12 +103,11 @@ impl ExitStatus {
 #[derive(new, Clone, Debug)]
 enum Notification {
     OutOfMemory(Container),
-    Exit {
-        container: Container,
-        status: ExitStatus,
-    },
+    Exit(Container, ExitStatus),
+    Install(Container),
+    Uninstall(Container),
     Started(Container),
-    Stopped(Container),
+    Stopped(Container, ExitStatus),
 }
 
 /// Result of a Runtime action

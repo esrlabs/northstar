@@ -48,7 +48,7 @@ test!(runtime_launch, {
 
 // Start the internal compiled in hello_world example
 test!(internal_hello_world, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
     runtime.start("hello-world:0.0.1").await?;
     runtime.shutdown().await
 });
@@ -56,7 +56,7 @@ test!(internal_hello_world, {
 // Install and uninstall is a loop. After a number of installation
 // try to start the test container
 test!(install_uninstall_test_container, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
     for _ in 0u32..10 {
         runtime.install_test_container().await?;
         runtime.uninstall_test_container().await?;
@@ -72,20 +72,11 @@ test!(start_stop_test_container_with_waiting, {
         runtime.start(TEST_CONTAINER).await?;
         assume("Sleeping", 5u64).await?;
         runtime.stop(TEST_CONTAINER, 5).await?;
-
         assume(
             "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
             5,
         )
         .await?;
-        runtime
-            .assume_notification(
-                move |n| {
-                    n == &Notification::Stopped(northstar_tests::test_container::test_container())
-                },
-                5,
-            )
-            .await?;
     }
 
     runtime.shutdown().await
@@ -98,37 +89,28 @@ test!(start_stop_test_container_without_waiting, {
     for _ in 0..10u32 {
         runtime.start(TEST_CONTAINER).await?;
         runtime.stop(TEST_CONTAINER, 1).await?;
-
         assume(
             "Stopped test_container:0.0.1 with status Signaled\\(SIGTERM\\)",
             5,
         )
         .await?;
-        runtime
-            .assume_notification(
-                move |n| {
-                    n == &Notification::Stopped(northstar_tests::test_container::test_container())
-                },
-                5,
-            )
-            .await?;
     }
     runtime.shutdown().await
 });
 
 // Mount and umount all containers known to the runtime
 test!(mount_umount_test_container_via_client, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
 
     // Mount
-    let containers = &runtime.containers().await?;
+    let containers = runtime.containers().await?;
     let containers = containers
         .iter()
         .map(|c| (c.container.name().as_str(), c.container.version()));
     (*runtime).mount(containers).await?;
 
     // Umount
-    let containers = &runtime.containers().await?;
+    let containers = &mut runtime.containers().await?;
     for c in containers.iter().filter(|c| c.mounted) {
         let container = format!("{}:{}", c.container.name(), c.container.version());
         runtime.umount(&container).await?;
@@ -139,7 +121,7 @@ test!(mount_umount_test_container_via_client, {
 
 // Try to stop a not started container and expect an Err
 test!(try_to_stop_unknown_container, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
     let container = "foo:0.0.1:default";
     assert!(runtime.stop(container, 5).await.is_err());
     runtime.shutdown().await
@@ -147,7 +129,7 @@ test!(try_to_stop_unknown_container, {
 
 // Try to start a container which is not installed/known
 test!(try_to_start_unknown_container, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
     let container = "unknown_application:0.0.12:asdf";
     assert!(runtime.start(container).await.is_err());
     runtime.shutdown().await
@@ -155,7 +137,7 @@ test!(try_to_start_unknown_container, {
 
 // Try to start a container where a dependecy is missing
 test!(try_to_start_containter_that_misses_a_resource, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
     runtime.install_test_container().await?;
     // The TEST_RESOURCE is not installed.
     assert!(runtime.start(TEST_CONTAINER).await.is_err());
@@ -164,7 +146,7 @@ test!(try_to_start_containter_that_misses_a_resource, {
 
 // Start a container that uses a resource
 test!(check_test_container_resource_usage, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
 
     // Install test container & resource
     runtime.install_test_container().await?;
@@ -188,7 +170,7 @@ test!(check_test_container_resource_usage, {
 
 // Try to uninstall a started container
 test!(try_to_uninstall_a_started_container, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
 
     runtime.install_test_container().await?;
     runtime.install_test_resource().await?;
@@ -205,7 +187,7 @@ test!(try_to_uninstall_a_started_container, {
 });
 
 test!(start_mounted_container_with_not_mounted_resource, {
-    let runtime = Northstar::launch().await?;
+    let mut runtime = Northstar::launch().await?;
 
     runtime.install_test_container().await?;
     runtime.install_test_resource().await?;
@@ -240,15 +222,7 @@ test!(container_crash_exit, {
         runtime.start(TEST_CONTAINER).await?;
         runtime
             .assume_notification(
-                |n| {
-                    matches!(
-                        n,
-                        Notification::Exit {
-                            status: ExitStatus::Signaled(6),
-                            ..
-                        }
-                    )
-                },
+                |n| matches!(n, Notification::Exit(_, ExitStatus::Signaled(6))),
                 15,
             )
             .await?;
@@ -263,7 +237,7 @@ test!(container_crash_exit, {
 // Check uid. In the manifest of the test container the uid
 // is set to 1000
 test!(container_uses_correct_uid, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
     assume("getuid: 1000", 5).await?;
@@ -273,7 +247,7 @@ test!(container_uses_correct_uid, {
 // Check gid. In the manifest of the test container the gid
 // is set to 1000
 test!(container_uses_correct_gid, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
     assume("getuid: 1000", 5).await?;
@@ -282,7 +256,7 @@ test!(container_uses_correct_gid, {
 
 // Check parent pid. Northstar starts an init process which must have pid 1.
 test!(container_ppid_must_be_init, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
     assume("getppid: 1", 5).await?;
@@ -291,7 +265,7 @@ test!(container_ppid_must_be_init, {
 
 // Check session id which needs to be pid of init
 test!(container_sid_must_be_init_or_none, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
 
@@ -302,7 +276,7 @@ test!(container_sid_must_be_init_or_none, {
 
 // The test container only gets the cap_kill capability. See the manifest
 test!(container_shall_only_have_configured_capabilities, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
     assume("caps bounding: \\{CAP_KILL\\}", 5).await?;
@@ -328,7 +302,7 @@ test!(
         // Collect list of fds
         let before = fds()?;
 
-        let runtime = Northstar::launch_install_test_container().await?;
+        let mut runtime = Northstar::launch_install_test_container().await?;
 
         runtime.start(TEST_CONTAINER).await?;
         assume("test_container: Sleeping", 5).await?;
@@ -348,7 +322,7 @@ test!(
 // stdout: some pipe
 // stderr: /dev/null
 test!(container_shall_only_have_configured_fds, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
     assume("/proc/self/fd/0: /dev/null", 5).await?;
@@ -361,7 +335,7 @@ test!(container_shall_only_have_configured_fds, {
 
 // Check if /proc is mounted ro
 test!(proc_is_mounted_ro, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.test_cmds("inspect").await;
     runtime.start(TEST_CONTAINER).await?;
     assume("proc /proc proc ro,", 5).await?;
@@ -383,7 +357,7 @@ test!(open_many_connections_to_the_runtime_and_shutdown, {
 
     let result = runtime.shutdown().await;
 
-    for client in &clients {
+    for client in &mut clients {
         assert!(client.containers().await.is_err());
     }
     clients.clear();
@@ -391,6 +365,7 @@ test!(open_many_connections_to_the_runtime_and_shutdown, {
     result
 });
 
+// Verify that the runtime reject a version mismatch in Connect
 test!(check_api_version_on_connect, {
     let runtime = Northstar::launch().await?;
 
@@ -416,20 +391,18 @@ test!(check_api_version_on_connect, {
 
     drop(connection);
 
-    let mut expected_message = model::Message::new_connect(model::Connect::ConnectNack(
+    let expected_message = model::Message::new_connect(model::Connect::ConnectNack(
         ConnectNack::InvalidProtocolVersion(model::version()),
     ));
-
-    // The reply shall contain the same uuid as the request
-    expected_message.id = connect_message.id.clone();
 
     assert_eq!(connack, expected_message);
 
     runtime.shutdown().await
 });
 
+// Verify that a container that exceeds it's memory limit is detected
 test!(cgroups_memory, {
-    let runtime = Northstar::launch_install_test_container().await?;
+    let mut runtime = Northstar::launch_install_test_container().await?;
 
     for _ in 0..10 {
         runtime.test_cmds("leak-memory").await;

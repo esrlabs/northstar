@@ -89,6 +89,7 @@ impl<T: Unpin + AsyncRead + AsyncWrite> AsyncWrite for Framed<T> {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
+        assert!(self.inner.write_buffer().is_empty());
         let t: &mut T = self.inner.get_mut();
         AsyncWrite::poll_write(Pin::new(t), cx, buf)
     }
@@ -155,9 +156,12 @@ impl<T: Unpin + AsyncRead + AsyncWrite> futures::sink::Sink<model::Message> for 
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto;
+
     use super::*;
+    use crate::api::model::{Message, Notification, Request, Response};
     use bytes::BytesMut;
-    use proptest::{prelude::Just, proptest, strategy::Strategy};
+    use proptest::{prelude::Just, prop_oneof, proptest, strategy::Strategy};
 
     proptest! {
         #[test]
@@ -176,12 +180,16 @@ mod tests {
         }
     }
 
-    fn mk_message() -> impl Strategy<Value = model::Message> {
-        mk_simple_payload().prop_map(model::Message::new)
-    }
-
-    fn mk_simple_payload() -> impl Strategy<Value = model::Payload> {
-        // TODO: Perhaps consider all the variants?
-        Just(model::Payload::Request(model::Request::Containers))
+    fn mk_message() -> impl Strategy<Value = Message> {
+        prop_oneof![
+            Just(Message::Request(Request::Containers)),
+            Just(Message::Request(Request::Shutdown)),
+            Just(Message::Request(Request::Mount(vec!()))),
+            Just(Message::Response(Response::Ok(()))),
+            Just(Message::Notification(Notification::Shutdown)),
+            Just(Message::Notification(Notification::OutOfMemory(
+                "test:0.0.1".try_into().unwrap()
+            ))),
+        ]
     }
 }

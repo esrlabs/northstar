@@ -13,34 +13,32 @@
 //   limitations under the License.
 
 use super::{
-    codec::{framed, Framed},
+    codec::{self, framed},
     model::{
-        self, Connect, Container, ContainerData, Message, MountResult, Notification, Payload,
-        RepositoryId, Request, Response,
+        self, Connect, Container, ContainerData, Message, MountResult, Notification, RepositoryId,
+        Request, Response,
     },
 };
 use futures::{SinkExt, Stream, StreamExt};
-use log::{debug, info};
+use log::debug;
 use npk::manifest::Version;
 use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
+    collections::{HashSet, VecDeque},
+    path::Path,
     pin::Pin,
     task::Poll,
 };
 use thiserror::Error;
 use tokio::{
-    fs,
-    io::{self, AsyncRead, AsyncWrite},
+    fs, io,
     net::{TcpStream, UnixStream},
-    select,
-    sync::{mpsc, oneshot},
-    task, time,
+    time,
 };
+use tokio_util::either::Either;
 use url::Url;
 
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
-impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
+const SCHEME_TCP: &str = "tcp";
+const SCHEME_UNIX: &str = "unix";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -52,12 +50,12 @@ pub enum Error {
     Stopped,
     #[error("Protocol error")]
     Protocol,
-    #[error("Pending request")]
-    PendingRequest,
     #[error("Api error: {0:?}")]
     Api(super::model::Error),
-    #[error("Invalid console address {0}, use either tcp://... or unix:...")]
+    #[error("Invalid console address {0}, use either tcp://... or unix://...")]
     InvalidConsoleAddress(String),
+    #[error("Notification consumer lagged")]
+    LaggedNotifications,
 }
 
 /// Client for a Northstar runtime instance.
@@ -78,14 +76,16 @@ pub enum Error {
 /// }
 /// ```
 pub struct Client {
-    notification_rx: mpsc::Receiver<Result<Notification, Error>>,
-    request_tx: mpsc::Sender<(ClientRequest, oneshot::Sender<Result<Response, Error>>)>,
+    /// Connectio to the runtime
+    connection: codec::Framed<Either<TcpStream, UnixStream>>,
+    /// Buffer notifications received during request response communication
+    notifications: Option<VecDeque<Notification>>,
+    /// Flag if the client is stopped
+    fused: bool,
 }
 
-enum ClientRequest {
-    Request(Request),
-    Install(PathBuf, String),
-}
+/// Northstar console connection
+pub type Connection = codec::Framed<Either<TcpStream, UnixStream>>;
 
 impl<'a> Client {
     /// Connect and return a raw stream and sink interface. See codec for details
@@ -93,9 +93,9 @@ impl<'a> Client {
         url: &Url,
         notifications: Option<usize>,
         timeout: time::Duration,
-    ) -> Result<Framed<impl AsyncReadWrite>, Error> {
+    ) -> Result<Connection, Error> {
         let mut connection = match url.scheme() {
-            "tcp" => {
+            SCHEME_TCP => {
                 let addresses = url.socket_addrs(|| Some(4200))?;
                 let address = addresses
                     .first()
@@ -103,13 +103,13 @@ impl<'a> Client {
                 let stream = time::timeout(timeout, TcpStream::connect(address))
                     .await
                     .map_err(|_| Error::Timeout)??;
-                framed(Box::new(stream) as Box<dyn AsyncReadWrite>)
+                framed(Either::Left(stream))
             }
-            "unix" => {
+            SCHEME_UNIX => {
                 let stream = time::timeout(timeout, UnixStream::connect(url.path()))
                     .await
                     .map_err(|_| Error::Timeout)??;
-                framed(Box::new(stream) as Box<dyn AsyncReadWrite>)
+                framed(Either::Right(stream))
             }
             _ => return Err(Error::InvalidConsoleAddress(url.to_string())),
         };
@@ -127,27 +127,26 @@ impl<'a> Client {
         // Wait for conack
         let connect = time::timeout(timeout, connection.next());
         match connect.await {
-            Ok(Some(Ok(message))) => match message.payload {
-                Payload::Connect(Connect::ConnectAck) => (),
+            Ok(Some(Ok(message))) => match message {
+                Message::Connect(Connect::ConnectAck) => Ok(connection),
                 _ => {
                     debug!(
                         "Received invalid message {:?} while waiting for connack",
                         message
                     );
-                    return Err(Error::Protocol);
+                    Err(Error::Protocol)
                 }
             },
-            Ok(Some(Err(e))) => return Err(Error::Io(e)),
+            Ok(Some(Err(e))) => Err(Error::Io(e)),
             Ok(None) => {
                 debug!("Connection closed while waiting for connack");
-                return Err(Error::Protocol);
+                Err(Error::Protocol)
             }
             Err(_) => {
                 debug!("Timeout waiting for connack");
-                return Err(Error::Protocol);
+                Err(Error::Protocol)
             }
         }
-        Ok(connection)
     }
 
     /// Create a new northstar client and connect to a runtime instance running on `host`.
@@ -156,78 +155,16 @@ impl<'a> Client {
         notifications: Option<usize>,
         timeout: time::Duration,
     ) -> Result<Client, Error> {
-        let (notification_tx, notification_rx) = mpsc::channel(1000);
-        let (request_tx, mut request_rx) =
-            mpsc::channel::<(ClientRequest, oneshot::Sender<Result<Response, Error>>)>(10);
-        let mut response_tx = Option::<oneshot::Sender<Result<Response, Error>>>::None;
-
-        let mut connection = time::timeout(timeout, Self::connect(url, notifications, timeout))
+        let connection = time::timeout(timeout, Self::connect(url, notifications, timeout))
             .await
             .map_err(|_| Error::Timeout)??;
 
         debug!("Connected to {}", url);
 
-        task::spawn(async move {
-            loop {
-                select! {
-                    message = connection.next() => {
-                        match message {
-                            Some(Ok(message)) => match message.payload {
-                                Payload::Connect(_) => break Err(Error::Protocol),
-                                Payload::Request(_) => break Err(Error::Protocol),
-                                Payload::Response(r) => {
-                                    if let Some(r_tx) = response_tx.take() {
-                                        r_tx.send(Ok(r)).ok();
-                                    } else {
-                                        break Err(Error::Protocol);
-                                    }
-                                }
-                                Payload::Notification(n) => if notification_tx.send(Ok(n)).await.is_err() {
-                                    break Ok(());
-                                }
-                            },
-                            Some(Err(e)) => break Err(Error::Io(e)),
-                            None => {
-                                    info!("Connection closed");
-                                    break Ok(());
-                            }
-                        }
-                    }
-                    request = request_rx.recv() => {
-                        if let Some((request, r_tx)) = request {
-                            if response_tx.is_some() {
-                                r_tx.send(Err(Error::PendingRequest)).ok();
-                            } else {
-                                match request {
-                                    ClientRequest::Request(request) => {
-                                        match connection.send(Message::new_request(request)).await {
-                                            Ok(_) => response_tx = Some(r_tx), // Store the reponse tx part
-                                            Err(e) => drop(r_tx.send(Err(Error::Io(e)))),
-                                        }
-                                    }
-                                    ClientRequest::Install(npk, repository) => {
-                                        let mut file = fs::File::open(npk).await.expect("Failed to open"); // TODO
-                                        let size = file.metadata().await.unwrap().len();
-                                        let request = Request::Install(repository, size);
-                                        match connection.send(Message::new_request(request)).await {
-                                            Ok(_) => response_tx = Some(r_tx), // Store the reponse tx part
-                                            Err(e) => drop(r_tx.send(Err(Error::Io(e)))),
-                                        }
-                                        io::copy(&mut file, &mut connection).await?;
-                                    }
-                                }
-                            }
-                        } else {
-                            break Ok(());
-                        }
-                    }
-                }
-            }
-        });
-
         Ok(Client {
-            notification_rx,
-            request_tx,
+            connection,
+            notifications: notifications.map(VecDeque::with_capacity),
+            fused: false,
         })
     }
 
@@ -246,13 +183,34 @@ impl<'a> Client {
     /// println!("{:?}", response);
     /// # }
     /// ```
-    pub async fn request(&self, request: Request) -> Result<Response, Error> {
-        let (tx, rx) = oneshot::channel::<Result<Response, Error>>();
-        self.request_tx
-            .send((ClientRequest::Request(request), tx))
-            .await
-            .map_err(|_| Error::Stopped)?;
-        rx.await.map_err(|_| Error::Stopped)?
+    pub async fn request(&mut self, request: Request) -> Result<Response, Error> {
+        self.fused()?;
+
+        let message = Message::new_request(request);
+        self.connection.send(message).await.map_err(|e| {
+            self.fuse();
+            Error::Io(e)
+        })?;
+        loop {
+            match self.connection.next().await {
+                Some(Ok(message)) => match message {
+                    Message::Response(r) => break Ok(r),
+                    Message::Notification(notification) => self.queue_notification(notification)?,
+                    _ => {
+                        self.fuse();
+                        break Err(Error::Protocol);
+                    }
+                },
+                Some(Err(e)) => {
+                    self.fuse();
+                    break Err(Error::Io(e));
+                }
+                None => {
+                    self.fuse();
+                    break Err(Error::Stopped);
+                }
+            }
+        }
     }
 
     /// Request a list of installed containers
@@ -269,7 +227,7 @@ impl<'a> Client {
     /// println!("{:#?}", containers);
     /// # }
     /// ```
-    pub async fn containers(&self) -> Result<Vec<ContainerData>, Error> {
+    pub async fn containers(&mut self) -> Result<Vec<ContainerData>, Error> {
         match self.request(Request::Containers).await? {
             Response::Containers(containers) => Ok(containers),
             Response::Err(e) => Err(Error::Api(e)),
@@ -291,7 +249,7 @@ impl<'a> Client {
     /// println!("{:#?}", repositories);
     /// # }
     /// ```
-    pub async fn repositories(&self) -> Result<HashSet<RepositoryId>, Error> {
+    pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, Error> {
         match self.request(Request::Repositories).await? {
             Response::Err(e) => Err(Error::Api(e)),
             Response::Repositories(repositories) => Ok(repositories),
@@ -315,7 +273,7 @@ impl<'a> Client {
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn start(&self, name: &str, version: &Version) -> Result<(), Error> {
+    pub async fn start(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Start(Container::new(
                 name.to_string(),
@@ -346,7 +304,7 @@ impl<'a> Client {
     /// # }
     /// ```
     pub async fn stop(
-        &self,
+        &mut self,
         name: &str,
         version: &Version,
         timeout: time::Duration,
@@ -378,19 +336,47 @@ impl<'a> Client {
     /// client.install(&npk, "default").await.expect("Failed to install \"test.npk\" into repository \"default\"");
     /// # }
     /// ```
-    pub async fn install(&self, npk: &Path, repository: &str) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel::<Result<Response, Error>>();
-        self.request_tx
-            .send((
-                ClientRequest::Install(npk.to_owned(), repository.to_owned()),
-                tx,
-            ))
+    pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<(), Error> {
+        self.fused()?;
+        let mut file = fs::File::open(npk).await.map_err(Error::Io)?;
+        let size = file.metadata().await.unwrap().len();
+        let request = Request::Install(repository.into(), size);
+        let message = Message::new_request(request);
+        self.connection.send(message).await.map_err(|_| {
+            self.fuse();
+            Error::Stopped
+        })?;
+
+        io::copy(&mut file, &mut self.connection)
             .await
-            .map_err(|_| Error::Stopped)?;
-        match rx.await.map_err(|_| Error::Stopped)?? {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
-            _ => Err(Error::Protocol),
+            .map_err(|e| {
+                self.fuse();
+                Error::Io(e)
+            })?;
+
+        loop {
+            match self.connection.next().await {
+                Some(Ok(message)) => match message {
+                    Message::Response(r) => match r {
+                        Response::Ok(_) => break Ok(()),
+                        Response::Err(e) => break Err(Error::Api(e)),
+                        _ => {
+                            self.fuse();
+                            break Err(Error::Protocol);
+                        }
+                    },
+                    Message::Notification(notification) => self.queue_notification(notification)?,
+                    _ => break Err(Error::Protocol),
+                },
+                Some(Err(e)) => {
+                    self.fuse();
+                    break Err(Error::Io(e));
+                }
+                None => {
+                    self.fuse();
+                    break Err(Error::Stopped);
+                }
+            }
         }
     }
 
@@ -411,7 +397,7 @@ impl<'a> Client {
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn uninstall(&self, name: &str, version: &Version) -> Result<(), Error> {
+    pub async fn uninstall(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Uninstall(Container::new(
                 name.to_string(),
@@ -421,16 +407,22 @@ impl<'a> Client {
         {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
-            _ => Err(Error::Protocol),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
         }
     }
 
     /// Stop the runtime
-    pub async fn shutdown(&self) -> Result<(), Error> {
+    pub async fn shutdown(&mut self) -> Result<(), Error> {
         match self.request(Request::Shutdown).await? {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
-            _ => Err(Error::Protocol),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
         }
     }
 
@@ -450,18 +442,21 @@ impl<'a> Client {
     /// # }
     /// ```
     pub async fn mount<I: 'a + IntoIterator<Item = (&'a str, &'a Version)>>(
-        &self,
+        &mut self,
         containers: I,
     ) -> Result<Vec<MountResult>, Error> {
+        self.fused()?;
         let containers = containers
             .into_iter()
             .map(|(name, version)| Container::new(name.to_string(), version.clone()))
             .collect();
         match self.request(Request::Mount(containers)).await? {
             Response::Mount(mounts) => Ok(mounts),
-            Response::Ok(_) => unreachable!(),
             Response::Err(e) => Err(Error::Api(e)),
-            _ => Err(Error::Protocol),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
         }
     }
 
@@ -479,7 +474,7 @@ impl<'a> Client {
     /// client.umount("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to unmount \"hello\"");
     /// # }
     /// ```
-    pub async fn umount(&self, name: &str, version: &Version) -> Result<(), Error> {
+    pub async fn umount(&mut self, name: &str, version: &Version) -> Result<(), Error> {
         match self
             .request(Request::Umount(Container::new(
                 name.to_string(),
@@ -489,7 +484,39 @@ impl<'a> Client {
         {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
-            _ => Err(Error::Protocol),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
+        }
+    }
+
+    /// Store a notification in the notification queue
+    fn queue_notification(&mut self, notification: Notification) -> Result<(), Error> {
+        if let Some(notifications) = &mut self.notifications {
+            if notifications.len() == notifications.capacity() {
+                self.fuse();
+                Err(Error::LaggedNotifications)
+            } else {
+                notifications.push_back(notification);
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Set the fused flag
+    fn fuse(&mut self) {
+        self.fused = true;
+    }
+
+    /// Return Error::Stopped if the client is fused
+    fn fused(&self) -> Result<(), Error> {
+        if self.fused {
+            Err(Error::Stopped)
+        } else {
+            Ok(())
         }
     }
 }
@@ -504,7 +531,7 @@ impl<'a> Client {
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), Some(10), Duration::from_secs(10)).await.unwrap();
 ///     client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
@@ -512,12 +539,30 @@ impl<'a> Client {
 /// }
 /// ```
 impl Stream for Client {
-    type Item = Result<Notification, Error>;
+    type Item = Result<Notification, io::Error>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.notification_rx).poll_recv(cx)
+        if self.fused {
+            return Poll::Ready(None);
+        }
+
+        if let Some(n) = self.notifications.as_mut().and_then(|n| n.pop_front()) {
+            Poll::Ready(Some(Ok(n)))
+        } else {
+            match self.connection.poll_next_unpin(cx) {
+                Poll::Ready(r) => match r {
+                    Some(Ok(message)) => match message {
+                        Message::Notification(n) => Poll::Ready(Some(Ok(n))),
+                        _ => unreachable!(),
+                    },
+                    Some(Err(e)) => Poll::Ready(Some(Err(e))),
+                    None => Poll::Ready(None),
+                },
+                Poll::Pending => Poll::Pending,
+            }
+        }
     }
 }

@@ -48,39 +48,8 @@ pub enum ExitStatus {
     Signaled(Signal),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Message {
-    pub id: MessageId, // used to match response with a request
-    pub payload: Payload,
-}
-
-impl Message {
-    pub fn new(payload: Payload) -> Message {
-        Message {
-            id: uuid::Uuid::new_v4().to_string(),
-            payload,
-        }
-    }
-
-    pub fn new_connect(connect: Connect) -> Message {
-        Message::new(Payload::Connect(connect))
-    }
-
-    pub fn new_request(request: Request) -> Message {
-        Message::new(Payload::Request(request))
-    }
-
-    pub fn new_response(respone: Response) -> Message {
-        Message::new(Payload::Response(respone))
-    }
-
-    pub fn new_notification(notification: Notification) -> Message {
-        Message::new(Payload::Notification(notification))
-    }
-}
-
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum Payload {
+pub enum Message {
     Connect(Connect),
     Request(Request),
     Response(Response),
@@ -90,14 +59,11 @@ pub enum Payload {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
     OutOfMemory(Container),
-    Exit {
-        container: Container,
-        status: ExitStatus,
-    },
-    Install(Name, Version),
-    Uninstalled(Name, Version),
+    Exit(Container, ExitStatus),
+    Install(Container),
+    Uninstall(Container),
     Started(Container),
-    Stopped(Container),
+    Stopped(Container, ExitStatus),
     Shutdown,
 }
 

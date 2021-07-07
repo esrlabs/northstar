@@ -139,14 +139,14 @@ impl Console {
         // Wait for a connect message within timeout
         let connect = network_stream.next();
         let connect = time::timeout(time::Duration::from_secs(5), connect);
-        let (protocol_version, notifications, connect_message_id) = match connect.await {
-            Ok(Some(Ok(m))) => match m.payload {
-                model::Payload::Connect(model::Connect::Connect {
+        let (protocol_version, notifications) = match connect.await {
+            Ok(Some(Ok(m))) => match m {
+                model::Message::Connect(model::Connect::Connect {
                     version,
                     subscribe_notifications,
-                }) => (version, subscribe_notifications, m.id),
+                }) => (version, subscribe_notifications),
                 _ => {
-                    warn!("{}: Received {:?} instead of Connect", peer, m.payload);
+                    warn!("{}: Received {:?} instead of Connect", peer, m);
                     return Ok(());
                 }
             },
@@ -173,19 +173,13 @@ impl Console {
             // Send a ConnectNack and return -> closes the connection
             let connack = model::ConnectNack::InvalidProtocolVersion(model::version());
             let connack = model::Connect::ConnectNack(connack);
-            let message = model::Message {
-                id: connect_message_id,
-                payload: model::Payload::Connect(connack),
-            };
+            let message = model::Message::Connect(connack);
             network_stream.send(message).await.ok();
             return Ok(());
         } else {
             // Send ConnectAck
             let conack = model::Connect::ConnectAck;
-            let message = model::Message {
-                id: connect_message_id,
-                payload: model::Payload::Connect(conack),
-            };
+            let message = model::Message::Connect(conack);
 
             if let Err(e) = network_stream.send(message).await {
                 warn!("{}: Connection error: {}", peer, e);
@@ -280,9 +274,8 @@ async fn process_request<S>(
 where
     S: AsyncRead + Unpin,
 {
-    let message_id = message.id.clone();
     let (reply_tx, reply_rx) = oneshot::channel();
-    if let model::Payload::Request(model::Request::Install(repository, size)) = message.payload {
+    if let model::Message::Request(model::Request::Install(repository, size)) = message {
         debug!(
             "{}: Received installation request with size {}",
             client_id,
@@ -320,10 +313,7 @@ where
         trace!("    {:?} <- event loop", response);
         response
     })
-    .map(|response| model::Message {
-        id: message_id,
-        payload: model::Payload::Response(response),
-    })
+    .map(model::Message::Response)
 }
 
 /// Types of listeners for console connections
@@ -454,12 +444,15 @@ impl From<Notification> for model::Notification {
     fn from(n: Notification) -> Self {
         match n {
             Notification::OutOfMemory(container) => model::Notification::OutOfMemory(container),
-            Notification::Exit { container, status } => model::Notification::Exit {
-                container,
-                status: status.into(),
-            },
+            Notification::Exit(container, status) => {
+                model::Notification::Exit(container, status.into())
+            }
+            Notification::Install(container) => model::Notification::Install(container),
+            Notification::Uninstall(container) => model::Notification::Uninstall(container),
             Notification::Started(container) => model::Notification::Started(container),
-            Notification::Stopped(container) => model::Notification::Stopped(container),
+            Notification::Stopped(container, status) => {
+                model::Notification::Stopped(container, status.into())
+            }
         }
     }
 }
