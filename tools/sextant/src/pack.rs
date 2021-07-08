@@ -13,9 +13,12 @@
 //   limitations under the License.
 
 use anyhow::{Context, Result};
-use npk::{
-    manifest::Manifest,
-    npk::{pack_with, CompressionAlgorithm},
+use northstar::{
+    npk,
+    npk::{
+        manifest::Manifest,
+        npk::{pack_with, CompressionAlgorithm},
+    },
 };
 use std::{convert::TryInto, fs, path::Path};
 use tempfile::tempdir;

@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::api;
+use crate::{api, api::model::Container};
 use config::Config;
 use derive_new::new;
 use error::Error;
@@ -52,9 +52,6 @@ mod mount;
 mod pipe;
 mod repository;
 mod state;
-
-/// Container identification
-pub use api::container::Container;
 
 type EventTx = mpsc::Sender<Event>;
 type RepositoryId = String;

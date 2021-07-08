@@ -19,9 +19,9 @@ use super::{
         Notification, RepositoryId, Request, Response,
     },
 };
+use crate::common::{name::InvalidNameChar, version::Version};
 use futures::{SinkExt, Stream, StreamExt};
 use log::debug;
-use npk::manifest::{InvalidNameChar, Version};
 use std::{
     collections::{HashSet, VecDeque},
     convert::TryInto,
@@ -69,7 +69,7 @@ pub enum Error {
 /// use futures::StreamExt;
 /// use tokio::time::Duration;
 /// use northstar::api::client::Client;
-/// # use npk::manifest::Version;
+/// use northstar::common::version::Version;
 ///
 /// #[tokio::main]
 /// async fn main() {
@@ -81,7 +81,7 @@ pub enum Error {
 /// }
 /// ```
 pub struct Client {
-    /// Connectio to the runtime
+    /// Connection to the runtime
     connection: codec::Framed<Either<TcpStream, UnixStream>>,
     /// Buffer notifications received during request response communication
     notifications: Option<VecDeque<Notification>>,
@@ -268,7 +268,7 @@ impl<'a> Client {
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use npk::manifest::Version;
+    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
@@ -298,11 +298,11 @@ impl<'a> Client {
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use npk::manifest::Version;
+    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.stop("hello", &Version::parse("0.0.1").unwrap(), Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
@@ -391,7 +391,7 @@ impl<'a> Client {
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use npk::manifest::Version;
+    /// # use northstar::common::version::Version;
     /// # use std::path::Path;
     /// #
     /// # #[tokio::main]
@@ -435,7 +435,7 @@ impl<'a> Client {
     /// ```no_run
     /// # use northstar::api::client::Client;
     /// # use std::time::Duration;
-    /// # use npk::manifest::Version;
+    /// # use northstar::common::version::Version;
     /// # use std::path::Path;
     /// # use std::convert::TryInto;
     /// #
@@ -467,10 +467,10 @@ impl<'a> Client {
     /// Umount a mounted container
     ///
     /// ```no_run
-    /// # use northstar::api::client::Client;
     /// # use std::time::Duration;
-    /// # use npk::manifest::Version;
     /// # use std::path::Path;
+    /// # use northstar::api::client::Client;
+    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
@@ -531,7 +531,7 @@ impl<'a> Client {
 /// use futures::StreamExt;
 /// use std::time::Duration;
 /// use northstar::api::client::Client;
-/// use npk::manifest::Version;
+/// use northstar::common::version::Version;
 ///
 /// #[tokio::main]
 /// async fn main() {

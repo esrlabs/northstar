@@ -12,7 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use npk::manifest::{InvalidNameChar, Name, Version};
+use crate::common::{
+    name::{InvalidNameChar, Name},
+    version::Version,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},

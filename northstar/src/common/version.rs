@@ -12,23 +12,4 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#![deny(clippy::all)]
-
-pub mod common;
-
-#[cfg(feature = "api")]
-/// Northstar remote API. Control start and stop of applications and
-/// receive updates about container states.
-pub mod api;
-
-#[cfg(feature = "npk")]
-/// NPK format support.
-pub mod npk;
-
-#[cfg(feature = "runtime")]
-/// The Northstar runtime core.
-pub mod runtime;
-
-/// Northstar internal utilities
-#[cfg(feature = "runtime")]
-mod util;
+pub type Version = semver::Version;

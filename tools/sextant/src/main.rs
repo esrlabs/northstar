@@ -15,6 +15,7 @@
 #![deny(clippy::all)]
 
 use anyhow::Result;
+use northstar::npk;
 use std::path::PathBuf;
 use structopt::StructOpt;
 

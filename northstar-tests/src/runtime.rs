@@ -18,14 +18,16 @@ use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use northstar::{
-    api::{client::Client, model::Notification},
+    api::{
+        client::Client,
+        model::{Container, Notification},
+    },
+    common::version::Version,
     runtime::{
         self,
         config::{self, Config},
-        Container,
     },
 };
-use npk::manifest::Version;
 use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
 use tempfile::TempDir;
 use tokio::{fs, pin, select, time};
@@ -212,7 +214,7 @@ impl Northstar {
 
         self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
             .await
-            .context("Failed to wait for test contaioner install notification")
+            .context("Failed to wait for test container install notification")
     }
 
     /// Uninstall the test container and wait for the notification

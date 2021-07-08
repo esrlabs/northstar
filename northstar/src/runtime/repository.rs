@@ -18,6 +18,7 @@ use super::{
     state::Npk,
     Container, RepositoryId,
 };
+use crate::npk::npk;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
@@ -26,7 +27,6 @@ use futures::{
 };
 use log::{debug, info, warn};
 use mpsc::Receiver;
-use npk::npk;
 use std::{
     collections::{HashMap, HashSet},
     ffi::CStr,
@@ -257,7 +257,7 @@ pub(super) struct MemRepository {
 }
 
 impl MemRepository {
-    pub fn new(id: RepositoryId) -> MemRepository {
+    pub fn _new(id: RepositoryId) -> MemRepository {
         MemRepository {
             id,
             containers: HashMap::new(),

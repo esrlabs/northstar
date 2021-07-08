@@ -19,7 +19,8 @@ use super::{
 };
 use crate::{
     api::{self, model::MountResult},
-    runtime::repository::MemRepository,
+    npk,
+    npk::manifest::{Autostart, Manifest, Mount, Resource},
 };
 use api::model::Response;
 use async_trait::async_trait;
@@ -30,7 +31,6 @@ use futures::{
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
-use npk::manifest::{Autostart, Manifest, Mount, Resource};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -45,8 +45,6 @@ use tokio::{
     sync::{mpsc, oneshot},
     task, time,
 };
-
-const INTERNAL_REPOSITORY: &str = "internal";
 
 type Repositories = HashMap<RepositoryId, Box<dyn Repository + Send + Sync>>;
 pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
@@ -160,28 +158,30 @@ impl<'a> State<'a> {
     async fn init_repositories(&mut self) -> Result<(), Error> {
         let mut blacklist = HashSet::new();
 
-        #[cfg(feature = "hello-world")]
-        {
-            // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
-            // feature is enabled
-            if self.config.repositories.contains_key(INTERNAL_REPOSITORY) {
-                return Err(Error::Configuration(format!(
-                    "Duplicate repository {}",
-                    INTERNAL_REPOSITORY
-                )));
-            }
-
-            info!("Adding hello-world to internal repository");
-            let mut internal = MemRepository::new("internal".into());
-            let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello-world-0.0.1.npk"));
-            let hello_world = internal
-                .add_buf(hello_world)
-                .await
-                .expect("Failed to load hello-world");
-            blacklist.insert(hello_world);
-            self.repositories
-                .insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
-        }
+        // #[cfg(feature = "hello-world")]
+        // {
+        //     const INTERNAL_REPOSITORY: &str = "internal";
+        //
+        //     // Check if the configuration contains a repository with id INTERNAL_REPOSITORY if the hello-world
+        //     // feature is enabled
+        //     if self.config.repositories.contains_key(INTERNAL_REPOSITORY) {
+        //         return Err(Error::Configuration(format!(
+        //             "Duplicate repository {}",
+        //             INTERNAL_REPOSITORY
+        //         )));
+        //     }
+        //
+        //     info!("Adding hello-world to internal repository");
+        //     let internal = MemRepository::new("internal".into());
+        //     let hello_world = include_bytes!(concat!(env!("OUT_DIR"), "/hello-world-0.0.1.npk"));
+        //     let hello_world = internal
+        //         .add_buf(hello_world)
+        //         .await
+        //         .expect("Failed to load hello-world");
+        //     blacklist.insert(hello_world);
+        //     self.repositories
+        //         .insert(INTERNAL_REPOSITORY.into(), Box::new(internal));
+        // }
 
         // Build a map of repositories from the configuration
         for (id, repository) in &self.config.repositories {

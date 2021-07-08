@@ -13,6 +13,7 @@
 //   limitations under the License.
 
 use escargot::CargoBuild;
+use northstar::npk;
 use std::{env, fs, path::Path};
 
 const KEY: &str = "../examples/northstar.key";

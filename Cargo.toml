@@ -13,7 +13,6 @@ members = [
     "northstar",
     "northstar-tests",
     "northstar-tests/test-container",
-    "npk",
     "tools/nstar",
     "tools/sextant",
     "tools/stress",

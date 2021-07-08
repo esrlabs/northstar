@@ -13,7 +13,13 @@
 //   limitations under the License.
 
 use super::{Container, Error};
-use crate::runtime::{config::Config, island::utils::PathExt};
+use crate::{
+    npk::{
+        manifest,
+        manifest::{MountOption, MountOptions, Resource, Tmpfs},
+    },
+    runtime::{config::Config, island::utils::PathExt},
+};
 use log::debug;
 use nix::{
     libc::makedev,
@@ -22,7 +28,6 @@ use nix::{
     unistd,
     unistd::{chown, Gid, Uid},
 };
-use npk::manifest::{self, MountOption, MountOptions, Resource, Tmpfs};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tokio::{fs::symlink, task};

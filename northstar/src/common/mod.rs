@@ -12,23 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#![deny(clippy::all)]
+/// API container identifier
+pub mod container;
 
-pub mod common;
+/// Container name
+pub mod name;
 
-#[cfg(feature = "api")]
-/// Northstar remote API. Control start and stop of applications and
-/// receive updates about container states.
-pub mod api;
+/// String without null characters
+pub mod non_null_string;
 
-#[cfg(feature = "npk")]
-/// NPK format support.
-pub mod npk;
-
-#[cfg(feature = "runtime")]
-/// The Northstar runtime core.
-pub mod runtime;
-
-/// Northstar internal utilities
-#[cfg(feature = "runtime")]
-mod util;
+/// Container version
+pub mod version;

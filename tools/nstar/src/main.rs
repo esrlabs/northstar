@@ -15,9 +15,12 @@
 use anyhow::{anyhow, Context, Error, Result};
 use api::{client::Client, model::Message};
 use futures::{sink::SinkExt, StreamExt};
-use northstar::api::{
-    self,
-    model::{Container, Request, Version},
+use northstar::{
+    api::{
+        self,
+        model::{Container, Request},
+    },
+    common::version::Version,
 };
 use std::{
     convert::{TryFrom, TryInto},

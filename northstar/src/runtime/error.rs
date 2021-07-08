@@ -13,7 +13,10 @@
 //   limitations under the License.
 
 use super::{Container, ExitStatus, RepositoryId};
-use crate::api::{self};
+use crate::{
+    api::{self},
+    npk,
+};
 use std::io;
 use thiserror::Error;
 

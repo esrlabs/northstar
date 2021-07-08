@@ -20,6 +20,7 @@ use super::{
     state::{MountedContainer, Process},
     Event, EventTx, ExitStatus, Pid,
 };
+use crate::npk::manifest::Manifest;
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
 use log::{debug, info, warn};
@@ -30,7 +31,6 @@ use nix::{
     sys::{self, signal::Signal, wait::WaitPidFlag},
     unistd,
 };
-use npk::manifest::Manifest;
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
 use std::{
