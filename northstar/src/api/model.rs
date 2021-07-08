@@ -16,13 +16,14 @@ use derive_new::new;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub use npk::manifest::{Manifest, Version};
-pub type Container = super::container::Container;
-pub type ContainerError = super::container::Error;
-pub type MessageId = String; // UUID
-pub type Name = npk::manifest::Name;
+pub type Container = crate::common::container::Container;
+pub type ContainerError = crate::common::container::Error;
+pub type ExitCode = i32;
+pub type Manifest = crate::npk::manifest::Manifest;
+pub type Version = crate::common::version::Version;
 pub type Pid = u32;
 pub type RepositoryId = String;
+pub type Signal = u32;
 
 const VERSION: Version = Version {
     major: 0,
@@ -37,9 +38,6 @@ const VERSION: Version = Version {
 pub fn version() -> Version {
     VERSION
 }
-
-pub type ExitCode = i32;
-pub type Signal = u32;
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum ExitStatus {

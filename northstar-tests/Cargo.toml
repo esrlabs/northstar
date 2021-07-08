@@ -13,8 +13,7 @@ futures = "0.3.14"
 lazy_static = "1.4"
 log = "0.4.14"
 nix = "0.20.0"
-northstar = { path = "../northstar", features = ["api", "runtime", "hello-world"] }
-npk = { path = "../npk" }
+northstar = { path = "../northstar", features = ["api", "runtime"] }
 regex = "1.4"
 rusty-fork = "0.3.0"
 tempfile = "3.2"
@@ -25,4 +24,4 @@ uuid = { version = "0.8.2", features = ["v4"] }
 [build-dependencies]
 tempfile = "3.2"
 escargot = "0.5.2"
-npk = { path = "../npk" }
+northstar = { path = "../northstar", features = ["runtime"] }

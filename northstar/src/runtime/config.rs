@@ -13,8 +13,7 @@
 //   limitations under the License.
 
 use super::{Error, RepositoryId};
-use crate::util::is_rw;
-use npk::manifest::NonNullString;
+use crate::{common::non_null_string::NonNullString, util::is_rw};
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;

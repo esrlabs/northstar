@@ -13,8 +13,8 @@
 //   limitations under the License.
 
 use super::{config, Container, Event, EventTx, Pid};
+use crate::npk::manifest;
 use log::{debug, warn};
-use npk::manifest;
 use proc_mounts::MountIter;
 use std::{
     os::unix::io::AsRawFd,

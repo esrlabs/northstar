@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use core::convert::TryFrom;
+use crate::common::{name::Name, non_null_string::NonNullString, version::Version};
 use itertools::Itertools;
 use serde::{
     de::{Deserializer, Visitor},
@@ -21,140 +21,16 @@ use serde::{
 use serde_with::skip_serializing_none;
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryInto,
-    fmt,
-    fmt::{Display, Formatter},
-    io,
-    ops::Deref,
+    fmt, io,
     path::{Component, Component::RootDir, PathBuf},
     str::FromStr,
 };
 use thiserror::Error;
 
-// TODO: move out of manifest.rs
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String")]
-pub struct Name(String);
-
-#[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[error("Invalid character(s) in name")]
-pub struct InvalidNameChar(usize);
-
-impl InvalidNameChar {
-    pub fn nul_position(&self) -> usize {
-        self.0
-    }
-}
-
-impl Display for Name {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Deref for Name {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for Name {
-    type Error = InvalidNameChar;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if let Some(pos) =
-            value.find(|c: char| !matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'))
-        {
-            Err(InvalidNameChar(pos))
-        } else {
-            Ok(Name(value))
-        }
-    }
-}
-
-impl TryFrom<&str> for Name {
-    type Error = InvalidNameChar;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        value.to_string().try_into()
-    }
-}
-
-impl Name {
-    /// &str representation of a Name
-    pub fn to_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-// TODO: move out of manifest.rs
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String")]
-pub struct NonNullString(String);
-
-#[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[error("Invalid null byte in string")]
-pub struct InvalidNullChar(usize);
-
-impl Display for NonNullString {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl AsRef<[u8]> for NonNullString {
-    fn as_ref(&self) -> &[u8] {
-        &self.0.as_bytes()
-    }
-}
-
-impl Deref for NonNullString {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for NonNullString {
-    type Error = InvalidNullChar;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if let Some(pos) = value.find('\0') {
-            Err(InvalidNullChar(pos))
-        } else {
-            Ok(NonNullString(value))
-        }
-    }
-}
-
-impl TryFrom<&str> for NonNullString {
-    type Error = InvalidNullChar;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        value.to_string().try_into()
-    }
-}
-
-impl NonNullString {
-    pub fn to_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl InvalidNullChar {
-    pub fn nul_position(&self) -> usize {
-        self.0
-    }
-}
-
 pub type Capability = caps::Capability;
 pub type CGroupConfig = HashMap<NonNullString, NonNullString>;
 pub type CGroups = HashMap<NonNullString, CGroupConfig>;
 pub type MountOptions = HashSet<MountOption>;
-pub type Version = semver::Version;
 
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -545,9 +421,12 @@ mod serde_caps {
 
 #[cfg(test)]
 mod tests {
-    use crate::manifest::*;
+    use crate::npk::manifest::*;
     use anyhow::{anyhow, Result};
-    use std::{convert::TryInto, iter::FromIterator};
+    use std::{
+        convert::{TryFrom, TryInto},
+        iter::FromIterator,
+    };
 
     #[test]
     fn parse() -> Result<()> {

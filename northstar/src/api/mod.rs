@@ -16,7 +16,5 @@
 pub mod client;
 /// API protocol codec
 pub mod codec;
-/// API container identifier
-pub mod container;
 /// API model
 pub mod model;

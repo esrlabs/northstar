@@ -17,9 +17,9 @@ use super::{
     error::Error,
     Pid,
 };
+use crate::npk::manifest::Manifest;
 use futures::future::OptionFuture;
 use log::{debug, error, info};
-use npk::manifest::Manifest;
 use std::{
     path::{Path, PathBuf},
     process::Stdio,

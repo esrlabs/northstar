@@ -12,9 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{
+use crate::npk::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-    manifest::{Bind, Manifest, Mount, MountOption, Version},
+    manifest::{Bind, Manifest, Mount, MountOption},
 };
 use ed25519_dalek::{
     ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
@@ -22,6 +22,7 @@ use ed25519_dalek::{
 };
 use itertools::Itertools;
 use rand::rngs::OsRng;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{

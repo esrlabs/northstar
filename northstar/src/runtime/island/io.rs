@@ -16,11 +16,11 @@ use super::{
     super::pipe::{pipe, AsyncPipeRead},
     Error,
 };
+use crate::{npk, npk::manifest::Manifest};
 use bytes::{Buf, BufMut, BytesMut};
 use futures::FutureExt;
 use log::{debug, error, info, trace, warn, Level};
 use nix::libc;
-use npk::manifest::Manifest;
 use std::{
     collections::HashMap,
     convert::TryInto,

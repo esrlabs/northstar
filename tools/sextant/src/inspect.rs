@@ -12,10 +12,9 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use ::npk::npk::{open_zip, Npk, MANIFEST_NAME, SIGNATURE_NAME, UNSQUASHFS};
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
-use npk::npk::FS_IMG_NAME;
+use northstar::npk::npk::{open_zip, Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME, UNSQUASHFS};
 use std::{
     fs::File,
     io::{self, BufReader, Read},
@@ -114,7 +113,7 @@ fn print_squashfs(fsimg_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::inspect;
-    use npk::npk::{gen_key, pack};
+    use northstar::npk::npk::{gen_key, pack};
     use std::{
         fs::File,
         io::Write,

@@ -1,4 +1,4 @@
-// Copyright (c) 2020 ESRLabs
+// Copyright (c) 2019 - 2020 ESRLabs
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -12,6 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+/// dm-verity for integrity checking of block devices
 pub mod dm_verity;
+
+/// Container manifest
 pub mod manifest;
+
+/// NPK file format
+#[allow(clippy::module_inception)]
 pub mod npk;

@@ -9,27 +9,35 @@ license-file = "LICENSE.md"
 [dependencies]
 async-stream = { version = "0.3.0", optional = true }
 async-trait = { version = "0.1.50", optional = true }
+base64 = "0.13.0"
 bincode = { version = "1.3", optional = true }
 bitflags = { version = "1.2", optional = true }
+byteorder = "1.4"
 bytes = { version = "1.0", optional = true }
 bytesize = { version = "1.0", optional = true }
 caps = { version = "0.5.1", optional = true }
 derive-new = { version = "0.5.9", optional = true }
 ed25519-dalek = { version = "1.0", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
+fs_extra = "1.2"
 futures = "0.3.14"
 hex = { version = "0.4.3", optional = true }
+humanize-rs = "0.1.5"
 itertools = { version = "0.10.0", optional = true }
 lazy_static = { version = "1.4", optional = true }
 log = { version = "0.4.14", features = [ "serde"] }
 memoffset = { version = "0.6.3", optional = true }
 nix = { version = "0.20.0", optional = true }
-npk = { path = "../npk", optional = true }
 page_size = { version = "0.4.2", optional = true }
 proc-mounts = { version = "0.2.4", optional = true }
 procinfo = { version = "0.4.2", optional = true }
+rand = "0.7.3"
+semver = { version = "0.11.0", features = ["serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", optional = true }
+serde_with = "1.9"
+serde_yaml = "0.8.17"
+sha2 = "0.9.3"
 tempfile = { version = "3.2", optional = true }
 thiserror = "1.0"
 tokio = { version = "1.5", features = ["full"] }
@@ -37,6 +45,8 @@ tokio-eventfd = { version = "0.2.0", optional = true }
 tokio-util = { version = "0.6.6", features = ["codec", "io"], optional = true }
 url = { version = "2.2", features = ["serde"] }
 uuid = { version = "0.8.2", features = ["v4"], optional = true }
+which = "4.1"
+zip = { version = "0.5.13", features = ["unreserved"] }
 
 [dev-dependencies]
 anyhow = "1.0"
@@ -45,8 +55,9 @@ proptest = "1.0"
 
 [features]
 default = []
-api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util"]
-hello-world = []
+api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util", "runtime"]
+#hello-world = ["npk"]
+npk = []
 runtime = [
     "api",
     "async-stream",
@@ -62,7 +73,6 @@ runtime = [
     "lazy_static",
     "memoffset",
     "nix",
-    "npk",
     "page_size",
     "proc-mounts",
     "procinfo",
@@ -77,4 +87,3 @@ anyhow = "1.0"
 bindgen = "0.58.1"
 lazy_static = "1.4.0"
 nix = "0.20.0"
-npk = { path = "../npk" }
