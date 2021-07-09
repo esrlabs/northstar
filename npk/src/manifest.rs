@@ -33,6 +33,7 @@ use thiserror::Error;
 
 // TODO: move out of manifest.rs
 #[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct Name(String);
 
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -90,6 +91,7 @@ impl Name {
 
 // TODO: move out of manifest.rs
 #[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct NonNullString(String);
 
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
