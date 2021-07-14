@@ -14,24 +14,26 @@
 
 use anyhow::{Context, Result};
 use nix::unistd::{self, Gid};
+use northstar::api::{client::Client, model::Version};
 use std::{
     env,
     ffi::c_void,
-    fs,
-    io::{self, Write},
     iter,
     path::{Path, PathBuf},
-    process, thread, time,
+    process::{self, abort},
+    thread,
 };
 use structopt::StructOpt;
+use tokio::{fs, io, time};
 
 #[derive(StructOpt)]
 enum TestCommands {
+    Abort,
     Cat {
         #[structopt(parse(from_os_str))]
         path: PathBuf,
     },
-    Crash,
+    Console,
     Echo {
         message: Vec<String>,
     },
@@ -49,27 +51,29 @@ enum TestCommands {
     },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let input = Path::new("/data").join("input.txt");
     if input.exists() {
         println!("Reading {}", input.display());
-        let commands = fs::read_to_string(&input)?;
+        let commands = fs::read_to_string(&input).await?;
 
         println!("Removing {}", input.display());
-        fs::remove_file(&input)?;
+        fs::remove_file(&input).await?;
 
         for line in commands.lines() {
             println!("Executing \"{}\"", line);
             let command = iter::once("test-container").chain(line.split_whitespace());
             match TestCommands::from_iter(command) {
-                TestCommands::Cat { path } => cat(&path)?,
-                TestCommands::Crash => crash(),
+                TestCommands::Abort => abort(),
+                TestCommands::Cat { path } => cat(&path).await?,
+                TestCommands::Console => console().await,
                 TestCommands::Echo { message } => echo(&message),
-                TestCommands::Inspect => inspect(),
+                TestCommands::Inspect => inspect().await,
                 TestCommands::LeakMemory => leak_memory(),
-                TestCommands::Touch { path } => touch(&path)?,
-                TestCommands::Sleep { seconds } => sleep(seconds),
-                TestCommands::Write { message, path } => write(&message, path.as_path())?,
+                TestCommands::Touch { path } => touch(&path).await?,
+                TestCommands::Sleep { seconds } => sleep(seconds).await,
+                TestCommands::Write { message, path } => write(&message, path.as_path()).await?,
             };
         }
     }
@@ -80,40 +84,53 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn dump(file: &str) {
+async fn dump(file: &str) {
     println!("{}:", file);
     fs::read_to_string(file)
+        .await
         .unwrap_or_else(|_| panic!("dump {}", file))
         .lines()
         .for_each(|l| println!("  {}", l));
 }
 
-fn cat(path: &Path) -> Result<()> {
-    let mut input =
-        fs::File::open(&path).with_context(|| format!("Failed to open {}", path.display()))?;
-    let mut output = std::io::stdout();
+async fn cat(path: &Path) -> Result<()> {
+    let mut input = fs::File::open(&path)
+        .await
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+    let mut output = io::stdout();
     io::copy(&mut input, &mut output)
+        .await
         .map(drop)
-        .with_context(|| format!("Failed to cat {}", path.display()))?;
-    writeln!(&mut output).context("Failed to write to stdout")
+        .with_context(|| format!("Failed to cat {}", path.display()))
 }
 
-fn crash() {
-    panic!("witness me!");
+async fn console() {
+    let url = url::Url::parse("unix:///northstar/console").unwrap();
+    let mut client = Client::new(&url, None, time::Duration::from_secs(1))
+        .await
+        .expect("Failed to connect to northstar");
+    client
+        .stop(
+            "test-container",
+            &Version::parse("0.0.1").unwrap(),
+            time::Duration::from_secs(1),
+        )
+        .await
+        .expect("Failed to stop myself");
 }
 
 fn echo(message: &[String]) {
     println!("{}", message.join(" "));
 }
 
-fn write(input: &str, path: &Path) -> Result<()> {
+async fn write(input: &str, path: &Path) -> Result<()> {
     fs::write(path, input)
+        .await
         .with_context(|| format!("Failed to write \"{}\" to {}", input, path.display()))
 }
 
-fn touch(path: &Path) -> Result<()> {
-    fs::File::create(path)?;
-    Ok(())
+async fn touch(path: &Path) -> Result<()> {
+    fs::File::create(path).await.map(drop).map_err(Into::into)
 }
 
 fn leak_memory() {
@@ -126,7 +143,7 @@ fn leak_memory() {
     }
 }
 
-fn inspect() {
+async fn inspect() {
     println!("getpid: {}", unistd::getpid());
     println!("getppid: {}", unistd::getppid());
     println!("getuid: {}", unistd::getuid());
@@ -166,25 +183,26 @@ fn inspect() {
     }
 
     println!("/proc/self/fd:");
-    fs::read_dir("/proc/self/fd")
-        .expect("read_dir /proc/self/fd")
-        .map(|e| e.unwrap().path())
-        .map(|p| (p.clone(), fs::read_link(p).expect("readlink entry")))
-        .filter(|(_, l)| l != &PathBuf::from(format!("/proc/{}/fd", std::process::id())))
-        .for_each(|(p, l)| {
-            println!("    {}: {}", p.display(), l.display());
-        });
-    // Substract the ReadDir fd
-    println!(
-        "    total: {}",
-        fs::read_dir("/proc/self/fd").unwrap().count() - 1
-    );
+    let mut n = 0;
+    let mut read_dir = fs::read_dir("/proc/self/fd")
+        .await
+        .expect("Failed to readdir");
+    while let Ok(Some(entry)) = read_dir.next_entry().await {
+        let link = fs::read_link(entry.path())
+            .await
+            .expect("Failed to readlink");
+        if link != PathBuf::from(format!("/proc/{}/fd", std::process::id())) {
+            n += 1;
+            println!("    {}: {}", entry.path().display(), link.display());
+        }
+    }
+    println!("    total: {}", n);
 
-    dump("/proc/self/mounts");
+    dump("/proc/self/mounts").await;
 }
 
-fn sleep(seconds: u64) {
-    thread::sleep(time::Duration::from_secs(seconds));
+async fn sleep(seconds: u64) {
+    time::sleep(time::Duration::from_secs(seconds)).await;
     println!("Exiting after {} seconds sleep", seconds);
     process::exit(0);
 }

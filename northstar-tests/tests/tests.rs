@@ -205,7 +205,7 @@ test!(start_mounted_container_with_not_mounted_resource, {
 
 // The test is flaky and needs to listen for notifications
 // in order to be implemented correctly
-test!(container_crash_exit, {
+test!(container_abort, {
     let mut runtime = Northstar::launch().await?;
 
     // install test container
@@ -213,7 +213,7 @@ test!(container_crash_exit, {
     runtime.install_test_resource().await?;
 
     for _ in 0..10 {
-        runtime.test_cmds("crash").await;
+        runtime.test_cmds("abort").await;
         runtime.start(TEST_CONTAINER).await?;
         runtime
             .assume_notification(
@@ -322,8 +322,8 @@ test!(container_shall_only_have_configured_fds, {
     runtime.start(TEST_CONTAINER).await?;
     assume("/proc/self/fd/0: /dev/null", 5).await?;
     assume("/proc/self/fd/1: pipe:.*", 5).await?;
-    assume("/proc/self/fd/2: /dev/null", 5).await?;
-    assume("total: 3", 5).await?;
+    assume("/proc/self/fd/2: pipe:.*", 5).await?;
+    assume("total: 9", 5).await?;
 
     runtime.shutdown().await
 });
@@ -409,6 +409,25 @@ test!(cgroups_memory, {
         )
         .await?;
     }
+
+    runtime.shutdown().await
+});
+
+// Use the northstar mount type from within a container
+test!(access_console_from_container, {
+    let mut runtime = Northstar::launch().await?;
+
+    runtime.install_test_container().await?;
+    runtime.install_test_resource().await?;
+
+    // Start the test container that shuts down itself
+    runtime.test_cmds("console").await;
+
+    runtime.start(TEST_CONTAINER).await?;
+
+    // Wait for a graceful shutdown of test_container
+    assume("Terminating test-container:0.0.1", 5).await?;
+    assume("Stopped test-container:0.0.1", 5).await?;
 
     runtime.shutdown().await
 });

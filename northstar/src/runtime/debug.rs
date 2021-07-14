@@ -196,6 +196,7 @@ impl Strace {
                 }
             })
         };
+        task::yield_now().await;
 
         Ok(Strace { child, token, task })
     }

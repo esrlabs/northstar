@@ -161,7 +161,7 @@ impl Northstar {
             .await
             .context("Failed to stop the runtime")?;
 
-        logger::assume("Closed listener", 5u64).await?;
+        logger::assume("Shutdown complete", 5u64).await?;
 
         // Remove the tmpdir
         self.tmpdir.close().context("Failed to remove tmpdir")

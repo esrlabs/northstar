@@ -1,17 +1,13 @@
-name: inspect
+name: console
 version: 0.0.1
-init: /inspect
+init: /console
 uid: 1000
 gid: 1000
 io:
   stdout:
     log:
       level: DEBUG
-      tag: inspect
-  stderr:
-    log:
-      level: WARN
-      tag: inspect
+      tag: console
 mounts:
   /dev:
     type: dev
@@ -24,10 +20,5 @@ mounts:
   /system:
     type: bind
     host: /system
-  /tmp:
-    type: tmpfs
-    size: 10MB
   /northstar:
     type: northstar
-capabilities: [CAP_KILL]
-suppl_groups: [src, inet]

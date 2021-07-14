@@ -147,6 +147,7 @@ main() {
 
   local EXAMPLES=(
     "./examples/cpueater"
+    "./examples/console"
     "./examples/crashing"
     "./examples/ferris"
     "./examples/hello-ferris"

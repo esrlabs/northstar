@@ -670,6 +670,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
         add_directory(&file, Path::new("/proc"), 444, uid, gid)?;
     }
 
+    // TODO: Correct permission
     for (target, mount) in &manifest.mounts {
         let mode = match mount {
             Mount::Bind(Bind { options: flags, .. }) => {
@@ -680,10 +681,11 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                 }
             }
             Mount::Persist => 777,
-            Mount::Resource { .. } => 555,
-            Mount::Tmpfs { .. } => 777,
+            Mount::Resource(_) => 555,
+            Mount::Tmpfs(_) => 777,
             // /dev is default
-            Mount::Dev { .. } => continue,
+            Mount::Dev => continue,
+            Mount::Northstar => 777,
         };
 
         // In order to support mount points with multiple path segments, we need to call mksquashfs multiple times:

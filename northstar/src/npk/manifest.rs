@@ -145,6 +145,29 @@ impl Manifest {
                 prev_comps = curr_comps;
                 Ok(())
             })?;
+
+        // Check that there's only one mount of type Mount:Dev:
+        if self
+            .mounts
+            .values()
+            .filter(|m| matches!(m, Mount::Dev))
+            .count()
+            > 1
+        {
+            return Err(Error::Invalid("Multiple mounts of type dev".into()));
+        }
+
+        // Check that there's only one mount of type Mount::Northstar
+        if self
+            .mounts
+            .values()
+            .filter(|m| matches!(m, Mount::Northstar))
+            .count()
+            > 1
+        {
+            return Err(Error::Invalid("Multiple mounts of type northstar".into()));
+        }
+
         Ok(())
     }
 }
@@ -259,6 +282,9 @@ pub enum Mount {
     /// Mount a tmpfs with size
     #[serde(rename = "tmpfs")]
     Tmpfs(Tmpfs),
+    /// Mount the Northstar management
+    #[serde(rename = "northstar")]
+    Northstar,
 }
 
 /// IO configuration for stdin, stdout, stderr

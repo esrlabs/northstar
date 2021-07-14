@@ -12,13 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Container, Error};
+use super::{super::console, Container, Error};
 use crate::{
     npk::{
         manifest,
         manifest::{MountOption, MountOptions, Resource, Tmpfs},
     },
-    runtime::{config::Config, island::utils::PathExt},
+    runtime::{config::Config, island::utils::PathExt, EventTx, NotificationTx},
 };
 use log::debug;
 use nix::{
@@ -26,15 +26,18 @@ use nix::{
     mount::MsFlags,
     sys::stat::{Mode, SFlag},
     unistd,
-    unistd::{chown, Gid, Uid},
 };
-use std::path::{Path, PathBuf};
+use std::{
+    fs::Permissions,
+    os::unix::prelude::PermissionsExt,
+    path::{Path, PathBuf},
+};
 use tempfile::TempDir;
-use tokio::{fs::symlink, task};
-
-/// The minimal version of the /dev is maintained in a tmpdir. This tmpdir
-/// must be held for the lifetime of the IslandProcess
-pub(crate) type Dev = Option<TempDir>;
+use tokio::{
+    fs::{self, symlink},
+    task::{self, JoinHandle},
+};
+use tokio_util::sync::CancellationToken;
 
 /// Instructions for mount system call done in init
 #[derive(Debug)]
@@ -89,22 +92,36 @@ impl Mount {
 /// Iterate the mounts of a container and assemble a list of `mount` calls to be
 /// performed by init. Prepare an options persist dir. This fn fails if a resource
 /// is referenced that does not exist.
-pub(super) async fn prepare_mounts(
+pub(super) async fn mounts(
     config: &Config,
     container: &Container,
-) -> Result<(Vec<Mount>, Dev), Error> {
+    event_tx: &EventTx,
+    notification_tx: &NotificationTx,
+) -> Result<(Vec<Mount>, Option<TempDir>, Option<Console>), Error> {
     let mut mounts = Vec::new();
-    let mut dev = None;
+    let mut tmpdir = None;
+    let mut console = None;
     let root = container
         .root
         .canonicalize()
         .map_err(|e| Error::io("Canonicalize root", e))?;
 
+    // Unconditionally add /proc
     mounts.push(proc(&root));
 
-    let manifest_mounts = &container.manifest.mounts;
+    // No dev configured in mounts: Use a minimal version
+    if !container
+        .manifest
+        .mounts
+        .values()
+        .any(|m| matches!(m, manifest::Mount::Dev))
+    {
+        let (mount, remount) = self::dev(&root, &container, &mut tmpdir).await;
+        mounts.push(mount);
+        mounts.push(remount);
+    }
 
-    for (target, mount) in manifest_mounts {
+    for (target, mount) in &container.manifest.mounts {
         match &mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
                 mounts.extend(bind(&root, target, host, options));
@@ -119,23 +136,27 @@ pub(super) async fn prepare_mounts(
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(&root, target, *size)),
             manifest::Mount::Dev => {
-                let (d, mount, remount) = self::dev(&root, &container).await;
+                let (mount, remount) = self::dev(&root, &container, &mut tmpdir).await;
                 mounts.push(mount);
                 mounts.push(remount);
-                dev = d
+            }
+            manifest::Mount::Northstar => {
+                let (mount, c) = northstar(
+                    &root,
+                    target,
+                    container,
+                    &mut tmpdir,
+                    event_tx,
+                    notification_tx,
+                )
+                .await;
+                console = Some(c);
+                mounts.push(mount);
             }
         }
     }
 
-    // No dev configured in mounts: Use minimal version
-    if dev.is_none() && !manifest_mounts.contains_key(Path::new("/dev")) {
-        let (d, mount, remount) = self::dev(&root, &container).await;
-        mounts.push(mount);
-        mounts.push(remount);
-        dev = d;
-    }
-
-    Ok((mounts, dev))
+    Ok((mounts, tmpdir, console))
 }
 
 fn proc(root: &Path) -> Mount {
@@ -197,25 +218,20 @@ async fn persist(
 
     if !dir.exists() {
         debug!("Creating {}", dir.display());
-        tokio::fs::create_dir_all(&dir)
+        fs::create_dir_all(&dir)
             .await
             .map_err(|e| Error::Io(format!("Failed to create {}", dir.display()), e))?;
     }
 
-    debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
-    task::block_in_place(|| {
-        unistd::chown(
-            dir.as_os_str(),
-            Some(unistd::Uid::from_raw(uid.into())),
-            Some(unistd::Gid::from_raw(gid.into())),
-        )
-    })
-    .map_err(|e| {
-        Error::os(
-            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
-            e,
-        )
-    })?;
+    chown(&dir, uid.into(), gid.into()).expect("Failed to show persist dir");
+    fs::set_permissions(&dir, Permissions::from_mode(0o700))
+        .await
+        .map_err(|e| {
+            Error::Io(
+                format!("Failed set permissions off {} to 0700", dir.display()),
+                e,
+            )
+        })?;
 
     debug!("Mounting {} on {}", dir.display(), target.display(),);
 
@@ -284,38 +300,109 @@ fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
     Mount::new(None, target, Some(fstype), flags, Some(data))
 }
 
-fn options_to_flags(opt: &MountOptions) -> MsFlags {
-    let mut flags = MsFlags::empty();
-    for opt in opt {
-        match opt {
-            MountOption::Rw => {}
-            MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
-            MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
-            MountOption::NoDev => flags |= MsFlags::MS_NODEV,
-        }
-    }
-    flags
+/// Wrap the console task and a tocken to stop the listener and connections.
+pub struct Console {
+    task: JoinHandle<()>,
+    stop: CancellationToken,
 }
 
-async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
-    let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
-    debug!("Creating devfs in {}", dir.path().display());
+impl Console {
+    /// Stop the listener and wait for all connections to be closed
+    pub async fn stop(self) {
+        self.stop.cancel();
+        self.task.await.expect("Console task error");
+    }
+}
 
-    task::block_in_place(|| {
-        dev_devices(dir.path(), container.manifest.uid, container.manifest.gid)
-    });
-    dev_symlinks(dir.path()).await;
+/// Create a tmpdir with the northstar management console exposed via Unix socket. Mount this
+/// directory to `target`
+async fn northstar(
+    root: &Path,
+    target: &Path,
+    container: &Container,
+    tmpdir: &mut Option<TempDir>,
+    event_tx: &EventTx,
+    notification_tx: &NotificationTx,
+) -> (Mount, Console) {
+    let (uid, gid) = (container.manifest.uid, container.manifest.gid);
+    // Create tempdir if not yet present
+    let dir = if let Some(tmpdir) = tmpdir {
+        tmpdir.path().join("northstar")
+    } else {
+        let dir = tempdir(uid.into(), gid.into()).await;
+        let path = dir.path().join("northstar");
+        tmpdir.replace(dir);
+        path
+    };
 
-    let source = dir.path().to_path_buf();
+    // Create directory and setup permissions and ownership
+    fs::create_dir(&dir)
+        .await
+        .expect("Failed to create northstar dir");
+    chown(&dir, uid.into(), gid.into()).expect("Failed to chown Northstar dir");
+    set_permissions(&dir, 0o700).await;
+
+    // Console on unix socket "console"
+    let url = url::Url::parse(&format!("unix://{}", dir.join("console").display())).unwrap();
+    let stop = CancellationToken::new();
+    let event_tx = event_tx.clone();
+    let notification_tx = notification_tx.clone();
+    let task = console::listen(&url, event_tx, notification_tx, stop.clone())
+        .await
+        .unwrap_or_else(|_| panic!("Failed to start console on {}", url));
+
+    // The Unix socket is create with the ownership of the runtime user. Chown it
+    // to the uid/gid the container is started with.
+    let socket_path = Path::new(url.path());
+    chown(socket_path, uid.into(), gid.into()).expect("Failed to chown console socket");
+    set_permissions(socket_path, 0o700).await;
+    let console = Console { task, stop };
+
+    // Mount
+    let flags = MsFlags::MS_BIND | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_NOSUID;
+    debug!(
+        "Mounting northstar from {} on {}",
+        dir.display(),
+        target.display()
+    );
+    let mount = Mount::new(Some(dir), root.join_strip(target), None, flags, None);
+
+    (mount, console)
+}
+
+async fn dev(root: &Path, container: &Container, tmpdir: &mut Option<TempDir>) -> (Mount, Mount) {
+    let dir = if let Some(tmpdir) = tmpdir {
+        tmpdir.path().join("dev")
+    } else {
+        let d = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
+        let path = d.path().join("dev");
+        tmpdir.replace(d);
+        path
+    };
+
+    fs::create_dir(&dir)
+        .await
+        .expect("Failed to create dev dir");
+    let (uid, gid) = (container.manifest.uid, container.manifest.gid);
+    chown(&dir, uid.into(), gid.into()).expect("Failed to chown dev dir");
+    set_permissions(&dir, 0o700).await;
+
+    debug!("Creating devfs in {}", dir.display());
+
+    dev_devices(&dir, uid, gid);
+    dev_symlinks(&dir).await;
+
+    let source = dir.to_path_buf();
     let mut flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
     let target = root.join("dev");
     let mount = Mount::new(Some(source.clone()), target.clone(), None, flags, None);
 
     flags.set(MsFlags::MS_REMOUNT, true);
     let remount = Mount::new(Some(source), target, None, flags, None);
-    (Some(dir), mount, remount)
+    (mount, remount)
 }
 
+/// Create char devs
 fn dev_devices(dir: &Path, uid: u16, gid: u16) {
     use nix::sys::stat::mknod;
 
@@ -329,16 +416,14 @@ fn dev_devices(dir: &Path, uid: u16, gid: u16) {
     ] {
         let dev_path = dir.join(dev);
         let dev = unsafe { makedev(*major, *minor) };
-        mknod(dev_path.as_path(), SFlag::S_IFCHR, Mode::all(), dev).expect("Failed to mknod");
-        chown(
-            dev_path.as_path(),
-            Some(Uid::from_raw(uid.into())),
-            Some(Gid::from_raw(gid.into())),
-        )
-        .expect("Failed to chown");
+        task::block_in_place(|| {
+            mknod(dev_path.as_path(), SFlag::S_IFCHR, Mode::all(), dev).expect("Failed to mknod");
+        });
+        chown(dev_path.as_path(), uid.into(), gid.into()).expect("Failed to chown");
     }
 }
 
+/// Create common symlinks in dev
 async fn dev_symlinks(dir: &Path) {
     let kcore = Path::new("/proc/kcore");
     if kcore.exists() {
@@ -358,4 +443,50 @@ async fn dev_symlinks(dir: &Path) {
             .await
             .expect("Failed to create symlink");
     }
+}
+
+/// Create a tempdir and set ownership to uid, gid. Set mode to 0700.
+async fn tempdir(uid: u32, gid: u32) -> TempDir {
+    let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
+    chown(&dir.path(), uid, gid).expect("Failed to chown Northstar dir");
+    set_permissions(&dir.path(), 0o700).await;
+    dir
+}
+
+/// Convert `MountOptions` into `MsFlags`
+fn options_to_flags(opt: &MountOptions) -> MsFlags {
+    let mut flags = MsFlags::empty();
+    for opt in opt {
+        match opt {
+            MountOption::Rw => {}
+            MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
+            MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
+            MountOption::NoDev => flags |= MsFlags::MS_NODEV,
+        }
+    }
+    flags
+}
+
+/// Perform a ordinary `unistd::chown`
+fn chown(dir: &Path, uid: u32, gid: u32) -> Result<(), Error> {
+    debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
+    task::block_in_place(|| {
+        unistd::chown(
+            dir.as_os_str(),
+            Some(unistd::Uid::from_raw(uid)),
+            Some(unistd::Gid::from_raw(gid)),
+        )
+    })
+    .map_err(|e| {
+        Error::os(
+            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
+            e,
+        )
+    })
+}
+
+async fn set_permissions(path: &Path, mode: u32) {
+    fs::set_permissions(&path, Permissions::from_mode(mode))
+        .await
+        .unwrap_or_else(|_| panic!("Failed set permissions off {} to 0700", path.display()));
 }

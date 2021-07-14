@@ -1,0 +1,12 @@
+[package]
+name = "console"
+version = "0.1.0"
+authors = ["ESRLabs"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+futures = "0.3.14"
+northstar = { path = "../../northstar", features = ["api"], default-features = false }
+tokio = { version = "1.5", features = [ "macros", "rt" ] }
+url = { version = "2.2", features = ["serde"] }

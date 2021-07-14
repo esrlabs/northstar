@@ -15,7 +15,7 @@
 use super::{
     cgroups, config::Config, console::Request, error::Error, island::Island, key::PublicKey,
     mount::MountControl, repository::DirRepository, Container, Event, EventTx, ExitStatus,
-    Notification, Pid, Repository, RepositoryId,
+    Notification, NotificationTx, Pid, Repository, RepositoryId,
 };
 use crate::{
     api::{self, model::MountResult},
@@ -131,10 +131,14 @@ impl ProcessContext {
 
 impl<'a> State<'a> {
     /// Create a new empty State instance
-    pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
+    pub(super) async fn new(
+        config: &'a Config,
+        events_tx: EventTx,
+        notification_tx: NotificationTx,
+    ) -> Result<State<'a>, Error> {
         let repositories = Repositories::default();
         let mount_control = Arc::new(MountControl::new(&config).await.map_err(Error::Mount)?);
-        let launcher_island = Island::start(events_tx.clone(), config.clone())
+        let launcher_island = Island::start(events_tx.clone(), notification_tx, config.clone())
             .await
             .expect("Failed to start launcher");
 

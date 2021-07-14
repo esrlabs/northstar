@@ -12,13 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use self::fs::Dev;
+use self::fs::Console;
+
 use super::{
     config::Config,
     error::Error,
     pipe::{self, pipe, PipeRead, PipeRecv, PipeSend, PipeWrite, RawFdExt},
     state::{MountedContainer, Process},
-    Event, EventTx, ExitStatus, Pid,
+    Event, EventTx, ExitStatus, NotificationTx, Pid,
 };
 use crate::npk::manifest::Manifest;
 use async_trait::async_trait;
@@ -42,6 +43,7 @@ use std::{
 };
 use sys::wait;
 use task::block_in_place as block;
+use tempfile::TempDir;
 use tokio::{signal, sync::mpsc::error::TrySendError, task, time};
 use Signal::SIGCHLD;
 
@@ -64,12 +66,14 @@ type ExitStatusFuture = Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpi
 
 #[derive(Debug)]
 pub(super) struct Island {
-    tx: EventTx,
+    event_tx: EventTx,
     config: Config,
     /// Used by child process to detect if the parent process has died
     tripwire_read: PipeRead,
     /// Unused writing end of the tripwire pipe. Keep it in Island for a proper close on `shutdown`
     tripwire_write: PipeWrite,
+    /// Notification braodcast
+    notification_tx: NotificationTx,
 }
 
 pub(super) enum IslandProcess {
@@ -78,13 +82,15 @@ pub(super) enum IslandProcess {
         exit_status: ExitStatusFuture,
         io: (Option<io::Log>, Option<io::Log>),
         checkpoint: Checkpoint,
-        _dev: Dev,
+        console: Option<Console>,
+        _tmpdir: Option<TempDir>,
     },
     Started {
         pid: Pid,
         exit_status: ExitStatusFuture,
         io: (Option<io::Log>, Option<io::Log>),
-        _dev: Dev,
+        console: Option<Console>,
+        _tmpdir: Option<TempDir>,
     },
     Stopped,
 }
@@ -106,17 +112,22 @@ impl fmt::Debug for IslandProcess {
 }
 
 impl Island {
-    pub async fn start(tx: EventTx, config: Config) -> Result<Self, Error> {
+    pub async fn start(
+        event_tx: EventTx,
+        notification_tx: NotificationTx,
+        config: Config,
+    ) -> Result<Self, Error> {
         let (tripwire_read, tripwire_write) =
             block(pipe).map_err(|e| Error::io("Open tripwire pipe", e))?;
         block(|| tripwire_read.set_cloexec(true))
             .map_err(|e| Error::io("Setting cloexec on tripwire fd", e))?;
 
         Ok(Island {
-            tx,
+            event_tx,
             config,
             tripwire_read,
             tripwire_write,
+            notification_tx,
         })
     }
 
@@ -131,7 +142,13 @@ impl Island {
         let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
         let (checkpoint_runtime, checkpoint_init) = checkpoints();
         let tripwire = self.tripwire_read.clone();
-        let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
+        let (mounts, tmpdir, console) = fs::mounts(
+            &self.config,
+            &container,
+            &self.event_tx,
+            &self.notification_tx,
+        )
+        .await?;
         let groups = groups(manifest);
         let seccomp = seccomp_filter(&container);
 
@@ -162,14 +179,15 @@ impl Island {
                         log
                     });
                     let pid = child.as_raw() as Pid;
-                    let exit_status = Box::new(waitpid(container, pid, &self.tx));
+                    let exit_status = Box::new(waitpid(container, pid, &self.event_tx));
 
                     Ok(Box::new(IslandProcess::Created {
                         pid,
                         exit_status,
                         io: (stdout, stderr),
                         checkpoint: checkpoint_runtime,
-                        _dev: dev,
+                        console,
+                        _tmpdir: tmpdir,
                     }))
                 }
                 unistd::ForkResult::Child => {
@@ -211,7 +229,8 @@ impl Process for IslandProcess {
                 pid,
                 exit_status,
                 io,
-                _dev,
+                console,
+                _tmpdir: _dev,
                 mut checkpoint,
             } => {
                 checkpoint.async_send(Start::Start).await;
@@ -221,7 +240,8 @@ impl Process for IslandProcess {
                     pid,
                     exit_status,
                     io,
-                    _dev,
+                    console,
+                    _tmpdir: _dev,
                 }))
             }
             _ => unreachable!(),
@@ -234,19 +254,21 @@ impl Process for IslandProcess {
         self: Box<Self>,
         timeout: time::Duration,
     ) -> Result<(Box<dyn Process>, ExitStatus), super::error::Error> {
-        let (pid, mut exit_status, io) = match *self {
+        let (pid, mut exit_status, io, console) = match *self {
             IslandProcess::Created {
                 pid,
                 exit_status,
                 io,
+                console,
                 ..
-            } => (pid, exit_status, io),
+            } => (pid, exit_status, io, console),
             IslandProcess::Started {
                 pid,
                 exit_status,
                 io,
-                _dev,
-            } => (pid, exit_status, io),
+                console,
+                _tmpdir: _dev,
+            } => (pid, exit_status, io, console),
             IslandProcess::Stopped { .. } => unreachable!(),
         };
         debug!("Trying to send SIGTERM to {}", pid);
@@ -283,6 +305,9 @@ impl Process for IslandProcess {
         }
         if let Some(io) = io.1 {
             io.stop().await?;
+        }
+        if let Some(stop) = console {
+            stop.stop().await;
         }
 
         Ok((Box::new(IslandProcess::Stopped), exit_status))

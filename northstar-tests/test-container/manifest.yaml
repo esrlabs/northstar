@@ -3,6 +3,8 @@ version: 0.0.1
 init: /test-container
 uid: 1000
 gid: 1000
+env:
+  RUST_BACKTRACE: 1
 cgroups:
   memory:
     limit_in_bytes: 10000000
@@ -10,6 +12,8 @@ cgroups:
 capabilities:
   - CAP_KILL
 mounts:
+  /northstar:
+    type: northstar
   /data:
     type: persist
   /lib:
@@ -37,4 +41,8 @@ io:
   stdout:
     log:
       level: DEBUG
+      tag: test-container
+  stderr:
+    log:
+      level: WARN
       tag: test-container

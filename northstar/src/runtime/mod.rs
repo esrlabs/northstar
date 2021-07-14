@@ -33,7 +33,7 @@ use std::{
 };
 use sync::mpsc;
 use tokio::{
-    sync::{self, oneshot},
+    sync::{self, broadcast, oneshot},
     task,
 };
 use tokio_util::sync::CancellationToken;
@@ -54,6 +54,7 @@ mod repository;
 mod state;
 
 type EventTx = mpsc::Sender<Event>;
+type NotificationTx = broadcast::Sender<Notification>;
 type RepositoryId = String;
 type ExitCode = i32;
 type Pid = u32;
@@ -180,12 +181,14 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
 
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(MAIN_BUFFER);
-    let mut state = State::new(config, event_tx.clone()).await?;
+    let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
+    let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
 
     // Initialize the console if configured
     let console = if let Some(url) = config.console.as_ref() {
-        let mut console = console::Console::new(url, event_tx.clone());
-        console.listen().await.map_err(Error::Console)?;
+        let console = console::Console::new(url, event_tx.clone(), notification_tx.clone())
+            .await
+            .map_err(Error::Console)?;
 
         Some(console)
     } else {
@@ -224,9 +227,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             }
             // Forward notifications to console
             Event::Notification(notification) => {
-                if let Some(console) = console.as_ref() {
-                    console.notification(notification).await;
-                }
+                drop(notification_tx.send(notification));
                 Ok(())
             }
         } {

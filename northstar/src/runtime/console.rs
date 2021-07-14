@@ -12,18 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Event, Notification, RepositoryId};
-use crate::{
-    api,
-    runtime::{EventTx, ExitStatus},
-};
+use super::{Event, ExitStatus, Notification, NotificationTx, RepositoryId};
+use crate::{api, runtime::EventTx};
 use api::model;
 use bytes::Bytes;
 use futures::{
-    future::join_all,
     sink::SinkExt,
     stream::{self, FuturesUnordered},
-    Future, StreamExt, TryFutureExt,
+    StreamExt, TryFutureExt,
 };
 use log::{debug, error, info, trace, warn};
 use std::{fmt, path::PathBuf, unreachable};
@@ -33,8 +29,8 @@ use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, BufReader},
     net::{TcpListener, UnixListener},
     pin, select,
-    sync::{self, broadcast, mpsc, oneshot},
-    task::{self},
+    sync::{broadcast, mpsc, oneshot},
+    task::{self, JoinHandle},
     time,
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
@@ -47,21 +43,36 @@ pub(crate) enum Request {
     Install(RepositoryId, mpsc::Receiver<Bytes>),
 }
 
+/// Open a socket and listen for incoming connections. Spawn a task for each connection. All
+/// tasks are stopped by `stop`.
+pub(super) async fn listen(
+    url: &Url,
+    event_tx: EventTx,
+    notification_tx: NotificationTx,
+    stop: CancellationToken,
+) -> Result<JoinHandle<()>, Error> {
+    let listener = Listener::new(&url)
+        .await
+        .map_err(|e| Error::Io(format!("Failed start console listener on {}", url), e))?;
+
+    let url = url.clone();
+    Ok(task::spawn(serve(
+        url,
+        listener,
+        event_tx,
+        notification_tx,
+        stop,
+    )))
+}
+
 /// A console is responsible for monitoring and serving incoming client connections
 /// It feeds relevant events back to the runtime and forwards responses and notifications
 /// to connected clients
 pub(crate) struct Console {
-    /// Tx handle to the main loop
-    event_tx: EventTx,
-    /// Listening address/url
-    url: Url,
-    /// Broadcast channel passed to connections to forward notifications
-    notification_tx: broadcast::Sender<Notification>,
     /// Shutdown the console by canceling this token
     stop: CancellationToken,
-    /// Listener tasks. Currently there's just one task but when the console
-    /// is exposed to containers via unix sockets this list will grow
-    tasks: Vec<task::JoinHandle<()>>,
+    /// Listener task
+    listener: task::JoinHandle<()>,
 }
 
 #[derive(Error, Debug)]
@@ -70,58 +81,30 @@ pub enum Error {
     Protocol(String),
     #[error("IO error: {0} ({1})")]
     Io(String, #[source] io::Error),
+    #[error("OS error: {0} ({1})")]
+    Os(String, #[source] nix::Error),
     #[error("Shutting down")]
     Shutdown,
 }
 
 impl Console {
     /// Construct a new console instance
-    pub(super) fn new(url: &Url, event_tx: EventTx) -> Console {
-        let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
-
-        Self {
-            event_tx,
-            url: url.clone(),
-            notification_tx,
-            stop: CancellationToken::new(),
-            tasks: Vec::new(),
-        }
-    }
-
-    /// Open a TCP socket and listen for incoming connections
-    /// spawn a task for each connection
-    pub(super) async fn listen(&mut self) -> Result<(), Error> {
-        let event_tx = self.event_tx.clone();
-        let notification_tx = self.notification_tx.clone();
-        // Stop token for self *and* the connections
-        let stop = self.stop.clone();
-
-        let task = match Listener::new(&self.url)
-            .await
-            .map_err(|e| Error::Io("Failed start console listener".into(), e))?
-        {
-            Listener::Tcp(listener) => task::spawn(async move {
-                handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
-            }),
-            Listener::Unix(listener) => task::spawn(async move {
-                handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
-            }),
-        };
-        self.tasks.push(task);
-
-        Ok(())
+    pub(super) async fn new(
+        url: &Url,
+        event_tx: EventTx,
+        notification_tx: NotificationTx,
+    ) -> Result<Console, Error> {
+        let stop = CancellationToken::new();
+        let listener = listen(url, event_tx.clone(), notification_tx.clone(), stop.clone()).await?;
+        let console = Console { stop, listener };
+        Ok(console)
     }
 
     /// Stop the listeners and wait for their shutdown
     pub(super) async fn shutdown(self) -> Result<(), Error> {
         self.stop.cancel();
-        join_all(self.tasks).await;
+        self.listener.await.expect("Task error");
         Ok(())
-    }
-
-    /// Send a notification to the notification broadcast
-    pub(super) async fn notification(&self, notification: Notification) {
-        self.notification_tx.send(notification).ok();
     }
 
     async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
@@ -351,43 +334,43 @@ impl Listener {
         };
         Ok(listener)
     }
+
+    async fn accept(&self) -> io::Result<(impl AsyncRead + AsyncWrite, ClientId)> {
+        match self {
+            Listener::Tcp(listener) => listener
+                .accept()
+                .await
+                .map(|(s, c)| (Either::Left(s), c.into())),
+            Listener::Unix(listener) => listener.accept().await.map(|(s, _)| {
+                let client_id = s.peer_addr().expect("Failed to get peer address").into();
+                (Either::Right(s), client_id)
+            }),
+        }
+    }
 }
 
-/// Function to handle connections
-///
-/// Generic handling of connections. The first parameter is a function that when called awaits for
-/// a new connection. The connections are represented as a pair of a stream and some client
-/// identifier.
-///
-/// All the connections container stored the tasks corresponding to each active connection. As
-/// these tasks terminate, they are removed from the connections container. Once a stop is issued,
-/// the termination of the remaining connections will be awaited.
-///
-async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
-    accept: AcceptConnection,
+/// Handle incoming connections by spawning a connection task for each. Termination is done by canceling
+/// `stop` and waiting for the connections to be terminated.
+async fn serve(
+    url: Url,
+    listener: Listener,
     event_tx: EventTx,
     notification_tx: broadcast::Sender<Notification>,
     stop: CancellationToken,
-) where
-    AcceptConnection: Fn() -> Connection,
-    Connection: Future<Output = Result<(Stream, Client), E>>,
-    Stream: AsyncWrite + AsyncRead + Unpin + Send + 'static,
-    Client: Into<ClientId>,
-    E: fmt::Debug,
-{
+) {
     let mut connections = FuturesUnordered::new();
     loop {
         select! {
-            _ = connections.next(), if !connections.is_empty() => (), // removes closed connections
+            _ = connections.next(), if !connections.is_empty() => (), // Removes closed connections
             // If event_tx is closed then the runtime is shutting down therefore no new connections
             // are accepted
-            connection = accept(), if !event_tx.is_closed() && !stop.is_cancelled() => {
+            connection = listener.accept(), if !event_tx.is_closed() && !stop.is_cancelled() => {
                 match connection {
                     Ok((stream, client)) => {
                         connections.push(
                         task::spawn(Console::connection(
                             stream,
-                            client.into(),
+                            client,
                             stop.clone(),
                             event_tx.clone(),
                             notification_tx.subscribe(),
@@ -401,14 +384,15 @@ async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
             }
             _ = stop.cancelled() => {
                 if !connections.is_empty() {
-                    debug!("Waiting for open connections");
+                    debug!("Waiting for remaining connections on {} to be closed", url);
                     while connections.next().await.is_some() {};
                 }
                 break;
             }
         }
     }
-    debug!("Closed listener");
+    drop(listener);
+    debug!("Stopped console on {}", url);
 }
 
 struct ClientId(String);

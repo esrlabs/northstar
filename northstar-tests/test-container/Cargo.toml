@@ -6,7 +6,9 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1.0"
-structopt = "0.3.21"
-nix = "0.20.0"
-url = "2.2"
 caps = "0.5.1"
+nix = "0.20.0"
+northstar = { path = "../../northstar", features = ["api"]}
+structopt = "0.3.21"
+tokio = { version = "1.4", features = ["net", "rt", "macros", "time"] }
+url = "2.2"
