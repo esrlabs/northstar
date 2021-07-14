@@ -249,7 +249,7 @@ impl Process for IslandProcess {
             } => (pid, exit_status, io),
             IslandProcess::Stopped { .. } => unreachable!(),
         };
-        debug!("Trying to send SIGTERM to {}", pid);
+        debug!("Stopping {} by SIGTERM", pid);
         let process_group = unistd::Pid::from_raw(-(pid as i32));
         let sigterm = Some(sys::signal::SIGTERM);
         let exit_status = match sys::signal::kill(process_group, sigterm) {

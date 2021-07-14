@@ -7,12 +7,6 @@ log_dir = "target/northstar/logs"
 memory = "northstar"
 cpu = "northstar"
 
-[devices]
-loop_control = "/dev/loop-control"
-loop_dev = "/dev/loop"
-device_mapper = "/dev/mapper/control"
-device_mapper_dev = "/dev/dm-"
-
 # Start a `strace -p PID ...` instance after a container is started.
 # The execution of the application is defered until strace is attached.
 # [debug.strace]
