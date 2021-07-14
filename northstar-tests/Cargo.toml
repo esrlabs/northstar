@@ -24,4 +24,4 @@ uuid = { version = "0.8.2", features = ["v4"] }
 [build-dependencies]
 tempfile = "3.2"
 escargot = "0.5.2"
-northstar = { path = "../northstar", features = ["runtime"] }
+northstar = { path = "../northstar", features = ["api", "npk"] }
