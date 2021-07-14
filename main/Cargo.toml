@@ -27,4 +27,3 @@ android-logd-logger = "0.1.3"
 
 [features]
 default = []
-#hello-world = ["northstar/hello-world"]
