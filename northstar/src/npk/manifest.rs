@@ -55,7 +55,7 @@ pub struct Manifest {
     /// CGroup config
     pub cgroups: Option<CGroups>,
     /// Seccomp configuration
-    pub seccomp: Option<HashMap<String, String>>,
+    pub seccomp: Option<Seccomp>,
     /// List of bind mounts and resources
     #[serde(
         default,
@@ -259,6 +259,24 @@ pub enum Mount {
     /// Mount a tmpfs with size
     #[serde(rename = "tmpfs")]
     Tmpfs(Tmpfs),
+}
+
+/// Pre-defined seccomp profiles
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+pub enum Profile {
+    Default,
+}
+
+/// Seccomp configuration
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Seccomp {
+    /// Pre-defined seccomp profile
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<Profile>,
+    /// Explicit list of allowed syscalls
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowlist: Option<HashSet<String>>,
 }
 
 /// IO configuration for stdin, stdout, stderr
@@ -473,8 +491,10 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-  fork: 1
-  waitpid: 1
+  allowlist: [
+    fork,
+    waitpid
+  ]
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -526,10 +546,16 @@ seccomp:
 
         assert_eq!(manifest.cgroups, Some(cgroups));
 
-        let mut seccomp = HashMap::new();
-        seccomp.insert("fork".to_string(), "1".to_string());
-        seccomp.insert("waitpid".to_string(), "1".to_string());
-        assert_eq!(manifest.seccomp, Some(seccomp));
+        let mut seccomp = HashSet::new();
+        seccomp.insert("fork".to_string());
+        seccomp.insert("waitpid".to_string());
+        assert_eq!(
+            manifest.seccomp,
+            Some(Seccomp {
+                profile: None,
+                allowlist: Some(seccomp)
+            })
+        );
 
         assert_eq!(
             manifest.capabilities,
@@ -714,8 +740,10 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-  fork: 1
-  waitpid: 1
+  allowlist: [
+    fork,
+    waitpid
+  ]
 capabilities:
   - CAP_NET_ADMIN
 io:

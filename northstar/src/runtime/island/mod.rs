@@ -50,6 +50,7 @@ mod fs;
 mod init;
 mod io;
 mod seccomp;
+mod syscalls_default;
 mod utils;
 
 /// Environment variable name passed to the container with the containers name
@@ -470,11 +471,14 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
 }
 
 fn seccomp_filter(container: &Container) -> Option<seccomp::AllowList> {
-    container
-        .manifest
-        .seccomp
-        .as_ref()
-        .map(|seccomp| seccomp::seccomp_filter(seccomp.iter()))
+    if let Some(seccomp) = container.manifest.seccomp.as_ref() {
+        return Some(seccomp::seccomp_filter(
+            seccomp.profile.as_ref(),
+            seccomp.allowlist.as_ref(),
+            container.manifest.capabilities.as_ref(),
+        ));
+    }
+    None
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
