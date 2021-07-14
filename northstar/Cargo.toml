@@ -56,7 +56,6 @@ proptest = "1.0"
 [features]
 default = []
 api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util", "runtime"]
-#hello-world = ["npk"]
 npk = []
 runtime = [
     "api",

@@ -16,9 +16,6 @@ use std::{env, fs, io::Write, path};
 
 fn main() {
     generate_seccomp();
-
-    // #[cfg(feature = "hello-world")]
-    // package_hello_example().expect("Failed to package hello-world");
 }
 
 fn generate_seccomp() {
@@ -102,64 +99,3 @@ fn generate_seccomp() {
 
     generate().expect("Failed to generate seccomp bindings");
 }
-
-// #[cfg(feature = "hello-world")]
-// pub fn package_hello_example() -> anyhow::Result<()> {
-//     use anyhow::Context;
-//     use std::path::Path;
-//
-//     const MANIFEST: &str = r#"name: hello-world
-// version: 0.0.1
-// uid: 1000
-// gid: 1000
-// init: /bin/sh
-// args:
-//   - "-c"
-//   - "echo Hello World!"
-// io:
-//   stdout: pipe
-// mounts:
-//   /bin:
-//     type: bind
-//     host: /bin
-//   /lib:
-//     type: bind
-//     host: /lib
-//   /lib64:
-//     type: bind
-//     host: /lib64"#;
-//
-//     const MANIFEST_ANDROID: &str = r#"name: hello-world
-// version: 0.0.1
-// uid: 1000
-// gid: 1000
-// init: /system/bin/sh
-// io:
-//   stdout: pipe
-// args:
-//   - "-c"
-//   - "echo Hello World!"
-// mounts:
-//   /system:
-//     type: bind
-//     host: /system"#;
-//
-//     let out_dir = env::var("OUT_DIR").context("Failed to read OUT_DIR")?;
-//     let out_dir = Path::new(&out_dir);
-//
-//     let root_dir = out_dir.join("root");
-//     fs::create_dir_all(&root_dir).context("Failed to create root dir")?;
-//
-//     let manifest = match env::var("CARGO_CFG_TARGET_OS")
-//         .context("Failed to read CARGO_CFG_TARGET_OS")?
-//         .as_str()
-//     {
-//         "android" => MANIFEST_ANDROID,
-//         _ => MANIFEST,
-//     };
-//     let manifest_file = out_dir.join("manifest.yaml");
-//     std::fs::write(&manifest_file, &manifest).context("Failed to create manifest")?;
-//
-//     npk::pack(&manifest_file, &root_dir, &out_dir, None)?;
-//     Ok(())
-// }

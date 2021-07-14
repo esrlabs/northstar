@@ -41,13 +41,6 @@ test!(runtime_launch, {
     Northstar::launch().await?.shutdown().await
 });
 
-// Start the internal compiled in hello_world example
-// test!(internal_hello_world, {
-//     let mut runtime = Northstar::launch().await?;
-//     runtime.start("hello-world:0.0.1").await?;
-//     runtime.shutdown().await
-// });
-
 // Install and uninstall is a loop. After a number of installation
 // try to start the test container
 test!(install_uninstall_test_container, {
