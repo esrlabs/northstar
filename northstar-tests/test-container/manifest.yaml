@@ -38,3 +38,7 @@ io:
     log:
       level: DEBUG
       tag: test-container
+  stderr:
+    log:
+      level: DEBUG
+      tag: test-container

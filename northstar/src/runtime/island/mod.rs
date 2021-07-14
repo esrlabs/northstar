@@ -18,7 +18,7 @@ use super::{
     error::Error,
     pipe::{self, pipe, PipeRead, PipeRecv, PipeSend, PipeWrite, RawFdExt},
     state::{MountedContainer, Process},
-    Event, EventTx, ExitStatus, Pid,
+    Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
 };
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
@@ -30,10 +30,11 @@ use nix::{
     sys::{self, signal::Signal, wait::WaitPidFlag},
     unistd,
 };
-use npk::manifest::Manifest;
+use npk::manifest::{Manifest, NonNullString};
 use sched::CloneFlags;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
@@ -52,10 +53,6 @@ mod io;
 mod seccomp;
 mod utils;
 
-/// Environment variable name passed to the container with the containers name
-const ENV_NAME: &str = "NAME";
-/// Environment variable name passed to the container with the containers version
-const ENV_VERSION: &str = "VERSION";
 /// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;
 
@@ -124,10 +121,15 @@ impl Island {
         Ok(())
     }
 
-    pub async fn create(&self, container: &Container) -> Result<Box<dyn Process>, Error> {
+    pub async fn create(
+        &self,
+        container: &Container,
+        args: Option<&Vec<NonNullString>>,
+        env: Option<&HashMap<NonNullString, NonNullString>>,
+    ) -> Result<Box<dyn Process>, Error> {
         let manifest = &container.manifest;
-        let (init, argv) = init_argv(manifest);
-        let env = env(manifest);
+        let (init, argv) = init_argv(manifest, args);
+        let env = self::env(manifest, env);
         let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
         let (checkpoint_runtime, checkpoint_init) = checkpoints();
         let tripwire = self.tripwire_read.clone();
@@ -391,7 +393,7 @@ fn exit_status(pid: Pid) -> Option<ExitStatus> {
 }
 
 /// Construct the init and argv argument for the containers execve
-fn init_argv(manifest: &Manifest) -> (CString, Vec<CString>) {
+fn init_argv(manifest: &Manifest, args: Option<&Vec<NonNullString>>) -> (CString, Vec<CString>) {
     // A container without an init shall not be started
     // Validation of init is done in `Manifest`
     let init = CString::new(
@@ -404,44 +406,63 @@ fn init_argv(manifest: &Manifest) -> (CString, Vec<CString>) {
     )
     .expect("Invalid init");
 
-    // argv that is passed to execve must start with init
-    let argv = if let Some(ref args) = manifest.args {
-        let mut argv = Vec::with_capacity(1 + args.len());
-        argv.push(init.clone());
-        argv.extend({
-            args.iter().map(|arg| {
-                CString::new(arg.as_bytes())
-                    .expect("Invalid arg. This is a bug in the manifest validation")
-            })
-        });
-        argv
-    } else {
-        vec![init.clone()]
+    // If optional argumenets are defined, discard the values from the manifest.
+    // if there are no optional args - take the values from the manifest if present
+    // or nothing.
+    let args = match (manifest.args.as_ref(), args) {
+        (None, None) => &[],
+        (None, Some(a)) => a.as_slice(),
+        (Some(ref m), None) => m.as_slice(),
+        (Some(_), Some(a)) => a.as_slice(),
     };
+
+    let mut argv = Vec::with_capacity(1 + args.len());
+    argv.push(init.clone());
+    argv.extend({
+        args.iter().map(|arg| {
+            CString::new(arg.as_bytes())
+                .expect("Invalid arg. This is a bug in the manifest or parameter validation")
+        })
+    });
 
     // argv
     (init, argv)
 }
 
-/// Construct the env argument for the containers execve
-fn env(manifest: &Manifest) -> Vec<CString> {
-    let mut env = Vec::with_capacity(2);
-    env.push(
+/// Construct the env argument for the containers execve. Optional args and env overwrite values from the
+/// manifest.
+fn env(manifest: &Manifest, env: Option<&HashMap<NonNullString, NonNullString>>) -> Vec<CString> {
+    let mut result = Vec::with_capacity(2);
+    result.push(
         CString::new(format!("{}={}", ENV_NAME, manifest.name.to_string()))
             .expect("Invalid container name. This is a bug in the manifest validation"),
     );
-    env.push(CString::new(format!("{}={}", ENV_VERSION, manifest.version)).unwrap());
+    result.push(CString::new(format!("{}={}", ENV_VERSION, manifest.version)).unwrap());
 
     if let Some(ref e) = manifest.env {
-        env.extend({
-            e.iter().map(|(k, v)| {
-                CString::new(format!("{}={}", k, v))
-                    .expect("Invalid env. This is a bug in the manifest validation")
-            })
+        result.extend({
+            e.iter()
+                .filter(|(k, _)| {
+                    // Skip the values declared in fn arguments
+                    env.map(|env| !env.contains_key(k)).unwrap_or(true)
+                })
+                .map(|(k, v)| {
+                    CString::new(format!("{}={}", k, v))
+                        .expect("Invalid env. This is a bug in the manifest validation")
+                })
         })
     }
 
-    env
+    // Add additional env variables passed
+    if let Some(env) = env {
+        result.extend(
+            env.iter().map(|(k, v)| {
+                CString::new(format!("{}={}", k, v)).expect("Invalid additional env")
+            }),
+        );
+    }
+
+    result
 }
 
 /// Generate a list of supplementary gids if the groups info can be retrieved. This

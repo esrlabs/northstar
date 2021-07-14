@@ -14,12 +14,11 @@
 
 use derive_new::new;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-pub use npk::manifest::{Manifest, Version};
+pub use npk::manifest::{Manifest, NonNullString, Version};
 pub type Container = super::container::Container;
 pub type ContainerError = super::container::Error;
-pub type MessageId = String; // UUID
 pub type Name = npk::manifest::Name;
 pub type Pid = u32;
 pub type RepositoryId = String;
@@ -27,7 +26,7 @@ pub type RepositoryId = String;
 const VERSION: Version = Version {
     major: 0,
     minor: 0,
-    patch: 6,
+    patch: 7,
     pre: vec![],
     build: vec![],
 };
@@ -91,7 +90,11 @@ pub enum Request {
     Mount(Vec<Container>),
     Repositories,
     Shutdown,
-    Start(Container),
+    Start(
+        Container,
+        Option<Vec<NonNullString>>, // Optional command line arguments
+        Option<HashMap<NonNullString, NonNullString>>, // Optional env variables
+    ),
     /// Stop the given container. If the process does not exit within
     /// the timeout in seconds it is SIGKILLED
     Stop(Container, u64),
@@ -153,6 +156,7 @@ pub enum Error {
     Configuration(String),
     DuplicateContainer(Container),
     InvalidContainer(Container),
+    InvalidArguments(String),
     MountBusy(Container),
     UmountBusy(Container),
     StartContainerStarted(Container),

@@ -17,9 +17,10 @@ use api::{client::Client, model::Message};
 use futures::{sink::SinkExt, StreamExt};
 use northstar::api::{
     self,
-    model::{Container, Request, Version},
+    model::{Container, NonNullString, Request, Version},
 };
 use std::{
+    collections::HashMap,
     convert::{TryFrom, TryInto},
     path::PathBuf,
     process,
@@ -75,6 +76,12 @@ pub enum Subcommand {
         name: String,
         /// Container version
         version: Version,
+        /// Command line arguments
+        #[structopt(short, long)]
+        args: Option<Vec<String>>,
+        /// Environment variables in KEY=VALUE format
+        #[structopt(short, long)]
+        env: Option<Vec<String>>,
     },
     /// Stop a container
     Stop {
@@ -158,8 +165,49 @@ impl TryFrom<Subcommand> for Request {
             Subcommand::Umount { name, version } => {
                 Ok(Request::Umount(Container::new(name.try_into()?, version)))
             }
-            Subcommand::Start { name, version } => {
-                Ok(Request::Start(Container::new(name.try_into()?, version)))
+            Subcommand::Start {
+                name,
+                version,
+                args,
+                env,
+            } => {
+                // Convert args
+                let args = if let Some(args) = args {
+                    let mut non_null = Vec::with_capacity(args.len());
+                    for arg in args {
+                        non_null
+                            .push(NonNullString::try_from(arg.as_str()).context("Invalid arg")?);
+                    }
+                    Some(non_null)
+                } else {
+                    None
+                };
+
+                // Convert env
+                let env = if let Some(env) = env {
+                    let mut non_null = HashMap::with_capacity(env.len());
+                    for env in env {
+                        let mut split = env.split('=');
+                        let key = split
+                            .next()
+                            .ok_or_else(|| anyhow!("Invalid env"))
+                            .and_then(|s| NonNullString::try_from(s).context("Invalid key"))?;
+                        let value = split
+                            .next()
+                            .ok_or_else(|| anyhow!("Invalid env"))
+                            .and_then(|s| NonNullString::try_from(s).context("Invalid value"))?;
+                        non_null.insert(key, value);
+                    }
+                    Some(non_null)
+                } else {
+                    None
+                };
+
+                Ok(Request::Start(
+                    Container::new(name.try_into()?, version),
+                    args,
+                    env,
+                ))
             }
             Subcommand::Stop {
                 name,

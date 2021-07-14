@@ -13,14 +13,18 @@
 //   limitations under the License.
 
 use super::{
-    cgroups, config::Config, console::Request, error::Error, island::Island, key::PublicKey,
-    mount::MountControl, repository::DirRepository, Container, Event, EventTx, ExitStatus,
-    Notification, Pid, Repository, RepositoryId,
+    cgroups,
+    config::Config,
+    console::Request,
+    error::Error,
+    island::Island,
+    key::PublicKey,
+    mount::MountControl,
+    repository::{DirRepository, MemRepository},
+    Container, Event, EventTx, ExitStatus, Notification, Pid, Repository, RepositoryId, ENV_NAME,
+    ENV_VERSION,
 };
-use crate::{
-    api::{self, model::MountResult},
-    runtime::repository::MemRepository,
-};
+use crate::api::{self, model::MountResult};
 use api::model::Response;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -30,7 +34,7 @@ use futures::{
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
-use npk::manifest::{Autostart, Manifest, Mount, Resource};
+use npk::manifest::{Autostart, Manifest, Mount, NonNullString, Resource};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
@@ -46,6 +50,7 @@ use tokio::{
     task, time,
 };
 
+/// Internal repository name
 const INTERNAL_REPOSITORY: &str = "internal";
 
 type Repositories = HashMap<RepositoryId, Box<dyn Repository + Send + Sync>>;
@@ -224,7 +229,7 @@ impl<'a> State<'a> {
             match result {
                 Ok(_) => {
                     info!("Autostarting {} ({:?})", container, autostart);
-                    if let Err(e) = self.start(&container).await {
+                    if let Err(e) = self.start(&container, None, None).await {
                         match autostart {
                             Autostart::Relaxed => {
                                 warn!("Failed to autostart relaxed {}: {}", container, e);
@@ -356,7 +361,16 @@ impl<'a> State<'a> {
         Ok(())
     }
 
-    pub(super) async fn start(&mut self, container: &Container) -> Result<(), Error> {
+    /// Start a container
+    /// `container`: Container to start
+    /// `args`: Optional command line arguments that overwrite the values from the manifest
+    /// `env`: Optional env variables that overwrite the values from the manifest
+    pub(super) async fn start(
+        &mut self,
+        container: &Container,
+        args: Option<&Vec<NonNullString>>,
+        env: Option<&HashMap<NonNullString, NonNullString>>,
+    ) -> Result<(), Error> {
         let start = time::Instant::now();
         info!("Trying to start {}", container);
 
@@ -367,6 +381,19 @@ impl<'a> State<'a> {
         } else {
             return Err(Error::InvalidContainer(container.clone()));
         };
+
+        // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
+        if let Some(env) = env {
+            if env
+                .keys()
+                .any(|k| k.as_str() == ENV_NAME || k.as_str() == ENV_VERSION)
+            {
+                return Err(Error::InvalidArguments(format!(
+                    "env contains reserved key {} or {}",
+                    ENV_NAME, ENV_VERSION
+                )));
+            }
+        }
 
         // Check if the container is not a resource
         if npk.manifest().init.is_none() {
@@ -426,7 +453,11 @@ impl<'a> State<'a> {
 
         // Spawn process
         info!("Creating {}", container);
-        let process = match self.launcher_island.create(&mounted_container).await {
+        let process = match self
+            .launcher_island
+            .create(&mounted_container, args, env)
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -725,14 +756,15 @@ impl<'a> State<'a> {
                                 .expect("Internal channel error on main");
                             Response::Ok(())
                         }
-                        api::model::Request::Start(container) => match self.start(&container).await
-                        {
-                            Ok(_) => Response::Ok(()),
-                            Err(e) => {
-                                warn!("Failed to start {}: {}", container, e);
-                                Response::Err(e.into())
+                        api::model::Request::Start(container, args, env) => {
+                            match self.start(&container, args.as_ref(), env.as_ref()).await {
+                                Ok(_) => Response::Ok(()),
+                                Err(e) => {
+                                    warn!("Failed to start {}: {}", container, e);
+                                    Response::Err(e.into())
+                                }
                             }
-                        },
+                        }
                         api::model::Request::Stop(container, timeout) => {
                             match self
                                 .stop(&container, std::time::Duration::from_secs(*timeout))

@@ -19,14 +19,13 @@ use std::{
     ffi::c_void,
     fs,
     io::{self, Write},
-    iter,
     path::{Path, PathBuf},
-    process, thread, time,
+    thread, time,
 };
 use structopt::StructOpt;
 
-#[derive(StructOpt)]
-enum TestCommands {
+#[derive(Debug, StructOpt)]
+enum Command {
     Cat {
         #[structopt(parse(from_os_str))]
         path: PathBuf,
@@ -40,9 +39,7 @@ enum TestCommands {
     Touch {
         path: PathBuf,
     },
-    Sleep {
-        seconds: u64,
-    },
+    Sleep,
     Write {
         message: String,
         path: PathBuf,
@@ -50,34 +47,27 @@ enum TestCommands {
 }
 
 fn main() -> Result<()> {
-    let input = Path::new("/data").join("input.txt");
-    if input.exists() {
-        println!("Reading {}", input.display());
-        let commands = fs::read_to_string(&input)?;
+    let command = Command::from_args();
+    println!("Executing \"{:?}\"", command);
+    match command {
+        Command::Cat { path } => cat(&path)?,
+        Command::Crash => crash(),
+        Command::Echo { message } => echo(&message),
+        Command::Inspect => inspect(),
+        Command::LeakMemory => leak_memory(),
+        Command::Touch { path } => touch(&path)?,
+        Command::Sleep => (),
+        Command::Write { message, path } => write(&message, path.as_path())?,
+    };
 
-        println!("Removing {}", input.display());
-        fs::remove_file(&input)?;
-
-        for line in commands.lines() {
-            println!("Executing \"{}\"", line);
-            let command = iter::once("test-container").chain(line.split_whitespace());
-            match TestCommands::from_iter(command) {
-                TestCommands::Cat { path } => cat(&path)?,
-                TestCommands::Crash => crash(),
-                TestCommands::Echo { message } => echo(&message),
-                TestCommands::Inspect => inspect(),
-                TestCommands::LeakMemory => leak_memory(),
-                TestCommands::Touch { path } => touch(&path)?,
-                TestCommands::Sleep { seconds } => sleep(seconds),
-                TestCommands::Write { message, path } => write(&message, path.as_path())?,
-            };
-        }
-    }
-
-    println!("Sleeping...");
-    thread::sleep(time::Duration::from_secs(u64::MAX));
+    sleep();
 
     Ok(())
+}
+
+fn sleep() {
+    println!("Sleeping...");
+    thread::sleep(time::Duration::from_secs(u64::MAX));
 }
 
 fn dump(file: &str) {
@@ -181,10 +171,4 @@ fn inspect() {
     );
 
     dump("/proc/self/mounts");
-}
-
-fn sleep(seconds: u64) {
-    thread::sleep(time::Duration::from_secs(seconds));
-    println!("Exiting after {} seconds sleep", seconds);
-    process::exit(0);
 }

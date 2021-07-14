@@ -124,11 +124,11 @@ async fn main() -> Result<()> {
             let mut iterations = 0;
             loop {
                 if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
-                    client.mount(vec![container.clone()]).await?;
+                    client.mount(Some(container.clone())).await?;
                 }
 
                 if mode != Mode::MountUmount {
-                    client.start(&app, &version).await?;
+                    client.start(container.clone()).await?;
                 }
 
                 if let Some(delay) = random {
@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
 
                 if mode != Mode::MountUmount {
                     client
-                        .stop(&app, &version, time::Duration::from_secs(5))
+                        .stop(container.clone(), time::Duration::from_secs(5))
                         .await
                         .context("Failed to stop container")?;
                 }
@@ -146,7 +146,7 @@ async fn main() -> Result<()> {
                 // Check if we need to umount
                 if mode != Mode::StartStop {
                     client
-                        .umount(&app, &version)
+                        .umount(container.clone())
                         .await
                         .context("Failed to umount")?;
                 }
@@ -222,7 +222,7 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
             n = client.next() => {
                 match n {
                     Some(Ok(model::Notification::Install(container))) => {
-                        client.uninstall(&container.name(), &container.version()).await?;
+                        client.uninstall(container).await?;
                     }
                     Some(Ok(model::Notification::Uninstall(_))) => {
                         client.install(npk, repository).await?;
