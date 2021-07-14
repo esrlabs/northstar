@@ -26,8 +26,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    fmt,
-    fs::{self, File},
+    fmt, fs,
     io::{self, BufReader, Read, Seek, SeekFrom, Write},
     os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
@@ -217,8 +216,11 @@ impl<R: Read + Seek> Npk<R> {
         })
     }
 
-    pub fn from_path(npk: &Path, key: Option<&PublicKey>) -> Result<Npk<BufReader<File>>, Error> {
-        File::open(npk)
+    pub fn from_path(
+        npk: &Path,
+        key: Option<&PublicKey>,
+    ) -> Result<Npk<BufReader<fs::File>>, Error> {
+        fs::File::open(npk)
             .map_err(|error| Error::Io {
                 context: format!("Open file {}", npk.display()),
                 error,
@@ -256,7 +258,7 @@ impl<R: Read + Seek> Npk<R> {
     }
 }
 
-impl AsRawFd for Npk<BufReader<File>> {
+impl AsRawFd for Npk<BufReader<fs::File>> {
     fn as_raw_fd(&self) -> RawFd {
         self.file.get_ref().as_raw_fd()
     }
@@ -508,7 +510,7 @@ pub fn pack_with(
         dest.push(format!("{}-{}.", &name, &version));
         dest.set_extension(&NPK_EXT);
     }
-    let npk = File::create(&dest).map_err(|e| Error::Io {
+    let npk = fs::File::create(&dest).map_err(|e| Error::Io {
         context: format!("Failed to create NPK: '{}'", &dest.display()),
         error: e,
     })?;
@@ -540,7 +542,7 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
     }
 
     fn write(data: &[u8], path: &Path) -> Result<(), Error> {
-        let mut file = File::create(&path).map_err(|e| Error::Io {
+        let mut file = fs::File::create(&path).map_err(|e| Error::Io {
             context: format!("Failed to create '{}'", &path.display()),
             error: e,
         })?;
@@ -648,7 +650,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     let gid = manifest.gid;
 
     fn add_directory(
-        mut file: &File,
+        mut file: &fs::File,
         directory: &Path,
         mode: u16,
         uid: u16,
@@ -690,7 +692,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
         let mut subdir = PathBuf::from("/");
         for dir in target.iter().skip(1) {
             subdir.push(dir);
-            add_directory(file, &subdir, mode, uid, gid)?;
+            add_directory(&file, &subdir, mode, uid, gid)?;
         }
     }
 
@@ -828,15 +830,15 @@ fn write_npk<W: Write + Seek>(
         .map(drop)
 }
 
-pub fn open_zip(file: &Path) -> Result<Zip<BufReader<File>>, Error> {
+pub fn open_zip(file: &Path) -> Result<Zip<BufReader<fs::File>>, Error> {
     zip::ZipArchive::new(BufReader::new(open(&file)?)).map_err(|error| Error::Zip {
         context: format!("Failed to parse ZIP format: '{}'", &file.display()),
         error,
     })
 }
 
-fn open(path: &Path) -> Result<File, Error> {
-    File::open(&path).map_err(|error| Error::Io {
+fn open(path: &Path) -> Result<fs::File, Error> {
+    fs::File::open(&path).map_err(|error| Error::Io {
         context: format!("Failed to open '{}'", &path.display()),
         error,
     })

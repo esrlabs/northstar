@@ -33,7 +33,7 @@ proc-mounts = { version = "0.2.4", optional = true }
 procinfo = { version = "0.4.2", optional = true }
 rand = { version = "0.7.3", optional = true }
 semver = { version = "0.11.0", features = ["serde"] }
-serde = { version = "1.0", features = ["derive", "rc"], optional = true }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", optional = true }
 serde_with = { version = "1.9", optional = true }
 serde_yaml = { version = "0.8.17", optional = true }
@@ -43,7 +43,7 @@ thiserror = "1.0"
 tokio = { version = "1.5", features = ["full"] }
 tokio-eventfd = { version = "0.2.0", optional = true }
 tokio-util = { version = "0.6.6", features = ["codec", "io"], optional = true }
-url = { version = "2.2", features = ["serde"] }
+url = { version = "2.2", features = ["serde"], optional = true }
 uuid = { version = "0.8.2", features = ["v4"], optional = true }
 which = { version = "4.1", optional = true }
 zip = { version = "0.5.13", features = ["unreserved"], optional = true }
@@ -54,8 +54,32 @@ nix = "0.20.0"
 proptest = "1.0"
 
 [features]
-api = ["bytes", "derive-new", "npk", "serde_json", "tokio-util"]
-npk = ["base64", "byteorder", "fs_extra", "humanize-rs", "rand", "sha2", "serde", "serde_with", "serde_yaml", "which", "zip"]
+api = [
+    "bytes",
+    "derive-new",
+    "npk",
+    "serde_json",
+    "tokio-util",
+    "url"
+]
+npk = [
+    "base64",
+    "byteorder",
+    "caps",
+    "ed25519-dalek",
+    "fs_extra",
+    "hex",
+    "humanize-rs",
+    "itertools",
+    "rand",
+    "sha2",
+    "serde_with",
+    "serde_yaml",
+    "tempfile",
+    "uuid",
+    "which",
+    "zip"
+]
 runtime = [
     "api",
     "async-stream",
@@ -77,11 +101,11 @@ runtime = [
     "tempfile",
     "tokio-eventfd",
     "tokio-util",
+    "url",
     "uuid",
 ]
 
 [build-dependencies]
 anyhow = "1.0"
 bindgen = "0.58.1"
-lazy_static = "1.4.0"
 nix = "0.20.0"
