@@ -12,12 +12,26 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
+use crate::{
+    npk::manifest::Profile,
+    runtime::island::syscalls_default::{
+        SYSCALLS_DEFAULT, SYSCALLS_DEFAULT_CAP_DAC_READ_SEARCH, SYSCALLS_DEFAULT_CAP_SYSLOG,
+        SYSCALLS_DEFAULT_CAP_SYS_ADMIN, SYSCALLS_DEFAULT_CAP_SYS_BOOT,
+        SYSCALLS_DEFAULT_CAP_SYS_CHROOT, SYSCALLS_DEFAULT_CAP_SYS_MODULE,
+        SYSCALLS_DEFAULT_CAP_SYS_NICE, SYSCALLS_DEFAULT_CAP_SYS_PACCT,
+        SYSCALLS_DEFAULT_CAP_SYS_PTRACE, SYSCALLS_DEFAULT_CAP_SYS_RAWIO,
+        SYSCALLS_DEFAULT_CAP_SYS_TIME, SYSCALLS_DEFAULT_CAP_SYS_TTY_CONFIG,
+        SYSCALLS_DEFAULT_NON_CAP_SYS_ADMIN,
+    },
+};
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_MAXINSNS,
     BPF_RET, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
 };
+use caps::Capability;
 use log::warn;
 use nix::errno::Errno;
+use std::collections::HashSet;
 use thiserror::Error;
 
 #[allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
@@ -39,18 +53,206 @@ const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 /// Syscalls used by northstar after the seccomp rules are applied and before the actual execve is done.
 const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 
+// Filter lists that mimic docker's default list
+// (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json)
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_DAC_READ_SEARCH: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_DAC_READ_SEARCH.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_ADMIN: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_ADMIN.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_BOOT: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_BOOT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_CHROOT: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_CHROOT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_MODULE: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_MODULE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_PACCT: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_PACCT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_PTRACE: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_PTRACE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_RAWIO: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_RAWIO.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_TIME: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_TIME.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_TTY_CONFIG: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_TTY_CONFIG.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYS_NICE: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYS_NICE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_CAP_SYSLOG: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_CAP_SYSLOG.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref BUILDER_DEFAULT_NON_CAP_SYS_ADMIN: Builder = {
+        builder_from_names(&SYSCALLS_DEFAULT_NON_CAP_SYS_ADMIN.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
 /// Construct a whitelist syscall filter that is applied post clone.
 pub(super) fn seccomp_filter(
-    filter: impl Iterator<Item = (impl ToString, impl ToString)>,
+    profile: Option<&Profile>,
+    names: Option<&HashSet<String>>,
+    caps: Option<&HashSet<Capability>>,
 ) -> AllowList {
     let mut builder = Builder::new();
-    for (name, _) in filter {
+    if let Some(names) = names {
+        builder.extend(builder_from_names(&names));
+    }
+    if let Some(profile) = profile {
+        builder.extend(builder_from_profile(&profile));
+    }
+    if let Some(caps) = caps {
+        builder.extend(builder_from_caps(&caps));
+    }
+    builder.build()
+}
+
+fn builder_from_names(names: &HashSet<String>) -> Builder {
+    let mut builder = Builder::new();
+    for name in names {
         if let Err(e) = builder.allow_syscall_name(&name.to_string()) {
             // Continue here as a missing syscall on the allow list does not lead to insecure behaviour
             warn!("Failed to allow syscall {}: {}", &name.to_string(), e);
         }
     }
-    builder.build()
+    builder
+}
+
+fn builder_from_profile(profile: &Profile) -> Builder {
+    match profile {
+        Profile::Default => BUILDER_DEFAULT.clone(),
+    }
+}
+
+fn builder_from_caps(caps: &HashSet<Capability>) -> Builder {
+    let mut builder = Builder::new();
+    let mut cap_sys_admin = false;
+    for cap in caps {
+        match cap {
+            Capability::CAP_CHOWN => {}
+            Capability::CAP_DAC_OVERRIDE => {}
+            Capability::CAP_DAC_READ_SEARCH => {
+                builder.extend(BUILDER_DEFAULT_CAP_DAC_READ_SEARCH.clone());
+            }
+            Capability::CAP_FOWNER => {}
+            Capability::CAP_FSETID => {}
+            Capability::CAP_KILL => {}
+            Capability::CAP_SETGID => {}
+            Capability::CAP_SETUID => {}
+            Capability::CAP_SETPCAP => {}
+            Capability::CAP_LINUX_IMMUTABLE => {}
+            Capability::CAP_NET_BIND_SERVICE => {}
+            Capability::CAP_NET_BROADCAST => {}
+            Capability::CAP_NET_ADMIN => {
+                cap_sys_admin = true;
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_ADMIN.clone());
+            }
+            Capability::CAP_NET_RAW => {}
+            Capability::CAP_IPC_LOCK => {}
+            Capability::CAP_IPC_OWNER => {}
+            Capability::CAP_SYS_MODULE => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_MODULE.clone());
+            }
+            Capability::CAP_SYS_RAWIO => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_RAWIO.clone());
+            }
+            Capability::CAP_SYS_CHROOT => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_CHROOT.clone());
+            }
+            Capability::CAP_SYS_PTRACE => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_PTRACE.clone());
+            }
+            Capability::CAP_SYS_PACCT => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_PACCT.clone());
+            }
+            Capability::CAP_SYS_ADMIN => {}
+            Capability::CAP_SYS_BOOT => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_BOOT.clone());
+            }
+            Capability::CAP_SYS_NICE => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_NICE.clone());
+            }
+            Capability::CAP_SYS_RESOURCE => {}
+            Capability::CAP_SYS_TIME => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_TIME.clone());
+            }
+            Capability::CAP_SYS_TTY_CONFIG => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYS_TTY_CONFIG.clone());
+            }
+            Capability::CAP_MKNOD => {}
+            Capability::CAP_LEASE => {}
+            Capability::CAP_AUDIT_WRITE => {}
+            Capability::CAP_AUDIT_CONTROL => {}
+            Capability::CAP_SETFCAP => {}
+            Capability::CAP_MAC_OVERRIDE => {}
+            Capability::CAP_MAC_ADMIN => {}
+            Capability::CAP_SYSLOG => {
+                builder.extend(BUILDER_DEFAULT_CAP_SYSLOG.clone());
+            }
+            Capability::CAP_WAKE_ALARM => {}
+            Capability::CAP_BLOCK_SUSPEND => {}
+            Capability::CAP_AUDIT_READ => {}
+            Capability::CAP_PERFMON => {}
+            Capability::CAP_BPF => {}
+            Capability::CAP_CHECKPOINT_RESTORE => {}
+            Capability::__Nonexhaustive => {}
+        };
+    }
+    if !cap_sys_admin {
+        builder.extend(BUILDER_DEFAULT_NON_CAP_SYS_ADMIN.clone());
+    }
+    builder
 }
 
 #[derive(Error, Debug)]
@@ -64,7 +266,7 @@ pub enum Error {
 }
 
 // Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AllowList {
     list: Vec<sock_filter>,
 }
@@ -98,6 +300,7 @@ impl AllowList {
     }
 }
 
+#[derive(Clone)]
 pub struct Builder {
     allowlist: Vec<sock_filter>,
     log_only: bool,
@@ -167,6 +370,14 @@ impl Builder {
     #[allow(unused)]
     pub fn log_only(&mut self) -> &mut Builder {
         self.log_only = true;
+        self
+    }
+
+    /// Extend one builder with another
+    /// Note: a) The 'log_only' property of the second builder is discarded
+    ///       b) Filter rules that exists in both builders are not deduplicated  
+    pub fn extend(&mut self, other: Builder) -> &mut Builder {
+        self.allowlist.extend(other.allowlist);
         self
     }
 
