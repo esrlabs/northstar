@@ -322,7 +322,7 @@ test!(container_shall_only_have_configured_fds, {
     runtime.start(TEST_CONTAINER).await?;
     assume("/proc/self/fd/0: /dev/null", 5).await?;
     assume("/proc/self/fd/1: pipe:.*", 5).await?;
-    assume("/proc/self/fd/2: /dev/null", 5).await?;
+    assume("/proc/self/fd/2: pipe:.*", 5).await?;
     assume("total: 3", 5).await?;
 
     runtime.shutdown().await
