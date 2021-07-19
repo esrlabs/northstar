@@ -450,7 +450,7 @@ mod tests {
     fn drop_reader() {
         let (read, mut write) = pipe().unwrap();
         drop(read);
-        write.send(0).expect("Failed to receive");
+        write.send(0).expect("Failed to send");
     }
 
     #[test]
