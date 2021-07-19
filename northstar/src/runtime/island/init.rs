@@ -128,7 +128,7 @@ pub(super) fn init(
                 reset_signal_mask();
 
                 // Set seccomp filter
-                if let Some(mut filter) = seccomp {
+                if let Some(ref filter) = seccomp {
                     filter.apply().expect("Failed to apply seccomp filter.");
                 }
 

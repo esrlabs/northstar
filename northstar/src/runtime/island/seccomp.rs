@@ -178,7 +178,7 @@ pub struct AllowList {
 }
 
 impl AllowList {
-    pub fn apply(&mut self) -> Result<(), Error> {
+    pub fn apply(&self) -> Result<(), Error> {
         #[cfg(target_os = "android")]
         const PR_SET_SECCOMP: nix::libc::c_int = 22;
 
@@ -197,7 +197,7 @@ impl AllowList {
 
         let sf_prog = sock_fprog {
             len: self.list.len() as u16,
-            filter: self.list.as_mut_ptr(),
+            filter: self.list.as_ptr() as *mut bindings::sock_filter,
         };
         let sf_prog_ptr = &sf_prog as *const sock_fprog;
         let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
