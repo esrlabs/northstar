@@ -12,23 +12,23 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    clone::clone, fs::Mount, io::Fd, Checkpoint, Container, PipeRead, Start, SIGNAL_OFFSET,
-};
+use super::{clone::clone, fs::Mount, io::Fd, Checkpoint, Container, PipeRead, SIGNAL_OFFSET};
 use crate::runtime::island::seccomp::AllowList;
 use nix::{
     errno::Errno,
-    libc::{self, c_int, c_ulong},
+    libc::{self, c_ulong},
     sched,
     sys::{
         self,
-        signal::{signal, sigprocmask, SigHandler, SigSet, SigmaskHow, Signal, SIGCHLD, SIGKILL},
+        signal::{Signal, SIGCHLD, SIGKILL},
+        wait::WaitPidFlag,
     },
     unistd::{self, Uid},
 };
 use sched::CloneFlags;
 use std::{
-    collections::HashSet, env, ffi::CString, io::Read, os::unix::prelude::RawFd, process::exit,
+    collections::HashSet, env, ffi::CString, io::Read, os::unix::prelude::RawFd, path::Path,
+    process::exit,
 };
 use sys::wait::{waitpid, WaitStatus};
 
@@ -36,6 +36,7 @@ use sys::wait::{waitpid, WaitStatus};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn init(
     container: &Container,
+    root: &Path,
     init: &CString,
     argv: &[CString],
     env: &[CString],
@@ -46,51 +47,36 @@ pub(super) fn init(
     mut checkpoint: Checkpoint,
     tripwire: PipeRead,
 ) -> ! {
-    // Install a "default signal handler" that exits on any signal. This process is the "init"
-    // process of this pid ns and therefore doesn't have any own signal handlers. This handler that just exits
-    // is needed in case the container is signaled *before* the child is spawned that would otherwise receive the signal.
-    // If the child is spawn when the signal is sent to this group it shall exit and the init returns from waitpid.
-    set_init_signal_handlers();
+    // Set the process name to init. This process inherited the process name
+    // from the runtime
+    set_process_name();
 
     // Become a session group leader
-    setsid();
-
-    // Sync with parent
-    checkpoint.wait(Start::Start);
-    checkpoint.send(Start::Started);
-    drop(checkpoint);
-
-    pr_set_name_init();
+    unistd::setsid().expect("Failed to call setsid");
 
     // Become a subreaper for orphans in this namespace
     set_child_subreaper(true);
 
-    let manifest = &container.manifest;
-    let root = container
-        .root
-        .canonicalize()
-        .expect("Failed to canonicalize root");
-
-    // Mount
+    // Perform all mounts passed in mounts
     mount(&mounts);
 
-    // Chroot
-    unistd::chroot(&root).expect("Failed to chroot");
+    // Set the chroot to the containers root mount point
+    unistd::chroot(root).expect("Failed to chroot");
 
-    // Pwd
+    // Set current working directory to root
     env::set_current_dir("/").expect("Failed to set cwd to /");
 
     // UID / GID
-    setid(manifest.uid, manifest.gid);
+    set_ids(container.manifest.uid, container.manifest.gid);
 
     // Supplementary groups
-    setgroups(groups);
+    set_groups(groups);
 
     // No new privileges
     set_no_new_privs(true);
 
     // Capabilities
-    drop_capabilities(manifest.capabilities.as_ref());
+    drop_capabilities(container.manifest.capabilities.as_ref());
 
     // Close and dup fds
     file_descriptors(fds);
@@ -99,13 +85,16 @@ pub(super) fn init(
     match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
         Ok(result) => match result {
             unistd::ForkResult::Parent { child } => {
+                // Start a thread that waits for the tripwire to be closed. See comment
+                // on wait_for_parent_death for details.
                 wait_for_parent_death(tripwire);
 
-                reset_signal_handlers();
+                // Drop checkpoint. The fds are cloned into the child and are closed upon execve.
+                drop(checkpoint);
 
                 // Wait for the child to exit
                 loop {
-                    match waitpid(Some(child), None) {
+                    match waitpid(Some(child), Some(WaitPidFlag::__WALL)) {
                         Ok(WaitStatus::Exited(_pid, status)) => exit(status),
                         Ok(WaitStatus::Signaled(_pid, status, _)) => {
                             // Encode the signal number in the process exit status. It's not possible to raise a
@@ -114,23 +103,31 @@ pub(super) fn init(
                             //debug!("Exiting with {} (signaled {})", code, status);
                             exit(code);
                         }
+                        Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => continue,
                         Err(e) if e == nix::Error::Sys(Errno::EINTR) => continue,
                         e => panic!("Failed to waitpid on {}: {:?}", child, e),
                     }
                 }
             }
             unistd::ForkResult::Child => {
-                drop(tripwire);
+                // If init dies, we want to die as well. This should normally never happen and is a error condition.
                 set_parent_death_signal(SIGKILL);
 
-                // TODO: Post Linux 5.5 there's a nice clone flag that allows to reset the signal handler during the clone.
-                reset_signal_handlers();
-                reset_signal_mask();
+                // Unblock signals. The signal mask has been set in the runtime prior to the clone call. This
+                // avoids that init receives signals which are unhandled. Reminder: init doesn't have any
+                // signals handlers because it's init of a PID ns.
+                super::signals_unblock();
 
                 // Set seccomp filter
                 if let Some(ref filter) = seccomp {
                     filter.apply().expect("Failed to apply seccomp filter.");
                 }
+
+                // Wait for the runtime to signal that the child shall start
+                checkpoint.wait();
+
+                // checkoint fds are cloexec and this signals the launcher that this child is started
+                // Therefore no explicity drop (close) of checkpoint here.
 
                 panic!(
                     "Execve: {:?} {:?}: {:?}",
@@ -222,44 +219,12 @@ pub const PR_SET_NAME: c_int = 15;
 use libc::PR_SET_NAME;
 
 /// Set the name of the current process to "init"
-fn pr_set_name_init() {
+fn set_process_name() {
     let cname = "init\0";
     let result = unsafe { libc::prctl(PR_SET_NAME, cname.as_ptr() as c_ulong, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
         .expect("Failed to set PR_SET_NAME");
-}
-
-/// Install default signal handler
-fn reset_signal_handlers() {
-    Signal::iterator()
-        .filter(|s| *s != Signal::SIGCHLD)
-        .filter(|s| *s != Signal::SIGKILL)
-        .filter(|s| *s != Signal::SIGSTOP)
-        .try_for_each(|s| unsafe { signal(s, SigHandler::SigDfl) }.map(drop))
-        .expect("failed to signal");
-}
-
-fn reset_signal_mask() {
-    sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None)
-        .expect("Failed to reset signal maks")
-}
-
-/// Install a signal handler that terminates the init process if the signal
-/// is received before the clone of the child. If this handler would not be
-/// installed the signal would be ignored (and not sent to the group) because
-/// the init processes in PID namespace do not have default signal handlers.
-fn set_init_signal_handlers() {
-    extern "C" fn init_signal_handler(signal: c_int) {
-        exit(SIGNAL_OFFSET + signal);
-    }
-
-    Signal::iterator()
-        .filter(|s| *s != Signal::SIGCHLD)
-        .filter(|s| *s != Signal::SIGKILL)
-        .filter(|s| *s != Signal::SIGSTOP)
-        .try_for_each(|s| unsafe { signal(s, SigHandler::Handler(init_signal_handler)) }.map(drop))
-        .expect("Failed to set signal handler");
 }
 
 // Reset effective caps to the most possible set
@@ -268,7 +233,7 @@ fn reset_effective_caps() {
 }
 
 /// Set uid/gid
-fn setid(uid: u16, gid: u16) {
+fn set_ids(uid: u16, gid: u16) {
     let rt_privileged = unistd::geteuid() == Uid::from_raw(0);
 
     // If running as uid 0 save our caps across the uid/gid drop
@@ -288,12 +253,7 @@ fn setid(uid: u16, gid: u16) {
     }
 }
 
-/// Become a session group leader
-fn setsid() {
-    unistd::setsid().expect("Failed to call setsid");
-}
-
-fn setgroups(groups: &[u32]) {
+fn set_groups(groups: &[u32]) {
     let result = unsafe { nix::libc::setgroups(groups.len(), groups.as_ptr()) };
 
     Errno::result(result)
