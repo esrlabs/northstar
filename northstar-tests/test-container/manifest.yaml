@@ -10,6 +10,8 @@ cgroups:
 capabilities:
   - CAP_KILL
 mounts:
+  /dev:
+    type: dev
   /data:
     type: persist
   /lib:
