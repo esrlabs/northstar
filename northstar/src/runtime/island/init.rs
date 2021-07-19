@@ -12,8 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{clone::clone, fs::Mount, io::Fd, Checkpoint, Container, PipeRead, SIGNAL_OFFSET};
-use crate::runtime::island::seccomp::AllowList;
+use super::{
+    clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Capabilities, Checkpoint, Container,
+    PipeRead, SIGNAL_OFFSET,
+};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
@@ -26,10 +28,7 @@ use nix::{
     unistd::{self, Uid},
 };
 use sched::CloneFlags;
-use std::{
-    collections::HashSet, env, ffi::CString, io::Read, os::unix::prelude::RawFd, path::Path,
-    process::exit,
-};
+use std::{env, ffi::CString, io::Read, os::unix::prelude::RawFd, path::Path, process::exit};
 use sys::wait::{waitpid, WaitStatus};
 
 // Init function. Pid 1.
@@ -43,6 +42,7 @@ pub(super) fn init(
     mounts: &[Mount],
     fds: &[(RawFd, Fd)],
     groups: &[u32],
+    capabilities: Option<Capabilities>,
     seccomp: Option<AllowList>,
     mut checkpoint: Checkpoint,
     tripwire: PipeRead,
@@ -76,7 +76,7 @@ pub(super) fn init(
     set_no_new_privs(true);
 
     // Capabilities
-    drop_capabilities(container.manifest.capabilities.as_ref());
+    drop_capabilities(capabilities);
 
     // Close and dup fds
     file_descriptors(fds);
@@ -262,22 +262,19 @@ fn set_groups(groups: &[u32]) {
 }
 
 /// Drop capabilities
-fn drop_capabilities(cs: Option<&HashSet<caps::Capability>>) {
-    let mut bounded =
-        caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
-    if let Some(caps) = cs {
-        bounded.retain(|c| !caps.contains(c));
-    }
-
-    for cap in bounded {
-        // caps::set cannot be called for bounded
-        caps::drop(None, caps::CapSet::Bounding, cap).expect("Failed to drop bounding cap");
-    }
-
-    if let Some(caps) = cs {
-        caps::set(None, caps::CapSet::Effective, caps).expect("Failed to set effective caps");
-        caps::set(None, caps::CapSet::Permitted, caps).expect("Failed to set permitted caps");
-        caps::set(None, caps::CapSet::Inheritable, caps).expect("Failed to set inheritable caps");
-        caps::set(None, caps::CapSet::Ambient, caps).expect("Failed to set ambient caps");
+fn drop_capabilities(capabilities: Option<Capabilities>) {
+    if let Some(capabilities) = capabilities {
+        for cap in capabilities.bounded {
+            // caps::set cannot be called for bounded
+            caps::drop(None, caps::CapSet::Bounding, cap).expect("Failed to drop bounding cap");
+        }
+        caps::set(None, caps::CapSet::Effective, &capabilities.set)
+            .expect("Failed to set effective caps");
+        caps::set(None, caps::CapSet::Permitted, &capabilities.set)
+            .expect("Failed to set permitted caps");
+        caps::set(None, caps::CapSet::Inheritable, &capabilities.set)
+            .expect("Failed to set inheritable caps");
+        caps::set(None, caps::CapSet::Ambient, &capabilities.set)
+            .expect("Failed to set ambient caps");
     }
 }
