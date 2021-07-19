@@ -195,6 +195,15 @@ impl Northstar {
         Ok(())
     }
 
+    // Install a npk from a buffer
+    pub async fn install(&mut self, npk: &[u8]) -> Result<()> {
+        let f = self.tmpdir.path().join(uuid::Uuid::new_v4().to_string());
+        fs::write(&f, npk).await?;
+        self.client.install(&f, "test").await?;
+        fs::remove_file(&f).await?;
+        Ok(())
+    }
+
     /// Umount a container
     pub async fn umount(&mut self, container: &str) -> Result<()> {
         let container: Container = container.try_into().expect("Invalid container str");
@@ -207,8 +216,7 @@ impl Northstar {
 
     /// Install the test container and wait for the notification
     pub async fn install_test_container(&mut self) -> Result<()> {
-        self.client
-            .install(TEST_CONTAINER_NPK.as_path(), "test")
+        self.install(&TEST_CONTAINER_NPK)
             .await
             .context("Failed to install test container")?;
 
@@ -230,8 +238,7 @@ impl Northstar {
 
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
-        self.client
-            .install(TEST_RESOURCE_NPK.as_path(), "test")
+        self.install(&TEST_RESOURCE_NPK)
             .await
             .context("Failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
