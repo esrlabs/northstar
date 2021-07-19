@@ -166,7 +166,7 @@ fn file_descriptors(map: &[(RawFd, Fd)]) {
 
 fn set_child_subreaper(value: bool) {
     #[cfg(target_os = "android")]
-    const PR_SET_CHILD_SUBREAPER: c_int = 36;
+    const PR_SET_CHILD_SUBREAPER: libc::c_int = 36;
     #[cfg(not(target_os = "android"))]
     use libc::PR_SET_CHILD_SUBREAPER;
 
@@ -179,7 +179,7 @@ fn set_child_subreaper(value: bool) {
 
 fn set_parent_death_signal(signal: Signal) {
     #[cfg(target_os = "android")]
-    const PR_SET_PDEATHSIG: c_int = 1;
+    const PR_SET_PDEATHSIG: libc::c_int = 1;
     #[cfg(not(target_os = "android"))]
     use libc::PR_SET_PDEATHSIG;
 
@@ -203,7 +203,7 @@ fn wait_for_parent_death(mut tripwire: PipeRead) {
 
 fn set_no_new_privs(value: bool) {
     #[cfg(target_os = "android")]
-    pub const PR_SET_NO_NEW_PRIVS: c_int = 38;
+    pub const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
     #[cfg(not(target_os = "android"))]
     use libc::PR_SET_NO_NEW_PRIVS;
 
@@ -214,7 +214,7 @@ fn set_no_new_privs(value: bool) {
 }
 
 #[cfg(target_os = "android")]
-pub const PR_SET_NAME: c_int = 15;
+pub const PR_SET_NAME: libc::c_int = 15;
 #[cfg(not(target_os = "android"))]
 use libc::PR_SET_NAME;
 
