@@ -419,7 +419,7 @@ mod example {
     // Start crashing example
     test!(crashing, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_CRASHING_NPK, "test").await?;
+        runtime.install(&EXAMPLE_CRASHING_NPK).await?;
         runtime.start(EXAMPLE_CRASHING).await?;
         assume("Crashing in", 5).await?;
         runtime.shutdown().await
@@ -428,7 +428,7 @@ mod example {
     // Start cpueater example and assume log message
     test!(cpueater, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_CPUEATER_NPK, "test").await?;
+        runtime.install(&EXAMPLE_CPUEATER_NPK).await?;
         runtime.start(EXAMPLE_CPUEATER).await?;
         assume("Eating CPU", 5).await?;
         runtime.shutdown().await
@@ -437,9 +437,9 @@ mod example {
     // Start hello-ferris example
     test!(hello_ferris, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_FERRIS_NPK, "test").await?;
-        runtime.install(&EXAMPLE_MESSAGE_0_0_1_NPK, "test").await?;
-        runtime.install(&EXAMPLE_HELLO_FERRIS_NPK, "test").await?;
+        runtime.install(&EXAMPLE_FERRIS_NPK).await?;
+        runtime.install(&EXAMPLE_MESSAGE_0_0_1_NPK).await?;
+        runtime.install(&EXAMPLE_HELLO_FERRIS_NPK).await?;
         runtime.start(EXAMPLE_HELLO_FERRIS).await?;
         assume("Hello once more from 0.0.1!", 5).await?;
         runtime.shutdown().await
@@ -448,8 +448,8 @@ mod example {
     // Start hello-resource example
     test!(hello_resource, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_MESSAGE_0_0_2_NPK, "test").await?;
-        runtime.install(&EXAMPLE_HELLO_RESOURCE_NPK, "test").await?;
+        runtime.install(&EXAMPLE_MESSAGE_0_0_2_NPK).await?;
+        runtime.install(&EXAMPLE_HELLO_RESOURCE_NPK).await?;
         runtime.start(EXAMPLE_HELLO_RESOURCE).await?;
         assume(
             "0: Content of /message/hello: Hello once more from v0.0.2!",
@@ -467,7 +467,7 @@ mod example {
     // Start inspect example
     test!(inspect, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_INSPECT_NPK, "test").await?;
+        runtime.install(&EXAMPLE_INSPECT_NPK).await?;
         runtime.start(EXAMPLE_INSPECT).await?;
         runtime.stop(EXAMPLE_INSPECT, 5).await?;
         // TODO
@@ -477,7 +477,7 @@ mod example {
     // Start memeater example
     test!(memeater, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_MEMEATER_NPK, "test").await?;
+        runtime.install(&EXAMPLE_MEMEATER_NPK).await?;
         runtime.start(EXAMPLE_MEMEATER).await?;
         // TODO
         runtime.stop(EXAMPLE_MEMEATER, 5).await?;
@@ -487,7 +487,7 @@ mod example {
     // Start persistence example and check output
     test!(persistence, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_PERSISTENCE_NPK, "test").await?;
+        runtime.install(&EXAMPLE_PERSISTENCE_NPK).await?;
         runtime.start(EXAMPLE_PERSISTENCE).await?;
         assume("Writing Hello! to /data/file", 5).await?;
         assume("Content of /data/file: Hello!", 5).await?;
@@ -497,7 +497,7 @@ mod example {
     // Start seccomp example
     test!(seccomp, {
         let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_SECCOMP_NPK, "test").await?;
+        runtime.install(&EXAMPLE_SECCOMP_NPK).await?;
         runtime.start(EXAMPLE_SECCOMP).await?;
         runtime.shutdown().await
     });
