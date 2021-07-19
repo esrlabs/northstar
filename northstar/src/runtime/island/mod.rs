@@ -20,7 +20,7 @@ use super::{
     state::{MountedContainer, Process},
     Event, EventTx, ExitStatus, Pid,
 };
-use crate::npk::manifest::Manifest;
+use crate::npk::manifest::{Capability, Manifest};
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
 use log::{debug, info, warn};
@@ -37,6 +37,7 @@ use nix::{
 };
 use sched::CloneFlags;
 use std::{
+    collections::HashSet,
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
@@ -138,6 +139,7 @@ impl Island {
         let tripwire = self.tripwire_read.clone();
         let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
         let groups = groups(manifest);
+        let capabilities = capabilities(&container);
         let seccomp = seccomp_filter(&container);
         let root = container
             .root
@@ -202,6 +204,7 @@ impl Island {
                         &mounts,
                         &fds,
                         &groups,
+                        capabilities,
                         seccomp,
                         checkpoint_init,
                         tripwire,
@@ -485,6 +488,7 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
     }
 }
 
+/// Generate seccomp filter applied in init
 fn seccomp_filter(container: &Container) -> Option<seccomp::AllowList> {
     if let Some(seccomp) = container.manifest.seccomp.as_ref() {
         return Some(seccomp::seccomp_filter(
@@ -496,6 +500,7 @@ fn seccomp_filter(container: &Container) -> Option<seccomp::AllowList> {
     None
 }
 
+/// Block all signals of this process and currenty thread
 fn signals_block() {
     SigSet::all()
         .thread_block()
@@ -503,11 +508,32 @@ fn signals_block() {
     sigprocmask(SigmaskHow::SIG_BLOCK, Some(&SigSet::all()), None).unwrap();
 }
 
+/// Unblock all signals of this process and currenty thread
 fn signals_unblock() {
     SigSet::all()
         .thread_unblock()
         .expect("Failed to set thread signal mask");
     sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None).unwrap();
+}
+
+/// Capability settings applied in init
+struct Capabilities {
+    bounded: HashSet<Capability>,
+    set: HashSet<Capability>,
+}
+
+/// Calculate capability sets
+fn capabilities(container: &Container) -> Option<Capabilities> {
+    let mut bounded =
+        caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
+
+    container.manifest.capabilities.as_ref().map(|caps| {
+        bounded.retain(|c| !caps.contains(c));
+        Capabilities {
+            bounded,
+            set: caps.clone(),
+        }
+    })
 }
 
 #[derive(Clone)]
