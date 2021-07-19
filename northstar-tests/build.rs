@@ -39,6 +39,14 @@ fn main() {
         "test-resource",
     ] {
         let dir = Path::new(dir);
+
+        // Rerun this script if the source or manifest is updated
+        println!("cargo:rerun-if-changed={}/manifest.yaml", dir.display());
+        let src_dir = dir.join("src");
+        if src_dir.exists() {
+            println!("cargo:rerun-if-changed={}", src_dir.display());
+        }
+
         // Build crate if a Cargo manifest is included in the directory
         let cargo_manifest = dir.join("Cargo.toml");
 
@@ -71,7 +79,7 @@ fn main() {
         };
 
         npk::npk::pack(
-            &dir.join(Path::new("manifest.yaml")),
+            &dir.join("manifest.yaml"),
             &root,
             out_dir,
             Some(Path::new(KEY)),
