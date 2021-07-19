@@ -3,10 +3,10 @@ version: 0.0.1
 init: /test-container
 uid: 1000
 gid: 1000
-cgroups:
-  memory:
-    limit_in_bytes: 10000000
-    swappiness: 0
+# cgroups:
+#   memory:
+#     limit_in_bytes: 10000000
+#     swappiness: 0
 capabilities:
   - CAP_KILL
 mounts:
