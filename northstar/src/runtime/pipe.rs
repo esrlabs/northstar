@@ -14,7 +14,6 @@
 
 use futures::ready;
 use nix::{fcntl, unistd};
-use serde::{de::DeserializeOwned, Serialize};
 use std::{
     convert::TryFrom,
     io,
@@ -199,67 +198,6 @@ impl AsyncWrite for AsyncPipeWrite {
     }
 }
 
-/// Send an item with bincode default serialization on self
-pub(crate) trait PipeSend {
-    fn send<T: Serialize>(&mut self, item: T) -> Result<()>;
-}
-
-impl<T> PipeSend for T
-where
-    T: io::Write,
-{
-    fn send<M: Serialize>(&mut self, item: M) -> Result<()> {
-        bincode::serialize_into(self, &item)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        Ok(())
-    }
-}
-
-/// Recv an item that is serialized via bincode defaults on self
-pub(crate) trait PipeRecv {
-    fn recv<M: DeserializeOwned>(&mut self) -> Result<M>;
-}
-
-impl<T> PipeRecv for T
-where
-    T: io::Read,
-{
-    fn recv<M: DeserializeOwned>(&mut self) -> Result<M> {
-        bincode::deserialize_from(self).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
-}
-
-/// Create a pair of read and writeable ends connected via two pipe(2)s
-#[allow(dead_code)]
-pub(crate) fn pipe_duplex<R: io::Read, S: io::Write>(
-) -> Result<((PipeRead, PipeWrite), (PipeRead, PipeWrite))> {
-    let (rx_left, tx_right) = pipe()?;
-    let (rx_right, tx_left) = pipe()?;
-    let left = (rx_left, tx_left);
-    let right = (rx_right, tx_right);
-    Ok((left, right))
-}
-
-/// Duplex message passing
-pub trait PipeSendRecv {
-    fn recv<T: Serialize + DeserializeOwned>(&mut self) -> Result<T>;
-    fn send<T: Serialize + DeserializeOwned>(&mut self, item: T) -> Result<()>;
-}
-
-impl<R, S> PipeSendRecv for (R, S)
-where
-    S: io::Write,
-    R: io::Read,
-{
-    fn recv<T: Serialize + DeserializeOwned>(&mut self) -> Result<T> {
-        self.0.recv()
-    }
-
-    fn send<T: Serialize + DeserializeOwned>(&mut self, item: T) -> Result<()> {
-        self.1.send(item)
-    }
-}
-
 /// Sets O_NONBLOCK flag on self
 pub trait RawFdExt: AsRawFd {
     fn set_nonblocking(&self);
@@ -340,7 +278,7 @@ impl Condition {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ConditionWait {
     read: PipeRead,
 }
@@ -372,7 +310,7 @@ impl IntoRawFd for ConditionWait {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ConditionNotify {
     write: PipeWrite,
 }
@@ -402,9 +340,8 @@ mod tests {
     use std::{
         convert::TryInto,
         io::{Read, Write},
-        process, thread, time,
+        process, thread,
     };
-    use time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
@@ -441,7 +378,7 @@ mod tests {
     fn drop_writer() {
         let (mut read, write) = pipe().unwrap();
         drop(write);
-        read.recv::<i32>().expect("Failed to receive");
+        assert!(matches!(read.read_exact(&mut [0u8; 1]), Ok(())));
     }
 
     #[test]
@@ -450,7 +387,7 @@ mod tests {
     fn drop_reader() {
         let (read, mut write) = pipe().unwrap();
         drop(read);
-        write.send(0).expect("Failed to send");
+        write.write_all(b"test").expect("Failed to send");
     }
 
     #[test]
@@ -541,98 +478,6 @@ mod tests {
                 process::exit(0);
             }
         }
-    }
-
-    #[test]
-    /// Smoke test message sending and receiving
-    fn send_recv() {
-        let (mut read, mut write) = pipe().unwrap();
-        for n in 0..100 {
-            let duration = Duration::from_secs(n);
-            write.send(duration).unwrap();
-            assert_eq!(read.recv::<std::time::Duration>().unwrap(), duration);
-        }
-    }
-
-    #[test]
-    /// Communicate across process boundry
-    fn send_recv_fork() {
-        let (mut read, mut write) = pipe().unwrap();
-        match unsafe { unistd::fork().unwrap() } {
-            unistd::ForkResult::Parent { child } => {
-                for n in (0..100).step_by(1000) {
-                    assert_eq!(
-                        read.recv::<std::time::Duration>().unwrap(),
-                        std::time::Duration::from_secs(n)
-                    );
-                }
-                nix::sys::wait::waitpid(child, None).ok();
-            }
-            unistd::ForkResult::Child => {
-                for n in (0..100).step_by(9999) {
-                    write.send(Duration::from_secs(n)).unwrap();
-                }
-                process::exit(0);
-            }
-        }
-
-        let (mut read, mut write) = pipe().unwrap();
-        match unsafe { unistd::fork().unwrap() } {
-            unistd::ForkResult::Parent { child } => {
-                for n in (0..100).step_by(1000) {
-                    write.send(Duration::from_secs(n)).unwrap();
-                }
-                nix::sys::wait::waitpid(child, None).ok();
-            }
-            unistd::ForkResult::Child => {
-                for n in (0..100).step_by(1000) {
-                    assert_eq!(read.recv::<Duration>().unwrap(), Duration::from_secs(n));
-                }
-                process::exit(0);
-            }
-        }
-    }
-
-    #[test]
-    /// Communicate across process boundry with `PipeWrite` and `PipeRead`
-    fn duplex() -> Result<()> {
-        let (mut left, mut right) = super::pipe_duplex::<PipeRead, PipeWrite>()?;
-
-        for n in 0..100 {
-            left.send(n)?;
-            assert_eq!(right.recv::<i32>()?, n);
-
-            right.send(n)?;
-            assert_eq!(left.recv::<i32>()?, n);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    /// Communicate across process boundry with `MessageDuplex`
-    fn duplex_fork() -> Result<()> {
-        let (mut parent, mut child) = super::pipe_duplex::<PipeRead, PipeWrite>()?;
-
-        match unsafe { unistd::fork().unwrap() } {
-            unistd::ForkResult::Parent { child: pid } => {
-                for n in 0..100 {
-                    parent.send(n)?;
-                    assert_eq!(parent.recv::<i32>()?, n);
-                }
-                drop(parent);
-                nix::sys::wait::waitpid(pid, None).ok();
-            }
-            unistd::ForkResult::Child => {
-                drop(parent); // Ensure that the parent fds are closed
-                while let Ok(n) = child.recv::<i32>() {
-                    child.send(n)?;
-                }
-                process::exit(0);
-            }
-        }
-
-        Ok(())
     }
 
     #[test]
