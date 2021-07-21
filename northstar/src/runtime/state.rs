@@ -27,6 +27,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
+    executor::block_on,
     future::{join_all, ready, Either},
     Future, FutureExt,
 };
@@ -771,28 +772,9 @@ impl<'a> State<'a> {
                     .containers
                     .get(&container)
                     .and_then(|c| c.process.as_ref())
-                    .map(|f| {
-                        let pid = futures::executor::block_on(f.process.pid());
-                        api::model::Process {
-                            pid,
-                            uptime: f.started.elapsed().as_nanos() as u64,
-                            resources: api::model::Resources {
-                                memory: {
-                                    {
-                                        let page_size = page_size::get();
-                                        procinfo::pid::statm(pid as i32).ok().map(|statm| {
-                                            api::model::Memory {
-                                                size: (statm.size * page_size) as u64,
-                                                resident: (statm.resident * page_size) as u64,
-                                                shared: (statm.share * page_size) as u64,
-                                                text: (statm.text * page_size) as u64,
-                                                data: (statm.data * page_size) as u64,
-                                            }
-                                        })
-                                    }
-                                },
-                            },
-                        }
+                    .map(|f| api::model::Process {
+                        pid: block_on(f.process.pid()),
+                        uptime: f.started.elapsed().as_nanos() as u64,
                     });
                 let mounted = self.containers.contains_key(&container);
                 let c = api::model::ContainerData::new(
