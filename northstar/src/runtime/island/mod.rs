@@ -16,7 +16,7 @@ use self::fs::Dev;
 use super::{
     config::Config,
     error::Error,
-    pipe::{self, pipe, PipeRead, PipeWrite, RawFdExt},
+    pipe::{pipe, Condition, ConditionNotify, ConditionWait, PipeRead, PipeWrite, RawFdExt},
     state::{MountedContainer, Process},
     Event, EventTx, ExitStatus, Pid,
 };
@@ -41,7 +41,6 @@ use std::{
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
-    io::{Read, Write},
     os::unix::io::AsRawFd,
     ptr::null,
 };
@@ -234,10 +233,11 @@ impl Process for IslandProcess {
                 exit_status,
                 io,
                 _dev,
-                mut checkpoint,
+                checkpoint,
             } => {
-                checkpoint.async_notify().await;
-                checkpoint.async_wait().await;
+                task::block_in_place(|| {
+                    checkpoint.notify().wait();
+                });
 
                 Ok(Box::new(IslandProcess::Started {
                     pid,
@@ -537,34 +537,28 @@ fn capabilities(container: &Container) -> Option<Capabilities> {
 }
 
 #[derive(Clone)]
-pub(super) struct Checkpoint(PipeRead, PipeWrite);
+pub(super) struct Checkpoint(ConditionWait, ConditionNotify);
 
 fn checkpoints() -> (Checkpoint, Checkpoint) {
-    let a = pipe::pipe().expect("Failed to create pipe");
-    let b = pipe::pipe().expect("Failed to create pipe");
+    let a = Condition::new().expect("Failed to create condition");
+    a.set_cloexec();
+    let b = Condition::new().expect("Failed to create condition");
+    b.set_cloexec();
 
-    a.0.set_cloexec(true).expect("Failed to set cloexec");
-    a.1.set_cloexec(true).expect("Failed to set cloexec");
-    b.0.set_cloexec(true).expect("Failed to set cloexec");
-    b.1.set_cloexec(true).expect("Failed to set cloexec");
+    let (aw, an) = a.split();
+    let (bw, bn) = b.split();
 
-    (Checkpoint(a.0, b.1), Checkpoint(b.0, a.1))
+    (Checkpoint(aw, bn), Checkpoint(bw, an))
 }
 
 impl Checkpoint {
-    fn notify(&mut self) {
-        self.1.write_all(b"0").expect("Pipe error");
+    fn notify(self) -> ConditionWait {
+        self.1.notify();
+        self.0
     }
 
-    fn wait(&mut self) {
-        self.0.read_exact(&mut [0u8; 1]).ok();
-    }
-
-    async fn async_notify(&mut self) {
-        task::block_in_place(|| self.notify());
-    }
-
-    async fn async_wait(&mut self) {
-        task::block_in_place(|| self.wait());
+    fn wait(self) -> ConditionNotify {
+        self.0.wait();
+        self.1
     }
 }
