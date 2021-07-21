@@ -50,7 +50,7 @@ mod fs;
 mod init;
 mod io;
 mod seccomp;
-mod syscalls_default;
+mod seccomp_profile_default;
 mod utils;
 
 /// Environment variable name passed to the container with the containers name
