@@ -13,19 +13,8 @@
 //   limitations under the License.
 
 use caps::CapSet;
-use nix::{
-    libc::c_int,
-    unistd::{self, Gid},
-};
-use signal_hook::{consts::signal::*, low_level};
+use nix::unistd::{self, Gid};
 use std::{env, fs};
-
-type Signals =
-    signal_hook::iterator::SignalsInfo<signal_hook::iterator::exfiltrator::origin::WithOrigin>;
-
-const SIGNALS: &[c_int] = &[
-    SIGTERM, SIGQUIT, SIGINT, SIGTSTP, SIGWINCH, SIGHUP, SIGCHLD, SIGCONT,
-];
 
 fn dump(file: &str) {
     println!("{}:", file);
@@ -105,10 +94,7 @@ fn main() {
         println!("{:>8}: {:>10}: {}", pid, name, cmdline);
     }
 
-    let mut sigs = Signals::new(SIGNALS).expect("install signal handler");
-    for signal in &mut sigs {
-        eprintln!("Received signal {:?}", signal);
-        let signal = signal.signal;
-        low_level::emulate_default_handler(signal).expect("default signal handler");
+    loop {
+        unistd::pause();
     }
 }
