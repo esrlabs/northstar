@@ -14,7 +14,7 @@
 
 use crate::{
     npk::manifest::Profile,
-    runtime::island::syscalls_default::{
+    runtime::island::seccomp_profile_default::{
         SYSCALLS_DEFAULT, SYSCALLS_DEFAULT_CAP_DAC_READ_SEARCH, SYSCALLS_DEFAULT_CAP_SYSLOG,
         SYSCALLS_DEFAULT_CAP_SYS_ADMIN, SYSCALLS_DEFAULT_CAP_SYS_BOOT,
         SYSCALLS_DEFAULT_CAP_SYS_CHROOT, SYSCALLS_DEFAULT_CAP_SYS_MODULE,
@@ -150,14 +150,12 @@ pub(super) fn seccomp_filter(
         builder.extend(builder_from_names(&names));
     }
     if let Some(profile) = profile {
-        builder.extend(builder_from_profile(&profile));
-    }
-    if let Some(caps) = caps {
-        builder.extend(builder_from_caps(&caps));
+        builder.extend(builder_from_profile(&profile, caps));
     }
     builder.build()
 }
 
+/// Create an AllowList Builder from a list of syscall names
 fn builder_from_names(names: &HashSet<String>) -> Builder {
     let mut builder = Builder::new();
     for name in names {
@@ -169,90 +167,93 @@ fn builder_from_names(names: &HashSet<String>) -> Builder {
     builder
 }
 
-fn builder_from_profile(profile: &Profile) -> Builder {
+/// Create an AllowList Builder from a pre-defined profile
+fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -> Builder {
     match profile {
-        Profile::Default => BUILDER_DEFAULT.clone(),
-    }
-}
+        Profile::Default => {
+            let mut builder = BUILDER_DEFAULT.clone();
 
-fn builder_from_caps(caps: &HashSet<Capability>) -> Builder {
-    let mut builder = Builder::new();
-    let mut cap_sys_admin = false;
-    for cap in caps {
-        match cap {
-            Capability::CAP_CHOWN => {}
-            Capability::CAP_DAC_OVERRIDE => {}
-            Capability::CAP_DAC_READ_SEARCH => {
-                builder.extend(BUILDER_DEFAULT_CAP_DAC_READ_SEARCH.clone());
+            // Allow additional syscalls depending on granted capabilities
+            if let Some(caps) = caps {
+                let mut cap_sys_admin = false;
+                for cap in caps {
+                    match cap {
+                        Capability::CAP_CHOWN => {}
+                        Capability::CAP_DAC_OVERRIDE => {}
+                        Capability::CAP_DAC_READ_SEARCH => {
+                            builder.extend(BUILDER_DEFAULT_CAP_DAC_READ_SEARCH.clone());
+                        }
+                        Capability::CAP_FOWNER => {}
+                        Capability::CAP_FSETID => {}
+                        Capability::CAP_KILL => {}
+                        Capability::CAP_SETGID => {}
+                        Capability::CAP_SETUID => {}
+                        Capability::CAP_SETPCAP => {}
+                        Capability::CAP_LINUX_IMMUTABLE => {}
+                        Capability::CAP_NET_BIND_SERVICE => {}
+                        Capability::CAP_NET_BROADCAST => {}
+                        Capability::CAP_NET_ADMIN => {
+                            cap_sys_admin = true;
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_ADMIN.clone());
+                        }
+                        Capability::CAP_NET_RAW => {}
+                        Capability::CAP_IPC_LOCK => {}
+                        Capability::CAP_IPC_OWNER => {}
+                        Capability::CAP_SYS_MODULE => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_MODULE.clone());
+                        }
+                        Capability::CAP_SYS_RAWIO => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_RAWIO.clone());
+                        }
+                        Capability::CAP_SYS_CHROOT => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_CHROOT.clone());
+                        }
+                        Capability::CAP_SYS_PTRACE => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_PTRACE.clone());
+                        }
+                        Capability::CAP_SYS_PACCT => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_PACCT.clone());
+                        }
+                        Capability::CAP_SYS_ADMIN => {}
+                        Capability::CAP_SYS_BOOT => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_BOOT.clone());
+                        }
+                        Capability::CAP_SYS_NICE => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_NICE.clone());
+                        }
+                        Capability::CAP_SYS_RESOURCE => {}
+                        Capability::CAP_SYS_TIME => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_TIME.clone());
+                        }
+                        Capability::CAP_SYS_TTY_CONFIG => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYS_TTY_CONFIG.clone());
+                        }
+                        Capability::CAP_MKNOD => {}
+                        Capability::CAP_LEASE => {}
+                        Capability::CAP_AUDIT_WRITE => {}
+                        Capability::CAP_AUDIT_CONTROL => {}
+                        Capability::CAP_SETFCAP => {}
+                        Capability::CAP_MAC_OVERRIDE => {}
+                        Capability::CAP_MAC_ADMIN => {}
+                        Capability::CAP_SYSLOG => {
+                            builder.extend(BUILDER_DEFAULT_CAP_SYSLOG.clone());
+                        }
+                        Capability::CAP_WAKE_ALARM => {}
+                        Capability::CAP_BLOCK_SUSPEND => {}
+                        Capability::CAP_AUDIT_READ => {}
+                        Capability::CAP_PERFMON => {}
+                        Capability::CAP_BPF => {}
+                        Capability::CAP_CHECKPOINT_RESTORE => {}
+                        Capability::__Nonexhaustive => {}
+                    };
+                }
+                if !cap_sys_admin {
+                    builder.extend(BUILDER_DEFAULT_NON_CAP_SYS_ADMIN.clone());
+                }
             }
-            Capability::CAP_FOWNER => {}
-            Capability::CAP_FSETID => {}
-            Capability::CAP_KILL => {}
-            Capability::CAP_SETGID => {}
-            Capability::CAP_SETUID => {}
-            Capability::CAP_SETPCAP => {}
-            Capability::CAP_LINUX_IMMUTABLE => {}
-            Capability::CAP_NET_BIND_SERVICE => {}
-            Capability::CAP_NET_BROADCAST => {}
-            Capability::CAP_NET_ADMIN => {
-                cap_sys_admin = true;
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_ADMIN.clone());
-            }
-            Capability::CAP_NET_RAW => {}
-            Capability::CAP_IPC_LOCK => {}
-            Capability::CAP_IPC_OWNER => {}
-            Capability::CAP_SYS_MODULE => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_MODULE.clone());
-            }
-            Capability::CAP_SYS_RAWIO => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_RAWIO.clone());
-            }
-            Capability::CAP_SYS_CHROOT => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_CHROOT.clone());
-            }
-            Capability::CAP_SYS_PTRACE => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_PTRACE.clone());
-            }
-            Capability::CAP_SYS_PACCT => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_PACCT.clone());
-            }
-            Capability::CAP_SYS_ADMIN => {}
-            Capability::CAP_SYS_BOOT => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_BOOT.clone());
-            }
-            Capability::CAP_SYS_NICE => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_NICE.clone());
-            }
-            Capability::CAP_SYS_RESOURCE => {}
-            Capability::CAP_SYS_TIME => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_TIME.clone());
-            }
-            Capability::CAP_SYS_TTY_CONFIG => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYS_TTY_CONFIG.clone());
-            }
-            Capability::CAP_MKNOD => {}
-            Capability::CAP_LEASE => {}
-            Capability::CAP_AUDIT_WRITE => {}
-            Capability::CAP_AUDIT_CONTROL => {}
-            Capability::CAP_SETFCAP => {}
-            Capability::CAP_MAC_OVERRIDE => {}
-            Capability::CAP_MAC_ADMIN => {}
-            Capability::CAP_SYSLOG => {
-                builder.extend(BUILDER_DEFAULT_CAP_SYSLOG.clone());
-            }
-            Capability::CAP_WAKE_ALARM => {}
-            Capability::CAP_BLOCK_SUSPEND => {}
-            Capability::CAP_AUDIT_READ => {}
-            Capability::CAP_PERFMON => {}
-            Capability::CAP_BPF => {}
-            Capability::CAP_CHECKPOINT_RESTORE => {}
-            Capability::__Nonexhaustive => {}
-        };
+            builder
+        }
     }
-    if !cap_sys_admin {
-        builder.extend(BUILDER_DEFAULT_NON_CAP_SYS_ADMIN.clone());
-    }
-    builder
 }
 
 #[derive(Error, Debug)]
@@ -293,7 +294,6 @@ impl AllowList {
             len: self.list.len() as u16,
             filter: self.list.as_mut_ptr(),
         };
-
         let sf_prog_ptr = &sf_prog as *const sock_fprog;
         let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
         Errno::result(result).map_err(Error::Os).map(drop)
@@ -302,7 +302,7 @@ impl AllowList {
 
 #[derive(Clone)]
 pub struct Builder {
-    allowlist: Vec<sock_filter>,
+    allowlist: Vec<u32>,
     log_only: bool,
 }
 
@@ -317,28 +317,7 @@ impl Builder {
             log_only: false,
         };
 
-        // Load architecture into accumulator
-        builder.allowlist.push(bpf_stmt(
-            BPF_LD | BPF_W | BPF_ABS,
-            memoffset::offset_of!(seccomp_data, arch) as u32,
-        ));
-
-        // Kill process if architecture does not match
-        builder.allowlist.push(bpf_jump(
-            BPF_JMP | BPF_JEQ | BPF_K,
-            AUDIT_ARCH,
-            Builder::SKIP_NEXT,
-            Builder::EVAL_NEXT,
-        ));
-        builder.allowlist.push(bpf_ret(SECCOMP_RET_KILL));
-
-        // Load system call number into accumulator for subsequent filtering
-        builder.allowlist.push(bpf_stmt(
-            BPF_LD | BPF_W | BPF_ABS,
-            memoffset::offset_of!(seccomp_data, nr) as u32,
-        ));
-
-        // Add default allowlist for architecture
+        // Add required syscalls (e.g. for execve)
         for syscall in REQUIRED_SYSCALLS {
             builder.allow_syscall_nr(*syscall as u32);
         }
@@ -347,14 +326,7 @@ impl Builder {
 
     /// Add syscall number to whitelist
     pub fn allow_syscall_nr(&mut self, nr: u32) -> &mut Builder {
-        // If syscall matches return 'allow' directly. If not, skip return instruction and go to next check.
-        self.allowlist.push(bpf_jump(
-            BPF_JMP | BPF_JEQ | BPF_K,
-            nr,
-            Builder::EVAL_NEXT,
-            Builder::SKIP_NEXT,
-        ));
-        self.allowlist.push(bpf_ret(SECCOMP_RET_ALLOW));
+        self.allowlist.push(nr);
         self
     }
 
@@ -373,29 +345,67 @@ impl Builder {
         self
     }
 
-    /// Extend one builder with another
-    /// Note: a) The 'log_only' property of the second builder is discarded
-    ///       b) Filter rules that exists in both builders are not deduplicated  
+    /// Extend one builder with another builder
+    ///
+    /// Note: The 'log_only' property of the extended builder is only set to true if it was true in both original builders
     pub fn extend(&mut self, other: Builder) -> &mut Builder {
         self.allowlist.extend(other.allowlist);
+        self.log_only &= other.log_only;
         self
     }
 
     /// Apply seccomp rules
     pub fn build(mut self) -> AllowList {
-        if self.log_only {
-            self.allowlist.push(bpf_ret(SECCOMP_RET_LOG));
-        } else {
-            self.allowlist.push(bpf_ret(SECCOMP_RET_KILL));
+        // sort and dedup syscall numbers to check common syscalls first
+        self.allowlist.sort_unstable();
+        self.allowlist.dedup();
+
+        // Load architecture into accumulator
+        let mut list = AllowList { list: vec![] };
+        list.list.push(bpf_stmt(
+            BPF_LD | BPF_W | BPF_ABS,
+            memoffset::offset_of!(seccomp_data, arch) as u32,
+        ));
+
+        // Kill process if architecture does not match
+        list.list.push(bpf_jump(
+            BPF_JMP | BPF_JEQ | BPF_K,
+            AUDIT_ARCH,
+            Builder::SKIP_NEXT,
+            Builder::EVAL_NEXT,
+        ));
+        list.list.push(bpf_ret(SECCOMP_RET_KILL));
+
+        // Load system call number into accumulator for subsequent filtering
+        list.list.push(bpf_stmt(
+            BPF_LD | BPF_W | BPF_ABS,
+            memoffset::offset_of!(seccomp_data, nr) as u32,
+        ));
+
+        // Add statements for every allowed syscall
+        for nr in &self.allowlist {
+            // If syscall matches return 'allow' directly. If not, skip return instruction and go to next check.
+            list.list.push(bpf_jump(
+                BPF_JMP | BPF_JEQ | BPF_K,
+                *nr,
+                Builder::EVAL_NEXT,
+                Builder::SKIP_NEXT,
+            ));
+            list.list.push(bpf_ret(SECCOMP_RET_ALLOW));
         }
 
-        AllowList {
-            list: self.allowlist,
+        // Finish by adding consequence for calling a prohibited syscall
+        if self.log_only {
+            list.list.push(bpf_ret(SECCOMP_RET_LOG));
+        } else {
+            list.list.push(bpf_ret(SECCOMP_RET_KILL));
         }
+
+        list
     }
 }
 
-/// Get number of system call by name
+/// Get syscall number by name
 fn translate_syscall(name: &str) -> Option<u32> {
     SYSCALL_MAP.get(name).cloned()
 }
