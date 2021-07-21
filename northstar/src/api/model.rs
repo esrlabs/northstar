@@ -29,7 +29,7 @@ pub type Signal = u32;
 const VERSION: Version = Version {
     major: 0,
     minor: 0,
-    patch: 6,
+    patch: 7,
     pre: vec![],
     build: vec![],
 };
@@ -113,23 +113,6 @@ pub struct Process {
     pub pid: Pid,
     /// Process uptime in nanoseconds
     pub uptime: u64,
-    /// Resources used and allocated by this process
-    pub resources: Resources,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Resources {
-    /// Memory resources used by process
-    pub memory: Option<Memory>,
-}
-
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Memory {
-    pub size: u64,
-    pub resident: u64,
-    pub shared: u64,
-    pub text: u64,
-    pub data: u64,
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

@@ -27,9 +27,7 @@ lazy_static = { version = "1.4", optional = true }
 log = { version = "0.4.14", features = [ "serde"] }
 memoffset = { version = "0.6.3", optional = true }
 nix = { version = "0.20.0", optional = true }
-page_size = { version = "0.4.2", optional = true }
 proc-mounts = { version = "0.2.4", optional = true }
-procinfo = { version = "0.4.2", optional = true }
 rand = { version = "0.7.3", optional = true }
 semver = { version = "0.11.0", features = ["serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -95,9 +93,7 @@ runtime = [
     "lazy_static",
     "memoffset",
     "nix",
-    "page_size",
     "proc-mounts",
-    "procinfo",
     "tempfile",
     "tokio-eventfd",
     "tokio-util",
