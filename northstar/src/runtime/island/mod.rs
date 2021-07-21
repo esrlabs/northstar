@@ -20,7 +20,7 @@ use super::{
     state::{MountedContainer, Process},
     Event, EventTx, ExitStatus, Pid,
 };
-use crate::npk::manifest::Manifest;
+use crate::api::model::Manifest;
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
 use log::{debug, info, warn};
@@ -50,7 +50,7 @@ mod fs;
 mod init;
 mod io;
 mod seccomp;
-mod seccomp_profile_default;
+mod seccomp_profiles;
 mod utils;
 
 /// Environment variable name passed to the container with the containers name

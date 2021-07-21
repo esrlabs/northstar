@@ -20,6 +20,7 @@ pub type Container = crate::common::container::Container;
 pub type ContainerError = crate::common::container::Error;
 pub type ExitCode = i32;
 pub type Manifest = crate::npk::manifest::Manifest;
+pub type Profile = crate::npk::manifest::Profile;
 pub type Version = crate::common::version::Version;
 pub type Pid = u32;
 pub type RepositoryId = String;

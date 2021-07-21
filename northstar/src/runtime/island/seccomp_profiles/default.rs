@@ -12,9 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-/// List of syscalls similar to the one from docker
-/// (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json)
-pub const SYSCALLS_DEFAULT: &[&str] = &[
+use crate::runtime::island::seccomp::{builder_from_names, Builder};
+use std::collections::HashSet;
+
+// Filter lists that mimic docker's default list
+// (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json)
+
+// Unconditional list of allowed syscalls
+pub const SYSCALLS_BASE: &[&str] = &[
     "accept",
     "accept4",
     "access",
@@ -378,8 +383,8 @@ pub const SYSCALLS_DEFAULT: &[&str] = &[
 ];
 
 // syscalls to be added if a given capability is present
-pub const SYSCALLS_DEFAULT_CAP_DAC_READ_SEARCH: &[&str] = &["open_by_handle_at"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_ADMIN: &[&str] = &[
+pub const SYSCALLS_CAP_DAC_READ_SEARCH: &[&str] = &["open_by_handle_at"];
+pub const SYSCALLS_CAP_SYS_ADMIN: &[&str] = &[
     "bpf",
     "clone",
     "fanotify_init",
@@ -402,12 +407,11 @@ pub const SYSCALLS_DEFAULT_CAP_SYS_ADMIN: &[&str] = &[
     "umount2",
     "unshare",
 ];
-pub const SYSCALLS_DEFAULT_CAP_SYS_BOOT: &[&str] = &["reboot"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_CHROOT: &[&str] = &["chroot"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_MODULE: &[&str] =
-    &["delete_module", "init_module", "finit_module"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_PACCT: &[&str] = &["acct"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_PTRACE: &[&str] = &[
+pub const SYSCALLS_CAP_SYS_BOOT: &[&str] = &["reboot"];
+pub const SYSCALLS_CAP_SYS_CHROOT: &[&str] = &["chroot"];
+pub const SYSCALLS_CAP_SYS_MODULE: &[&str] = &["delete_module", "init_module", "finit_module"];
+pub const SYSCALLS_CAP_SYS_PACCT: &[&str] = &["acct"];
+pub const SYSCALLS_CAP_SYS_PTRACE: &[&str] = &[
     "kcmp",
     "pidfd_getfd",
     "process_madvise",
@@ -415,15 +419,100 @@ pub const SYSCALLS_DEFAULT_CAP_SYS_PTRACE: &[&str] = &[
     "process_vm_writev",
     "ptrace",
 ];
-pub const SYSCALLS_DEFAULT_CAP_SYS_RAWIO: &[&str] = &["iopl", "ioperm"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_TIME: &[&str] = &["settimeofday", "stime", "clock_settime"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_TTY_CONFIG: &[&str] = &["vhangup"];
-pub const SYSCALLS_DEFAULT_CAP_SYS_NICE: &[&str] = &["get_mempolicy", "mbind", "set_mempolicy"];
-pub const SYSCALLS_DEFAULT_CAP_SYSLOG: &[&str] = &["syslog"];
+pub const SYSCALLS_CAP_SYS_RAWIO: &[&str] = &["iopl", "ioperm"];
+pub const SYSCALLS_CAP_SYS_TIME: &[&str] = &["settimeofday", "stime", "clock_settime"];
+pub const SYSCALLS_CAP_SYS_TTY_CONFIG: &[&str] = &["vhangup"];
+pub const SYSCALLS_CAP_SYS_NICE: &[&str] = &["get_mempolicy", "mbind", "set_mempolicy"];
+pub const SYSCALLS_CAP_SYSLOG: &[&str] = &["syslog"];
 
 // syscalls to be added if a given capability is _missing_
-pub const SYSCALLS_DEFAULT_NON_CAP_SYS_ADMIN: &[&str] = &[
+pub const SYSCALLS_NON_CAP_SYS_ADMIN: &[&str] = &[
     // TODO: parameter condition: value=0x7E020000 and op=SCMP_CMP_MASKED_EQ
     // (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json#L583)
     "clone",
 ];
+
+// pre-computed builders
+lazy_static::lazy_static! {
+    pub static ref BASE: Builder = {
+        builder_from_names(&SYSCALLS_BASE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_DAC_READ_SEARCH: Builder = {
+        builder_from_names(&SYSCALLS_CAP_DAC_READ_SEARCH.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_ADMIN: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_ADMIN.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_BOOT: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_BOOT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_CHROOT: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_CHROOT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_MODULE: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_MODULE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_PACCT: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_PACCT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_PTRACE: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_PTRACE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_RAWIO: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_RAWIO.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_TIME: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_TIME.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_TTY_CONFIG: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_TTY_CONFIG.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYS_NICE: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYS_NICE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref CAP_SYSLOG: Builder = {
+        builder_from_names(&SYSCALLS_CAP_SYSLOG.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}
+
+lazy_static::lazy_static! {
+    pub static ref NON_CAP_SYS_ADMIN: Builder = {
+        builder_from_names(&SYSCALLS_NON_CAP_SYS_ADMIN.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+    };
+}

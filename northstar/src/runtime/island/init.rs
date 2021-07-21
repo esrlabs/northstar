@@ -13,9 +13,9 @@
 //   limitations under the License.
 
 use super::{
-    clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Checkpoint, Container, PipeRead, Start,
-    SIGNAL_OFFSET,
+    clone::clone, fs::Mount, io::Fd, Checkpoint, Container, PipeRead, Start, SIGNAL_OFFSET,
 };
+use crate::runtime::island::seccomp::AllowList;
 use nix::{
     errno::Errno,
     libc::{self, c_int, c_ulong},
