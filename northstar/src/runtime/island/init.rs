@@ -44,7 +44,7 @@ pub(super) fn init(
     groups: &[u32],
     capabilities: Option<Capabilities>,
     seccomp: Option<AllowList>,
-    mut checkpoint: Checkpoint,
+    checkpoint: Checkpoint,
     tripwire: PipeRead,
 ) -> ! {
     // Set the process name to init. This process inherited the process name
@@ -124,10 +124,9 @@ pub(super) fn init(
                 }
 
                 // Wait for the runtime to signal that the child shall start
-                checkpoint.wait();
-
                 // checkoint fds are cloexec and this signals the launcher that this child is started
-                // Therefore no explicity drop (close) of checkpoint here.
+                // Therefore no explicity drop (close) of _checkpoint_notify here.
+                let _checkpoint_notify = checkpoint.wait();
 
                 panic!(
                     "Execve: {:?} {:?}: {:?}",
