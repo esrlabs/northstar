@@ -19,32 +19,5 @@ io:
       level: DEBUG
       tag: seccomp
 seccomp:
-  allowlist: [
-    write,
-    clock_nanosleep,
-    nanosleep,
-    access,
-    arch_prctl,
-    brk,
-    clone,
-    close,
-    execve,
-    exit_group,
-    fstat,
-    mmap,
-    mprotect,
-    munmap,
-    openat,
-    poll,
-    prctl,
-    pread64,
-    prlimit64,
-    read,
-    rt_sigaction,
-    rt_sigprocmask,
-    sched_getaffinity,
-    set_robust_list,
-    set_tid_address,
-    sigaltstack,
-    stat
-  ]
+  profile:
+    default

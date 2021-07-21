@@ -264,6 +264,8 @@ pub enum Mount {
 /// Pre-defined seccomp profiles
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub enum Profile {
+    /// Default seccomp filter similar to docker's default profile
+    #[serde(rename = "default")]
     Default,
 }
 
