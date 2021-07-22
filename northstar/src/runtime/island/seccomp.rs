@@ -12,12 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::{api::model::Profile, runtime::island::seccomp_profiles::default};
+use crate::{
+    npk::manifest::{Capability, Profile},
+    runtime::island::seccomp_profiles::default,
+};
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_MAXINSNS,
     BPF_RET, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
 };
-use caps::Capability;
 use log::warn;
 use nix::errno::Errno;
 use std::collections::HashSet;

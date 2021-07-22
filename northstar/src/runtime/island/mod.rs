@@ -20,7 +20,7 @@ use super::{
     state::{MountedContainer, Process},
     Event, EventTx, ExitStatus, Pid,
 };
-use crate::api::model::Manifest;
+use crate::npk::manifest::Manifest;
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
 use log::{debug, info, warn};
