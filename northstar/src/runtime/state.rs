@@ -27,7 +27,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
-    executor::block_on,
     future::{join_all, ready, Either},
     Future, FutureExt,
 };
@@ -52,7 +51,7 @@ pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
 
 #[async_trait]
 pub(super) trait Process: Send + Sync + Debug {
-    async fn pid(&self) -> Pid;
+    fn pid(&self) -> Pid;
     async fn start(self: Box<Self>) -> Result<Box<dyn Process>, Error>;
     async fn stop(
         self: Box<Self>,
@@ -411,7 +410,7 @@ impl<'a> State<'a> {
                 return Err(e);
             }
         };
-        let pid = process.pid().await;
+        let pid = process.pid();
 
         // Debug
         let debug =
@@ -773,7 +772,7 @@ impl<'a> State<'a> {
                     .get(&container)
                     .and_then(|c| c.process.as_ref())
                     .map(|f| api::model::Process {
-                        pid: block_on(f.process.pid()),
+                        pid: f.process.pid(),
                         uptime: f.started.elapsed().as_nanos() as u64,
                     });
                 let mounted = self.containers.contains_key(&container);
