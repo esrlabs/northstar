@@ -39,7 +39,7 @@ fn main() {
         "test-resource",
     ] {
         let dir = Path::new(dir);
-        // Build crate if a Cargo manfiest is included in the directory
+        // Build crate if a Cargo manifest is included in the directory
         let cargo_manifest = dir.join("Cargo.toml");
 
         let (root, tmpdir) = if cargo_manifest.exists() {
