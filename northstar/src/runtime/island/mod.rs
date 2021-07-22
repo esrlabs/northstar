@@ -23,7 +23,7 @@ use super::{
 use crate::npk::manifest::{Capability, Manifest};
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use nix::{
     errno::Errno,
     libc::c_int,
@@ -217,7 +217,7 @@ impl Island {
 
 #[async_trait]
 impl Process for IslandProcess {
-    async fn pid(&self) -> Pid {
+    fn pid(&self) -> Pid {
         match self {
             IslandProcess::Created { pid, .. } => *pid,
             IslandProcess::Started { pid, .. } => *pid,
@@ -226,7 +226,7 @@ impl Process for IslandProcess {
     }
 
     async fn start(self: Box<Self>) -> Result<Box<dyn Process>, Error> {
-        info!("Starting {}", self.pid().await);
+        info!("Starting {}", self.pid());
         match *self {
             IslandProcess::Created {
                 pid,
@@ -235,9 +235,24 @@ impl Process for IslandProcess {
                 _dev,
                 checkpoint,
             } => {
-                task::block_in_place(|| {
-                    checkpoint.notify().wait();
-                });
+                let wait = checkpoint.notify();
+
+                // If the child process refuses to start - kill it after 5 seconds
+                if time::timeout(
+                    time::Duration::from_secs(5),
+                    task::spawn_blocking(|| wait.wait()),
+                )
+                .await
+                .is_err()
+                {
+                    error!(
+                        "Timeout while waiting for {} to start. Sending SIGKILL to {}",
+                        pid, pid
+                    );
+                    let process_group = unistd::Pid::from_raw(-(pid as i32));
+                    let sigkill = Some(sys::signal::SIGKILL);
+                    sys::signal::kill(process_group, sigkill).ok();
+                }
 
                 Ok(Box::new(IslandProcess::Started {
                     pid,
