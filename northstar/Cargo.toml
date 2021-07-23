@@ -103,5 +103,5 @@ runtime = [
 
 [build-dependencies]
 anyhow = "1.0"
-bindgen = "0.58.1"
+bindgen = { version = "0.58.1", default-features = false, features = ["runtime"] }
 nix = "0.20.0"
