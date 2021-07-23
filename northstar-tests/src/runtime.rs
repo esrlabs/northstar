@@ -18,17 +18,13 @@ use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use northstar::{
-    api::{
-        client::Client,
-        model::{Container, Notification},
-    },
-    common::version::Version,
+    api::{client::Client, model::Notification},
     runtime::{
         self,
         config::{self, Config},
     },
 };
-use std::{collections::HashMap, convert::TryInto, path::PathBuf, time::Duration};
+use std::{collections::HashMap, convert::TryInto, path::PathBuf};
 use tempfile::TempDir;
 use tokio::{fs, pin, select, time};
 
@@ -37,7 +33,6 @@ pub struct Northstar {
     client: northstar::api::client::Client,
     runtime: runtime::Runtime,
     tmpdir: TempDir,
-    data_dir: PathBuf,
 }
 
 impl std::ops::Deref for Northstar {
@@ -138,7 +133,6 @@ impl Northstar {
             client,
             runtime,
             tmpdir,
-            data_dir,
         })
     }
 
@@ -172,45 +166,12 @@ impl Northstar {
         &self.config
     }
 
-    /// Start a container
-    pub async fn start(&mut self, container: &str) -> Result<()> {
-        let container: Container = container.try_into().expect("Invalid container str");
-        self.client
-            .start(container.name(), container.version())
-            .await
-            .context("Failed to start")
-    }
-
-    /// Stop a container
-    pub async fn stop(&mut self, container: &str, timeout: u64) -> Result<()> {
-        let container: Container = container.try_into().expect("Invalid container str");
-        self.client
-            .stop(
-                container.name(),
-                container.version(),
-                Duration::from_secs(timeout),
-            )
-            .await
-            .context("Failed to stop")?;
-        Ok(())
-    }
-
     // Install a npk from a buffer
     pub async fn install(&mut self, npk: &[u8]) -> Result<()> {
         let f = self.tmpdir.path().join(uuid::Uuid::new_v4().to_string());
         fs::write(&f, npk).await?;
         self.client.install(&f, "test").await?;
         fs::remove_file(&f).await?;
-        Ok(())
-    }
-
-    /// Umount a container
-    pub async fn umount(&mut self, container: &str) -> Result<()> {
-        let container: Container = container.try_into().expect("Invalid container str");
-        self.client
-            .umount(container.name(), container.version())
-            .await
-            .context("Failed to umount")?;
         Ok(())
     }
 
@@ -228,7 +189,7 @@ impl Northstar {
     /// Uninstall the test container and wait for the notification
     pub async fn uninstall_test_container(&mut self) -> Result<()> {
         self.client
-            .uninstall("test-container", &Version::parse("0.0.1").unwrap())
+            .uninstall("test-container:0.0.1")
             .await
             .context("Failed to uninstall test container")?;
         self.assume_notification(|n| matches!(n, Notification::Uninstall(_)), 15)
@@ -249,7 +210,7 @@ impl Northstar {
     /// Uninstall the test resource and wait for the notification
     pub async fn uninstall_test_resource(&mut self) -> Result<()> {
         self.client
-            .uninstall("test-resource", &Version::parse("0.0.1").unwrap())
+            .uninstall("test-resource:0.0.1")
             .await
             .context("Failed to uninstall test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Uninstall(_)), 15)
@@ -277,17 +238,5 @@ impl Northstar {
                 }
             }
         }
-    }
-
-    /// Write `cmd` string into the persist folder of the test container
-    /// Check the test container main about the supported commands.
-    pub async fn test_cmds(&self, cmd: &str) {
-        let data = self.data_dir.join("test-container");
-        fs::create_dir_all(&data)
-            .await
-            .expect("Failed to create data dir");
-        fs::write(&data.join("input.txt"), &cmd)
-            .await
-            .expect("Failed to write test_container input");
     }
 }

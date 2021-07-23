@@ -15,16 +15,19 @@
 use super::{
     codec::{self, framed},
     model::{
-        self, Connect, Container, ContainerData, ContainerError, Message, MountResult,
-        Notification, RepositoryId, Request, Response,
+        self, Connect, Container, ContainerData, Message, MountResult, Notification, RepositoryId,
+        Request, Response,
     },
 };
-use crate::common::{name::InvalidNameChar, version::Version};
+use crate::common::{
+    container,
+    non_null_string::{InvalidNullChar, NonNullString},
+};
 use futures::{SinkExt, Stream, StreamExt};
 use log::debug;
 use std::{
-    collections::{HashSet, VecDeque},
-    convert::TryInto,
+    collections::{HashMap, HashSet, VecDeque},
+    convert::{Infallible, TryInto},
     path::Path,
     pin::Pin,
     task::Poll,
@@ -57,10 +60,30 @@ pub enum Error {
     InvalidConsoleAddress(String),
     #[error("Notification consumer lagged")]
     LaggedNotifications,
-    #[error("Invalid name {0}")]
-    Name(InvalidNameChar),
     #[error("Invalid container {0}")]
-    Container(ContainerError),
+    Container(container::Error),
+    #[error("Invalid string {0}")]
+    String(InvalidNullChar),
+    #[error("Infalliable")]
+    Infalliable,
+}
+
+impl From<container::Error> for Error {
+    fn from(e: container::Error) -> Error {
+        Error::Container(e)
+    }
+}
+
+impl From<InvalidNullChar> for Error {
+    fn from(e: InvalidNullChar) -> Self {
+        Error::String(e)
+    }
+}
+
+impl From<Infallible> for Error {
+    fn from(_: Infallible) -> Self {
+        Error::Infalliable
+    }
 }
 
 /// Client for a Northstar runtime instance.
@@ -74,7 +97,7 @@ pub enum Error {
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-///     client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
+///     client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }
@@ -268,22 +291,112 @@ impl<'a> Client {
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
+    /// client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn start(&mut self, name: &str, version: &Version) -> Result<(), Error> {
+    pub async fn start(
+        &mut self,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
+    ) -> Result<(), Error> {
+        let container = container.try_into().map_err(Into::into)?;
+        match self.request(Request::Start(container, None, None)).await? {
+            Response::Ok(()) => Ok(()),
+            Response::Err(e) => Err(Error::Api(e)),
+            _ => Err(Error::Protocol),
+        }
+    }
+
+    /// Start container name and pass args
+    ///
+    /// ```no_run
+    /// # use futures::StreamExt;
+    /// # use std::time::Duration;
+    /// # use northstar::api::client::Client;
+    /// # use std::collections::HashMap;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// client.start_with_args("hello:0.0.1", ["--foo"]).await.expect("Failed to start \"hello --foor\"");
+    /// // Print start notification
+    /// println!("{:#?}", client.next().await);
+    /// # }
+    /// ```
+    pub async fn start_with_args(
+        &mut self,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
+        args: impl IntoIterator<Item = impl TryInto<NonNullString, Error = impl Into<Error>>>,
+    ) -> Result<(), Error> {
+        let container = container.try_into().map_err(Into::into)?;
+        let mut args_converted = vec![];
+        for arg in args {
+            args_converted.push(arg.try_into().map_err(Into::into)?);
+        }
+
         match self
-            .request(Request::Start(Container::new(
-                name.try_into().map_err(Error::Name)?,
-                version.clone(),
-            )))
+            .request(Request::Start(container, Some(args_converted), None))
+            .await?
+        {
+            Response::Ok(()) => Ok(()),
+            Response::Err(e) => Err(Error::Api(e)),
+            _ => Err(Error::Protocol),
+        }
+    }
+
+    /// Start container name and pass args and set additional env variables
+    ///
+    /// ```no_run
+    /// # use futures::StreamExt;
+    /// # use std::time::Duration;
+    /// # use northstar::api::client::Client;
+    /// # use std::collections::HashMap;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let mut env = HashMap::new();
+    /// env.insert("FOO", "blah");
+    /// client.start_with_args_env("hello:0.0.1", ["--dump", "-v"], env).await.expect("Failed to start \"hello\"");
+    /// // Print start notification
+    /// println!("{:#?}", client.next().await);
+    /// # }
+    /// ```
+    pub async fn start_with_args_env(
+        &mut self,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
+        args: impl IntoIterator<Item = impl TryInto<NonNullString, Error = impl Into<Error>>>,
+        env: impl IntoIterator<
+            Item = (
+                impl TryInto<NonNullString, Error = impl Into<Error>>,
+                impl TryInto<NonNullString, Error = impl Into<Error>>,
+            ),
+        >,
+    ) -> Result<(), Error> {
+        let container = container.try_into().map_err(Into::into)?;
+        let mut args_converted = vec![];
+        for arg in args {
+            args_converted.push(arg.try_into().map_err(Into::into)?);
+        }
+
+        let mut env_converted = HashMap::new();
+        for (k, v) in env {
+            let k = k.try_into().map_err(Into::into)?;
+            let v = v.try_into().map_err(Into::into)?;
+            env_converted.insert(k, v);
+        }
+
+        match self
+            .request(Request::Start(
+                container,
+                Some(args_converted),
+                Some(env_converted),
+            ))
             .await?
         {
             Response::Ok(()) => Ok(()),
@@ -298,27 +411,23 @@ impl<'a> Client {
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.stop("hello", &Version::parse("0.0.1").unwrap(), Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
+    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// client.stop("hello:0.0.1", Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
     pub async fn stop(
         &mut self,
-        name: &str,
-        version: &Version,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
         timeout: time::Duration,
     ) -> Result<(), Error> {
+        let container = container.try_into().map_err(Into::into)?;
         match self
-            .request(Request::Stop(
-                Container::new(name.try_into().map_err(Error::Name)?, version.clone()),
-                timeout.as_secs(),
-            ))
+            .request(Request::Stop(container, timeout.as_secs()))
             .await?
         {
             Response::Ok(()) => Ok(()),
@@ -397,19 +506,17 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.uninstall("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to uninstall \"hello\"");
+    /// client.uninstall("hello:0.0.1").await.expect("Failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn uninstall(&mut self, name: &str, version: &Version) -> Result<(), Error> {
-        match self
-            .request(Request::Uninstall(Container::new(
-                name.to_string().try_into().map_err(Error::Name)?,
-                version.clone(),
-            )))
-            .await?
-        {
+    pub async fn uninstall(
+        &mut self,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
+    ) -> Result<(), Error> {
+        let container = container.try_into().map_err(Into::into)?;
+        match self.request(Request::Uninstall(container)).await? {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
@@ -442,19 +549,24 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let container = "test:0.0.2".try_into().unwrap();
-    /// client.mount(vec!(container)).await.expect("Failed to mount");
+    /// client.mount(vec!("test:0.0.1")).await.expect("Failed to mount");
     /// # }
     /// ```
-    pub async fn mount<I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
+    pub async fn mount<E, C, I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
     where
-        I: 'a + IntoIterator<Item = Container>,
+        E: Into<Error>,
+        C: TryInto<Container, Error = E>,
+        I: 'a + IntoIterator<Item = C>,
     {
         self.fused()?;
-        match self
-            .request(Request::Mount(containers.into_iter().collect()))
-            .await?
-        {
+
+        let mut result = vec![];
+        for container in containers.into_iter() {
+            let container = container.try_into().map_err(Into::into)?;
+            result.push(container);
+        }
+
+        match self.request(Request::Mount(result)).await? {
             Response::Mount(mounts) => Ok(mounts),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
@@ -475,17 +587,15 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.umount("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to unmount \"hello\"");
+    /// client.umount("hello:0.0.1").await.expect("Failed to unmount \"hello\"");
     /// # }
     /// ```
-    pub async fn umount(&mut self, name: &str, version: &Version) -> Result<(), Error> {
-        match self
-            .request(Request::Umount(Container::new(
-                name.to_string().try_into().map_err(Error::Name)?,
-                version.clone(),
-            )))
-            .await?
-        {
+    pub async fn umount(
+        &mut self,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
+    ) -> Result<(), Error> {
+        let container = container.try_into().map_err(Into::into)?;
+        match self.request(Request::Umount(container)).await? {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
@@ -531,12 +641,11 @@ impl<'a> Client {
 /// use futures::StreamExt;
 /// use std::time::Duration;
 /// use northstar::api::client::Client;
-/// use northstar::common::version::Version;
 ///
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), Some(10), Duration::from_secs(10)).await.unwrap();
-///     client.start("hello", &Version::parse("0.0.1").unwrap()).await.expect("Failed to start \"hello\"");
+///     client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }

@@ -14,22 +14,21 @@
 
 use derive_new::new;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub type Container = crate::common::container::Container;
-pub type ContainerError = crate::common::container::Error;
 pub type ExitCode = i32;
 pub type Manifest = crate::npk::manifest::Manifest;
-pub type Profile = crate::npk::manifest::Profile;
-pub type Version = crate::common::version::Version;
+pub type NonNullString = crate::common::non_null_string::NonNullString;
 pub type Pid = u32;
 pub type RepositoryId = String;
 pub type Signal = u32;
+pub type Version = crate::common::version::Version;
 
 const VERSION: Version = Version {
     major: 0,
     minor: 0,
-    patch: 7,
+    patch: 8,
     pre: vec![],
     build: vec![],
 };
@@ -90,7 +89,11 @@ pub enum Request {
     Mount(Vec<Container>),
     Repositories,
     Shutdown,
-    Start(Container),
+    Start(
+        Container,
+        Option<Vec<NonNullString>>, // Optional command line arguments
+        Option<HashMap<NonNullString, NonNullString>>, // Optional env variables
+    ),
     /// Stop the given container. If the process does not exit within
     /// the timeout in seconds it is SIGKILLED
     Stop(Container, u64),
@@ -135,6 +138,7 @@ pub enum Error {
     Configuration(String),
     DuplicateContainer(Container),
     InvalidContainer(Container),
+    InvalidArguments(String),
     MountBusy(Container),
     UmountBusy(Container),
     StartContainerStarted(Container),
