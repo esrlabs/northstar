@@ -158,9 +158,9 @@ impl VerityHeader {
 }
 
 /// Generate and append a dm-verity superblock
-/// (https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format)
+/// <https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format>
 /// and a dm-verity hash_tree
-/// https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#hash-tree
+/// <https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#hash-tree>
 /// to the given file.
 pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest, Error> {
     let (level_offsets, tree_size) =

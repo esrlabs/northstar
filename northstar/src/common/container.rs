@@ -60,6 +60,18 @@ pub enum Error {
     InvalidVersion,
 }
 
+impl Display for Container {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.inner.name, self.inner.version,)
+    }
+}
+
+impl From<InvalidNameChar> for Error {
+    fn from(e: InvalidNameChar) -> Self {
+        Error::InvalidName(e)
+    }
+}
+
 impl TryFrom<&str> for Container {
     type Error = Error;
 
@@ -77,9 +89,13 @@ impl TryFrom<&str> for Container {
     }
 }
 
-impl Display for Container {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.inner.name, self.inner.version,)
+impl<E: Into<Error>, N: TryInto<Name, Error = E>, V: ToString> TryFrom<(N, V)> for Container {
+    type Error = Error;
+
+    fn try_from((name, version): (N, V)) -> Result<Self, Self::Error> {
+        let name = name.try_into().map_err(Into::into)?;
+        let version = Version::parse(&version.to_string()).map_err(|_| Error::InvalidVersion)?;
+        Ok(Container::new(name, version))
     }
 }
 

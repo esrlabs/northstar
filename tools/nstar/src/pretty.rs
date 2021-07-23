@@ -173,6 +173,7 @@ fn format_err(err: &model::Error) -> String {
             format!("duplicate container name and version {}", container)
         }
         model::Error::InvalidContainer(c) => format!("invalid container {}", c),
+        model::Error::InvalidArguments(c) => format!("invalid arguments {}", c),
         model::Error::MountBusy(c) => format!("failed to mount {}: busy", c),
         model::Error::UmountBusy(c) => format!("failed to umount {}: busy", c),
         model::Error::StartContainerStarted(c) => {

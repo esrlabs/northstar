@@ -26,6 +26,8 @@ pub enum Error {
     Configuration(String),
     #[error("Invalid container {0}")]
     InvalidContainer(Container),
+    #[error("Invalid arguments {0}")]
+    InvalidArguments(String),
     #[error("Container {0} cannot be mounted because it is already mounted")]
     MountBusy(Container),
     #[error("Duplicate container {0}")]
@@ -86,6 +88,7 @@ impl From<Error> for api::model::Error {
                 api::model::Error::DuplicateContainer(container)
             }
             Error::InvalidContainer(container) => api::model::Error::InvalidContainer(container),
+            Error::InvalidArguments(cause) => api::model::Error::InvalidArguments(cause),
             Error::MountBusy(container) => api::model::Error::MountBusy(container),
             Error::UmountBusy(container) => api::model::Error::UmountBusy(container),
             Error::StartContainerStarted(container) => {

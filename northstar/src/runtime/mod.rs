@@ -61,6 +61,11 @@ type Pid = u32;
 /// Buffer size of the main loop channel
 const MAIN_BUFFER: usize = 1000;
 
+/// Environment variable name passed to the container with the containers name
+const ENV_NAME: &str = "NAME";
+/// Environment variable name passed to the container with the containers version
+const ENV_VERSION: &str = "VERSION";
+
 #[derive(Debug)]
 enum Event {
     /// Incomming console command
