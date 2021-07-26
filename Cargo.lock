@@ -1979,6 +1979,7 @@ dependencies = [
  "anyhow",
  "env_logger 0.8.4",
  "futures",
+ "log",
  "northstar",
  "rand 0.8.4",
  "structopt",

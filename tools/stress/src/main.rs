@@ -14,14 +14,15 @@
 
 use anyhow::{anyhow, Context, Result};
 use futures::{
-    future::{pending, ready, try_join_all},
+    future::{self, pending, ready, try_join_all},
     FutureExt, StreamExt,
 };
+use log::{debug, info};
 use northstar::api::{
-    client,
-    model::{self, Container},
+    client::{self, Client},
+    model::{self, ExitStatus, Notification},
 };
-use std::{convert::TryInto, path::PathBuf, str::FromStr};
+use std::{path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 use tokio::{pin, select, task, time};
 use tokio_util::{either::Either, sync::CancellationToken};
@@ -64,7 +65,7 @@ struct Opt {
     #[structopt(short, long)]
     duration: Option<u64>,
 
-    /// Random delay between each iteration within 1..value ms
+    /// Random delay between each iteration within 0..value ms
     #[structopt(short, long)]
     random: Option<u64>,
 
@@ -79,6 +80,14 @@ struct Opt {
     /// Repository for install-uninstall mode
     #[structopt(long, required_if("mode", "install-uninstall"))]
     repository: Option<String>,
+
+    /// Relaxed result
+    #[structopt(long)]
+    relaxed: bool,
+
+    /// Initial random delay in ms to randomize tasks
+    #[structopt(long)]
+    initial_random_delay: Option<u64>,
 }
 
 #[tokio::main]
@@ -87,18 +96,27 @@ async fn main() -> Result<()> {
     let opt = Opt::from_args();
     let timeout = time::Duration::from_secs(30);
 
+    info!("mode: {:?}", opt.mode);
+    info!("duration: {:?}", opt.duration);
+    debug!("address: {}", opt.address.to_string());
+    debug!("repository: {:?}", opt.repository);
+    debug!("npk: {:?}", opt.npk);
+    debug!("relaxed: {}", opt.relaxed);
+    debug!("random: {:?}", opt.random);
+
     if opt.mode == Mode::InstallUninstall {
         return install_uninstall(&opt).await;
     }
 
     // Get a list of installed applications
+    debug!("Getting list of startable containers");
     let mut client = client::Client::new(&opt.address, None, timeout).await?;
-    let apps = client
+    let containers = client
         .containers()
         .await?
         .iter()
         .filter(|c| c.manifest.init.is_some())
-        .map(|c| (c.manifest.name.to_string(), c.manifest.version.clone()))
+        .map(|c| c.container.clone())
         .collect::<Vec<_>>();
     drop(client);
 
@@ -112,39 +130,77 @@ async fn main() -> Result<()> {
         }
     }
 
-    for (app, version) in apps.clone().drain(..) {
-        let token = token.clone();
-        let random = opt.random;
-        let url = opt.address.clone();
-        let mode = opt.mode.clone();
-        let container = Container::new(app.clone().try_into().unwrap(), version.clone());
+    // Max string len of all containers
+    let len = containers
+        .iter()
+        .map(ToString::to_string)
+        .map(|s| s.len())
+        .sum::<usize>();
 
+    let start = CancellationToken::new();
+
+    for container in &containers {
+        let container = container.clone();
+        let initial_random_delay = opt.initial_random_delay;
+        let mode = opt.mode.clone();
+        let random = opt.random;
+        let relaxed = opt.relaxed;
+        let start = start.clone();
+        let token = token.clone();
+        let url = opt.address.clone();
+
+        debug!("Spawning task for {}", container);
         let task = task::spawn(async move {
-            let mut client = client::Client::new(&url, None, timeout).await?;
+            start.cancelled().await;
+            if let Some(initial_delay) = initial_random_delay {
+                time::sleep(time::Duration::from_millis(
+                    rand::random::<u64>() % initial_delay,
+                ))
+                .await;
+            }
+
+            let notifications = if relaxed { None } else { Some(100) };
+            let mut client = client::Client::new(&url, notifications, timeout).await?;
             let mut iterations = 0;
             loop {
                 if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
-                    client.mount(Some(container.clone())).await?;
+                    info!("{:<a$} mount", &container, a = len);
+                    client.mount(vec![container.clone()]).await?;
                 }
 
                 if mode != Mode::MountUmount {
-                    client.start(container.clone()).await?;
+                    info!("{:<a$}: start", container, a = len);
+                    client.start(&container).await?;
+                    if !relaxed {
+                        let started = Notification::Started(container.clone());
+                        await_notification(&mut client, started, 60).await?;
+                    }
                 }
 
                 if let Some(delay) = random {
-                    let delay = rand::random::<u64>() % delay;
-                    time::sleep(time::Duration::from_millis(delay)).await;
+                    let delay = time::Duration::from_millis(rand::random::<u64>() % delay);
+                    info!("{:<a$}: sleeping for {:?}", container, delay, a = len);
+                    time::sleep(delay).await;
                 }
 
                 if mode != Mode::MountUmount {
+                    info!("{:<a$}: stopping", container, a = len);
                     client
                         .stop(container.clone(), time::Duration::from_secs(5))
                         .await
                         .context("Failed to stop container")?;
+
+                    if !relaxed {
+                        info!("{:<a$}: waiting for termination", container, a = len);
+                        let stopped =
+                            Notification::Stopped(container.clone(), ExitStatus::Signaled(15));
+                        await_notification(&mut client, stopped, 60).await?;
+                    }
                 }
 
                 // Check if we need to umount
                 if mode != Mode::StartStop {
+                    info!("{:<a$}: umounting", container, a = len);
                     client
                         .umount(container.clone())
                         .await
@@ -153,6 +209,7 @@ async fn main() -> Result<()> {
 
                 iterations += 1;
                 if token.is_cancelled() {
+                    info!("{:<a$}: finishing", container, a = len);
                     drop(client);
                     break Ok(iterations);
                 }
@@ -165,32 +222,56 @@ async fn main() -> Result<()> {
         tasks.push(task);
     }
 
+    info!("Starting {} tasks", containers.len());
+    start.cancel();
+
     let mut tasks = try_join_all(tasks);
     let ctrl_c = tokio::signal::ctrl_c();
-    let result = if let Some(duration) = opt.duration {
-        select! {
-            _ = time::sleep(time::Duration::from_secs(duration)) => {
-                token.cancel();
-                tasks.await
-            }
-            _ = ctrl_c => {
-                token.cancel();
-                tasks.await
-            }
-            r = &mut tasks => r,
+    let duration = opt
+        .duration
+        .map(time::Duration::from_secs)
+        .map(time::sleep)
+        .map(Either::Left)
+        .unwrap_or_else(|| Either::Right(future::pending::<()>()));
+
+    let result = select! {
+        _ = duration => {
+            info!("Stopping because test duration exceeded");
+            token.cancel();
+            tasks.await
         }
-    } else {
-        select! {
-            _ = ctrl_c => {
-                token.cancel();
-                tasks.await
-            }
-            r = &mut tasks => r,
+        _ = ctrl_c => {
+            info!("Stopping because of ctrlc");
+            token.cancel();
+            tasks.await
         }
+        r = &mut tasks => r,
     };
 
-    println!("Total iterations: {}", result?.iter().sum::<u32>());
+    info!("Total iterations: {}", result?.iter().sum::<u32>());
     Ok(())
+}
+
+/// Wait for a `notifcation` for `duration` seconds or timeout
+async fn await_notification(
+    client: &mut Client,
+    notification: Notification,
+    duration: u64,
+) -> Result<()> {
+    let duration = time::Duration::from_secs(duration);
+
+    time::timeout(duration, async {
+        loop {
+            match client.next().await {
+                Some(Ok(n)) if n == notification => break Ok(()),
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => break Err(e.into()),
+                None => break Err(anyhow!("Notification stream closed")),
+            }
+        }
+    })
+    .await
+    .context("Failed to wait for notification")?
 }
 
 /// Install and uninstall an npk in a loop

@@ -89,6 +89,14 @@ impl TryFrom<&str> for Container {
     }
 }
 
+impl TryFrom<&Container> for Container {
+    type Error = Error;
+
+    fn try_from(container: &Container) -> Result<Self, Self::Error> {
+        Ok(container.clone())
+    }
+}
+
 impl<E: Into<Error>, N: TryInto<Name, Error = E>, V: ToString> TryFrom<(N, V)> for Container {
     type Error = Error;
 
@@ -109,6 +117,6 @@ struct Inner {
 fn try_from() {
     assert_eq!(
         Container::new("test".try_into().unwrap(), Version::parse("0.0.1").unwrap()),
-        std::convert::TryInto::try_into("test:0.0.1").unwrap()
+        "test:0.0.1".try_into().unwrap()
     );
 }
