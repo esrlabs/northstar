@@ -19,6 +19,7 @@ use serde::{
     Deserialize, Serialize,
 };
 use serde_with::skip_serializing_none;
+use serde_yaml::Value;
 use std::{
     collections::{HashMap, HashSet},
     fmt, io,
@@ -71,6 +72,8 @@ pub struct Manifest {
     pub suppl_groups: Option<Vec<NonNullString>>,
     /// IO configuration
     pub io: Option<Io>,
+    /// Optional custom data. The runtime doesnt use this.
+    pub custom: Option<Value>,
 }
 
 impl Manifest {
@@ -754,6 +757,13 @@ io:
       level: DEBUG
       tag: test
   stderr: pipe
+custom:
+    blah: foo
+    foo: 234
+    test:
+      - one
+      - two
+      - three
 ";
 
         let manifest = serde_yaml::from_str::<Manifest>(m)?;
