@@ -44,3 +44,5 @@ io:
     log:
       level: DEBUG
       tag: test-container
+custom:
+  priority: 123
