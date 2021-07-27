@@ -25,6 +25,12 @@ use std::{
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
+struct Opt {
+    #[structopt(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, StructOpt)]
 enum Command {
     Cat {
         #[structopt(parse(from_os_str))]
@@ -47,7 +53,7 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    let command = Command::from_args();
+    let command = Opt::from_args().command.unwrap_or(Command::Sleep);
     println!("Executing \"{:?}\"", command);
     match command {
         Command::Cat { path } => cat(&path)?,
