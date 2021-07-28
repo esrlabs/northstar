@@ -12,8 +12,12 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use crate::runtime::island::seccomp::{builder_from_names, Builder};
-use std::collections::HashSet;
+use crate::{
+    common::non_null_string::NonNullString,
+    npk::manifest::SyscallRule,
+    runtime::island::seccomp::{builder_from_rules, Builder},
+};
+use std::{collections::HashMap, convert::TryInto};
 
 // Filter lists that mimic docker's default list
 // (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json)
@@ -435,84 +439,140 @@ pub const SYSCALLS_NON_CAP_SYS_ADMIN: &[&str] = &[
 // pre-computed builders
 lazy_static::lazy_static! {
     pub static ref BASE: Builder = {
-        builder_from_names(&SYSCALLS_BASE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_BASE.len());
+        for name in SYSCALLS_BASE {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_DAC_READ_SEARCH: Builder = {
-        builder_from_names(&SYSCALLS_CAP_DAC_READ_SEARCH.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_DAC_READ_SEARCH.len());
+        for name in SYSCALLS_CAP_DAC_READ_SEARCH {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_ADMIN: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_ADMIN.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_ADMIN.len());
+        for name in SYSCALLS_CAP_SYS_ADMIN {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_BOOT: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_BOOT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_BOOT.len());
+        for name in SYSCALLS_CAP_SYS_BOOT {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_CHROOT: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_CHROOT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_CHROOT.len());
+        for name in SYSCALLS_CAP_SYS_CHROOT {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_MODULE: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_MODULE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_MODULE.len());
+        for name in SYSCALLS_CAP_SYS_MODULE {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_PACCT: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_PACCT.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PACCT.len());
+        for name in SYSCALLS_CAP_SYS_PACCT {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_PTRACE: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_PTRACE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PTRACE.len());
+        for name in SYSCALLS_CAP_SYS_PTRACE {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_RAWIO: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_RAWIO.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_RAWIO.len());
+        for name in SYSCALLS_CAP_SYS_RAWIO {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_TIME: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_TIME.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TIME.len());
+        for name in SYSCALLS_CAP_SYS_TIME {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_TTY_CONFIG: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_TTY_CONFIG.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TTY_CONFIG.len());
+        for name in SYSCALLS_CAP_SYS_TTY_CONFIG {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYS_NICE: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYS_NICE.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_NICE.len());
+        for name in SYSCALLS_CAP_SYS_NICE {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref CAP_SYSLOG: Builder = {
-        builder_from_names(&SYSCALLS_CAP_SYSLOG.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYSLOG.len());
+        for name in SYSCALLS_CAP_SYSLOG {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
 
 lazy_static::lazy_static! {
     pub static ref NON_CAP_SYS_ADMIN: Builder = {
-        builder_from_names(&SYSCALLS_NON_CAP_SYS_ADMIN.iter().map(|s| s.to_string()).collect::<HashSet<_>>())
+        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_NON_CAP_SYS_ADMIN.len());
+        for name in SYSCALLS_NON_CAP_SYS_ADMIN {
+            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+        }
+        builder_from_rules(&hm)
     };
 }
