@@ -807,10 +807,10 @@ fn write_npk<W: Write + Seek>(
             error: e,
         })?;
 
-    /* We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
-     * 'extra data' to inflate the header of the ZIP file.
-     * See chapter 4.3.6 of APPNOTE.TXT
-     * (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) */
+    // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
+    // 'extra data' to inflate the header of the ZIP file.
+    // See chapter 4.3.6 of APPNOTE.TXT
+    // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
     zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
         .map_err(|e| Error::Zip {
             context: "Could create aligned zip-file".to_string(),

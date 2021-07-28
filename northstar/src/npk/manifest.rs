@@ -148,6 +148,24 @@ impl Manifest {
                 prev_comps = curr_comps;
                 Ok(())
             })?;
+
+        // Check seccomp filter
+        const MAX_ALLOWED_ARG_VALUES: usize = 100; // BPF jumps cannot exceed 255 so we are conservative here
+        if let Some(seccomp) = &self.seccomp {
+            if let Some(allowlist) = &seccomp.allowlist {
+                for filter in allowlist {
+                    match filter.1 {
+                        SyscallRule::Args(args) => {
+                            if args.values.len() > MAX_ALLOWED_ARG_VALUES as usize {
+                                return Err(Error::Invalid(format!("Seccomp syscall argument cannot have more than {} allowed values", MAX_ALLOWED_ARG_VALUES)));
+                            }
+                        }
+                        SyscallRule::All => {}
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -281,7 +299,50 @@ pub struct Seccomp {
     pub profile: Option<Profile>,
     /// Explicit list of allowed syscalls
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowlist: Option<HashSet<String>>,
+    pub allowlist: Option<HashMap<NonNullString, SyscallRule>>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+//#[serde(untagged)]
+pub enum SyscallRule {
+    /// All syscall arguments are allowed
+    #[serde(rename = "all")]
+    All,
+    /// Explicit list of allowed syscalls arguments
+    #[serde(rename = "args")]
+    Args(SyscallArgValues),
+}
+
+#[cfg(target_pointer_width = "32")]
+type ArgType = u32;
+#[cfg(target_pointer_width = "64")]
+pub type ArgType = u64;
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyscallArgValues {
+    /// Index of syscall argument
+    pub index: usize,
+    /// Value of syscall argument
+    pub values: Vec<ArgType>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CmpOperation {
+    #[serde(rename = "ne")]
+    Ne,
+    #[serde(rename = "lt")]
+    Lt,
+    #[serde(rename = "lle")]
+    Le,
+    #[serde(rename = "eq")]
+    Eq,
+    #[serde(rename = "ge")]
+    Ge,
+    #[serde(rename = "gt")]
+    Gt,
+    #[serde(rename = "masked_eq")]
+    MaskedEq,
 }
 
 /// IO configuration for stdin, stdout, stderr
@@ -444,7 +505,7 @@ mod serde_caps {
 
 #[cfg(test)]
 mod tests {
-    use crate::npk::manifest::*;
+    use crate::npk::manifest::{SyscallRule::All, *};
     use anyhow::{anyhow, Result};
     use std::{
         convert::{TryFrom, TryInto},
@@ -496,10 +557,9 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-  allowlist: [
-    fork,
-    waitpid
-  ]
+  allowlist: 
+    fork: all
+    waitpid: all
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -551,9 +611,9 @@ seccomp:
 
         assert_eq!(manifest.cgroups, Some(cgroups));
 
-        let mut seccomp = HashSet::new();
-        seccomp.insert("fork".to_string());
-        seccomp.insert("waitpid".to_string());
+        let mut seccomp: HashMap<NonNullString, SyscallRule> = HashMap::new();
+        seccomp.insert(NonNullString::try_from("fork".to_string())?, All);
+        seccomp.insert(NonNullString::try_from("waitpid".to_string())?, All);
         assert_eq!(
             manifest.seccomp,
             Some(Seccomp {
@@ -745,10 +805,9 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-  allowlist: [
-    fork,
-    waitpid
-  ]
+  allowlist:
+    fork: all
+    waitpid: all
 capabilities:
   - CAP_NET_ADMIN
 io:

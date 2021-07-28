@@ -341,7 +341,7 @@ fn init_argv(manifest: &Manifest, args: Option<&Vec<NonNullString>>) -> (CString
     )
     .expect("Invalid init");
 
-    // If optional argumenets are defined, discard the values from the manifest.
+    // If optional arguments are defined, discard the values from the manifest.
     // if there are no optional args - take the values from the manifest if present
     // or nothing.
     let args = match (manifest.args.as_ref(), args) {
@@ -436,7 +436,7 @@ fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
     None
 }
 
-/// Block all signals of this process and currenty thread
+/// Block all signals of this process and current thread
 fn signals_block() {
     SigSet::all()
         .thread_block()
@@ -444,7 +444,7 @@ fn signals_block() {
     sigprocmask(SigmaskHow::SIG_BLOCK, Some(&SigSet::all()), None).unwrap();
 }
 
-/// Unblock all signals of this process and currenty thread
+/// Unblock all signals of this process and current thread
 fn signals_unblock() {
     SigSet::all()
         .thread_unblock()
