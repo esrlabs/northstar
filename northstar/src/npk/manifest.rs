@@ -150,14 +150,23 @@ impl Manifest {
             })?;
 
         // Check seccomp filter
-        const MAX_ALLOWED_ARG_VALUES: usize = 100; // BPF jumps cannot exceed 255 so we are conservative here
+        const MAX_ARG_INDEX: usize = 5;
+        const MAX_ARG_VALUES: usize = 100; // BPF jumps cannot exceed 255 so we are conservative here
         if let Some(seccomp) = &self.seccomp {
             if let Some(allowlist) = &seccomp.allowlist {
                 for filter in allowlist {
                     match filter.1 {
                         SyscallRule::Args(args) => {
-                            if args.values.len() > MAX_ALLOWED_ARG_VALUES as usize {
-                                return Err(Error::Invalid(format!("Seccomp syscall argument cannot have more than {} allowed values", MAX_ALLOWED_ARG_VALUES)));
+                            if args.index > MAX_ARG_INDEX {
+                                return Err(Error::Invalid(format!(
+                                    "Seccomp syscall argument index must be {} or smaller",
+                                    MAX_ARG_INDEX
+                                )));
+                            }
+                            if args.values.len() > MAX_ARG_VALUES {
+                                return Err(Error::Invalid(format!(
+                                    "Seccomp syscall argument cannot have more than {} allowed values",
+                                    MAX_ARG_VALUES)));
                             }
                         }
                         SyscallRule::All => {}

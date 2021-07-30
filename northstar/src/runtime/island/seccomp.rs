@@ -18,15 +18,14 @@ use crate::{
     runtime::island::seccomp_profiles::default,
 };
 use bindings::{
-    seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_MAXINSNS,
-    BPF_MEM, BPF_RET, BPF_ST, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG,
-    SYSCALL_MAP,
+    sock_filter, sock_fprog, BPF_ABS, BPF_JEQ, BPF_JMP, BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM,
+    BPF_RET, BPF_ST, BPF_W, SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
 };
 use log::warn;
 use nix::errno::Errno;
 use std::{
     collections::{HashMap, HashSet},
-    mem,
+    mem::size_of,
 };
 use thiserror::Error;
 
@@ -54,6 +53,37 @@ const EVAL_NEXT: u8 = 0;
 /// Skip next instruction
 const SKIP_NEXT: u8 = 1;
 
+// From seccomp man page:
+// struct seccomp_data {
+//     int   nr;                   /* System call number */
+//     __u32 arch;                 /* AUDIT_ARCH_* value
+//                                    (see <linux/audit.h>) */
+//     __u64 instruction_pointer;  /* CPU instruction pointer */
+//     __u64 args[6];              /* Up to 6 system call arguments */
+// };
+/// Offset of 'nr' member in 'seccomp_data' struct
+const SECCOMP_DATA_OFFSET_NR: usize = 0;
+/// Offset of 'arch' member in 'seccomp_data' struct
+const SECCOMP_DATA_OFFSET_ARCH: usize = SECCOMP_DATA_OFFSET_NR + size_of::<::std::os::raw::c_int>();
+/// Offset of 'instruction_pointer' member in 'seccomp_data' struct
+const SECCOMP_DATA_OFFSET_INST_P: usize = SECCOMP_DATA_OFFSET_ARCH + size_of::<u32>();
+/// Offset of 'args' member in 'seccomp_data' struct
+const SECCOMP_DATA_OFFSET_ARGS: usize = SECCOMP_DATA_OFFSET_INST_P + size_of::<u64>();
+/// Size of elements of 'args' array
+const SECCOMP_DATA_SIZE_ARGS: usize = size_of::<u64>();
+
+/// Index to scratch memory where to store/load the high part of an u64 to/from
+#[cfg(target_endian = "big")]
+const SCRATCH_MEM_HIGH_INDEX: u32 = 0;
+#[cfg(target_endian = "little")]
+const SCRATCH_MEM_HIGH_INDEX: u32 = 1;
+
+/// Index to scratch memory where to store/load the low part of an u64 to/from
+#[cfg(target_endian = "big")]
+const SCRATCH_MEM_LOW_INDEX: u32 = 1;
+#[cfg(target_endian = "little")]
+const SCRATCH_MEM_LOW_INDEX: u32 = 0;
+
 /// Construct a whitelist syscall filter that is applied post clone.
 pub(super) fn seccomp_filter(
     profile: Option<&Profile>,
@@ -67,7 +97,7 @@ pub(super) fn seccomp_filter(
     if let Some(profile) = profile {
         builder.extend(builder_from_profile(profile, caps));
     }
-    // builder.log_only(); // TODO: remove
+    builder.log_only(); // TODO: remove
     builder.build()
 }
 
@@ -260,6 +290,16 @@ impl Builder {
         nr: u32,
         arg_vals: Option<SyscallArgValues>,
     ) -> &mut Builder {
+        if let Some(arg_vals) = &arg_vals {
+            println!(
+                "Allowing syscall {} (arg_vals.index={}, arg_vals.values.len()={})",
+                nr,
+                arg_vals.index,
+                arg_vals.values.len()
+            );
+        } else {
+            println!("Allowing syscall {}", nr);
+        }
         self.allowlist.push(NumericSyscallRule { nr, arg_vals });
         self
     }
@@ -292,19 +332,20 @@ impl Builder {
         self
     }
 
-    /// Apply seccomp rules
+    /// Create seccomp filter ready to apply
     pub fn build(mut self) -> AllowList {
         // sort and dedup syscall numbers to check common syscalls first
         self.allowlist.sort_unstable_by_key(|rule| rule.nr);
         self.allowlist.dedup();
 
-        // Load architecture into accumulator
         let mut filter = AllowList { list: vec![] };
+
+        // Load architecture into accumulator
         load_arch_into_acc(&mut filter);
 
         // Kill process if architecture does not match
         jump_if_acc_is_equal(&mut filter, AUDIT_ARCH, SKIP_NEXT, EVAL_NEXT);
-        filter.list.push(bpf_ret(SECCOMP_RET_KILL));
+        filter.list.push(bpf_ret(SECCOMP_RET_KILL)); // never just log if architecture does not match
 
         // Load syscall number into accumulator for subsequent filtering
         load_syscall_nr_into_acc(&mut filter);
@@ -312,28 +353,31 @@ impl Builder {
         // Add statements for every allowed syscall
         for rule in &self.allowlist {
             if let Some(arg_rule) = &rule.arg_vals {
-                // load syscall argument into accumulator
+                // Calculate how many instructions to skip of syscall number does not match
+                #[cfg(target_pointer_width = "32")]
+                const SKIP_SYSCALL: u8 = 1 + 1 + 1 + 1;
+                #[cfg(target_pointer_width = "64")]
+                const SKIP_SYSCALL: u8 = 4 + 4 + 1 + 1;
+
+                // If syscall matches continue to check its arguments
+                jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, SKIP_SYSCALL);
+                // load syscall argument into accumulator (32 bit) or scratch memory (64 bit)
                 load_syscall_arg(&mut filter, arg_rule);
                 // Compare syscall argument against allowed values
-                jump_if_syscall_arg_matches(&mut filter, &arg_rule.values, SKIP_NEXT, EVAL_NEXT);
-                // Kill or log if syscall argument did not match
-                add_consequence(&mut filter, self.log_only);
+                jump_if_syscall_arg_matches(&mut filter, &arg_rule.values, EVAL_NEXT, SKIP_NEXT);
+                // If syscall argument matches return 'allow' directly
+                add_success_consequence(&mut filter);
                 // Restore accumulator with syscall number for subsequent checks
                 load_syscall_nr_into_acc(&mut filter);
             } else {
-                // If syscall matches return then return 'allow' directly. If not, skip return instruction and go to next check.
-                filter.list.push(bpf_jump(
-                    BPF_JMP | BPF_JEQ | BPF_K,
-                    rule.nr,
-                    EVAL_NEXT,
-                    SKIP_NEXT,
-                ));
-                filter.list.push(bpf_ret(SECCOMP_RET_ALLOW));
+                // If syscall matches return 'allow' directly
+                jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, SKIP_NEXT);
+                add_success_consequence(&mut filter);
             }
         }
 
         // Fall through consequence if not filter rule matched
-        add_consequence(&mut filter, self.log_only);
+        add_fail_consequence(&mut filter, self.log_only);
 
         filter
     }
@@ -347,61 +391,61 @@ fn translate_syscall(name: &str) -> Option<u32> {
 fn load_arch_into_acc(filter: &mut AllowList) {
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
-        memoffset::offset_of!(seccomp_data, arch) as u32,
+        SECCOMP_DATA_OFFSET_ARCH as u32,
     ));
 }
 
 fn load_syscall_nr_into_acc(filter: &mut AllowList) {
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
-        memoffset::offset_of!(seccomp_data, nr) as u32,
+        SECCOMP_DATA_OFFSET_NR as u32,
     ));
 }
 
 /// On 32 bit architectures: load into accumulator
 /// On 64 bit architectures: store in scratch memory
 fn load_syscall_arg(filter: &mut AllowList, arg_rule: &SyscallArgValues) {
-    let args_offset: usize = memoffset::offset_of!(seccomp_data, args);
     #[cfg(target_pointer_width = "32")]
     {
         const PTR_SIZE: usize = mem::size_of::<u32>();
         filter.list.push(bpf_stmt(
             BPF_LD | BPF_W | BPF_ABS,
-            (args_offset + PTR_SIZE * arg_rule.index) as u32,
+            (SECCOMP_DATA_OFFSET_ARGS + SECCOMP_DATA_SIZE_ARGS * arg_rule.index) as u32,
         ));
     }
     #[cfg(target_pointer_width = "64")]
     {
         // Load high and low parts into scratch memory separately
-        const PTR_SIZE: usize = mem::size_of::<u64>();
+
         // Load low part of argument from seccomp_data
-        // TODO: Use register X instead of manual array indexing:
-        // BPF_LDX+BPF_W+BPF_IMM
-        //    X <- k
-        // BPF_LD+BPF_W+BPF_IND
-        //    A <- P[X+k:4]
         filter.list.push(bpf_stmt(
             BPF_LD | BPF_W | BPF_ABS,
-            (args_offset + PTR_SIZE * arg_rule.index) as u32,
+            (SECCOMP_DATA_OFFSET_ARGS + SECCOMP_DATA_SIZE_ARGS * arg_rule.index) as u32,
         ));
-        // Store accumulator in scratch memory at index 0
-        filter.list.push(bpf_stmt(BPF_ST, 0));
+        // Store accumulator in scratch memory
+        filter.list.push(bpf_stmt(BPF_ST, SCRATCH_MEM_LOW_INDEX));
         // Get high part of argument from seccomp_data
         filter.list.push(bpf_stmt(
             BPF_LD | BPF_W | BPF_ABS,
-            (args_offset + PTR_SIZE * arg_rule.index + (PTR_SIZE / 2)) as u32,
+            (SECCOMP_DATA_OFFSET_ARGS
+                + SECCOMP_DATA_SIZE_ARGS * arg_rule.index
+                + (SECCOMP_DATA_SIZE_ARGS / 2)) as u32,
         ));
         // Store accumulator in scratch memory at index 1
-        filter.list.push(bpf_stmt(BPF_ST, 1));
+        filter.list.push(bpf_stmt(BPF_ST, SCRATCH_MEM_HIGH_INDEX));
     }
 }
 
-fn load_scratch_into_acc_lo(filter: &mut AllowList) {
-    filter.list.push(bpf_stmt(BPF_LD | BPF_MEM, 0 as u32));
+fn load_scratch_low_into_acc(filter: &mut AllowList) {
+    filter
+        .list
+        .push(bpf_stmt(BPF_LD | BPF_MEM, SCRATCH_MEM_LOW_INDEX as u32));
 }
 
-fn load_scratch_into_acc_hi(filter: &mut AllowList) {
-    filter.list.push(bpf_stmt(BPF_LD | BPF_MEM, 1 as u32));
+fn load_scratch_high_into_acc(filter: &mut AllowList) {
+    filter
+        .list
+        .push(bpf_stmt(BPF_LD | BPF_MEM, SCRATCH_MEM_HIGH_INDEX as u32));
 }
 
 fn jump_if_syscall_arg_matches(
@@ -449,18 +493,22 @@ fn jump_if_scratch_is_equal(filter: &mut AllowList, value: u64, offset_true: u8,
     let low: u32 = value as u32;
 
     // Compare high and low parts of scratch memory separately
-    load_scratch_into_acc_lo(filter);
-    jump_if_acc_is_equal(filter, low, EVAL_NEXT, offset_false + 2);
-    load_scratch_into_acc_hi(filter);
-    jump_if_acc_is_equal(filter, high, offset_true, offset_false);
+    load_scratch_high_into_acc(filter);
+    jump_if_acc_is_equal(filter, high, EVAL_NEXT, offset_false + 2);
+    load_scratch_low_into_acc(filter);
+    jump_if_acc_is_equal(filter, low, offset_true, offset_false);
 }
 
-fn add_consequence(filter: &mut AllowList, log_only: bool) {
+fn add_fail_consequence(filter: &mut AllowList, log_only: bool) {
     if log_only {
         filter.list.push(bpf_ret(SECCOMP_RET_LOG));
     } else {
         filter.list.push(bpf_ret(SECCOMP_RET_KILL));
     }
+}
+
+fn add_success_consequence(filter: &mut AllowList) {
+    filter.list.push(bpf_ret(SECCOMP_RET_ALLOW));
 }
 
 // https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/filter.h
