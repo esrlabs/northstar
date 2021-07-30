@@ -38,12 +38,23 @@ pub struct Config {
     pub debug: Option<Debug>,
 }
 
+/// Repository type
+#[derive(Clone, Debug, Deserialize)]
+pub enum RepositoryType {
+    /// Directory based
+    #[serde(rename = "fs")]
+    Fs { dir: PathBuf },
+    /// Memory based
+    #[serde(rename = "mem")]
+    Memory,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
-    /// Directory containing images in container format
-    pub dir: PathBuf,
-    /// Directory where public signing keys are stored
+    /// Optional key for this repository
     pub key: Option<PathBuf>,
+    /// Repository type: fs or mem
+    pub r#type: RepositoryType,
 }
 
 /// This map specifies the root cgroup under which the application cgroups are inserted.

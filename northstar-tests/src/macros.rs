@@ -15,23 +15,14 @@
 use super::logger;
 use nix::{mount, sched};
 use sched::{unshare, CloneFlags};
-use std::env;
 
 pub fn init() {
-    color_eyre::install().unwrap();
     logger::init();
     log::set_max_level(log::LevelFilter::Debug);
-
-    // TODO make the test independent of the workspace structure
-    // set the CWD to the root
-    env::set_current_dir("..").unwrap();
 
     // Enter a mount namespace. This needs to be done before spawning
     // the tokio threadpool.
     unshare(CloneFlags::CLONE_NEWNS).unwrap();
-
-    // Enable backtrace dumping
-    env::set_var("RUST_BACKTRACE", "1");
 
     // Set the mount propagation to private on root. This ensures that *all*
     // mounts get cleaned up upon process termination. The approach to bind
@@ -63,7 +54,7 @@ macro_rules! test {
             #[test]
             fn $name() {
                 northstar_tests::macros::init();
-                match tokio::runtime::Builder::new_multi_thread()
+                match tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .thread_name(stringify!($name))
                     .build()

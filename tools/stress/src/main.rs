@@ -192,16 +192,13 @@ async fn main() -> Result<()> {
                 if mode != Mode::MountUmount {
                     info!("{:<a$}: stopping", container, a = len);
                     client
-                        .stop(container.clone(), time::Duration::from_secs(5))
+                        .kill(container.clone(), 15)
                         .await
                         .context("Failed to stop container")?;
 
-                    if !relaxed {
-                        info!("{:<a$}: waiting for termination", container, a = len);
-                        let stopped =
-                            Notification::Stopped(container.clone(), ExitStatus::Signaled(15));
-                        await_notification(&mut client, stopped, timeout).await?;
-                    }
+                    info!("{:<a$}: waiting for termination", container, a = len);
+                    let stopped = Notification::Exit(container.clone(), ExitStatus::Signaled(15));
+                    await_notification(&mut client, stopped, timeout).await?;
                 }
 
                 // Check if we need to umount

@@ -70,12 +70,6 @@ pub enum Error {
         #[source]
         error: io::Error,
     },
-    #[error("IO: {context}")]
-    FsExtra {
-        context: String,
-        #[source]
-        error: fs_extra::error::Error,
-    },
     #[error("Squashfs error: {0}")]
     Squashfs(String),
     #[error("Archive error: {context}")]

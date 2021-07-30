@@ -68,6 +68,9 @@ pub enum Error {
     Io(String, io::Error),
     #[error("Os: {0}: {1:?}")]
     Os(String, nix::Error),
+
+    #[error("{0}: {1:?}")]
+    Other(String, String),
 }
 
 impl Error {
@@ -77,6 +80,10 @@ impl Error {
 
     pub(crate) fn os<T: ToString>(e: T, err: nix::Error) -> Error {
         Error::Os(e.to_string(), err)
+    }
+
+    pub(crate) fn other<T: ToString, E: std::fmt::Debug>(e: T, err: E) -> Error {
+        Error::Other(e.to_string(), format!("{:?}", err))
     }
 }
 
@@ -121,6 +128,7 @@ impl From<Error> for api::model::Error {
             Error::Key(error) => api::model::Error::Key(error.to_string()),
             Error::Io(cause, error) => api::model::Error::Io(format!("{}: {}", cause, error)),
             Error::Os(cause, error) => api::model::Error::Os(format!("{}: {}", cause, error)),
+            Error::Other(cause, error) => api::model::Error::Other(cause, error),
         }
     }
 }

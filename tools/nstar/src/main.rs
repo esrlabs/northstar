@@ -87,14 +87,13 @@ pub enum Subcommand {
         env: Option<Vec<String>>,
     },
     /// Stop a container
-    Stop {
+    Kill {
         /// Container name
         name: String,
         /// Container version
         version: Version,
-        /// Timeout
-        #[structopt(default_value = "5")]
-        timeout: u64,
+        /// Signal
+        signal: Option<i32>,
     },
     /// Install a npk
     Install {
@@ -212,13 +211,13 @@ impl TryFrom<Subcommand> for Request {
                     env,
                 ))
             }
-            Subcommand::Stop {
+            Subcommand::Kill {
                 name,
                 version,
-                timeout,
-            } => Ok(Request::Stop(
+                signal,
+            } => Ok(Request::Kill(
                 Container::new(name.try_into()?, version),
-                timeout,
+                signal.unwrap_or(15),
             )),
             Subcommand::Install {
                 npk,

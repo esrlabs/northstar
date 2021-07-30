@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use thiserror::Error;
-use tokio::{fs, io, sync::Mutex, task, time};
+use tokio::{fs, io, sync::Mutex, time};
 
 const LOOP_SET_FD: u16 = 0x4C00;
 //const LOOP_CLR_FD: u16 = 0x4C01;
@@ -61,11 +61,8 @@ struct ControlLock {
 }
 
 impl ControlLock {
-    pub async fn new(control_fd: RawFd) -> Result<ControlLock, Error> {
-        let result = task::block_in_place(|| {
-            nix::fcntl::flock(control_fd, nix::fcntl::FlockArg::LockExclusive)
-        });
-        match result {
+    pub fn new(control_fd: RawFd) -> Result<ControlLock, Error> {
+        match nix::fcntl::flock(control_fd, nix::fcntl::FlockArg::LockExclusive) {
             Ok(_) => debug!("Acquired control lock"),
             Err(e) => {
                 warn!("Failed to lock control {:?}", e);
@@ -117,95 +114,91 @@ impl LoopControl {
         let control_fd = self.control.lock().await;
 
         // Lock the loopback control file via fcntl. Sync between multiple northstar instances
-        let lock = ControlLock::new(control_fd.as_raw_fd()).await?;
+        let lock = ControlLock::new(control_fd.as_raw_fd())?;
 
-        let loop_device = task::block_in_place(move || {
-            // Get next free loop device
-            let index = unsafe { ioctl(control_fd.as_raw_fd(), LOOP_CTL_GET_FREE.into()) };
-            let loop_device_path = match index {
-                n if n < 0 => return Err(Error::NoFreeDeviceFound),
-                n => PathBuf::from(&format!("{}{}", self.dev, n)),
+        // Get next free loop device
+        let index = unsafe { ioctl(control_fd.as_raw_fd(), LOOP_CTL_GET_FREE.into()) };
+        let loop_device_path = match index {
+            n if n < 0 => return Err(Error::NoFreeDeviceFound),
+            n => PathBuf::from(&format!("{}{}", self.dev, n)),
+        };
+
+        debug!("Using loop dev {}", loop_device_path.display());
+
+        // Open e.g. /dev/loop4
+        let loop_device_file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&loop_device_path)
+            .map_err(Error::Open)?;
+
+        // Attach the file => Associate the loop device with the open file
+        if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_FD.into(), file_fd) } < 0 {
+            return Err(Error::AssociateWithOpenFile);
+        }
+
+        // Set offset and limit for backing_file
+        log::debug!("Setting offset {} and limit {}", offset, sizelimit);
+        let mut info = loop_info64 {
+            lo_offset: offset,
+            lo_sizelimit: sizelimit,
+            ..Default::default()
+        };
+        if read_only {
+            info.lo_flags |= LOOP_FLAG_READ_ONLY;
+        }
+        if auto_clear {
+            info.lo_flags |= LOOP_FLAG_AUTOCLEAR;
+        }
+
+        const MAX_RETRIES: usize = 10;
+
+        for _ in 0..MAX_RETRIES {
+            let code = unsafe {
+                ioctl(
+                    loop_device_file.as_raw_fd(),
+                    LOOP_SET_STATUS64.into(),
+                    &mut info,
+                )
             };
 
-            debug!("Using loop dev {}", loop_device_path.display());
-
-            // Open e.g. /dev/loop4
-            let loop_device_file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&loop_device_path)
-                .map_err(Error::Open)?;
-
-            // Attach the file => Associate the loop device with the open file
-            if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_FD.into(), file_fd) } < 0 {
-                return Err(Error::AssociateWithOpenFile);
-            }
-
-            // Set offset and limit for backing_file
-            log::debug!("Setting offset {} and limit {}", offset, sizelimit);
-            let mut info = loop_info64 {
-                lo_offset: offset,
-                lo_sizelimit: sizelimit,
-                ..Default::default()
-            };
-            if read_only {
-                info.lo_flags |= LOOP_FLAG_READ_ONLY;
-            }
-            if auto_clear {
-                info.lo_flags |= LOOP_FLAG_AUTOCLEAR;
-            }
-
-            const MAX_RETRIES: usize = 10;
-
-            for _ in 0..MAX_RETRIES {
-                let code = unsafe {
-                    ioctl(
-                        loop_device_file.as_raw_fd(),
-                        LOOP_SET_STATUS64.into(),
-                        &mut info,
-                    )
-                };
-
-                match Errno::result(code) {
-                    Ok(_) => break,
-                    nix::Result::Err(Sys(Errno::EAGAIN)) => {
-                        warn!("Received a EAGAIN during lo attach");
-                        // this error means the call should be retried
-                        std::thread::sleep(time::Duration::from_millis(50));
-                    }
-                    nix::Result::Err(e) => {
-                        return Err(Error::SetStatusFailed(e));
-                    }
+            match Errno::result(code) {
+                Ok(_) => break,
+                nix::Result::Err(Sys(Errno::EAGAIN)) => {
+                    warn!("Received a EAGAIN during lo attach");
+                    // this error means the call should be retried
+                    std::thread::sleep(time::Duration::from_millis(50));
+                }
+                nix::Result::Err(e) => {
+                    return Err(Error::SetStatusFailed(e));
                 }
             }
+        }
 
-            // Unlock the loopback control lock
-            drop(lock);
-            drop(control_fd);
+        // Unlock the loopback control lock
+        drop(lock);
+        drop(control_fd);
 
-            // Try to set direct IO
-            if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_DIRECT_IO.into(), 1) } < 0 {
-                warn!(
-                    "Failed to enable direct IO on {}",
-                    loop_device_path.display()
-                );
-            }
+        // Try to set direct IO
+        if unsafe { ioctl(loop_device_file.as_raw_fd(), LOOP_SET_DIRECT_IO.into(), 1) } < 0 {
+            warn!(
+                "Failed to enable direct IO on {}",
+                loop_device_path.display()
+            );
+        }
 
-            // Get major/minor
-            let attr = loop_device_file.metadata()?;
-            let rdev = attr.rdev();
-            let major = ((rdev >> 32) & 0xFFFF_F000) | ((rdev >> 8) & 0xFFF);
-            let minor = ((rdev >> 12) & 0xFFFF_FF00) | (rdev & 0xFF);
+        // Get major/minor
+        let attr = loop_device_file.metadata()?;
+        let rdev = attr.rdev();
+        let major = ((rdev >> 32) & 0xFFFF_F000) | ((rdev >> 8) & 0xFFF);
+        let minor = ((rdev >> 12) & 0xFFFF_FF00) | (rdev & 0xFF);
 
-            let loop_device = LoopDevice {
-                device: loop_device_file,
-                path: loop_device_path,
-                major,
-                minor,
-            };
-
-            Ok(loop_device)
-        })?;
+        let loop_device = LoopDevice {
+            device: loop_device_file,
+            path: loop_device_path,
+            major,
+            minor,
+        };
 
         let losetup_duration = start.elapsed();
         debug!(

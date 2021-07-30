@@ -21,7 +21,7 @@ use northstar::api::{
     model::{self, ConnectNack, ExitStatus, Notification},
 };
 use northstar_tests::{containers::*, logger, runtime::Northstar, test};
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::UnixStream,
@@ -67,30 +67,10 @@ test!(start_stop_test_container_with_waiting, {
     for _ in 0..10u32 {
         runtime.start_with_args(TEST_CONTAINER, ["sleep"]).await?;
         assume("Sleeping", 5u64).await?;
-        runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
-        assume(
-            "Stopped test-container:0.0.1 with status Signaled\\(SIGTERM\\)",
-            5,
-        )
-        .await?;
+        runtime.stop(TEST_CONTAINER, 5).await?;
+        assume("Process test-container:0.0.1 exited", 5).await?;
     }
 
-    runtime.shutdown().await
-});
-
-// Start and stop a container without waiting
-test!(start_stop_test_container_without_waiting, {
-    let mut runtime = Northstar::launch_install_test_container().await?;
-
-    for _ in 0..10u32 {
-        runtime.start(TEST_CONTAINER).await?;
-        runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
-        // TODO: For an unknown reason the child processes exit with a SIGABRT instead
-        // of SIGTERM. The abort is generated in the child process *after* the execve
-        // which makes it impossible to handle by init or the runtime. Accept any exit
-        // status here, as long as the container exits at all.
-        assume("Stopped test-container:0.0.1 with status .*", 5).await?;
-    }
     runtime.shutdown().await
 });
 
@@ -117,10 +97,7 @@ test!(mount_umount_test_container_via_client, {
 test!(try_to_stop_unknown_container, {
     let mut runtime = Northstar::launch().await?;
     let container = "foo:0.0.1:default";
-    assert!(runtime
-        .stop(container, Duration::from_secs(5))
-        .await
-        .is_err());
+    assert!(runtime.stop(container, 5).await.is_err());
     runtime.shutdown().await
 });
 
@@ -153,7 +130,7 @@ test!(check_test_container_resource_usage, {
     assume("hello from test resource", 5).await?;
 
     // The container might have finished at this point
-    runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
 
     runtime.uninstall_test_container().await?;
     runtime.uninstall_test_resource().await?;
@@ -171,7 +148,7 @@ test!(try_to_uninstall_a_started_container, {
     let result = runtime.uninstall_test_container().await;
     assert!(result.is_err());
 
-    runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
 
     runtime.shutdown().await
 });
@@ -182,7 +159,7 @@ test!(start_mounted_container_with_not_mounted_resource, {
     // Start a container that depends on a resource.
     runtime.start_with_args(TEST_CONTAINER, ["sleep"]).await?;
     assume("test-container: Sleeping...", 5u64).await?;
-    runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
 
     // Umount the resource and start the container again.
     runtime.umount(TEST_RESOURCE).await?;
@@ -190,7 +167,7 @@ test!(start_mounted_container_with_not_mounted_resource, {
     runtime.start_with_args(TEST_CONTAINER, ["sleep"]).await?;
     assume("test-container: Sleeping...", 5u64).await?;
 
-    runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
 
     runtime.shutdown().await
 });
@@ -222,6 +199,7 @@ test!(container_uses_correct_uid, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
     assume("getuid: 1000", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
@@ -230,7 +208,8 @@ test!(container_uses_correct_uid, {
 test!(container_uses_correct_gid, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
-    assume("getuid: 1000", 5).await?;
+    assume("getgid: 1000", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
@@ -239,6 +218,7 @@ test!(container_ppid_must_be_init, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
     assume("getppid: 1", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
@@ -246,9 +226,8 @@ test!(container_ppid_must_be_init, {
 test!(container_sid_must_be_init_or_none, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
-
     assume("getsid: 1", 5).await?;
-
+    runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
@@ -256,9 +235,10 @@ test!(container_sid_must_be_init_or_none, {
 test!(container_shall_only_have_configured_capabilities, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
-    assume("caps bounding: \\{CAP_KILL\\}", 5).await?;
-    assume("caps effective: \\{CAP_KILL\\}", 5).await?;
-    assume("caps permitted: \\{CAP_KILL\\}", 5).await?;
+    assume("caps bounding: \\{\\}", 10).await?;
+    assume("caps effective: \\{\\}", 10).await?;
+    assume("caps permitted: \\{\\}", 10).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
@@ -283,7 +263,7 @@ test!(
 
         runtime.start_with_args(TEST_CONTAINER, ["sleep"]).await?;
         assume("test-container: Sleeping", 5).await?;
-        runtime.stop(TEST_CONTAINER, Duration::from_secs(5)).await?;
+        runtime.stop(TEST_CONTAINER, 5).await?;
 
         let result = runtime.shutdown().await;
 
@@ -305,6 +285,7 @@ test!(container_shall_only_have_configured_fds, {
     assume("/proc/self/fd/1: pipe:.*", 5).await?;
     assume("/proc/self/fd/2: pipe:.*", 5).await?;
     assume("total: 3", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
 
     runtime.shutdown().await
 });
@@ -314,6 +295,7 @@ test!(proc_is_mounted_ro, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
     assume("proc /proc proc ro,", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
@@ -411,6 +393,8 @@ mod example {
         runtime.install(&EXAMPLE_CPUEATER_NPK).await?;
         runtime.start(EXAMPLE_CPUEATER).await?;
         assume("Eating CPU", 5).await?;
+
+        runtime.stop(EXAMPLE_CPUEATER, 10).await?;
         runtime.shutdown().await
     });
 
@@ -449,9 +433,7 @@ mod example {
         let mut runtime = Northstar::launch().await?;
         runtime.install(&EXAMPLE_INSPECT_NPK).await?;
         runtime.start(EXAMPLE_INSPECT).await?;
-        runtime
-            .stop(EXAMPLE_INSPECT, Duration::from_secs(5))
-            .await?;
+        runtime.stop(EXAMPLE_INSPECT, 5).await?;
         // TODO
         runtime.shutdown().await
     });
@@ -462,9 +444,7 @@ mod example {
         runtime.install(&EXAMPLE_MEMEATER_NPK).await?;
         runtime.start(EXAMPLE_MEMEATER).await?;
         // TODO
-        runtime
-            .stop(EXAMPLE_MEMEATER, Duration::from_secs(5))
-            .await?;
+        runtime.stop(EXAMPLE_MEMEATER, 5).await?;
         runtime.shutdown().await
     });
 

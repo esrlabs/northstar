@@ -4,8 +4,8 @@ data_dir = "/data/northstar/data"
 log_dir = "/data/northstar/logs"
 
 [repositories.system]
-dir = "/system/northstar/system"
 key = "/system/etc/northstar/system.pub"
+type = { fs = { dir = "/system/northstar/system" }}
 
 [cgroups]
 memory = "northstar"

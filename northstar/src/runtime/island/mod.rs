@@ -16,15 +16,16 @@ use self::fs::Dev;
 use super::{
     config::Config,
     error::Error,
-    pipe::{pipe, Condition, ConditionNotify, ConditionWait, PipeRead, PipeWrite, RawFdExt},
+    pipe::{Condition, ConditionNotify, ConditionWait},
     state::{MountedContainer, Process},
     Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
-    common::non_null_string::NonNullString,
-    npk::manifest::{Capability, Manifest},
+    common::{container::Container, non_null_string::NonNullString},
+    npk::manifest::Manifest,
 };
 use async_trait::async_trait;
+use caps::CapsHashSet;
 use futures::{Future, FutureExt};
 use log::{debug, error, info, warn};
 use nix::{
@@ -40,15 +41,13 @@ use nix::{
 };
 use sched::CloneFlags;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
-    os::unix::io::AsRawFd,
     ptr::null,
 };
 use sys::wait;
-use task::block_in_place as block;
 use tokio::{signal, task, time};
 use Signal::SIGCHLD;
 
@@ -58,70 +57,36 @@ mod init;
 mod io;
 mod seccomp;
 mod seccomp_profiles;
-mod utils;
 
 /// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;
-
-type Container = MountedContainer;
-type ExitStatusFuture = Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpin>;
 
 #[derive(Debug)]
 pub(super) struct Island {
     tx: EventTx,
     config: Config,
-    /// Used by child process to detect if the parent process has died
-    tripwire_read: PipeRead,
-    /// Unused writing end of the tripwire pipe. Keep it in Island for a proper close on `shutdown`
-    tripwire_write: PipeWrite,
 }
 
-pub(super) enum IslandProcess {
-    Created {
-        pid: Pid,
-        exit_status: ExitStatusFuture,
-        io: (Option<io::Log>, Option<io::Log>),
-        checkpoint: Checkpoint,
-        _dev: Dev,
-    },
-    Started {
-        pid: Pid,
-        exit_status: ExitStatusFuture,
-        io: (Option<io::Log>, Option<io::Log>),
-        _dev: Dev,
-    },
-    Stopped,
+pub(super) struct IslandProcess {
+    pid: Pid,
+    checkpoint: Option<Checkpoint>,
+    io: (Option<io::Log>, Option<io::Log>),
+    exit_status: Option<Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpin>>,
+    _dev: Dev,
 }
 
 impl fmt::Debug for IslandProcess {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            IslandProcess::Created { pid, .. } => f
-                .debug_struct("IslandProcess::Created")
-                .field("pid", &pid)
-                .finish(),
-            IslandProcess::Started { pid, .. } => f
-                .debug_struct("IslandProcess::Started")
-                .field("pid", &pid)
-                .finish(),
-            IslandProcess::Stopped => f.debug_struct("IslandProcess::Stopped").finish(),
-        }
+        f.debug_struct("IslandProcess")
+            .field("pid", &self.pid)
+            .field("checkpoint", &self.checkpoint)
+            .finish()
     }
 }
 
 impl Island {
     pub async fn start(tx: EventTx, config: Config) -> Result<Self, Error> {
-        let (tripwire_read, tripwire_write) =
-            block(pipe).map_err(|e| Error::io("Open tripwire pipe", e))?;
-        block(|| tripwire_read.set_cloexec(true))
-            .map_err(|e| Error::io("Setting cloexec on tripwire fd", e))?;
-
-        Ok(Island {
-            tx,
-            config,
-            tripwire_read,
-            tripwire_write,
-        })
+        Ok(Island { tx, config })
     }
 
     pub async fn shutdown(self) -> Result<(), Error> {
@@ -130,28 +95,25 @@ impl Island {
 
     pub async fn create(
         &self,
-        container: &Container,
+        container: &MountedContainer,
         args: Option<&Vec<NonNullString>>,
         env: Option<&HashMap<NonNullString, NonNullString>>,
-    ) -> Result<Box<dyn Process>, Error> {
-        let manifest = &container.manifest;
-        let (init, argv) = init_argv(manifest, args);
-        let env = self::env(manifest, env);
-        let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
-        let (checkpoint_runtime, checkpoint_init) = checkpoints();
-        let tripwire = self.tripwire_read.clone();
-        let (mounts, dev) = fs::prepare_mounts(&self.config, container).await?;
-        let groups = groups(manifest);
-        let capabilities = capabilities(container);
-        let seccomp = seccomp_filter(container);
+    ) -> Result<IslandProcess, Error> {
         let root = container
             .root
             .canonicalize()
             .expect("Failed to canonicalize root");
-
-        // Do not close child tripwire fd as it will be needed to detect if the runtime process died
-        fds.remove(&self.tripwire_read.as_raw_fd());
+        let manifest = container.manifest.clone();
+        let (mounts, dev) = fs::prepare_mounts(&self.config, container).await?;
+        let container = container.container.clone();
+        let (init, argv) = init_argv(&manifest, args);
+        let env = self::env(&manifest, env);
+        let (stdout, stderr, mut fds) = io::from_manifest(&manifest).await?;
         let fds = fds.drain().collect::<Vec<_>>();
+        let (checkpoint_runtime, checkpoint_init) = checkpoints();
+        let groups = groups(&manifest);
+        let capabilities = capabilities(&manifest);
+        let seccomp = seccomp_filter(&manifest);
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
@@ -168,50 +130,50 @@ impl Island {
         match clone::clone(flags, Some(SIGCHLD as c_int)) {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
-                    debug!("Created {} with pid {}", container.container, child);
+                    debug!("Created {} with pid {}", container, child);
 
                     // Unblock signals that were block to start init with masked signals
                     signals_unblock();
 
-                    block(|| drop(checkpoint_init));
+                    drop(checkpoint_init);
 
                     // Close writing part of log forwards if any
                     let stdout = stdout.map(|(log, fd)| {
-                        block(|| unistd::close(fd).ok());
+                        unistd::close(fd).ok();
                         log
                     });
                     let stderr = stderr.map(|(log, fd)| {
-                        block(|| unistd::close(fd).ok());
+                        unistd::close(fd).ok();
                         log
                     });
                     let pid = child.as_raw() as Pid;
-                    let exit_status = Box::new(waitpid(container, pid, &self.tx));
 
-                    Ok(Box::new(IslandProcess::Created {
+                    let exit_status = waitpid(container, pid, self.tx.clone());
+
+                    Ok(IslandProcess {
                         pid,
-                        exit_status,
                         io: (stdout, stderr),
-                        checkpoint: checkpoint_runtime,
+                        checkpoint: Some(checkpoint_runtime),
+                        exit_status: Some(Box::new(exit_status)),
                         _dev: dev,
-                    }))
+                    })
                 }
                 unistd::ForkResult::Child => {
                     drop(checkpoint_runtime);
-
-                    init::init(
-                        container,
-                        &root,
-                        &init,
-                        &argv,
-                        &env,
-                        &mounts,
-                        &fds,
-                        &groups,
+                    let init = init::Init {
+                        manifest,
+                        root,
+                        init,
+                        argv,
+                        env,
+                        mounts,
+                        fds,
+                        groups,
                         capabilities,
                         seccomp,
-                        checkpoint_init,
-                        tripwire,
-                    );
+                        checkpoint: checkpoint_init,
+                    };
+                    init.run();
                 }
             },
             Err(e) => panic!("Fork error: {}", e),
@@ -222,134 +184,72 @@ impl Island {
 #[async_trait]
 impl Process for IslandProcess {
     fn pid(&self) -> Pid {
-        match self {
-            IslandProcess::Created { pid, .. } => *pid,
-            IslandProcess::Started { pid, .. } => *pid,
-            IslandProcess::Stopped { .. } => unreachable!(),
-        }
+        self.pid
     }
 
-    async fn start(self: Box<Self>) -> Result<Box<dyn Process>, Error> {
+    async fn spawn(&mut self) -> Result<(), Error> {
+        let checkpoint = self
+            .checkpoint
+            .take()
+            .expect("Attempt to start container twice. This is a bug.");
         info!("Starting {}", self.pid());
-        match *self {
-            IslandProcess::Created {
-                pid,
-                exit_status,
-                io,
-                _dev,
-                checkpoint,
-            } => {
-                let wait = checkpoint.notify();
+        let wait = checkpoint.notify();
 
-                // If the child process refuses to start - kill it after 5 seconds
-                if time::timeout(
-                    time::Duration::from_secs(5),
-                    task::spawn_blocking(|| wait.wait()),
-                )
-                .await
-                .is_err()
-                {
-                    error!(
-                        "Timeout while waiting for {} to start. Sending SIGKILL to {}",
-                        pid, pid
-                    );
-                    let process_group = unistd::Pid::from_raw(-(pid as i32));
-                    let sigkill = Some(sys::signal::SIGKILL);
-                    sys::signal::kill(process_group, sigkill).ok();
-                }
-
-                Ok(Box::new(IslandProcess::Started {
-                    pid,
-                    exit_status,
-                    io,
-                    _dev,
-                }))
+        // If the child process refuses to start - kill it after 5 seconds
+        match time::timeout(time::Duration::from_secs(5), wait.async_wait()).await {
+            Ok(_) => (),
+            Err(_) => {
+                error!(
+                    "Timeout while waiting for {} to start. Sending SIGKILL to {}",
+                    self.pid, self.pid
+                );
+                let process_group = unistd::Pid::from_raw(-(self.pid as i32));
+                let sigkill = Some(sys::signal::SIGKILL);
+                sys::signal::kill(process_group, sigkill).ok();
             }
-            _ => unreachable!(),
         }
+
+        Ok(())
     }
 
-    /// Send a SIGTERM to the application. If the application does not terminate with a timeout
-    /// it is SIGKILLed.
-    async fn stop(
-        self: Box<Self>,
-        timeout: time::Duration,
-    ) -> Result<(Box<dyn Process>, ExitStatus), super::error::Error> {
-        let (pid, mut exit_status, io) = match *self {
-            IslandProcess::Created {
-                pid,
-                exit_status,
-                io,
-                ..
-            } => (pid, exit_status, io),
-            IslandProcess::Started {
-                pid,
-                exit_status,
-                io,
-                _dev,
-            } => (pid, exit_status, io),
-            IslandProcess::Stopped { .. } => unreachable!(),
-        };
-        debug!("Trying to send SIGTERM to {}", pid);
-        let process_group = unistd::Pid::from_raw(-(pid as i32));
-        let sigterm = Some(sys::signal::SIGTERM);
-        let exit_status = match sys::signal::kill(process_group, sigterm) {
-            Ok(_) => {
-                match time::timeout(timeout, &mut exit_status).await {
-                    Ok(exit_status) => Ok(exit_status),
-                    Err(_) => {
-                        warn!(
-                            "Process {} did not exit within {:?}. Sending SIGKILL...",
-                            pid, timeout
-                        );
-                        // Send SIGKILL if the process did not terminate before timeout
-                        let sigkill = Some(sys::signal::SIGKILL);
-                        sys::signal::kill(process_group, sigkill)
-                            .map_err(|e| Error::Os("Failed to kill process".to_string(), e))?;
-
-                        Ok(exit_status.await)
-                    }
-                }
-            }
+    async fn kill(&mut self, signal: Signal) -> Result<(), super::error::Error> {
+        debug!("Sending {} to {}", signal.as_str(), self.pid);
+        let process_group = unistd::Pid::from_raw(-(self.pid as i32));
+        let sigterm = Some(signal);
+        match sys::signal::kill(process_group, sigterm) {
+            Ok(_) => {}
             // The process is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == Errno::ESRCH => {
-                debug!("Process {} already exited. Waiting for status", pid);
-                Ok(exit_status.await)
+                debug!("Process {} already exited", self.pid);
             }
-            Err(e) => Err(Error::Os(format!("Failed to SIGTERM {}", process_group), e)),
-        }?;
-
-        if let Some(io) = io.0 {
-            io.stop().await?;
+            Err(e) => {
+                return Err(Error::Os(
+                    format!("Failed to send signal {} {}", signal, process_group),
+                    e,
+                ))
+            }
         }
-        if let Some(io) = io.1 {
-            io.stop().await?;
-        }
-
-        Ok((Box::new(IslandProcess::Stopped), exit_status))
+        Ok(())
     }
 
-    async fn destroy(self: Box<Self>) -> Result<(), Error> {
-        match *self {
-            IslandProcess::Created { io, .. } | IslandProcess::Started { io, .. } => {
-                if let Some(io) = io.0 {
-                    io.stop().await?;
-                }
-                if let Some(io) = io.1 {
-                    io.stop().await?;
-                }
-                Ok(())
-            }
-            IslandProcess::Stopped { .. } => Ok(()),
+    async fn wait(&mut self) -> Result<ExitStatus, Error> {
+        let exit_status = self.exit_status.take().expect("Wait called twice");
+        Ok(exit_status.await)
+    }
+
+    async fn destroy(&mut self) -> Result<(), Error> {
+        if let Some(io) = self.io.0.take() {
+            io.stop().await?;
         }
+        if let Some(io) = self.io.1.take() {
+            io.stop().await?;
+        }
+        Ok(())
     }
 }
 
 /// Spawn a task that waits for the process to exit. Resolves to the exit status of `pid`.
-fn waitpid(container: &Container, pid: Pid, tx: &EventTx) -> impl Future<Output = ExitStatus> {
-    let container = container.container.clone();
-    let tx = tx.clone();
-
+fn waitpid(container: Container, pid: Pid, tx: EventTx) -> impl Future<Output = ExitStatus> {
     task::spawn(async move {
         let mut sigchld = signal::unix::signal(signal::unix::SignalKind::child())
             .expect("Failed to set up signal handle for SIGCHLD");
@@ -366,16 +266,15 @@ fn waitpid(container: &Container, pid: Pid, tx: &EventTx) -> impl Future<Output 
             tx.send(Event::Exit(container.clone(), exit_status.clone()))
                 .await,
         );
-
         exit_status
     })
-    .map(|r| r.expect("Task error"))
+    .map(|r| r.expect("Task join error"))
 }
 
 /// Get exit status of process with `pid` or None
 fn exit_status(pid: Pid) -> Option<ExitStatus> {
     let pid = unistd::Pid::from_raw(pid as i32);
-    match task::block_in_place(|| wait::waitpid(Some(pid), Some(WaitPidFlag::WNOHANG))) {
+    match wait::waitpid(Some(pid), Some(WaitPidFlag::WNOHANG)) {
         // The process exited normally (as with exit() or returning from main) with the given exit code.
         // This case matches the C macro WIFEXITED(status); the second field is WEXITSTATUS(status).
         Ok(wait::WaitStatus::Exited(pid, code)) => {
@@ -509,9 +408,8 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
         let mut result = Vec::with_capacity(groups.len());
         for group in groups {
             let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
-            let group_info = task::block_in_place(|| unsafe {
-                nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char)
-            });
+            let group_info =
+                unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
             if group_info == (null::<c_void>() as *mut nix::libc::group) {
                 warn!("Skipping invalid supplementary group {}", group);
             } else {
@@ -527,12 +425,12 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
 }
 
 /// Generate seccomp filter applied in init
-fn seccomp_filter(container: &Container) -> Option<seccomp::AllowList> {
-    if let Some(seccomp) = container.manifest.seccomp.as_ref() {
+fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
+    if let Some(seccomp) = manifest.seccomp.as_ref() {
         return Some(seccomp::seccomp_filter(
             seccomp.profile.as_ref(),
             seccomp.allowlist.as_ref(),
-            container.manifest.capabilities.as_ref(),
+            manifest.capabilities.as_ref(),
         ));
     }
     None
@@ -556,25 +454,22 @@ fn signals_unblock() {
 
 /// Capability settings applied in init
 struct Capabilities {
-    bounded: HashSet<Capability>,
-    set: HashSet<Capability>,
+    all: CapsHashSet,
+    bounded: CapsHashSet,
+    set: CapsHashSet,
 }
 
 /// Calculate capability sets
-fn capabilities(container: &Container) -> Option<Capabilities> {
+fn capabilities(manifest: &Manifest) -> Capabilities {
+    let all = caps::all();
     let mut bounded =
         caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
-
-    container.manifest.capabilities.as_ref().map(|caps| {
-        bounded.retain(|c| !caps.contains(c));
-        Capabilities {
-            bounded,
-            set: caps.clone(),
-        }
-    })
+    let set = manifest.capabilities.clone().unwrap_or_default();
+    bounded.retain(|c| !set.contains(c));
+    Capabilities { all, bounded, set }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(super) struct Checkpoint(ConditionWait, ConditionNotify);
 
 fn checkpoints() -> (Checkpoint, Checkpoint) {

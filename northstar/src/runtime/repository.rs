@@ -18,7 +18,7 @@ use super::{
     state::Npk,
     Container, RepositoryId,
 };
-use crate::npk::npk;
+use crate::{npk::npk, runtime::pipe::RawFdExt};
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
@@ -29,14 +29,19 @@ use log::{debug, info, warn};
 use mpsc::Receiver;
 use std::{
     collections::{HashMap, HashSet},
-    ffi::CStr,
     fmt,
-    io::{BufReader, Seek, SeekFrom, Write},
-    os::unix::prelude::{FromRawFd, RawFd},
+    io::{BufReader, ErrorKind, SeekFrom},
+    os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::{fs, io::AsyncWriteExt, sync::mpsc, task, time::Instant};
+use tokio::{
+    fs,
+    io::{self, AsyncSeekExt, AsyncWriteExt},
+    sync::mpsc,
+    task,
+    time::Instant,
+};
 
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {
@@ -72,7 +77,7 @@ pub(super) struct DirRepository {
 impl DirRepository {
     pub async fn new(
         id: RepositoryId,
-        dir: PathBuf,
+        dir: &Path,
         key: Option<&Path>,
         blacklist: &HashSet<Container>,
     ) -> Result<DirRepository, Error> {
@@ -93,7 +98,7 @@ impl DirRepository {
         while let Ok(Some(entry)) = readir.next_entry().await {
             let file = entry.path();
             let blacklist = blacklist.clone();
-            let task = task::spawn_blocking(move || {
+            let task = task::spawn(async move {
                 debug!(
                     "Loading {}{}",
                     file.display(),
@@ -145,7 +150,7 @@ impl DirRepository {
 
         Ok(DirRepository {
             id,
-            dir,
+            dir: dir.to_owned(),
             key,
             containers,
         })
@@ -173,7 +178,7 @@ impl<'a> Repository for DirRepository {
         drop(file);
 
         debug!("Loading {}", dest.display());
-        let npk = match task::block_in_place(|| Npk::from_path(dest.as_path(), self.key.as_ref()))
+        let npk = match Npk::from_path(dest.as_path(), self.key.as_ref())
             .map_err(|e| Error::Npk(dest.display().to_string(), e))
         {
             Ok(n) => Ok(n),
@@ -191,14 +196,13 @@ impl<'a> Repository for DirRepository {
             fs::remove_file(&dest)
                 .await
                 .map_err(|e| Error::io("Remove file from repository", e))?;
-            return Err(Error::InstallDuplicate(container.clone()));
+            Err(Error::InstallDuplicate(container.clone()))
+        } else {
+            self.containers
+                .insert(container.clone(), (dest.to_owned(), Arc::new(npk)));
+            info!("Loaded {} into {}", container, self.id);
+            Ok(container)
         }
-        self.containers
-            .insert(container.clone(), (dest.to_owned(), Arc::new(npk)));
-
-        info!("Loaded {} into {}", container, self.id);
-
-        Ok(container)
     }
 
     async fn remove(&mut self, container: &Container) -> Result<(), Error>
@@ -253,52 +257,19 @@ impl<'a> Repository for DirRepository {
 #[derive(Debug)]
 pub(super) struct MemRepository {
     id: RepositoryId,
-    containers: HashMap<Container, (Vec<u8>, Arc<Npk>)>,
+    key: Option<PublicKey>,
+    containers: HashMap<Container, Arc<Npk>>,
 }
 
 impl MemRepository {
-    pub fn _new(id: RepositoryId) -> MemRepository {
-        MemRepository {
+    pub async fn new(id: RepositoryId, key: Option<&Path>) -> Result<MemRepository, Error> {
+        let key: OptionFuture<_> = key.map(key::load).into();
+        let key = key.await.transpose().map_err(Error::Key)?;
+        Ok(MemRepository {
             id,
+            key,
             containers: HashMap::new(),
-        }
-    }
-
-    pub(super) async fn add_buf(&mut self, buf: &[u8]) -> Result<Container, Error> {
-        let data = Vec::from(buf);
-        let fd = Self::memfd_create().map_err(|e| Error::Os("Failed create memfd".into(), e))?;
-        let file = task::block_in_place(|| {
-            let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-            file.write_all(buf)
-                .map_err(|e| Error::io("Failed copy npk", e))?;
-            file.seek(SeekFrom::Start(0))
-                .map_err(|e| Error::io("Failed seek", e))?;
-            Result::<_, Error>::Ok(BufReader::new(file))
-        })?;
-        debug!("Loading buffer");
-        let npk = npk::Npk::from_reader(file, None).map_err(|e| Error::Npk("Memory".into(), e))?;
-        let manifest = npk.manifest();
-        let container = Container::new(manifest.name.clone(), manifest.version.clone());
-
-        self.containers
-            .insert(container.clone(), (data, Arc::new(npk)));
-
-        info!("Loaded {} into {}", container, self.id);
-
-        Ok(container)
-    }
-
-    #[cfg(target_os = "android")]
-    fn memfd_create() -> nix::Result<RawFd> {
-        let name = CStr::from_bytes_with_nul(b"foo\0").unwrap();
-        let res = unsafe { nix::libc::syscall(nix::libc::SYS_memfd_create, name.as_ptr(), 0) };
-        nix::errno::Errno::result(res).map(|r| r as RawFd)
-    }
-
-    #[cfg(not(target_os = "android"))]
-    pub fn memfd_create() -> nix::Result<RawFd> {
-        let name = CStr::from_bytes_with_nul(b"foo\0").unwrap();
-        nix::sys::memfd::memfd_create(name, nix::sys::memfd::MemFdCreateFlag::empty())
+        })
     }
 }
 
@@ -308,11 +279,57 @@ impl<'a> Repository for MemRepository {
     where
         Self: Sized,
     {
-        let mut buffer = Vec::new();
+        // Create a new memfd
+        let opts = memfd::MemfdOptions::default().allow_sealing(true);
+        let fd = opts.create(uuid::Uuid::new_v4().to_string()).map_err(|e| {
+            Error::io(
+                "Failed to create memfd",
+                io::Error::new(ErrorKind::Other, e),
+            )
+        })?;
+
+        // Write buffer to the memfd
+        let mut file = unsafe { fs::File::from_raw_fd(fd.as_raw_fd()) };
+        file.set_nonblocking();
+
         while let Some(r) = rx.recv().await {
-            buffer.extend(&r);
+            file.write_all(&r)
+                .await
+                .map_err(|e| Error::io("Failed copy npk", e))?;
         }
-        self.add_buf(&buffer).await
+
+        file.seek(SeekFrom::Start(0))
+            .await
+            .map_err(|e| Error::io("Failed seek", e))?;
+
+        // Seal the memfd
+        let mut seals = memfd::SealsHashSet::new();
+        seals.insert(memfd::FileSeal::SealShrink);
+        seals.insert(memfd::FileSeal::SealGrow);
+        fd.add_seals(&seals)
+            .map_err(|e| Error::io("Failed to add seals", io::Error::new(ErrorKind::Other, e)))?;
+        fd.add_seal(memfd::FileSeal::SealSeal)
+            .map_err(|e| Error::io("Failed to add seals", io::Error::new(ErrorKind::Other, e)))?;
+
+        // Forget fd - it's owned by file
+        fd.into_raw_fd();
+
+        file.set_blocking();
+        let file = BufReader::new(file.into_std().await);
+
+        // Load npk
+        debug!("Loading buffer");
+        let npk = npk::Npk::from_reader(file, None).map_err(|e| Error::Npk("Memory".into(), e))?;
+        let manifest = npk.manifest();
+        let container = Container::new(manifest.name.clone(), manifest.version.clone());
+
+        if self.containers.contains_key(&container) {
+            Err(Error::InstallDuplicate(container))
+        } else {
+            self.containers.insert(container.clone(), Arc::new(npk));
+            info!("Loaded {} into {}", container, self.id);
+            Ok(container)
+        }
     }
 
     async fn remove(&mut self, container: &Container) -> Result<(), Error>
@@ -327,17 +344,14 @@ impl<'a> Repository for MemRepository {
     where
         Self: Sized,
     {
-        self.containers.get(container).map(|(_, npk)| npk.clone())
+        self.containers.get(container).cloned()
     }
 
     fn containers(&self) -> Vec<Arc<Npk>>
     where
         Self: Sized,
     {
-        self.containers
-            .values()
-            .map(|(_, npk)| npk.clone())
-            .collect()
+        self.containers.values().cloned().collect()
     }
 
     fn list(&self) -> Vec<Container>

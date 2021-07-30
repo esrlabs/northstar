@@ -105,7 +105,6 @@ enum Notification {
     Install(Container),
     Uninstall(Container),
     Started(Container),
-    Stopped(Container, ExitStatus),
 }
 
 /// Result of a Runtime action
@@ -220,7 +219,6 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
             // The runtime os commanded to shut down and exit.
             Event::Shutdown => {
                 debug!("Shutting down Northstar runtime");
-                drop(event_rx);
                 if let Some(console) = console {
                     debug!("Shutting down console");
                     console.shutdown().await.map_err(Error::Console)?;
