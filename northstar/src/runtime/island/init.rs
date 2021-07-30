@@ -124,9 +124,9 @@ impl Init {
                         filter.apply().expect("Failed to apply seccomp filter.");
                     }
 
-                    // Wait for the runtime to signal that the child shall start
-                    // checkoint fds are cloexec and this signals the launcher that this child is started
-                    // Therefore no explicity drop (close) of _checkpoint_notify here.
+                    // Wait for the runtime to signal that the child shall start.
+                    // Checkpoint fds are FD_CLOEXEC and act as a signal for the launcher that this child is started.
+                    // Therefore no explicit drop (close) of _checkpoint_notify is needed here.
                     let _checkpoint_notify = self.checkpoint.wait();
 
                     panic!(
