@@ -15,7 +15,7 @@
 use futures::ready;
 use nix::{fcntl, unistd};
 use std::{
-    convert::TryFrom,
+    convert::{TryFrom, TryInto},
     io,
     io::Result,
     mem,
@@ -24,7 +24,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{unix::AsyncFd, AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
 
 #[derive(Debug)]
 struct Inner {
@@ -201,13 +201,30 @@ impl AsyncWrite for AsyncPipeWrite {
 /// Sets O_NONBLOCK flag on self
 pub trait RawFdExt: AsRawFd {
     fn set_nonblocking(&self);
+    fn set_blocking(&self);
     fn set_cloexec(&self, value: bool) -> Result<()>;
 }
 
 impl<T: AsRawFd> RawFdExt for T {
     fn set_nonblocking(&self) {
         unsafe {
-            nix::libc::fcntl(self.as_raw_fd(), nix::libc::F_SETFL, nix::libc::O_NONBLOCK);
+            let opt = nix::libc::fcntl(self.as_raw_fd(), nix::libc::F_GETFL);
+            nix::libc::fcntl(
+                self.as_raw_fd(),
+                nix::libc::F_SETFL,
+                opt | nix::libc::O_NONBLOCK,
+            );
+        }
+    }
+
+    fn set_blocking(&self) {
+        unsafe {
+            let opt = nix::libc::fcntl(self.as_raw_fd(), nix::libc::F_GETFL);
+            nix::libc::fcntl(
+                self.as_raw_fd(),
+                nix::libc::F_SETFL,
+                opt & !nix::libc::O_NONBLOCK,
+            );
         }
     }
 
@@ -286,10 +303,20 @@ pub(crate) struct ConditionWait {
 impl ConditionWait {
     #[allow(unused)]
     pub(crate) fn wait(mut self) {
-        let buf: &mut [u8] = &mut [0u8; 1];
         use std::io::Read;
         loop {
-            match self.read.read(buf) {
+            match self.read.read(&mut [0u8; 1]) {
+                Ok(n) if n == 0 => break,
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+    }
+
+    pub(crate) async fn async_wait(self) {
+        let mut read: AsyncPipeRead = self.read.try_into().unwrap();
+        loop {
+            match read.read(&mut [0u8; 1]).await {
                 Ok(n) if n == 0 => break,
                 Ok(_) => continue,
                 Err(_) => break,
@@ -387,7 +414,9 @@ mod tests {
     fn drop_reader() {
         let (read, mut write) = pipe().unwrap();
         drop(read);
-        write.write_all(b"test").expect("Failed to send");
+        loop {
+            write.write_all(b"test").expect("Failed to send");
+        }
     }
 
     #[test]

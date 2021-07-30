@@ -266,12 +266,10 @@ async fn memory_monitor(
 
 /// Get the cgroup v1 controller hierarchy mount point
 fn mount_point(controller: &str) -> Result<PathBuf, Error> {
-    task::block_in_place(|| {
-        MountIter::new()
-            .map_err(Error::MountInfo)?
-            .filter_map(Result::ok)
-            .find(|m| m.fstype == "cgroup" && m.options.iter().any(|c| c == controller))
-            .map(|m| m.dest)
-            .ok_or_else(|| Error::UnknownController(controller.to_string()))
-    })
+    MountIter::new()
+        .map_err(Error::MountInfo)?
+        .filter_map(Result::ok)
+        .find(|m| m.fstype == "cgroup" && m.options.iter().any(|c| c == controller))
+        .map(|m| m.dest)
+        .ok_or_else(|| Error::UnknownController(controller.to_string()))
 }

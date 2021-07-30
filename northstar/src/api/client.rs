@@ -405,7 +405,7 @@ impl<'a> Client {
         }
     }
 
-    /// Stop container with name
+    /// Kill container with name
     ///
     /// ```no_run
     /// # use futures::StreamExt;
@@ -415,21 +415,18 @@ impl<'a> Client {
     /// # #[tokio::main]
     /// # async fn main() {
     /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.stop("hello:0.0.1", Duration::from_secs(3)).await.expect("Failed to start \"hello\"");
+    /// client.kill("hello:0.0.1", 15).await.expect("Failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn stop(
+    pub async fn kill(
         &mut self,
         container: impl TryInto<Container, Error = impl Into<Error>>,
-        timeout: time::Duration,
+        signal: i32,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self
-            .request(Request::Stop(container, timeout.as_secs()))
-            .await?
-        {
+        match self.request(Request::Kill(container, signal)).await? {
             Response::Ok(()) => Ok(()),
             Response::Err(e) => Err(Error::Api(e)),
             _ => Err(Error::Protocol),

@@ -15,7 +15,7 @@
 use nix::{sys::stat, unistd};
 use std::{
     os::unix::prelude::{MetadataExt, PermissionsExt},
-    path::Path,
+    path::{Path, PathBuf},
 };
 use tokio::fs;
 
@@ -37,5 +37,18 @@ pub(crate) async fn is_rw(path: &Path) -> bool {
             is_readable && is_writable
         }
         Err(_) => false,
+    }
+}
+
+pub(crate) trait PathExt {
+    fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf;
+}
+
+impl PathExt for Path {
+    fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf {
+        self.join(match w.as_ref().strip_prefix("/") {
+            Ok(stripped) => stripped,
+            Err(_) => w.as_ref(),
+        })
     }
 }

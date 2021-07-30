@@ -44,7 +44,8 @@ struct Opt {
     pub disable_mount_namespace: bool,
 }
 
-fn main() -> Result<(), Error> {
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), Error> {
     let opt = Opt::from_args();
     let config = read_to_string(&opt.config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
@@ -99,14 +100,6 @@ fn main() -> Result<(), Error> {
         warn!("Mount namespace is disabled");
     }
 
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("northstar")
-        .build()?
-        .block_on(run(config, run_dir_mount))
-}
-
-async fn run(config: Config, run_dir_mount: Option<PathBuf>) -> Result<(), Error> {
     let mut runtime = runtime::Runtime::start(config)
         .await
         .context("Failed to start runtime")?;

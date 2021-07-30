@@ -18,6 +18,7 @@ use crate::{
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
+use async_stream::stream;
 use bytes::Bytes;
 use futures::{
     future::join_all,
@@ -191,7 +192,7 @@ impl Console {
         // receiver and otherwise drop it
         let notifications = if notifications {
             debug!("Client {} subscribed to notifications", peer);
-            let stream = async_stream::stream! { loop { yield notification_rx.recv().await; } };
+            let stream = stream! { loop { yield notification_rx.recv().await; } };
             Either::Left(stream)
         } else {
             drop(notification_rx);
@@ -450,9 +451,6 @@ impl From<Notification> for model::Notification {
             Notification::Install(container) => model::Notification::Install(container),
             Notification::Uninstall(container) => model::Notification::Uninstall(container),
             Notification::Started(container) => model::Notification::Started(container),
-            Notification::Stopped(container, status) => {
-                model::Notification::Stopped(container, status.into())
-            }
         }
     }
 }

@@ -21,7 +21,6 @@ use super::{
     state::Npk,
 };
 use crate::{npk, npk::dm_verity::VerityHeader};
-use bitflags::_core::str::Utf8Error;
 use floating_duration::TimeAsFloat;
 use futures::{future::ready, Future, FutureExt};
 use log::{debug, info};
@@ -31,6 +30,7 @@ use std::{
     os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     process,
+    str::Utf8Error,
     sync::Arc,
 };
 use thiserror::Error;
@@ -59,7 +59,7 @@ pub enum Error {
     #[error("Inotify timeout error {0}")]
     Timeout(String),
     #[error("Task join error: {0}")]
-    TaskJoin(JoinError),
+    Task(JoinError),
     #[error("Os error: {0}")]
     Os(nix::Error),
     #[error("Repository error: {0:?}")]
@@ -118,7 +118,7 @@ impl MountControl {
         })
         .then(|r| match r {
             Ok(r) => ready(r),
-            Err(e) => ready(Err(Error::TaskJoin(e))),
+            Err(e) => ready(Err(Error::Task(e))),
         })
     }
 
@@ -127,7 +127,7 @@ impl MountControl {
         target: &Path,
         verity_device: Option<&Path>,
     ) -> Result<(), Error> {
-        task::block_in_place(|| nix::mount::umount(target).map_err(Error::Os))?;
+        nix::mount::umount(target).map_err(Error::Os)?;
 
         if let Some(verity_device) = verity_device {
             debug!("Waiting for dm device {}", verity_device.display());
@@ -313,9 +313,7 @@ fn mount(
         dev.display(),
         target.display(),
     );
-    task::block_in_place(|| {
-        nix::mount::mount(Some(dev), target, Some(r#type), flags, data).map_err(Error::Os)
-    })?;
+    nix::mount::mount(Some(dev), target, Some(r#type), flags, data).map_err(Error::Os)?;
 
     Ok(())
 }

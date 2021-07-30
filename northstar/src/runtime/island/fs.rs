@@ -12,13 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Container, Error};
+use super::Error;
 use crate::{
     npk::{
         manifest,
         manifest::{MountOption, MountOptions, Resource, Tmpfs},
     },
-    runtime::{config::Config, island::utils::PathExt},
+    runtime::{config::Config, state::MountedContainer},
+    util::PathExt,
 };
 use log::debug;
 use nix::{
@@ -30,7 +31,7 @@ use nix::{
 };
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use tokio::{fs::symlink, task};
+use tokio::fs::symlink;
 
 /// The minimal version of the /dev is maintained in a tmpdir. This tmpdir
 /// must be held for the lifetime of the IslandProcess
@@ -91,7 +92,7 @@ impl Mount {
 /// is referenced that does not exist.
 pub(super) async fn prepare_mounts(
     config: &Config,
-    container: &Container,
+    container: &MountedContainer,
 ) -> Result<(Vec<Mount>, Dev), Error> {
     let mut mounts = Vec::new();
     let mut dev = None;
@@ -189,7 +190,7 @@ async fn persist(
     root: &Path,
     target: &Path,
     config: &Config,
-    container: &Container,
+    container: &MountedContainer,
 ) -> Result<Mount, Error> {
     let uid = container.manifest.uid;
     let gid = container.manifest.gid;
@@ -203,13 +204,11 @@ async fn persist(
     }
 
     debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
-    task::block_in_place(|| {
-        unistd::chown(
-            dir.as_os_str(),
-            Some(unistd::Uid::from_raw(uid.into())),
-            Some(unistd::Gid::from_raw(gid.into())),
-        )
-    })
+    unistd::chown(
+        dir.as_os_str(),
+        Some(unistd::Uid::from_raw(uid.into())),
+        Some(unistd::Gid::from_raw(gid.into())),
+    )
     .map_err(|e| {
         Error::os(
             format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
@@ -229,7 +228,7 @@ fn resource(
     root: &Path,
     target: &Path,
     config: &Config,
-    container: &Container,
+    container: &MountedContainer,
     resource: &Resource,
 ) -> Result<(Mount, Mount), Error> {
     let src = {
@@ -297,13 +296,11 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
     flags
 }
 
-async fn dev(root: &Path, container: &Container) -> (Dev, Mount, Mount) {
-    let dir = task::block_in_place(|| TempDir::new().expect("Failed to create tempdir"));
+async fn dev(root: &Path, container: &MountedContainer) -> (Dev, Mount, Mount) {
+    let dir = TempDir::new().expect("Failed to create tempdir");
     debug!("Creating devfs in {}", dir.path().display());
 
-    task::block_in_place(|| {
-        dev_devices(dir.path(), container.manifest.uid, container.manifest.gid)
-    });
+    dev_devices(dir.path(), container.manifest.uid, container.manifest.gid);
     dev_symlinks(dir.path()).await;
 
     let source = dir.path().to_path_buf();

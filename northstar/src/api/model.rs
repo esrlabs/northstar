@@ -27,8 +27,8 @@ pub type Version = crate::common::version::Version;
 
 const VERSION: Version = Version {
     major: 0,
-    minor: 0,
-    patch: 8,
+    minor: 1,
+    patch: 0,
     pre: vec![],
     build: vec![],
 };
@@ -62,7 +62,6 @@ pub enum Notification {
     Install(Container),
     Uninstall(Container),
     Started(Container),
-    Stopped(Container, ExitStatus),
     Shutdown,
 }
 
@@ -94,9 +93,7 @@ pub enum Request {
         Option<Vec<NonNullString>>, // Optional command line arguments
         Option<HashMap<NonNullString, NonNullString>>, // Optional env variables
     ),
-    /// Stop the given container. If the process does not exit within
-    /// the timeout in seconds it is SIGKILLED
-    Stop(Container, u64),
+    Kill(Container, i32),
     Umount(Container),
     Uninstall(Container),
 }
@@ -160,4 +157,5 @@ pub enum Error {
 
     Io(String),
     Os(String),
+    Other(String, String),
 }

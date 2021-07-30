@@ -18,14 +18,17 @@ use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use northstar::{
-    api::{client::Client, model::Notification},
+    api::{
+        client::Client,
+        model::{Container, ExitStatus, Notification},
+    },
     runtime::{
         self,
-        config::{self, Config},
+        config::{self, Config, RepositoryType},
     },
 };
 use std::{collections::HashMap, convert::TryInto, path::PathBuf};
-use tempfile::TempDir;
+use tempfile::{NamedTempFile, TempDir};
 use tokio::{fs, pin, select, time};
 
 pub struct Northstar {
@@ -53,7 +56,7 @@ impl Northstar {
     /// Launches an instance of Northstar
     pub async fn launch() -> Result<Northstar> {
         let pid = std::process::id();
-        let tmpdir = tempfile::TempDir::new()?;
+        let tmpdir = tempfile::Builder::new().prefix("northstar-").tempdir()?;
 
         let run_dir = tmpdir.path().join("run");
         fs::create_dir(&run_dir).await?;
@@ -70,7 +73,7 @@ impl Northstar {
         repositories.insert(
             "test".into(),
             config::Repository {
-                dir: test_repository,
+                r#type: RepositoryType::Memory,
                 key: Some(example_key.clone()),
             },
         );
@@ -145,6 +148,17 @@ impl Northstar {
         Ok(runtime)
     }
 
+    pub async fn stop(&mut self, container: &str, timeout: u64) -> Result<()> {
+        self.client.kill(container, 15).await?;
+        let container: Container = container.try_into()?;
+        self.assume_notification(
+            |n| n == &Notification::Exit(container.clone(), ExitStatus::Signaled(15)),
+            timeout,
+        )
+        .await?;
+        Ok(())
+    }
+
     pub async fn shutdown(self) -> Result<()> {
         // Dropping the client closes the connection to the runtime
         drop(self.client);
@@ -158,7 +172,8 @@ impl Northstar {
         logger::assume("Closed listener", 5u64).await?;
 
         // Remove the tmpdir
-        self.tmpdir.close().context("Failed to remove tmpdir")
+        self.tmpdir.close().expect("Failed to remove tmpdir");
+        Ok(())
     }
 
     /// Return the runtimes configuration
@@ -168,10 +183,9 @@ impl Northstar {
 
     // Install a npk from a buffer
     pub async fn install(&mut self, npk: &[u8]) -> Result<()> {
-        let f = self.tmpdir.path().join(uuid::Uuid::new_v4().to_string());
+        let f = NamedTempFile::new_in(self.tmpdir.path())?;
         fs::write(&f, npk).await?;
-        self.client.install(&f, "test").await?;
-        fs::remove_file(&f).await?;
+        self.client.install(f.path(), "test").await?;
         Ok(())
     }
 

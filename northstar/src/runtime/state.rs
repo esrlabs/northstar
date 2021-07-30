@@ -13,9 +13,15 @@
 //   limitations under the License.
 
 use super::{
-    cgroups, config::Config, console::Request, error::Error, island::Island, key::PublicKey,
-    mount::MountControl, repository::DirRepository, Container, Event, EventTx, ExitStatus,
-    Notification, Pid, Repository, RepositoryId,
+    cgroups,
+    config::{Config, RepositoryType},
+    console::Request,
+    error::Error,
+    island::Island,
+    key::PublicKey,
+    mount::MountControl,
+    repository::{DirRepository, MemRepository},
+    Container, Event, EventTx, ExitStatus, Notification, Pid, Repository, RepositoryId,
 };
 use crate::{
     api::{self, model::MountResult},
@@ -29,12 +35,16 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
 use futures::{
+    executor::{ThreadPool, ThreadPoolBuilder},
     future::{join_all, ready, Either},
+    task::SpawnExt,
     Future, FutureExt,
 };
 use log::{debug, error, info, warn};
+use nix::sys::signal::Signal;
 use std::{
     collections::{HashMap, HashSet},
+    convert::TryFrom,
     fmt::Debug,
     fs::File,
     io::BufReader,
@@ -47,6 +57,7 @@ use tokio::{
     sync::{mpsc, oneshot},
     task, time,
 };
+use Signal::SIGKILL;
 
 type Repositories = HashMap<RepositoryId, Box<dyn Repository + Send + Sync>>;
 pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
@@ -54,12 +65,10 @@ pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
 #[async_trait]
 pub(super) trait Process: Send + Sync + Debug {
     fn pid(&self) -> Pid;
-    async fn start(self: Box<Self>) -> Result<Box<dyn Process>, Error>;
-    async fn stop(
-        self: Box<Self>,
-        timeout: time::Duration,
-    ) -> Result<(Box<dyn Process>, ExitStatus), Error>;
-    async fn destroy(self: Box<Self>) -> Result<(), Error>;
+    async fn spawn(&mut self) -> Result<(), Error>;
+    async fn kill(&mut self, signal: Signal) -> Result<(), Error>;
+    async fn wait(&mut self) -> Result<ExitStatus, Error>;
+    async fn destroy(&mut self) -> Result<(), Error>;
 }
 
 #[derive(Debug)]
@@ -70,6 +79,7 @@ pub(super) struct State<'a> {
     containers: HashMap<Container, MountedContainer>,
     mount_control: Arc<MountControl>,
     launcher_island: Island,
+    executor: ThreadPool,
 }
 
 #[derive(Debug)]
@@ -96,22 +106,8 @@ pub(super) struct ProcessContext {
 }
 
 impl ProcessContext {
-    async fn terminate(mut self, timeout: time::Duration) -> Result<ExitStatus, Error> {
-        let (process, status) = self
-            .process
-            .stop(timeout)
-            .await
-            .expect("Failed to terminate process");
-
-        process.destroy().await.expect("Failed to destroy process");
-
-        self.debug.destroy().await?;
-
-        if let Some(cgroups) = self.cgroups.take() {
-            cgroups.destroy().await;
-        }
-
-        Ok(status)
+    async fn kill(&mut self, signal: Signal) -> Result<(), Error> {
+        self.process.kill(signal).await
     }
 
     async fn destroy(mut self) {
@@ -139,6 +135,10 @@ impl<'a> State<'a> {
         let launcher_island = Island::start(events_tx.clone(), config.clone())
             .await
             .expect("Failed to start launcher");
+        let executor = ThreadPoolBuilder::new()
+            .name_prefix("northstar")
+            .create()
+            .expect("Failed to start thread pool");
 
         let mut state = State {
             events_tx,
@@ -147,6 +147,7 @@ impl<'a> State<'a> {
             config,
             launcher_island,
             mount_control,
+            executor,
         };
 
         state.init_repositories().await?;
@@ -162,15 +163,20 @@ impl<'a> State<'a> {
 
         // Build a map of repositories from the configuration
         for (id, repository) in &self.config.repositories {
-            let repository = DirRepository::new(
-                id.clone(),
-                repository.dir.clone(),
-                repository.key.as_deref(),
-                &blacklist,
-            )
-            .await?;
-            blacklist.extend(repository.list());
-            self.repositories.insert(id.clone(), Box::new(repository));
+            match &repository.r#type {
+                RepositoryType::Fs { dir } => {
+                    let repository =
+                        DirRepository::new(id.clone(), dir, repository.key.as_deref(), &blacklist)
+                            .await?;
+                    blacklist.extend(repository.list());
+                    self.repositories.insert(id.clone(), Box::new(repository));
+                }
+                RepositoryType::Memory => {
+                    let repository =
+                        MemRepository::new(id.clone(), repository.key.as_deref()).await?;
+                    self.repositories.insert(id.clone(), Box::new(repository));
+                }
+            }
         }
 
         Ok(())
@@ -425,7 +431,7 @@ impl<'a> State<'a> {
 
         // Spawn process
         info!("Creating {}", container);
-        let process = match self
+        let mut process = match self
             .launcher_island
             .create(mounted_container, args, env)
             .await
@@ -463,7 +469,7 @@ impl<'a> State<'a> {
         };
 
         // Signal the process to continue starting. This can fail because of the container content
-        let process = match process.start().await {
+        match process.spawn().await {
             result::Result::Ok(process) => process,
             result::Result::Err(e) => {
                 warn!("Failed to start {} ({}): {}", container, pid, e);
@@ -479,7 +485,7 @@ impl<'a> State<'a> {
 
         // Add process context to process
         mounted_container.process = Some(ProcessContext {
-            process,
+            process: Box::new(process),
             started: time::Instant::now(),
             debug,
             cgroups,
@@ -498,28 +504,19 @@ impl<'a> State<'a> {
         Ok(())
     }
 
-    /// Stop a application. Timeout specifies the time until the process is
-    /// SIGKILLed if it doesn't exit when receiving a SIGTERM
-    pub(super) async fn stop(
+    /// Terminate container
+    pub(super) async fn kill(
         &mut self,
         container: &Container,
-        timeout: time::Duration,
+        signal: Signal,
     ) -> Result<(), Error> {
         if let Some(process) = self
             .containers
             .get_mut(container)
-            .and_then(|c| c.process.take())
+            .and_then(|c| c.process.as_mut())
         {
-            info!("Terminating {}", container);
-            let exit_status = process.terminate(timeout).await.expect("Failed to stop");
-
-            info!("Stopped {} with status {:?}", container, exit_status);
-
-            // Send notification to main loop
-            self.notification(Notification::Stopped(container.clone(), exit_status))
-                .await;
-
-            Ok(())
+            info!("Killing {} with {}", container, signal.as_str());
+            process.kill(signal).await
         } else {
             Err(Error::StopContainerNotStarted(container.clone()))
         }
@@ -527,22 +524,26 @@ impl<'a> State<'a> {
 
     /// Shutdown the runtime: stop running applications and umount npks
     pub(super) async fn shutdown(mut self) -> Result<(), Error> {
-        // Stop started containers
-        let started = self
-            .containers
-            .iter()
-            .filter_map(|(container, mounted_container)| {
-                mounted_container.process.as_ref().map(|_| container)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        // Stop started applications
-        for container in &started {
-            self.stop(container, time::Duration::from_secs(5)).await?;
+        let to_umount = self.containers.keys().cloned().collect::<Vec<_>>();
+
+        for (container, mounted) in self.containers.iter_mut() {
+            if let Some(mut context) = mounted.process.take() {
+                let pid = context.process.pid();
+                info!("Sending SIGKILL to {} ({})", container, pid);
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), SIGKILL).ok();
+
+                info!("Waiting for {} to exit", container);
+                let exit_status =
+                    time::timeout(time::Duration::from_secs(10), context.process.wait())
+                        .await
+                        .map_err(|e| Error::other(format!("Killing {}", container), e))?;
+                debug!("Container {} terminated with {:?}", container, exit_status);
+                context.destroy().await;
+            }
         }
 
-        let containers = self.containers.keys().cloned().collect::<Vec<_>>();
-        for container in &containers {
+        for container in &to_umount {
+            info!("Umounting {}", container);
             self.umount(container).await?;
         }
 
@@ -642,10 +643,9 @@ impl<'a> State<'a> {
             .and_then(|c| c.process.as_ref())
             .is_some()
         {
-            warn!("Process {} is out of memory. Stopping", container);
+            warn!("Process {} is out of memory", container);
             self.notification(Notification::OutOfMemory(container.clone()))
                 .await;
-            self.stop(container, time::Duration::from_secs(5)).await?;
         }
         Ok(())
     }
@@ -666,6 +666,11 @@ impl<'a> State<'a> {
                 mounts.push(m);
             }
         }
+
+        // Spawn mount tasks onto the executor
+        let mounts = mounts
+            .drain(..)
+            .map(|t| self.executor.spawn_with_handle(t).unwrap());
 
         // Insert all mounted containers into containers map
         join_all(mounts)
@@ -736,14 +741,12 @@ impl<'a> State<'a> {
                                 }
                             }
                         }
-                        api::model::Request::Stop(container, timeout) => {
-                            match self
-                                .stop(container, std::time::Duration::from_secs(*timeout))
-                                .await
-                            {
+                        api::model::Request::Kill(container, signal) => {
+                            let signal = Signal::try_from(*signal).unwrap();
+                            match self.kill(container, signal).await {
                                 Ok(_) => Response::Ok(()),
                                 Err(e) => {
-                                    error!("Failed to stop {}: {}", container, e);
+                                    error!("Failed to kill {} with {}: {}", container, signal, e);
                                     Response::Err(e.into())
                                 }
                             }

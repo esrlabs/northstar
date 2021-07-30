@@ -35,6 +35,10 @@ device_mapper_dev = "/dev/dm-"
 # Optional additional flags passed to `perf`
 # flags = ""
 
-[repositories.default]
-dir = "target/northstar/repository"
+[repositories.memory]
 key = "examples/northstar.pub"
+type = "mem"
+
+[repositories.default]
+key = "examples/northstar.pub"
+type = { fs = { dir = "target/northstar/repository" }}

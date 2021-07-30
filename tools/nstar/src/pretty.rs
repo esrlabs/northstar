@@ -35,16 +35,6 @@ pub(crate) fn notification(notification: &Notification) {
         Notification::Install(container) => println!("installed {}", container),
         Notification::Uninstall(container) => println!("uninstalled {}", container),
         Notification::Started(container) => println!("started {}", container),
-        Notification::Stopped(container, status) => {
-            println!(
-                "stopped {} with status {}",
-                container,
-                match status {
-                    ExitStatus::Exit(code) => format!("exit code {}", code),
-                    ExitStatus::Signaled(signal) => format!("signaled {}", signal),
-                }
-            )
-        }
         Notification::Shutdown => println!("shutting down"),
     }
 }
@@ -212,5 +202,6 @@ fn format_err(err: &model::Error) -> String {
         model::Error::Io(e) => format!("io error: {}", e),
         model::Error::Os(e) => format!("os error: {}", e),
         model::Error::Name(e) => format!("name error: {}", e),
+        model::Error::Other(e, c) => format!("{}: {}", e, c),
     }
 }
