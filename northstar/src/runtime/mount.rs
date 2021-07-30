@@ -59,7 +59,7 @@ pub enum Error {
     #[error("Inotify timeout error {0}")]
     Timeout(String),
     #[error("Task join error: {0}")]
-    JoinError(JoinError),
+    TaskJoin(JoinError),
     #[error("Os error: {0}")]
     Os(nix::Error),
     #[error("Repository error: {0:?}")]
@@ -118,7 +118,7 @@ impl MountControl {
         })
         .then(|r| match r {
             Ok(r) => ready(r),
-            Err(e) => ready(Err(Error::JoinError(e))),
+            Err(e) => ready(Err(Error::TaskJoin(e))),
         })
     }
 
@@ -131,7 +131,7 @@ impl MountControl {
 
         if let Some(verity_device) = verity_device {
             debug!("Waiting for dm device {}", verity_device.display());
-            wait_for_file_deleted(&verity_device, std::time::Duration::from_secs(5)).await?;
+            wait_for_file_deleted(verity_device, std::time::Duration::from_secs(5)).await?;
         }
 
         debug!("Removing mountpoint {}", target.display());
@@ -186,7 +186,7 @@ async fn attach(
                     dm.clone(),
                     device_mapper_dev,
                     &loop_device_id,
-                    &header,
+                    header,
                     &dm_name,
                     hashes.fs_verity_hash.as_str(),
                     hashes.fs_verity_offset,
@@ -213,7 +213,7 @@ async fn attach(
     mount(
         &device,
         target,
-        &FS_TYPE,
+        FS_TYPE,
         MountFlags::MS_RDONLY | MountFlags::MS_NODEV | MountFlags::MS_NOSUID,
         None,
     )?;
@@ -223,7 +223,7 @@ async fn attach(
         debug!("Enabling defered removal on device {}", dm_name);
         dm.device_remove(
             &dm_name,
-            &device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
+            device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
         )
         .await
         .map_err(Error::DeviceMapper)?;
@@ -264,8 +264,8 @@ async fn dmsetup(
 
     let dm_device = dm
         .device_create(
-            &name,
-            &dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
+            name,
+            dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
         )
         .await
         .map_err(Error::DeviceMapper)?;
@@ -282,7 +282,7 @@ async fn dmsetup(
     .map_err(Error::DeviceMapper)?;
 
     debug!("Resuming device {}", dm_dev.display());
-    dm.device_suspend(&name, &dm::DmOptions::new())
+    dm.device_suspend(name, &dm::DmOptions::new())
         .await
         .map_err(Error::DeviceMapper)?;
 

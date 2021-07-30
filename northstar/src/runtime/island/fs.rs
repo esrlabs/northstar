@@ -119,7 +119,7 @@ pub(super) async fn prepare_mounts(
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(&root, target, *size)),
             manifest::Mount::Dev => {
-                let (d, mount, remount) = self::dev(&root, &container).await;
+                let (d, mount, remount) = self::dev(&root, container).await;
                 mounts.push(mount);
                 mounts.push(remount);
                 dev = d
@@ -129,7 +129,7 @@ pub(super) async fn prepare_mounts(
 
     // No dev configured in mounts: Use minimal version
     if dev.is_none() && !manifest_mounts.contains_key(Path::new("/dev")) {
-        let (d, mount, remount) = self::dev(&root, &container).await;
+        let (d, mount, remount) = self::dev(&root, container).await;
         mounts.push(mount);
         mounts.push(remount);
         dev = d;
@@ -159,7 +159,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
         );
         let source = host.to_owned();
         let target = root.join_strip(target);
-        let mut flags = options_to_flags(&options);
+        let mut flags = options_to_flags(options);
         flags.set(MsFlags::MS_BIND, true);
         mounts.push(Mount::new(
             Some(source.clone()),
@@ -193,7 +193,7 @@ async fn persist(
 ) -> Result<Mount, Error> {
     let uid = container.manifest.uid;
     let gid = container.manifest.gid;
-    let dir = config.data_dir.join(&container.manifest.name.to_string());
+    let dir = config.data_dir.join(container.manifest.name.to_string());
 
     if !dir.exists() {
         debug!("Creating {}", dir.display());

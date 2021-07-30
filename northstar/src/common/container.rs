@@ -84,7 +84,7 @@ impl TryFrom<&str> for Container {
             .try_into()
             .map_err(Error::InvalidName)?;
         let version = split.next().ok_or(Error::MissingVersion)?;
-        let version = Version::parse(&version).map_err(|_| Error::InvalidVersion)?;
+        let version = Version::parse(version).map_err(|_| Error::InvalidVersion)?;
         Ok(Container::new(name, version))
     }
 }

@@ -67,7 +67,7 @@ pub(crate) fn containers(containers: &[ContainerData]) {
         .sorted_by_key(|c| c.manifest.init.is_none())
     {
         table.add_row(Row::new(vec![
-            Cell::new(&container.container.name()).with_style(Attr::Bold),
+            Cell::new(container.container.name()).with_style(Attr::Bold),
             Cell::new(&container.container.version().to_string()),
             Cell::new(&container.repository),
             Cell::new(
@@ -105,9 +105,7 @@ pub fn repositories(repositories: &HashSet<RepositoryId>) {
     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
     table.set_titles(Row::new(vec![Cell::new("Name").with_style(Attr::Bold)]));
     for repository in repositories.iter().sorted_by_key(|i| (*i).clone()) {
-        table.add_row(Row::new(
-            vec![Cell::new(&repository).with_style(Attr::Bold)],
-        ));
+        table.add_row(Row::new(vec![Cell::new(repository).with_style(Attr::Bold)]));
     }
 
     table.printstd();
@@ -144,15 +142,15 @@ pub fn mounts(mounts: &[MountResult]) {
 pub fn response(response: &Response) -> i32 {
     match response {
         Response::Containers(cs) => {
-            containers(&cs);
+            containers(cs);
             0
         }
         Response::Repositories(rs) => {
-            repositories(&rs);
+            repositories(rs);
             0
         }
         Response::Mount(results) => {
-            mounts(&results);
+            mounts(results);
             0
         }
         Response::Ok(()) => {

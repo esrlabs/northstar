@@ -185,7 +185,7 @@ impl<R: Read + Seek> Npk<R> {
         let hashes = hashes(&mut zip, key)?;
         let manifest = manifest(&mut zip, hashes.as_ref())?;
         let (fs_img_offset, fs_img_size) = {
-            let fs_img = &zip.by_name(&FS_IMG_NAME).map_err(|e| Error::Zip {
+            let fs_img = &zip.by_name(FS_IMG_NAME).map_err(|e| Error::Zip {
                 context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
                 error: e,
             })?;
@@ -293,11 +293,11 @@ fn manifest<R: Read + Seek>(
     mut zip: &mut Zip<R>,
     hashes: Option<&Hashes>,
 ) -> Result<Manifest, Error> {
-    let content = read_to_string(&mut zip, &MANIFEST_NAME)?;
+    let content = read_to_string(&mut zip, MANIFEST_NAME)?;
     if let Some(Hashes { manifest_hash, .. }) = &hashes {
         let expected_hash = hex::decode(manifest_hash)
             .map_err(|e| Error::Manifest(format!("Failed to parse manifest hash {}", e)))?;
-        let actual_hash = Sha256::digest(&content.as_bytes());
+        let actual_hash = Sha256::digest(content.as_bytes());
         if expected_hash != actual_hash.as_slice() {
             return Err(Error::Manifest(format!(
                 "Invalid manifest hash (expected={} actual={})",
@@ -381,7 +381,7 @@ impl Builder {
 
         // Sign and write NPK
         if let Some(key) = &self.key {
-            let signature = sign_npk(&key, &fsimg, &self.manifest)?;
+            let signature = sign_npk(key, &fsimg, &self.manifest)?;
             write_npk(writer, &self.manifest, &fsimg, Some(&signature))
         } else {
             write_npk(writer, &self.manifest, &fsimg, None)
@@ -500,9 +500,9 @@ pub fn pack_with(
     let version = manifest.version.clone();
     let mut builder = Builder::new(root, manifest);
     if let Some(key) = key {
-        builder = builder.key(&key);
+        builder = builder.key(key);
     }
-    builder = builder.squashfs_opts(&squashfs_opts);
+    builder = builder.squashfs_opts(squashfs_opts);
 
     let mut dest = out.to_path_buf();
     // Append filename from manifest if only a directory path was given
@@ -519,13 +519,13 @@ pub fn pack_with(
 
 /// Extract the npk content to `out`
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
-    let mut zip = open_zip(&npk)?;
+    let mut zip = open_zip(npk)?;
     zip.extract(&out).map_err(|e| Error::Zip {
         context: format!("Failed to extract NPK to '{}'", &out.display()),
         error: e,
     })?;
     let fsimg = out.join(&FS_IMG_NAME);
-    unpack_squashfs(&fsimg, &out)
+    unpack_squashfs(&fsimg, out)
 }
 
 /// Generate a keypair suitable for signing and verifying NPKs
@@ -546,7 +546,7 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
             context: format!("Failed to create '{}'", &path.display()),
             error: e,
         })?;
-        file.write_all(&data).map_err(|e| Error::Io {
+        file.write_all(data).map_err(|e| Error::Io {
             context: format!("Failed to write to '{}'", &path.display()),
             error: e,
         })?;
@@ -566,14 +566,14 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
 }
 
 fn read_manifest(path: &Path) -> Result<Manifest, Error> {
-    let file = open(&path)?;
+    let file = open(path)?;
     Manifest::from_reader(&file)
         .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
-    open(&key_file)?
+    open(key_file)?
         .read_exact(&mut secret_key_bytes)
         .map_err(|e| Error::Io {
             context: format!("Failed to read key data from '{}'", &key_file.display()),
@@ -603,7 +603,7 @@ fn gen_hashes_yaml(
     sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
-    let mut fsimg = open(&fsimg)?;
+    let mut fsimg = open(fsimg)?;
     io::copy(&mut fsimg, &mut sha256).map_err(|e| Error::Io {
         context: "Failed to read fs image".to_string(),
         error: e,
@@ -632,8 +632,8 @@ fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Err
         })?
         .len();
     let root_hash: &[u8] = &append_dm_verity_block(fsimg, fsimg_size).map_err(Error::Verity)?;
-    let key_pair = read_keypair(&key)?;
-    let hashes_yaml = gen_hashes_yaml(&manifest, &fsimg, fsimg_size, &root_hash)?;
+    let key_pair = read_keypair(key)?;
+    let hashes_yaml = gen_hashes_yaml(manifest, fsimg, fsimg_size, root_hash)?;
     let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
 
     Ok(signature_yaml)
@@ -666,8 +666,8 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
 
     if manifest.init.is_some() {
         // The default is to have at least a minimal /dev mount
-        add_directory(&file, Path::new("/dev"), 444, uid, gid)?;
-        add_directory(&file, Path::new("/proc"), 444, uid, gid)?;
+        add_directory(file, Path::new("/dev"), 444, uid, gid)?;
+        add_directory(file, Path::new("/proc"), 444, uid, gid)?;
     }
 
     for (target, mount) in &manifest.mounts {
@@ -692,7 +692,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
         let mut subdir = PathBuf::from("/");
         for dir in target.iter().skip(1) {
             subdir.push(dir);
-            add_directory(&file, &subdir, mode, uid, gid)?;
+            add_directory(file, &subdir, mode, uid, gid)?;
         }
     }
 
@@ -715,7 +715,7 @@ fn create_squashfs_img(
     image: &Path,
     squashfs_opts: &SquashfsOpts,
 ) -> Result<(), Error> {
-    let pseudo_files = gen_pseudo_files(&manifest)?;
+    let pseudo_files = gen_pseudo_files(manifest)?;
 
     which::which(&MKSQUASHFS)
         .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS)))?;
@@ -782,7 +782,7 @@ fn write_npk<W: Write + Seek>(
     fsimg: &Path,
     signature: Option<&str>,
 ) -> Result<(), Error> {
-    let mut fsimg = open(&fsimg)?;
+    let mut fsimg = open(fsimg)?;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string = serde_yaml::to_string(&manifest)
@@ -831,7 +831,7 @@ fn write_npk<W: Write + Seek>(
 }
 
 pub fn open_zip(file: &Path) -> Result<Zip<BufReader<fs::File>>, Error> {
-    zip::ZipArchive::new(BufReader::new(open(&file)?)).map_err(|error| Error::Zip {
+    zip::ZipArchive::new(BufReader::new(open(file)?)).map_err(|error| Error::Zip {
         context: format!("Failed to parse ZIP format: '{}'", &file.display()),
         error,
     })

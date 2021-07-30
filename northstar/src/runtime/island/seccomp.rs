@@ -52,10 +52,10 @@ pub(super) fn seccomp_filter(
 ) -> AllowList {
     let mut builder = Builder::new();
     if let Some(names) = names {
-        builder.extend(builder_from_names(&names));
+        builder.extend(builder_from_names(names));
     }
     if let Some(profile) = profile {
-        builder.extend(builder_from_profile(&profile, caps));
+        builder.extend(builder_from_profile(profile, caps));
     }
     builder.build()
 }

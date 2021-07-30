@@ -135,7 +135,7 @@ impl<'a> State<'a> {
     /// Create a new empty State instance
     pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
         let repositories = Repositories::default();
-        let mount_control = Arc::new(MountControl::new(&config).await.map_err(Error::Mount)?);
+        let mount_control = Arc::new(MountControl::new(config).await.map_err(Error::Mount)?);
         let launcher_island = Island::start(events_tx.clone(), config.clone())
             .await
             .expect("Failed to start launcher");
@@ -380,7 +380,7 @@ impl<'a> State<'a> {
                 warn!("Application {} is already running", container);
                 return Err(Error::StartContainerStarted(container.clone()));
             }
-        } else if !self.containers.contains_key(&container) {
+        } else if !self.containers.contains_key(container) {
             need_mount.insert(container.clone());
         }
 
@@ -427,7 +427,7 @@ impl<'a> State<'a> {
         info!("Creating {}", container);
         let process = match self
             .launcher_island
-            .create(&mounted_container, args, env)
+            .create(mounted_container, args, env)
             .await
         {
             Ok(p) => p,
@@ -441,8 +441,7 @@ impl<'a> State<'a> {
         let pid = process.pid();
 
         // Debug
-        let debug =
-            super::debug::Debug::new(&self.config, &mounted_container.manifest, pid).await?;
+        let debug = super::debug::Debug::new(self.config, &mounted_container.manifest, pid).await?;
 
         // CGroups
         let cgroups = if let Some(ref cgroup) = mounted_container.manifest.cgroups {
@@ -452,7 +451,7 @@ impl<'a> State<'a> {
                 cgroups::CGroups::new(
                     &self.config.cgroups,
                     self.events_tx.clone(),
-                    &container,
+                    container,
                     cgroup,
                     pid,
                 )
@@ -476,7 +475,7 @@ impl<'a> State<'a> {
             }
         };
 
-        let mounted_container = self.containers.get_mut(&container).unwrap();
+        let mounted_container = self.containers.get_mut(container).unwrap();
 
         // Add process context to process
         mounted_container.process = Some(ProcessContext {
@@ -508,7 +507,7 @@ impl<'a> State<'a> {
     ) -> Result<(), Error> {
         if let Some(process) = self
             .containers
-            .get_mut(&container)
+            .get_mut(container)
             .and_then(|c| c.process.take())
         {
             info!("Terminating {}", container);
@@ -539,7 +538,7 @@ impl<'a> State<'a> {
             .collect::<Vec<_>>();
         // Stop started applications
         for container in &started {
-            self.stop(&container, time::Duration::from_secs(5)).await?;
+            self.stop(container, time::Duration::from_secs(5)).await?;
         }
 
         let containers = self.containers.keys().cloned().collect::<Vec<_>>();
@@ -729,7 +728,7 @@ impl<'a> State<'a> {
                             Response::Ok(())
                         }
                         api::model::Request::Start(container, args, env) => {
-                            match self.start(&container, args.as_ref(), env.as_ref()).await {
+                            match self.start(container, args.as_ref(), env.as_ref()).await {
                                 Ok(_) => Response::Ok(()),
                                 Err(e) => {
                                     warn!("Failed to start {}: {}", container, e);
@@ -739,7 +738,7 @@ impl<'a> State<'a> {
                         }
                         api::model::Request::Stop(container, timeout) => {
                             match self
-                                .stop(&container, std::time::Duration::from_secs(*timeout))
+                                .stop(container, std::time::Duration::from_secs(*timeout))
                                 .await
                             {
                                 Ok(_) => Response::Ok(()),
@@ -750,7 +749,7 @@ impl<'a> State<'a> {
                             }
                         }
                         api::model::Request::Umount(container) => {
-                            match self.umount(&container).await {
+                            match self.umount(container).await {
                                 Ok(_) => api::model::Response::Ok(()),
                                 Err(e) => {
                                     warn!("Failed to unmount{}: {}", container, e);
@@ -759,7 +758,7 @@ impl<'a> State<'a> {
                             }
                         }
                         api::model::Request::Uninstall(container) => {
-                            match self.uninstall(&container).await {
+                            match self.uninstall(container).await {
                                 Ok(_) => api::model::Response::Ok(()),
                                 Err(e) => {
                                     warn!("Failed to uninstall {}: {}", container, e);
@@ -777,7 +776,7 @@ impl<'a> State<'a> {
                 }
             }
             Request::Install(repository, ref mut rx) => {
-                let payload = match self.install(&repository, rx).await {
+                let payload = match self.install(repository, rx).await {
                     Ok(_) => api::model::Response::Ok(()),
                     Err(e) => api::model::Response::Err(e.into()),
                 };
