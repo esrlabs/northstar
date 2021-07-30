@@ -151,9 +151,9 @@ impl Manifest {
 
         // Check seccomp filter
         const MAX_ARG_INDEX: usize = 5;
-        const MAX_ARG_VALUES: usize = 100; // BPF jumps cannot exceed 255 so we are conservative here
+        const MAX_ARG_VALUES: usize = 50; // BPF jumps cannot exceed 255 and each check needs multiple instructions
         if let Some(seccomp) = &self.seccomp {
-            if let Some(allowlist) = &seccomp.allowlist {
+            if let Some(allowlist) = &seccomp.allow {
                 for filter in allowlist {
                     match filter.1 {
                         SyscallRule::Args(args) => {
@@ -308,7 +308,7 @@ pub struct Seccomp {
     pub profile: Option<Profile>,
     /// Explicit list of allowed syscalls
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowlist: Option<HashMap<NonNullString, SyscallRule>>,
+    pub allow: Option<HashMap<NonNullString, SyscallRule>>,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -566,7 +566,7 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-  allowlist: 
+  allow: 
     fork: all
     waitpid: all
 ";
@@ -627,7 +627,7 @@ seccomp:
             manifest.seccomp,
             Some(Seccomp {
                 profile: None,
-                allowlist: Some(seccomp)
+                allow: Some(seccomp)
             })
         );
 
@@ -814,7 +814,7 @@ cgroups:
   cpu:
     shares: 100
 seccomp:
-  allowlist:
+  allow:
     fork: all
     waitpid: all
 capabilities:

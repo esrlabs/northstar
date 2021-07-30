@@ -429,7 +429,7 @@ fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
     if let Some(seccomp) = manifest.seccomp.as_ref() {
         return Some(seccomp::seccomp_filter(
             seccomp.profile.as_ref(),
-            seccomp.allowlist.as_ref(),
+            seccomp.allow.as_ref(),
             manifest.capabilities.as_ref(),
         ));
     }
