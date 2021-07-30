@@ -323,12 +323,12 @@ fn append_superblock_and_hashtree(
     );
     assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
     let data_blocks = fsimg_size / BLOCK_SIZE as u64;
-    let header = VerityHeader::new(&uuid, data_blocks, SHA256_SIZE as u16, &salt).to_bytes();
+    let header = VerityHeader::new(&uuid, data_blocks, SHA256_SIZE as u16, salt).to_bytes();
     fsimg.write_all(&header).map_err(|e| Error::Os {
         context: "Failed to write verity header".to_string(),
         error: e,
     })?;
-    fsimg.write_all(&hash_tree).map_err(|e| Error::Os {
+    fsimg.write_all(hash_tree).map_err(|e| Error::Os {
         context: "Failed to write verity hash tree".to_string(),
         error: e,
     })?;

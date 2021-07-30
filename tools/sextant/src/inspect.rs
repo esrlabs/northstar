@@ -24,9 +24,9 @@ use std::{
 
 pub fn inspect(npk: &Path, short: bool) -> Result<()> {
     if short {
-        inspect_short(&npk)
+        inspect_short(npk)
     } else {
-        inspect_long(&npk)
+        inspect_long(npk)
     }
 }
 
@@ -46,7 +46,7 @@ pub fn inspect_short(npk: &Path) -> Result<()> {
 }
 
 pub fn inspect_long(npk: &Path) -> Result<()> {
-    let mut zip = open_zip(&npk)?;
+    let mut zip = open_zip(npk)?;
     let mut print_buf: String = String::new();
     println!(
         "{}",
@@ -90,7 +90,7 @@ pub fn inspect_long(npk: &Path) -> Result<()> {
         .context("Failed to find filesystem image in NPK")?;
     io::copy(&mut src_fsimage, &mut dest_fsimage)?;
     let path = dest_fsimage.path();
-    print_squashfs(&path)?;
+    print_squashfs(path)?;
 
     Ok(())
 }

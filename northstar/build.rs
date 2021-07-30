@@ -44,7 +44,7 @@ fn generate_seccomp() {
         let out_path = path::PathBuf::from(env::var("OUT_DIR")?);
         let mut f = fs::File::create(&out_path.join("syscall_bindings.rs"))?;
 
-        f.write_all(&lines.join("\n").as_bytes())?;
+        f.write_all(lines.join("\n").as_bytes())?;
         writeln!(f)?;
         writeln!(f)?;
 

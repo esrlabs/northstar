@@ -140,10 +140,10 @@ impl Island {
         let (stdout, stderr, mut fds) = io::from_manifest(manifest).await?;
         let (checkpoint_runtime, checkpoint_init) = checkpoints();
         let tripwire = self.tripwire_read.clone();
-        let (mounts, dev) = fs::prepare_mounts(&self.config, &container).await?;
+        let (mounts, dev) = fs::prepare_mounts(&self.config, container).await?;
         let groups = groups(manifest);
-        let capabilities = capabilities(&container);
-        let seccomp = seccomp_filter(&container);
+        let capabilities = capabilities(container);
+        let seccomp = seccomp_filter(container);
         let root = container
             .root
             .canonicalize()
@@ -448,7 +448,7 @@ fn init_argv(manifest: &Manifest, args: Option<&Vec<NonNullString>>) -> (CString
     let args = match (manifest.args.as_ref(), args) {
         (None, None) => &[],
         (None, Some(a)) => a.as_slice(),
-        (Some(ref m), None) => m.as_slice(),
+        (Some(m), None) => m.as_slice(),
         (Some(_), Some(a)) => a.as_slice(),
     };
 

@@ -205,7 +205,7 @@ impl<'a> Repository for DirRepository {
     where
         Self: Sized,
     {
-        if let Some((path, npk)) = self.containers.remove(&container) {
+        if let Some((path, npk)) = self.containers.remove(container) {
             debug!("Removing {} from {}", path.display(), self.id);
             drop(npk);
             fs::remove_file(path)
@@ -298,7 +298,7 @@ impl MemRepository {
     #[cfg(not(target_os = "android"))]
     pub fn memfd_create() -> nix::Result<RawFd> {
         let name = CStr::from_bytes_with_nul(b"foo\0").unwrap();
-        nix::sys::memfd::memfd_create(&name, nix::sys::memfd::MemFdCreateFlag::empty())
+        nix::sys::memfd::memfd_create(name, nix::sys::memfd::MemFdCreateFlag::empty())
     }
 }
 

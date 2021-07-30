@@ -58,7 +58,7 @@ pub(super) fn init(
     set_child_subreaper(true);
 
     // Perform all mounts passed in mounts
-    mount(&mounts);
+    mount(mounts);
 
     // Set the chroot to the containers root mount point
     unistd::chroot(root).expect("Failed to chroot");
@@ -132,7 +132,7 @@ pub(super) fn init(
                     "Execve: {:?} {:?}: {:?}",
                     &init,
                     &argv,
-                    unistd::execve(&init, &argv, &env)
+                    unistd::execve(init, argv, env)
                 )
             }
         },
