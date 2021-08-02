@@ -11,7 +11,7 @@ colored = "2.0"
 ed25519-dalek = "1.0"
 env_logger = "0.9"
 log = "0.4"
-northstar = { path = "../../northstar"}
+northstar = { path = "../../northstar", features = ["npk"] }
 structopt = "0.3"
 tempfile = "3.2"
 which = "4.1"
