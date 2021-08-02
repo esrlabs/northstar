@@ -91,3 +91,24 @@ jobs:
           use-cross: true
           command: build
           args: --target=${{ matrix.target }} --all-features
+
+  utils:
+    name: Tools
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install nstar
+        run: cargo install --path tools/nstar
+      - name: Install sextant
+        run: cargo install --path tools/sextant
+      - name: Install stress
+        run: cargo install --path tools/stress
