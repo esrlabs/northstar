@@ -6,11 +6,27 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
+export TERM=xterm
+
 this_script=$(basename $0)
 bold=$(tput bold)
 normal=$(tput sgr0)
 CLONES=""
 KEY="./examples/northstar.key"
+EXAMPLES=(
+  "./examples/cpueater"
+  "./examples/crashing"
+  "./examples/ferris"
+  "./examples/hello-ferris"
+  "./examples/hello-resource"
+  "./examples/hello-world"
+  "./examples/inspect"
+  "./examples/memeater"
+  "./examples/message-0.0.1"
+  "./examples/message-0.0.2"
+  "./examples/persistence"
+  "./examples/seccomp"
+)
 
 usage() {
     echo "USAGE:"
@@ -21,6 +37,7 @@ usage() {
     echo "    -c, --comp   <algorithm>  Compression algorithm used by squashfs"
     echo "                              (gzip, lzma, lzo, xz, zstd)"
     echo "    --clones     <number>     Create number of clones"
+    echo "    --example    <example>    Single example to pack"
     echo "    -h, --help                Prints help information"
 }
 
@@ -44,6 +61,11 @@ case $key in
     shift # past argument
     shift # past value
     ;;
+    --example)
+    EXAMPLES=("./examples/$2")
+    shift # past argument
+    shift # past value
+    ;;
     -h|--help)
     usage
     exit 0
@@ -57,8 +79,9 @@ done
 PLATFORM=${PLATFORM-"host"}
 COMPRESSION_ALGORITHM=${COMPRESSION_ALGORITHM-"gzip"}
 
-echo "PLATFORM              = ${PLATFORM}"
 echo "COMPRESSION_ALGORITHM = ${COMPRESSION_ALGORITHM}"
+echo "EXAMPLES              = ${EXAMPLES}"
+echo "PLATFORM              = ${PLATFORM}"
 
 exe() { echo " + $*" ; $* ; }
 
@@ -144,21 +167,6 @@ build_example() {
 
 main() {
   assert_is_toplevel_dir
-
-  local EXAMPLES=(
-    "./examples/cpueater"
-    "./examples/crashing"
-    "./examples/ferris"
-    "./examples/hello-ferris"
-    "./examples/hello-resource"
-    "./examples/hello-world"
-    "./examples/inspect"
-    "./examples/memeater"
-    "./examples/message-0.0.1"
-    "./examples/message-0.0.2"
-    "./examples/persistence"
-    "./examples/seccomp"
-  )
 
   local OUTPUT_DIR="./target/northstar/repository"
 
