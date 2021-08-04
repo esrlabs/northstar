@@ -88,13 +88,16 @@ struct Opt {
     /// Initial random delay in ms to randomize tasks
     #[structopt(long)]
     initial_random_delay: Option<u64>,
+
+    /// Notification timeout in seconds
+    #[structopt(short, long, default_value = "60")]
+    timeout: u64,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
     let opt = Opt::from_args();
-    let timeout = time::Duration::from_secs(30);
 
     info!("mode: {:?}", opt.mode);
     info!("duration: {:?}", opt.duration);
@@ -103,6 +106,7 @@ async fn main() -> Result<()> {
     debug!("npk: {:?}", opt.npk);
     debug!("relaxed: {}", opt.relaxed);
     debug!("random: {:?}", opt.random);
+    debug!("timeout: {:?}", opt.timeout);
 
     if opt.mode == Mode::InstallUninstall {
         return install_uninstall(&opt).await;
@@ -110,7 +114,7 @@ async fn main() -> Result<()> {
 
     // Get a list of installed applications
     debug!("Getting list of startable containers");
-    let mut client = client::Client::new(&opt.address, None, timeout).await?;
+    let mut client = client::Client::new(&opt.address, None, time::Duration::from_secs(30)).await?;
     let containers = client
         .containers()
         .await?
@@ -148,6 +152,7 @@ async fn main() -> Result<()> {
         let start = start.clone();
         let token = token.clone();
         let url = opt.address.clone();
+        let timeout = opt.timeout;
 
         debug!("Spawning task for {}", container);
         let task = task::spawn(async move {
@@ -160,7 +165,8 @@ async fn main() -> Result<()> {
             }
 
             let notifications = if relaxed { None } else { Some(100) };
-            let mut client = client::Client::new(&url, notifications, timeout).await?;
+            let mut client =
+                client::Client::new(&url, notifications, time::Duration::from_secs(30)).await?;
             let mut iterations = 0;
             loop {
                 if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
@@ -173,7 +179,7 @@ async fn main() -> Result<()> {
                     client.start(&container).await?;
                     if !relaxed {
                         let started = Notification::Started(container.clone());
-                        await_notification(&mut client, started, 60).await?;
+                        await_notification(&mut client, started, timeout).await?;
                     }
                 }
 
@@ -194,7 +200,7 @@ async fn main() -> Result<()> {
                         info!("{:<a$}: waiting for termination", container, a = len);
                         let stopped =
                             Notification::Stopped(container.clone(), ExitStatus::Signaled(15));
-                        await_notification(&mut client, stopped, 60).await?;
+                        await_notification(&mut client, stopped, timeout).await?;
                     }
                 }
 
