@@ -160,19 +160,33 @@ impl Manifest {
                         SyscallRule::Args(args) => {
                             if args.index > MAX_ARG_INDEX {
                                 return Err(Error::Invalid(format!(
-                                    "Seccomp syscall argument index must be {} or smaller",
+                                    "Seccomp syscall argument index must be {} or less",
                                     MAX_ARG_INDEX
                                 )));
                             }
-                            if args.values.len() > MAX_ARG_VALUES {
-                                return Err(Error::Invalid(format!(
-                                    "Seccomp syscall argument cannot have more than {} allowed values",
-                                    MAX_ARG_VALUES)));
+                            if args.values.is_none() && args.mask.is_none() {
+                                return Err(Error::Invalid(
+                                    "Either 'values' or 'mask' must be defined in seccomp syscall argument filter".to_string()));
                             }
-                            for value in &args.values {
-                                if value > &MAX_ARG_VALUE {
+                            if let Some(values) = &args.values {
+                                if values.len() > MAX_ARG_VALUES {
                                     return Err(Error::Invalid(format!(
-                                        "Seccomp syscall argument values cannot exceed {}",
+                                        "Seccomp syscall argument cannot have more than {} allowed values",
+                                        MAX_ARG_VALUES)));
+                                }
+                                for value in values {
+                                    if value > &MAX_ARG_VALUE {
+                                        return Err(Error::Invalid(format!(
+                                            "Seccomp syscall argument values cannot exceed {}",
+                                            MAX_ARG_VALUE
+                                        )));
+                                    }
+                                }
+                            }
+                            if let Some(mask) = &args.mask {
+                                if mask > &MAX_ARG_VALUE {
+                                    return Err(Error::Invalid(format!(
+                                        "Seccomp syscall argument mask cannot exceed {}",
                                         MAX_ARG_VALUE
                                     )));
                                 }
@@ -330,7 +344,7 @@ pub enum SyscallRule {
     All,
     /// Explicit list of allowed syscalls arguments
     #[serde(rename = "args")]
-    Args(SyscallArgValues),
+    Args(SyscallArgRule),
 }
 
 #[cfg(target_pointer_width = "32")]
@@ -340,11 +354,14 @@ pub type ArgType = u64;
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SyscallArgValues {
+pub struct SyscallArgRule {
     /// Index of syscall argument
     pub index: usize,
     /// Value of syscall argument
-    pub values: Vec<ArgType>,
+    pub values: Option<Vec<ArgType>>,
+    /// Bitmask of syscall argument
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask: Option<ArgType>,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

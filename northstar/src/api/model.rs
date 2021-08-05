@@ -152,6 +152,7 @@ pub enum Error {
     Console(String),
     Cgroups(String),
     Mount(String),
+    Seccomp(String),
     Name(String),
     Key(String),
 
