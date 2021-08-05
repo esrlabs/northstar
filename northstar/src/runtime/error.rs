@@ -59,6 +59,8 @@ pub enum Error {
     Cgroups(#[from] super::cgroups::Error),
     #[error("Mount: {0}")]
     Mount(super::mount::Error),
+    #[error("Seccomp: {0}")]
+    Seccomp(super::island::seccomp::Error),
     #[error("Name: {0}")]
     Name(String),
     #[error("Key: {0}")]
@@ -124,6 +126,7 @@ impl From<Error> for api::model::Error {
             Error::Console(error) => api::model::Error::Console(error.to_string()),
             Error::Cgroups(error) => api::model::Error::Cgroups(error.to_string()),
             Error::Mount(error) => api::model::Error::Mount(error.to_string()),
+            Error::Seccomp(error) => api::model::Error::Mount(error.to_string()),
             Error::Name(error) => api::model::Error::Name(error),
             Error::Key(error) => api::model::Error::Key(error.to_string()),
             Error::Io(cause, error) => api::model::Error::Io(format!("{}: {}", cause, error)),

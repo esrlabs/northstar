@@ -198,6 +198,7 @@ fn format_err(err: &model::Error) -> String {
         model::Error::Console(e) => format!("console error: {}", e),
         model::Error::Cgroups(e) => format!("cgroups error: {}", e),
         model::Error::Mount(e) => format!("mount error: {}", e),
+        model::Error::Seccomp(e) => format!("seccomp error: {}", e),
         model::Error::Key(e) => format!("key error: {}", e),
         model::Error::Io(e) => format!("io error: {}", e),
         model::Error::Os(e) => format!("os error: {}", e),
