@@ -150,9 +150,8 @@ impl Manifest {
             })?;
 
         // Check seccomp filter
-        const MAX_ARG_INDEX: usize = 5;
+        const MAX_ARG_INDEX: usize = 5; // Restricted by seccomp_data struct
         const MAX_ARG_VALUES: usize = 50; // BPF jumps cannot exceed 255 and each check needs multiple instructions
-        const MAX_ARG_VALUE: u64 = u32::MAX as u64; // 64 bit arguments need special treatment
         if let Some(seccomp) = &self.seccomp {
             if let Some(allowlist) = &seccomp.allow {
                 for filter in allowlist {
@@ -173,22 +172,6 @@ impl Manifest {
                                     return Err(Error::Invalid(format!(
                                         "Seccomp syscall argument cannot have more than {} allowed values",
                                         MAX_ARG_VALUES)));
-                                }
-                                for value in values {
-                                    if value > &MAX_ARG_VALUE {
-                                        return Err(Error::Invalid(format!(
-                                            "Seccomp syscall argument values cannot exceed {}",
-                                            MAX_ARG_VALUE
-                                        )));
-                                    }
-                                }
-                            }
-                            if let Some(mask) = &args.mask {
-                                if mask > &MAX_ARG_VALUE {
-                                    return Err(Error::Invalid(format!(
-                                        "Seccomp syscall argument mask cannot exceed {}",
-                                        MAX_ARG_VALUE
-                                    )));
                                 }
                             }
                         }
