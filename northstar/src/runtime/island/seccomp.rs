@@ -327,12 +327,6 @@ impl Builder {
         jump_if_acc_is_equal(&mut filter, AUDIT_ARCH, SKIP_NEXT, EVAL_NEXT);
         filter.list.push(bpf_ret(SECCOMP_RET_KILL)); // never just log if architecture does not match
 
-        // TODO: Is this really necessary?
-        // Clear accumulator and scratch memory
-        load_into_acc(&mut filter, 0);
-        store_acc_in_scratch_low(&mut filter);
-        store_acc_in_scratch_high(&mut filter);
-
         // Load syscall number into accumulator for subsequent filtering
         load_syscall_nr_into_acc(&mut filter);
 
