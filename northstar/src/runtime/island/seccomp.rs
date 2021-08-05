@@ -22,13 +22,21 @@ use bindings::{
     BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM, BPF_NEG, BPF_OR, BPF_RET, BPF_ST, BPF_W,
     SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
 };
-use log::{debug, warn};
+use log::trace;
 use nix::errno::Errno;
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
 };
 use thiserror::Error;
+
+// Required for platform check
+#[cfg(any(
+    not(any(target_arch = "aarch64", target_arch = "x86_64")),
+    target_pointer_width = "32",
+    target_endian = "big"
+))]
+use crate::runtime::island::seccomp::Error::UnsupportedPlatform;
 
 #[allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 mod bindings {
@@ -40,10 +48,10 @@ mod bindings {
     pub const SECCOMP_RET_LOG: u32 = 2147221504;
 }
 
-#[cfg(all(target_arch = "aarch64"))]
+#[cfg(target_arch = "aarch64")]
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_AARCH64;
 
-#[cfg(all(target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
 /// Syscalls used by northstar after the seccomp rules are applied and before the actual execve is done.
@@ -60,6 +68,8 @@ pub(super) fn seccomp_filter(
     rules: Option<&HashMap<NonNullString, SyscallRule>>,
     caps: Option<&HashSet<Capability>>,
 ) -> Result<AllowList, Error> {
+    check_platform_requirements()?;
+
     let mut builder = Builder::new();
     if let Some(profile) = profile {
         builder.extend(builder_from_profile(profile, caps));
@@ -67,8 +77,7 @@ pub(super) fn seccomp_filter(
     if let Some(rules) = rules {
         builder.extend(builder_from_rules(rules));
     }
-    builder.log_only(); // TODO: remove
-    builder.build()
+    Ok(builder.build())
 }
 
 /// Create an AllowList Builder from a list of syscall names
@@ -86,10 +95,26 @@ pub fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builde
         }
         if let Err(e) = builder.allow_syscall_name(&name.to_string(), arg_rule.cloned()) {
             // Only issue a warning as a missing syscall on the allow list does not lead to insecure behaviour
-            warn!("Failed to allow syscall {}: {}", &name.to_string(), e);
+            trace!("Failed to allow syscall {}: {}", &name.to_string(), e);
         }
     }
     builder
+}
+
+fn check_platform_requirements() -> Result<(), Error> {
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    return Err(UnsupportedPlatform(
+        "Seccomp is only supported on aarch64 and x86_64".to_string(),
+    ));
+    #[cfg(target_pointer_width = "32")]
+    return Err(UnsupportedPlatform(
+        "Seccomp is not supported on 32 Bit architectures".to_string(),
+    ));
+    #[cfg(target_endian = "big")]
+    return Err(UnsupportedPlatform(
+        "Seccomp is not supported on Big Endian architectures".to_string(),
+    ));
+    Ok(())
 }
 
 /// Create an AllowList Builder from a pre-defined profile
@@ -288,12 +313,7 @@ impl Builder {
     }
 
     /// Create seccomp filter ready to apply
-    pub fn build(mut self) -> Result<AllowList, Error> {
-        #[cfg(target_pointer_width = "32")]
-        return Err("32 Bit architectures are not supported");
-        #[cfg(target_endian = "big")]
-        return Err("Big Endian architectures are not supported");
-
+    pub fn build(mut self) -> AllowList {
         // sort and dedup syscall numbers to check common syscalls first
         self.allowlist.sort_unstable_by_key(|rule| rule.nr);
         self.allowlist.dedup();
@@ -319,56 +339,62 @@ impl Builder {
         // Add filter block for every allowed syscall
         for rule in &self.allowlist {
             if let Some(arg_rule) = &rule.arg_rule {
-                if let Some(values) = &arg_rule.values {
+                if let Some(args) = &arg_rule.values {
+                    trace!("Adding seccomp argument block (num. args={})", args.len());
+
                     // Precalculate number of instructions to skip if syscall number does not match
-                    assert!(values.len() <= 50);
-                    let skip_if_no_match: u8 = (4 + 2 * values.len() + 1) as u8;
+                    assert!(args.len() <= 50);
+                    let skip_if_no_match: u8 = (4 + 4 * args.len() + 1) as u8;
 
                     // If syscall matches continue to check its arguments
                     jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, skip_if_no_match);
                     // Helper instruction counter to verify precalculated jump value
                     let mut insts = 0;
-                    // Load syscall argument into accumulator (32 bit) or scratch memory (64 bit)
-                    insts += load_syscall_arg(&mut filter, arg_rule);
+                    // Load syscall argument into scratch memory
+                    insts += load_syscall_arg_into_scratch(&mut filter, arg_rule);
                     // Compare syscall argument against allowed values
-                    insts += jump_if_arg_matches(&mut filter, values, EVAL_NEXT, SKIP_NEXT);
+                    insts += jump_if_scratch_matches(&mut filter, args, EVAL_NEXT, SKIP_NEXT);
                     // If syscall argument matches return 'allow' directly
-                    insts += add_success_consequence(&mut filter);
-                    // Restore accumulator with syscall number for possible next iteration
+                    insts += add_success(&mut filter);
                     assert_eq!(skip_if_no_match as u32, insts);
+                    // Restore accumulator with syscall number for possible next iteration
                     load_syscall_nr_into_acc(&mut filter);
+
+                    trace!("Finished seccomp argument block (num. args={})", args.len());
                 }
                 if let Some(mask) = &arg_rule.mask {
-                    println!("--- Adding masked rule (mask={})", mask);
+                    trace!("Adding masked seccomp argument block (mask={})", mask);
+
                     // Precalculate number of instructions to skip if syscall number does not match
-                    let skip_if_no_match: u8 = (4 + 3 + 1) as u8;
+                    let skip_if_no_match: u8 = (4 + 6 + 1) as u8;
 
                     // If syscall matches continue to check its arguments
                     jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, skip_if_no_match);
                     // Helper instruction counter to verify precalculated jump value
                     let mut insts = 0;
                     // Load syscall argument into accumulator (32 bit) or scratch memory (64 bit)
-                    insts += load_syscall_arg(&mut filter, arg_rule);
+                    insts += load_syscall_arg_into_scratch(&mut filter, arg_rule);
                     // Compare syscall argument against mask
-                    insts += jump_if_arg_matches_mask(&mut filter, mask, EVAL_NEXT, SKIP_NEXT);
-                    insts += add_success_consequence(&mut filter);
+                    insts += jump_if_scratch_matches_mask(&mut filter, mask, EVAL_NEXT, SKIP_NEXT);
+                    insts += add_success(&mut filter);
                     // Restore accumulator with syscall number for possible next iteration
                     assert_eq!(skip_if_no_match as u32, insts);
                     load_syscall_nr_into_acc(&mut filter);
-                    println!("--- Done adding masked rule (mask={})", mask);
+
+                    trace!("Finished masked seccomp argument block (mask={})", mask);
                 }
             } else {
                 // If syscall matches return 'allow' directly
                 jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, SKIP_NEXT);
-                add_success_consequence(&mut filter);
+                add_success(&mut filter);
                 // No need to restore accumulator with syscall number as we did not overwrite it
             }
         }
 
         // Fall through consequence if not filter rule matched
-        add_fail_consequence(&mut filter, self.log_only);
+        add_fail(&mut filter, self.log_only);
 
-        Ok(filter)
+        filter
     }
 }
 
@@ -386,7 +412,6 @@ fn load_arch_into_acc(filter: &mut AllowList) -> u32 {
 }
 
 fn load_syscall_nr_into_acc(filter: &mut AllowList) -> u32 {
-    println!("load_syscall_nr_into_acc");
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
         memoffset::offset_of!(seccomp_data, nr) as u32,
@@ -394,11 +419,9 @@ fn load_syscall_nr_into_acc(filter: &mut AllowList) -> u32 {
     1
 }
 
-fn load_syscall_arg(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
-    println!("load_syscall_arg");
-    let mut insts = 0;
-
+fn load_syscall_arg_into_scratch(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
     // Load high and low parts into scratch memory separately
+    let mut insts = 0;
     insts += load_arg_low_into_acc(filter, arg_rule);
     insts += store_acc_in_scratch_low(filter);
     insts += load_arg_high_into_acc(filter, arg_rule);
@@ -407,7 +430,6 @@ fn load_syscall_arg(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
 }
 
 fn load_arg_low_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
-    println!("load_arg_low_into_acc");
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
         arg_low_array_offset(arg_rule.index) as u32,
@@ -416,7 +438,6 @@ fn load_arg_low_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u
 }
 
 fn load_arg_high_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
-    println!("load_arg_high_into_acc");
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
         arg_high_array_offset(arg_rule.index) as u32,
@@ -449,31 +470,33 @@ fn load_into_acc(filter: &mut AllowList, value: u32) -> u32 {
     1
 }
 
+const SCRATCH_LOW_INDEX: u32 = 0;
+const SCRATCH_HIGH_INDEX: u32 = 1;
 fn load_scratch_low_into_acc(filter: &mut AllowList) -> u32 {
-    println!("load_scratch_low_into_acc");
-    filter.list.push(bpf_stmt(BPF_LD | BPF_MEM, 0));
+    filter
+        .list
+        .push(bpf_stmt(BPF_LD | BPF_MEM, SCRATCH_LOW_INDEX));
     1
 }
 
-// TODO: Support actual 64 bit arguments
-fn _load_scratch_high_into_acc(filter: &mut AllowList) -> u32 {
-    filter.list.push(bpf_stmt(BPF_LD | BPF_MEM, 1));
+fn load_scratch_high_into_acc(filter: &mut AllowList) -> u32 {
+    filter
+        .list
+        .push(bpf_stmt(BPF_LD | BPF_MEM, SCRATCH_HIGH_INDEX));
     1
 }
 
 fn store_acc_in_scratch_low(filter: &mut AllowList) -> u32 {
-    println!("store_acc_in_scratch_low");
-    filter.list.push(bpf_stmt(BPF_ST, 0));
+    filter.list.push(bpf_stmt(BPF_ST, SCRATCH_LOW_INDEX));
     1
 }
 
 fn store_acc_in_scratch_high(filter: &mut AllowList) -> u32 {
-    println!("store_acc_in_scratch_high");
-    filter.list.push(bpf_stmt(BPF_ST, 1));
+    filter.list.push(bpf_stmt(BPF_ST, SCRATCH_HIGH_INDEX));
     1
 }
 
-fn jump_if_arg_matches(
+fn jump_if_scratch_matches(
     filter: &mut AllowList,
     values: &[ArgType],
     jump_true: u8,
@@ -483,7 +506,7 @@ fn jump_if_arg_matches(
     let mut insts = 0;
 
     for (iteration, value) in values.iter().enumerate() {
-        const INSTS_PER_ITER: u8 = 2; // load_scratch_low_into_acc + jump_if_acc_is_equal
+        const INSTS_PER_ITER: u8 = 4; // 2 * load_scratch + 2 * jump_if_acc_is_equal
 
         // Overflow check
         assert!(values.len() > iteration);
@@ -503,21 +526,8 @@ fn jump_if_arg_matches(
     insts
 }
 
-fn jump_if_arg_matches_mask(
-    filter: &mut AllowList,
-    mask: &ArgType,
-    jump_true: u8,
-    jump_false: u8,
-) -> u32 {
-    println!("jump_if_arg_matches_mask");
-    let mut insts = 0;
-    insts += jump_if_scratch_matches_mask(filter, mask, jump_true, jump_false);
-    insts
-}
-
-/// Compare accumulator (always 32 bit) against given value
+/// Compare accumulator (32 bit) against given value
 fn jump_if_acc_is_equal(filter: &mut AllowList, value: u32, jump_true: u8, jump_false: u8) -> u32 {
-    println!("jump_if_acc_is_equal");
     filter.list.push(bpf_jump(
         BPF_JMP | BPF_JEQ | BPF_K,
         value,
@@ -533,18 +543,11 @@ fn jump_if_acc_matches_mask(
     jump_true: u8,
     jump_false: u8,
 ) -> u32 {
-    println!(
-        "jump_if_acc_matches_mask (mask={}, jump_true={}, jump_false={})",
-        mask, jump_true, jump_false
-    );
+    let mut insts = 0;
     filter.list.push(bpf_and(!mask)); // Keep only non-masked ones
-    filter.list.push(bpf_jump(
-        BPF_JMP | BPF_JEQ | BPF_K,
-        0,
-        jump_true,
-        jump_false,
-    ));
-    2
+    insts += 1;
+    insts += jump_if_acc_is_equal(filter, 0, jump_true, jump_false);
+    insts
 }
 
 /// Compare first two 32 bit registers of scratch memory
@@ -555,15 +558,14 @@ fn jump_if_scratch_is_equal(
     jump_false: u8,
 ) -> u32 {
     let low: u32 = value as u32;
-    let _high: u32 = (value >> 32) as u32;
+    let high: u32 = (value >> 32) as u32;
 
     // Compare high and low parts of scratch memory separately
     let mut insts = 0;
     insts += load_scratch_low_into_acc(filter);
-    insts += jump_if_acc_is_equal(filter, low, jump_true, jump_false);
-    // TODO: Support actual 64 bit arguments
-    // insts += load_scratch_high_into_acc(filter);
-    // insts += jump_if_acc_is_equal(filter, high, jump_true, jump_false);
+    insts += jump_if_acc_is_equal(filter, low, EVAL_NEXT, jump_false + 2);
+    insts += load_scratch_high_into_acc(filter);
+    insts += jump_if_acc_is_equal(filter, high, jump_true, jump_false);
     insts
 }
 
@@ -574,23 +576,18 @@ fn jump_if_scratch_matches_mask(
     jump_true: u8,
     jump_false: u8,
 ) -> u32 {
-    println!("jump_if_scratch_matches_mask");
-    let low: u32 = *mask as u32;
-    let _high: u32 = (mask >> 32) as u32;
-    println!("low={}", low);
-    println!("_high={}", _high);
-
     // Check high and low parts of scratch memory separately
+    let low: u32 = *mask as u32;
+    let high: u32 = (mask >> 32) as u32;
     let mut insts = 0;
     insts += load_scratch_low_into_acc(filter);
-    insts += jump_if_acc_matches_mask(filter, low, jump_true, jump_false);
-    // TODO: Support actual 64 bit arguments
-    // insts += load_scratch_high_into_acc(filter);
-    // insts += jump_if_acc_matches_mask(filter, high, jump_true, jump_false);
+    insts += jump_if_acc_matches_mask(filter, low, EVAL_NEXT, jump_false + 2);
+    insts += load_scratch_high_into_acc(filter);
+    insts += jump_if_acc_matches_mask(filter, high, jump_true, jump_false);
     insts
 }
 
-fn add_fail_consequence(filter: &mut AllowList, log_only: bool) -> u32 {
+fn add_fail(filter: &mut AllowList, log_only: bool) -> u32 {
     if log_only {
         filter.list.push(bpf_ret(SECCOMP_RET_LOG));
     } else {
@@ -599,33 +596,33 @@ fn add_fail_consequence(filter: &mut AllowList, log_only: bool) -> u32 {
     1
 }
 
-fn add_success_consequence(filter: &mut AllowList) -> u32 {
-    println!("add_success_consequence");
+fn add_success(filter: &mut AllowList) -> u32 {
+    trace!("add_success");
     filter.list.push(bpf_ret(SECCOMP_RET_ALLOW));
     1
 }
 
 /// Negate accumulator
 fn _bpf_neg() -> sock_filter {
-    println!("bpf_neg");
+    trace!("bpf_neg");
     bpf_stmt(BPF_ALU | BPF_NEG, 0)
 }
 
 /// And accumulator with value
 fn bpf_and(k: u32) -> sock_filter {
-    println!("bpf_and");
+    trace!("bpf_and");
     bpf_stmt(BPF_ALU | BPF_AND | BPF_K, k)
 }
 
 /// Or accumulator with value
 fn _bpf_or(k: u32) -> sock_filter {
-    println!("bpf_or");
+    trace!("bpf_or");
     bpf_stmt(BPF_ALU | BPF_OR | BPF_K, k)
 }
 
 /// Add return clause (e.g. allow, kill, log)
 fn bpf_ret(k: u32) -> sock_filter {
-    println!("bpf_ret");
+    trace!("bpf_ret");
     bpf_stmt(BPF_RET | BPF_K, k)
 }
 
@@ -636,7 +633,7 @@ fn bpf_stmt(code: u32, k: u32) -> sock_filter {
 
 // https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/filter.h#L51
 fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> sock_filter {
-    debug!("*bpf_jump({}, {}, {}, {})", code, k, jt, jf);
+    trace!("*bpf_jump({}, {}, {}, {})", code, k, jt, jf);
     sock_filter {
         code: code as u16,
         k,

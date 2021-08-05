@@ -432,7 +432,7 @@ fn seccomp_filter(manifest: &Manifest) -> Result<Option<seccomp::AllowList>, Err
             seccomp.allow.as_ref(),
             manifest.capabilities.as_ref(),
         )
-        .map_err(|e| Error::Seccomp(e))
+        .map_err(Error::Seccomp)
         {
             Ok(f) => Ok(Some(f)),
             Err(e) => Err(e),
