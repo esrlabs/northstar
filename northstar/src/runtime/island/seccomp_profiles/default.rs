@@ -14,7 +14,7 @@
 
 use crate::{
     common::non_null_string::NonNullString,
-    npk::manifest::SyscallRule,
+    npk::manifest::{SyscallArgRule, SyscallRule},
     runtime::island::seccomp::{builder_from_rules, Builder},
 };
 use std::{collections::HashMap, convert::TryInto};
@@ -367,22 +367,24 @@ pub const SYSCALLS_BASE: &[&str] = &[
     "process_vm_readv",  // "minKernel": "4.8"
     "process_vm_writev", // "minKernel": "4.8"
     "ptrace",            // "minKernel": "4.8"
-    "personality", // TODO: parameter condition: must be equal to 0x00, 0x08, 0x20000, 0x20008 or 0xFFFFFFFF
-    #[cfg(all(target_arch = "aarch64"))]
+    // Parameter condition: index=0, value={0x00, 0x08, 0x20000, 0x20008, 0xFFFFFFFF}, op=SCMP_CMP_EQ
+    // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L414)
+    "personality",
+    #[cfg(target_arch = "aarch64")]
     "arm_fadvise64_64",
-    #[cfg(all(target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     "arm_sync_file_range",
-    #[cfg(all(target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     "sync_file_range2",
-    #[cfg(all(target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     "breakpoint",
-    #[cfg(all(target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     "cacheflush",
-    #[cfg(all(target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     "set_tls",
-    #[cfg(all(target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     "arch_prctl", // only on "amd64" and "x32"
-    #[cfg(all(target_arch = "x86_64"))]
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     "modify_ldt", // only on "amd64", "x32" and "x86"
 ];
 
@@ -431,8 +433,8 @@ pub const SYSCALLS_CAP_SYSLOG: &[&str] = &["syslog"];
 
 // syscalls to be added if a given capability is _missing_
 pub const SYSCALLS_NON_CAP_SYS_ADMIN: &[&str] = &[
-    // TODO: parameter condition: value=0x7E020000 and op=SCMP_CMP_MASKED_EQ
-    // (https://github.com/moby/moby/blob/master/profiles/seccomp/default.json#L583)
+    // Parameter condition: index=0, value=0x7E020000, op=SCMP_CMP_MASKED_EQ
+    // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L624)
     "clone",
 ];
 
@@ -441,7 +443,17 @@ lazy_static::lazy_static! {
     pub static ref BASE: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_BASE.len());
         for name in SYSCALLS_BASE {
-            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+            // Parameter condition: index=0, value={0x00, 0x08, 0x20000, 0x20008, 0xFFFFFFFF}, op=SCMP_CMP_EQ
+            // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L414)
+            if *name == "personality" {
+                hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Args(SyscallArgRule{
+                    index: 0,
+                    values: Some([0x00, 0x08, 0x20000, 0x20008, 0xFFFFFFFF].to_vec()),
+                    mask: None}));
+            }
+            else {
+                hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+            }
         }
         builder_from_rules(&hm)
     };
@@ -571,7 +583,14 @@ lazy_static::lazy_static! {
     pub static ref NON_CAP_SYS_ADMIN: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_NON_CAP_SYS_ADMIN.len());
         for name in SYSCALLS_NON_CAP_SYS_ADMIN {
-            hm.insert(name.to_string().try_into().unwrap(), SyscallRule::All);
+            if *name == "clone" {
+                // Parameter condition: index=0, value=0x7E020000, op=SCMP_CMP_MASKED_EQ
+                // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L624)
+                hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Args(SyscallArgRule{
+                    index: 0,
+                    values: None,
+                    mask: Some(0x7E020000)}));
+            }
         }
         builder_from_rules(&hm)
     };
