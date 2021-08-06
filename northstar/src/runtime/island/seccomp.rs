@@ -14,7 +14,7 @@
 
 use crate::{
     common::non_null_string::NonNullString,
-    npk::manifest::{ArgType, Capability, Profile, SyscallArgRule, SyscallRule},
+    npk::manifest::{Capability, Profile, SyscallArgRule, SyscallRule},
     runtime::island::seccomp_profiles::default,
 };
 use bindings::{
@@ -356,11 +356,11 @@ impl Builder {
 
                     trace!("Finished seccomp argument block (num. args={})", args.len());
                 }
-                if let Some(mask) = &arg_rule.mask {
+                if let Some(mask) = arg_rule.mask {
                     trace!("Adding masked seccomp argument block (mask={})", mask);
 
                     // Precalculate number of instructions to skip if syscall number does not match
-                    let skip_if_no_match: u8 = (4 + 6 + 1) as u8;
+                    let skip_if_no_match: u8 = (4 + /*3*/ 6 + 1) as u8;
 
                     // If syscall matches continue to check its arguments
                     jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, skip_if_no_match);
@@ -397,6 +397,7 @@ fn translate_syscall(name: &str) -> Option<u32> {
     SYSCALL_MAP.get(name).cloned()
 }
 
+/// Load architecture identifier number into accumulator
 fn load_arch_into_acc(filter: &mut AllowList) -> u32 {
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
@@ -405,6 +406,7 @@ fn load_arch_into_acc(filter: &mut AllowList) -> u32 {
     1
 }
 
+/// Load the number of the syscall into accumulator
 fn load_syscall_nr_into_acc(filter: &mut AllowList) -> u32 {
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
@@ -413,6 +415,7 @@ fn load_syscall_nr_into_acc(filter: &mut AllowList) -> u32 {
     1
 }
 
+/// Load syscall argument into the first two 32-bit registers of scratch memory
 fn load_syscall_arg_into_scratch(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
     // Load high and low parts into scratch memory separately
     let mut insts = 0;
@@ -423,6 +426,7 @@ fn load_syscall_arg_into_scratch(filter: &mut AllowList, arg_rule: &SyscallArgRu
     insts
 }
 
+/// Load 32 low bits of syscall argument into 32-bit accumulator
 fn load_arg_low_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
@@ -431,6 +435,7 @@ fn load_arg_low_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u
     1
 }
 
+/// Load 32 high bits of syscall argument into 32-bit accumulator
 fn load_arg_high_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> u32 {
     filter.list.push(bpf_stmt(
         BPF_LD | BPF_W | BPF_ABS,
@@ -449,23 +454,28 @@ fn load_arg_high_into_acc(filter: &mut AllowList, arg_rule: &SyscallArgRule) -> 
 /// Size of elements of 'args' array
 const SECCOMP_DATA_ARGS_SIZE: usize = size_of::<u64>();
 
+/// Get the offset of 'args' array entry in the 'seccomp_data' struct that holds the 32 low bits of syscall argument
 fn arg_low_array_offset(index: usize) -> usize {
     memoffset::offset_of!(seccomp_data, args) + (index * SECCOMP_DATA_ARGS_SIZE)
 }
 
+/// Get the offset of 'args' array entry in the 'seccomp_data' struct that holds the 32 high bits of syscall argument
 fn arg_high_array_offset(index: usize) -> usize {
     memoffset::offset_of!(seccomp_data, args)
         + (index * SECCOMP_DATA_ARGS_SIZE)
         + (SECCOMP_DATA_ARGS_SIZE / 2)
 }
 
-fn load_into_acc(filter: &mut AllowList, value: u32) -> u32 {
+/// Load given value into accumulator
+fn _load_into_acc(filter: &mut AllowList, value: u32) -> u32 {
     filter.list.push(bpf_stmt(BPF_LD | BPF_IMM, value));
     1
 }
 
 const SCRATCH_LOW_INDEX: u32 = 0;
 const SCRATCH_HIGH_INDEX: u32 = 1;
+
+/// Load the first 32-bit register of scratch memory into register
 fn load_scratch_low_into_acc(filter: &mut AllowList) -> u32 {
     filter
         .list
@@ -473,6 +483,7 @@ fn load_scratch_low_into_acc(filter: &mut AllowList) -> u32 {
     1
 }
 
+/// Load the second 32-bit register of scratch memory into register
 fn load_scratch_high_into_acc(filter: &mut AllowList) -> u32 {
     filter
         .list
@@ -480,19 +491,22 @@ fn load_scratch_high_into_acc(filter: &mut AllowList) -> u32 {
     1
 }
 
+/// Store accumulator into the first 32-bit register of scratch memory
 fn store_acc_in_scratch_low(filter: &mut AllowList) -> u32 {
     filter.list.push(bpf_stmt(BPF_ST, SCRATCH_LOW_INDEX));
     1
 }
 
+/// Store accumulator into the second 32-bit register of scratch memory
 fn store_acc_in_scratch_high(filter: &mut AllowList) -> u32 {
     filter.list.push(bpf_stmt(BPF_ST, SCRATCH_HIGH_INDEX));
     1
 }
 
+/// Perform jump if the first two 32-bit scratch registers match the given 64-bit value
 fn jump_if_scratch_matches(
     filter: &mut AllowList,
-    values: &[ArgType],
+    values: &[u64],
     jump_true: u8,
     jump_false: u8,
 ) -> u32 {
@@ -531,6 +545,7 @@ fn jump_if_acc_is_equal(filter: &mut AllowList, value: u32, jump_true: u8, jump_
     1
 }
 
+/// Jump if accumulator has no bits set outside the given mask
 fn jump_if_acc_matches_mask(
     filter: &mut AllowList,
     mask: u32,
@@ -566,21 +581,25 @@ fn jump_if_scratch_is_equal(
 /// Compare first two 32 bit registers of scratch memory
 fn jump_if_scratch_matches_mask(
     filter: &mut AllowList,
-    mask: &ArgType,
+    mask: u64,
     jump_true: u8,
     jump_false: u8,
 ) -> u32 {
     // Check high and low parts of scratch memory separately
-    let low: u32 = *mask as u32;
+    const INSTS_PER_CHECK: u8 = 3;
+    let low: u32 = mask as u32;
     let high: u32 = (mask >> 32) as u32;
     let mut insts = 0;
     insts += load_scratch_low_into_acc(filter);
-    insts += jump_if_acc_matches_mask(filter, low, EVAL_NEXT, jump_false + 2);
+    insts += jump_if_acc_matches_mask(filter, low, EVAL_NEXT, jump_false + INSTS_PER_CHECK);
+    let prev_insts = insts;
     insts += load_scratch_high_into_acc(filter);
     insts += jump_if_acc_matches_mask(filter, high, jump_true, jump_false);
+    assert_eq!(prev_insts + INSTS_PER_CHECK as u32, insts);
     insts
 }
 
+/// Add statement that causes the BPF program return and prohibit the syscall
 fn add_fail(filter: &mut AllowList, log_only: bool) -> u32 {
     if log_only {
         filter.list.push(bpf_ret(SECCOMP_RET_LOG));
@@ -590,6 +609,7 @@ fn add_fail(filter: &mut AllowList, log_only: bool) -> u32 {
     1
 }
 
+/// Add statement that causes the BPF program return and allow the syscall
 fn add_success(filter: &mut AllowList) -> u32 {
     trace!("add_success");
     filter.list.push(bpf_ret(SECCOMP_RET_ALLOW));
