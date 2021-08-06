@@ -44,3 +44,14 @@ io:
       tag: test-container
 custom:
   priority: 123
+seccomp:
+  profile:
+    default
+  allow:
+    sysfs:
+      args:
+        index: 0
+        values: [
+            1,
+        ]
+        mask: 0x06

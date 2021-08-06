@@ -13,7 +13,10 @@
 //   limitations under the License.
 
 use anyhow::{Context, Result};
-use nix::unistd::{self, Gid};
+use nix::{
+    libc,
+    unistd::{self, Gid},
+};
 use std::{
     env,
     ffi::c_void,
@@ -50,6 +53,9 @@ enum Command {
         message: String,
         path: PathBuf,
     },
+    CallSysfs {
+        option: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -64,6 +70,7 @@ fn main() -> Result<()> {
         Command::Touch { path } => touch(&path)?,
         Command::Sleep => (),
         Command::Write { message, path } => write(&message, path.as_path())?,
+        Command::CallSysfs { option } => call_sysfs(option)?,
     };
 
     sleep();
@@ -120,6 +127,14 @@ fn leak_memory() {
     loop {
         unsafe { malloc(1_000) };
     }
+}
+
+/// Call sysfs syscall to test seccomp
+fn call_sysfs(option: String) -> Result<()> {
+    let option = option.parse::<u32>().unwrap();
+    let _result = unsafe { libc::syscall(libc::SYS_sysfs, option) };
+    println!("Sysfs syscall was successful");
+    Ok(())
 }
 
 fn inspect() {

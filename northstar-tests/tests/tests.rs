@@ -299,6 +299,38 @@ test!(proc_is_mounted_ro, {
     runtime.shutdown().await
 });
 
+// Call specifically allowed syscall
+test!(seccomp_allowed_syscall, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    runtime
+        .start_with_args(TEST_CONTAINER, ["call-sysfs", "1"])
+        .await?;
+    assume("Sysfs syscall was successful", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
+    runtime.shutdown().await
+});
+
+// Call syscall allowed by bitmask
+test!(seccomp_allowed_by_mask_syscall, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    runtime
+        .start_with_args(TEST_CONTAINER, ["call-sysfs", "4"])
+        .await?;
+    assume("Sysfs syscall was successful", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
+    runtime.shutdown().await
+});
+
+// Call prohibited syscall
+test!(seccomp_prohibited_syscall, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    runtime
+        .start_with_args(TEST_CONTAINER, ["call-sysfs", "7"])
+        .await?;
+    assume(r"exited after .* with status Signaled\(SIGSYS\)", 5).await?;
+    runtime.shutdown().await
+});
+
 // Open many connections to the runtime
 test!(open_many_connections_to_the_runtime_and_shutdown, {
     let runtime = Northstar::launch().await?;

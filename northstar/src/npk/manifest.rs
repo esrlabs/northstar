@@ -330,21 +330,16 @@ pub enum SyscallRule {
     Args(SyscallArgRule),
 }
 
-#[cfg(target_pointer_width = "32")]
-type ArgType = u32;
-#[cfg(target_pointer_width = "64")]
-pub type ArgType = u64;
-
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyscallArgRule {
     /// Index of syscall argument
     pub index: usize,
     /// Value of syscall argument
-    pub values: Option<Vec<ArgType>>,
+    pub values: Option<Vec<u64>>,
     /// Bitmask of syscall argument
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mask: Option<ArgType>,
+    pub mask: Option<u64>,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
