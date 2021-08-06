@@ -299,33 +299,33 @@ test!(proc_is_mounted_ro, {
     runtime.shutdown().await
 });
 
-// Call specifically allowed syscall
-test!(seccomp_allowed_syscall, {
+// Call syscall with specifically allowed argument
+test!(seccomp_allowed_syscall_with_allowed_arg, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime
-        .start_with_args(TEST_CONTAINER, ["call-sysfs", "1"])
+        .start_with_args(TEST_CONTAINER, ["call-delete-module", "1"])
         .await?;
-    assume("Sysfs syscall was successful", 5).await?;
+    assume("delete_module syscall was successful", 5).await?;
     runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
-// Call syscall allowed by bitmask
-test!(seccomp_allowed_by_mask_syscall, {
+// Call syscall with argument allowed by bitmask
+test!(seccomp_allowed_syscall_with_masked_arg, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime
-        .start_with_args(TEST_CONTAINER, ["call-sysfs", "4"])
+        .start_with_args(TEST_CONTAINER, ["call-delete-module", "4"])
         .await?;
-    assume("Sysfs syscall was successful", 5).await?;
+    assume("delete_module syscall was successful", 5).await?;
     runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
 
-// Call prohibited syscall
-test!(seccomp_prohibited_syscall, {
+// Call syscall with prohibited argument
+test!(seccomp_allowed_syscall_with_prohibited_arg, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime
-        .start_with_args(TEST_CONTAINER, ["call-sysfs", "7"])
+        .start_with_args(TEST_CONTAINER, ["call-delete-module", "7"])
         .await?;
     assume(r"exited after .* with status Signaled\(SIGSYS\)", 5).await?;
     runtime.shutdown().await

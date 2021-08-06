@@ -502,7 +502,7 @@ mod serde_caps {
 
 #[cfg(test)]
 mod tests {
-    use crate::npk::manifest::{SyscallRule::All, *};
+    use crate::npk::manifest::*;
     use anyhow::{anyhow, Result};
     use std::{
         convert::{TryFrom, TryInto},
@@ -609,8 +609,14 @@ seccomp:
         assert_eq!(manifest.cgroups, Some(cgroups));
 
         let mut seccomp: HashMap<NonNullString, SyscallRule> = HashMap::new();
-        seccomp.insert(NonNullString::try_from("fork".to_string())?, All);
-        seccomp.insert(NonNullString::try_from("waitpid".to_string())?, All);
+        seccomp.insert(
+            NonNullString::try_from("fork".to_string())?,
+            SyscallRule::All,
+        );
+        seccomp.insert(
+            NonNullString::try_from("waitpid".to_string())?,
+            SyscallRule::All,
+        );
         assert_eq!(
             manifest.seccomp,
             Some(Seccomp {
