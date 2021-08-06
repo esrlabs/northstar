@@ -589,7 +589,11 @@ lazy_static::lazy_static! {
                 hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Args(SyscallArgRule{
                     index: 0,
                     values: None,
-                    mask: Some(0x7E020000)}));
+                    // Docker allows a masked syscall argument if it is equal to 0. This effectively
+                    // prohibits the use of the masked values. Since our logic specifically allows
+                    // arguments that match the mask, we invert dockers bitmask here to achieve the
+                    // same behavior.
+                    mask: Some(!0x7E020000)}));
             }
         }
         builder_from_rules(&hm)

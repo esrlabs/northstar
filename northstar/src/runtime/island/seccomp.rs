@@ -101,6 +101,7 @@ pub fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builde
     builder
 }
 
+/// Return an error if the current platform is not supported
 fn check_platform_requirements() -> Result<(), Error> {
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     return Err(UnsupportedPlatform(
@@ -527,9 +528,9 @@ fn jump_if_scratch_matches(
         let jump_false = jump_false + offset_adjust;
 
         // Compare accumulator with scratch memory
-        let prev_insts = insts;
+        let insts_before = insts;
         insts += jump_if_scratch_is_equal(filter, *value, jump_true, jump_false);
-        assert_eq!(prev_insts + INSTS_PER_ITER as u32, insts);
+        assert_eq!(insts_before + INSTS_PER_ITER as u32, insts);
     }
     insts
 }
@@ -590,12 +591,13 @@ fn jump_if_scratch_matches_mask(
     let low: u32 = mask as u32;
     let high: u32 = (mask >> 32) as u32;
     let mut insts = 0;
+    let insts_before = insts;
     insts += load_scratch_low_into_acc(filter);
     insts += jump_if_acc_matches_mask(filter, low, EVAL_NEXT, jump_false + INSTS_PER_CHECK);
-    let prev_insts = insts;
+    assert_eq!(insts_before + INSTS_PER_CHECK as u32, insts);
     insts += load_scratch_high_into_acc(filter);
     insts += jump_if_acc_matches_mask(filter, high, jump_true, jump_false);
-    assert_eq!(prev_insts + INSTS_PER_CHECK as u32, insts);
+    assert_eq!(insts_before + 2 * INSTS_PER_CHECK as u32, insts);
     insts
 }
 
