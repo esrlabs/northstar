@@ -23,6 +23,7 @@ use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    ptr::null_mut,
     thread, time,
 };
 use structopt::StructOpt;
@@ -53,8 +54,8 @@ enum Command {
         message: String,
         path: PathBuf,
     },
-    CallSysfs {
-        option: String,
+    CallDeleteModule {
+        flags: String,
     },
 }
 
@@ -70,7 +71,7 @@ fn main() -> Result<()> {
         Command::Touch { path } => touch(&path)?,
         Command::Sleep => (),
         Command::Write { message, path } => write(&message, path.as_path())?,
-        Command::CallSysfs { option } => call_sysfs(option)?,
+        Command::CallDeleteModule { flags } => call_delete_module(flags)?,
     };
 
     sleep();
@@ -129,11 +130,12 @@ fn leak_memory() {
     }
 }
 
-/// Call sysfs syscall to test seccomp
-fn call_sysfs(option: String) -> Result<()> {
+/// Call the 'delete_module' syscall with an empty module name. This has no effect and just returns -1.
+/// Since the call is not allowed by the default seccomp profile it is used to test seccomp.
+fn call_delete_module(option: String) -> Result<()> {
     let option = option.parse::<u32>().unwrap();
-    let _result = unsafe { libc::syscall(libc::SYS_sysfs, option) };
-    println!("Sysfs syscall was successful");
+    let result = unsafe { libc::syscall(libc::SYS_delete_module, null_mut::<u32>(), option) };
+    println!("delete_module syscall was successful ({})", result);
     Ok(())
 }
 

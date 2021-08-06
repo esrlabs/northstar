@@ -48,9 +48,9 @@ seccomp:
   profile:
     default
   allow:
-    sysfs:
+    delete_module:
       args:
-        index: 0
+        index: 1
         values: [
             1,
         ]
