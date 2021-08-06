@@ -342,24 +342,6 @@ pub struct SyscallArgRule {
     pub mask: Option<u64>,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub enum CmpOperation {
-    #[serde(rename = "ne")]
-    Ne,
-    #[serde(rename = "lt")]
-    Lt,
-    #[serde(rename = "lle")]
-    Le,
-    #[serde(rename = "eq")]
-    Eq,
-    #[serde(rename = "ge")]
-    Ge,
-    #[serde(rename = "gt")]
-    Gt,
-    #[serde(rename = "masked_eq")]
-    MaskedEq,
-}
-
 /// IO configuration for stdin, stdout, stderr
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
