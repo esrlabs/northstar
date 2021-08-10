@@ -62,7 +62,19 @@ const EVAL_NEXT: u8 = 0;
 /// Skip next instruction
 const SKIP_NEXT: u8 = 1;
 
-/// Construct a whitelist syscall filter that is applied post clone.
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("Invalid arguments")]
+    InvalidArguments,
+    #[error("Unknown system call {0}")]
+    UnknownSyscall(String),
+    #[error("OS error: {0}")]
+    Os(nix::Error),
+    #[error("Unsupported platform")]
+    UnsupportedPlatform(String),
+}
+
+/// Construct a allowlist syscall filter that is applied post clone.
 pub(super) fn seccomp_filter(
     profile: Option<&Profile>,
     rules: Option<&HashMap<NonNullString, SyscallRule>>,
@@ -99,23 +111,6 @@ pub fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builde
         }
     }
     builder
-}
-
-/// Return an error if the current platform is not supported
-fn check_platform_requirements() -> Result<(), Error> {
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    return Err(UnsupportedPlatform(
-        "Seccomp is only supported on aarch64 and x86_64".to_string(),
-    ));
-    #[cfg(target_pointer_width = "32")]
-    return Err(UnsupportedPlatform(
-        "Seccomp is not supported on 32 Bit architectures".to_string(),
-    ));
-    #[cfg(target_endian = "big")]
-    return Err(UnsupportedPlatform(
-        "Seccomp is not supported on Big Endian architectures".to_string(),
-    ));
-    Ok(())
 }
 
 /// Create an AllowList Builder from a pre-defined profile
@@ -207,19 +202,24 @@ fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -
     }
 }
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Invalid arguments")]
-    InvalidArguments,
-    #[error("Unknown system call {0}")]
-    UnknownSyscall(String),
-    #[error("OS error: {0}")]
-    Os(nix::Error),
-    #[error("Unsupported platform")]
-    UnsupportedPlatform(String),
+/// Check if the current platform is supported and return an error if not
+fn check_platform_requirements() -> Result<(), Error> {
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    return Err(UnsupportedPlatform(
+        "Seccomp is only supported on aarch64 and x86_64".to_string(),
+    ));
+    #[cfg(target_pointer_width = "32")]
+    return Err(UnsupportedPlatform(
+        "Seccomp is not supported on 32 Bit architectures".to_string(),
+    ));
+    #[cfg(target_endian = "big")]
+    return Err(UnsupportedPlatform(
+        "Seccomp is not supported on Big Endian architectures".to_string(),
+    ));
+    Ok(())
 }
 
-// Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
+/// Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
 #[derive(Clone, Debug, Default)]
 pub struct AllowList {
     list: Vec<sock_filter>,
@@ -254,10 +254,11 @@ impl AllowList {
 struct NumericSyscallRule {
     /// Number of syscall
     nr: u32,
-    /// Allowed argument values. If no values are defined, the syscall is allowed unconditionally
+    /// Allowed argument values. If no values are defined, the syscall is allowed unconditionally.
     arg_rule: Option<SyscallArgRule>,
 }
 
+/// Builder for AllowList struct
 #[derive(Clone)]
 pub struct Builder {
     allowlist: Vec<NumericSyscallRule>,
@@ -279,13 +280,13 @@ impl Builder {
         builder
     }
 
-    /// Add syscall number to allowlist
+    /// Add syscall to allowlist by number
     pub fn allow_syscall_nr(&mut self, nr: u32, arg_rule: Option<SyscallArgRule>) -> &mut Builder {
         self.allowlist.push(NumericSyscallRule { nr, arg_rule });
         self
     }
 
-    /// Add syscall name to allowlist
+    /// Add syscall to allowlist by name
     pub fn allow_syscall_name(
         &mut self,
         name: &str,
@@ -297,16 +298,15 @@ impl Builder {
         }
     }
 
-    /// Log syscall violations only
+    /// Log syscall violations instead of aborting the program
     #[allow(unused)]
     pub fn log_only(&mut self) -> &mut Builder {
         self.log_only = true;
         self
     }
 
-    /// Extend one builder with another builder
-    ///
-    /// Note: The 'log_only' property of the extended builder is only set to true if it was true in both original builders
+    /// Extend one builder with another builder.
+    /// Note: The 'log_only' property of the extended builder is only set to true if it was true in both original builders.
     pub fn extend(&mut self, other: Builder) -> &mut Builder {
         self.allowlist.extend(other.allowlist);
         self.log_only &= other.log_only;
@@ -334,12 +334,12 @@ impl Builder {
         // Add filter block for every allowed syscall
         for rule in &self.allowlist {
             if let Some(arg_rule) = &rule.arg_rule {
-                if let Some(args) = &arg_rule.values {
-                    trace!("Adding seccomp argument block (num. args={})", args.len());
+                if let Some(values) = &arg_rule.values {
+                    trace!("Adding seccomp argument block (nr={})", rule.nr);
 
                     // Precalculate number of instructions to skip if syscall number does not match
-                    assert!(args.len() <= 50);
-                    let skip_if_no_match: u8 = (4 + 4 * args.len() + 1) as u8;
+                    assert!(values.len() <= 50); // Avoid u8 overflow
+                    let skip_if_no_match: u8 = (4 + 4 * values.len() + 1) as u8;
 
                     // If syscall matches continue to check its arguments
                     jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, skip_if_no_match);
@@ -348,17 +348,21 @@ impl Builder {
                     // Load syscall argument into scratch memory
                     insts += load_syscall_arg_into_scratch(&mut filter, arg_rule);
                     // Compare syscall argument against allowed values
-                    insts += jump_if_scratch_matches(&mut filter, args, EVAL_NEXT, SKIP_NEXT);
+                    insts += jump_if_scratch_matches(&mut filter, values, EVAL_NEXT, SKIP_NEXT);
                     // If syscall argument matches return 'allow' directly
-                    insts += add_success(&mut filter);
+                    insts += return_success(&mut filter);
                     assert_eq!(skip_if_no_match as u32, insts);
                     // Restore accumulator with syscall number for possible next iteration
                     load_syscall_nr_into_acc(&mut filter);
 
-                    trace!("Finished seccomp argument block (num. args={})", args.len());
+                    trace!("Finished seccomp argument block (nr={})", rule.nr);
                 }
                 if let Some(mask) = arg_rule.mask {
-                    trace!("Adding masked seccomp argument block (mask={})", mask);
+                    trace!(
+                        "Adding seccomp argument block (nr={}, mask={})",
+                        rule.nr,
+                        mask
+                    );
 
                     // Precalculate number of instructions to skip if syscall number does not match
                     let skip_if_no_match: u8 = (4 + /*3*/ 6 + 1) as u8;
@@ -371,23 +375,31 @@ impl Builder {
                     insts += load_syscall_arg_into_scratch(&mut filter, arg_rule);
                     // Compare syscall argument against mask
                     insts += jump_if_scratch_matches_mask(&mut filter, mask, EVAL_NEXT, SKIP_NEXT);
-                    insts += add_success(&mut filter);
+                    insts += return_success(&mut filter);
                     // Restore accumulator with syscall number for possible next iteration
                     assert_eq!(skip_if_no_match as u32, insts);
                     load_syscall_nr_into_acc(&mut filter);
 
-                    trace!("Finished masked seccomp argument block (mask={})", mask);
+                    trace!(
+                        "Finished seccomp arg. block (nr={}, mask={})",
+                        rule.nr,
+                        mask
+                    );
                 }
             } else {
+                trace!("Adding seccomp syscall block (nr={})", rule.nr);
+
                 // If syscall matches return 'allow' directly
                 jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, SKIP_NEXT);
-                add_success(&mut filter);
+                return_success(&mut filter);
                 // No need to restore accumulator with syscall number as we did not overwrite it
+
+                trace!("Finished seccomp syscall block (nr={})", rule.nr);
             }
         }
 
         // Fall through consequence if not filter rule matched
-        add_fail(&mut filter, self.log_only);
+        return_fail(&mut filter, self.log_only);
 
         filter
     }
@@ -602,7 +614,7 @@ fn jump_if_scratch_matches_mask(
 }
 
 /// Add statement that causes the BPF program return and prohibit the syscall
-fn add_fail(filter: &mut AllowList, log_only: bool) -> u32 {
+fn return_fail(filter: &mut AllowList, log_only: bool) -> u32 {
     if log_only {
         filter.list.push(bpf_ret(SECCOMP_RET_LOG));
     } else {
@@ -612,7 +624,7 @@ fn add_fail(filter: &mut AllowList, log_only: bool) -> u32 {
 }
 
 /// Add statement that causes the BPF program return and allow the syscall
-fn add_success(filter: &mut AllowList) -> u32 {
+fn return_success(filter: &mut AllowList) -> u32 {
     trace!("add_success");
     filter.list.push(bpf_ret(SECCOMP_RET_ALLOW));
     1
@@ -626,24 +638,25 @@ fn _bpf_neg() -> sock_filter {
 
 /// And accumulator with value
 fn bpf_and(k: u32) -> sock_filter {
-    trace!("bpf_and");
+    trace!("bpf_and({})", k);
     bpf_stmt(BPF_ALU | BPF_AND | BPF_K, k)
 }
 
 /// Or accumulator with value
 fn _bpf_or(k: u32) -> sock_filter {
-    trace!("bpf_or");
+    trace!("bpf_or({})", k);
     bpf_stmt(BPF_ALU | BPF_OR | BPF_K, k)
 }
 
 /// Add return clause (e.g. allow, kill, log)
 fn bpf_ret(k: u32) -> sock_filter {
-    trace!("bpf_ret");
+    trace!("bpf_ret({})", k);
     bpf_stmt(BPF_RET | BPF_K, k)
 }
 
 // https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/filter.h#L48
 fn bpf_stmt(code: u32, k: u32) -> sock_filter {
+    trace!("bpf_stmt({}, {})", code, k);
     bpf_jump(code, k, 0, 0)
 }
 
