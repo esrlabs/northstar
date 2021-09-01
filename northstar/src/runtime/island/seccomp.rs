@@ -50,7 +50,6 @@ mod bindings {
 
 #[cfg(target_arch = "aarch64")]
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_AARCH64;
-
 #[cfg(target_arch = "x86_64")]
 const AUDIT_ARCH: u32 = bindings::AUDIT_ARCH_X86_64;
 
@@ -64,14 +63,12 @@ const SKIP_NEXT: u8 = 1;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Invalid arguments")]
-    InvalidArguments,
+    #[error("Seccomp filter list exceeds maximum number of BPF statements")]
+    ListTooLong,
     #[error("Unknown system call {0}")]
     UnknownSyscall(String),
     #[error("OS error: {0}")]
     Os(nix::Error),
-    #[error("Unsupported platform")]
-    UnsupportedPlatform(String),
 }
 
 /// Construct a allowlist syscall filter that is applied post clone.
@@ -79,8 +76,8 @@ pub(super) fn seccomp_filter(
     profile: Option<&Profile>,
     rules: Option<&HashMap<NonNullString, SyscallRule>>,
     caps: Option<&HashSet<Capability>>,
-) -> Result<AllowList, Error> {
-    check_platform_requirements()?;
+) -> AllowList {
+    check_platform_requirements();
 
     let mut builder = Builder::new();
     if let Some(profile) = profile {
@@ -89,7 +86,7 @@ pub(super) fn seccomp_filter(
     if let Some(rules) = rules {
         builder.extend(builder_from_rules(rules));
     }
-    Ok(builder.build())
+    builder.build()
 }
 
 /// Create an AllowList Builder from a list of syscall names
@@ -98,7 +95,7 @@ pub fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builde
     for (name, call_rule) in rules {
         let arg_rule;
         match call_rule {
-            SyscallRule::All => {
+            SyscallRule::Any => {
                 arg_rule = None;
             }
             SyscallRule::Args(a) => {
@@ -203,20 +200,13 @@ fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -
 }
 
 /// Check if the current platform is supported and return an error if not
-fn check_platform_requirements() -> Result<(), Error> {
+fn check_platform_requirements() {
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    return Err(UnsupportedPlatform(
-        "Seccomp is only supported on aarch64 and x86_64".to_string(),
-    ));
+    compile_error!("Seccomp is only supported on aarch64 and x86_64");
     #[cfg(target_pointer_width = "32")]
-    return Err(UnsupportedPlatform(
-        "Seccomp is not supported on 32 Bit architectures".to_string(),
-    ));
+    compile_error!("Seccomp is not supported on 32 Bit architectures");
     #[cfg(target_endian = "big")]
-    return Err(UnsupportedPlatform(
-        "Seccomp is not supported on Big Endian architectures".to_string(),
-    ));
-    Ok(())
+    compile_error!("Seccomp is not supported on Big Endian architectures");
 }
 
 /// Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
@@ -237,7 +227,7 @@ impl AllowList {
         use nix::libc::SECCOMP_MODE_FILTER;
 
         if self.list.len() > BPF_MAXINSNS as usize {
-            return Err(Error::InvalidArguments);
+            return Err(Error::ListTooLong);
         }
 
         let sf_prog = sock_fprog {
@@ -338,7 +328,7 @@ impl Builder {
                     trace!("Adding seccomp argument block (nr={})", rule.nr);
 
                     // Precalculate number of instructions to skip if syscall number does not match
-                    assert!(values.len() <= 50); // Avoid u8 overflow
+                    assert!(values.len() <= ((u8::MAX - 5) / 4) as usize); // Detect u8 overflow
                     let skip_if_no_match: u8 = (4 + 4 * values.len() + 1) as u8;
 
                     // If syscall matches continue to check its arguments
@@ -365,7 +355,7 @@ impl Builder {
                     );
 
                     // Precalculate number of instructions to skip if syscall number does not match
-                    let skip_if_no_match: u8 = (4 + /*3*/ 6 + 1) as u8;
+                    let skip_if_no_match: u8 = (4 + 6 + 1) as u8;
 
                     // If syscall matches continue to check its arguments
                     jump_if_acc_is_equal(&mut filter, rule.nr, EVAL_NEXT, skip_if_no_match);
