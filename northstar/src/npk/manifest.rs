@@ -175,7 +175,7 @@ impl Manifest {
                                 }
                             }
                         }
-                        SyscallRule::All => {
+                        SyscallRule::Any => {
                             // This syscall is allowed unconditionally
                         }
                     }
@@ -322,9 +322,9 @@ pub struct Seccomp {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 //#[serde(untagged)]
 pub enum SyscallRule {
-    /// All syscall arguments are allowed
-    #[serde(rename = "all")]
-    All,
+    /// Any syscall argument is allowed
+    #[serde(rename = "any")]
+    Any,
     /// Explicit list of allowed syscalls arguments
     #[serde(rename = "args")]
     Args(SyscallArgRule),
@@ -555,8 +555,8 @@ cgroups:
     shares: 100
 seccomp:
   allow: 
-    fork: all
-    waitpid: all
+    fork: any
+    waitpid: any
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -611,11 +611,11 @@ seccomp:
         let mut seccomp: HashMap<NonNullString, SyscallRule> = HashMap::new();
         seccomp.insert(
             NonNullString::try_from("fork".to_string())?,
-            SyscallRule::All,
+            SyscallRule::Any,
         );
         seccomp.insert(
             NonNullString::try_from("waitpid".to_string())?,
-            SyscallRule::All,
+            SyscallRule::Any,
         );
         assert_eq!(
             manifest.seccomp,
@@ -809,8 +809,8 @@ cgroups:
     shares: 100
 seccomp:
   allow:
-    fork: all
-    waitpid: all
+    fork: any
+    waitpid: any
 capabilities:
   - CAP_NET_ADMIN
 io:

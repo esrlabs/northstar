@@ -113,7 +113,7 @@ impl Island {
         let (checkpoint_runtime, checkpoint_init) = checkpoints();
         let groups = groups(&manifest);
         let capabilities = capabilities(&manifest);
-        let seccomp = seccomp_filter(&manifest).expect("Failed to create seccomp filter");
+        let seccomp = seccomp_filter(&manifest);
 
         debug!("{} init is {:?}", manifest.name, init);
         debug!("{} argv is {:?}", manifest.name, argv);
@@ -425,20 +425,15 @@ fn groups(manifest: &Manifest) -> Vec<u32> {
 }
 
 /// Generate seccomp filter applied in init
-fn seccomp_filter(manifest: &Manifest) -> Result<Option<seccomp::AllowList>, Error> {
+fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
     if let Some(seccomp) = manifest.seccomp.as_ref() {
-        return match seccomp::seccomp_filter(
+        return Some(seccomp::seccomp_filter(
             seccomp.profile.as_ref(),
             seccomp.allow.as_ref(),
             manifest.capabilities.as_ref(),
-        )
-        .map_err(Error::Seccomp)
-        {
-            Ok(f) => Ok(Some(f)),
-            Err(e) => Err(e),
-        };
+        ));
     }
-    Ok(None)
+    None
 }
 
 /// Block all signals of this process and current thread
