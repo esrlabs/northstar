@@ -19,8 +19,7 @@ use crate::{
 };
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_ALU, BPF_AND, BPF_IMM, BPF_JEQ, BPF_JMP,
-    BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM, BPF_NEG, BPF_OR, BPF_RET, BPF_ST, BPF_W,
-    SECCOMP_RET_ALLOW, SECCOMP_RET_KILL, SECCOMP_RET_LOG, SYSCALL_MAP,
+    BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM, BPF_NEG, BPF_OR, BPF_RET, BPF_ST, BPF_W, SYSCALL_MAP,
 };
 use log::trace;
 use nix::errno::Errno;
@@ -30,22 +29,10 @@ use std::{
 };
 use thiserror::Error;
 
-// Required for platform check
-#[cfg(any(
-    not(any(target_arch = "aarch64", target_arch = "x86_64")),
-    target_pointer_width = "32",
-    target_endian = "big"
-))]
-use crate::runtime::island::seccomp::Error::UnsupportedPlatform;
-
 #[allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 mod bindings {
     include!(concat!(env!("OUT_DIR"), "/syscall_bindings.rs"));
     include!(concat!(env!("OUT_DIR"), "/seccomp_bindings.rs"));
-
-    /// SECCOMP_RET_LOG is implemented by Linux 4.14 but not present in all C libs
-    #[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
-    pub const SECCOMP_RET_LOG: u32 = 2147221504;
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -316,7 +303,7 @@ impl Builder {
 
         // Kill process if architecture does not match
         jump_if_acc_is_equal(&mut filter, AUDIT_ARCH, SKIP_NEXT, EVAL_NEXT);
-        filter.list.push(bpf_ret(SECCOMP_RET_KILL)); // never just log if architecture does not match
+        filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_KILL));
 
         // Load syscall number into accumulator for subsequent filtering
         load_syscall_nr_into_acc(&mut filter);
@@ -562,17 +549,16 @@ fn jump_if_acc_matches_mask(
     insts
 }
 
-/// Compare first two 32 bit registers of scratch memory
+/// Compare first two 32 bit registers of scratch memory with value
 fn jump_if_scratch_is_equal(
     filter: &mut AllowList,
     value: u64,
     jump_true: u8,
     jump_false: u8,
 ) -> u32 {
+    // Compare high and low parts of scratch memory separately
     let low: u32 = value as u32;
     let high: u32 = (value >> 32) as u32;
-
-    // Compare high and low parts of scratch memory separately
     let mut insts = 0;
     insts += load_scratch_low_into_acc(filter);
     insts += jump_if_acc_is_equal(filter, low, EVAL_NEXT, jump_false + 2);
@@ -581,15 +567,16 @@ fn jump_if_scratch_is_equal(
     insts
 }
 
-/// Compare first two 32 bit registers of scratch memory
+/// Match first two 32 bit registers of scratch memory against bitmask
 fn jump_if_scratch_matches_mask(
     filter: &mut AllowList,
     mask: u64,
     jump_true: u8,
     jump_false: u8,
 ) -> u32 {
-    // Check high and low parts of scratch memory separately
     const INSTS_PER_CHECK: u8 = 3;
+
+    // Check high and low parts of scratch memory separately
     let low: u32 = mask as u32;
     let high: u32 = (mask >> 32) as u32;
     let mut insts = 0;
@@ -606,9 +593,9 @@ fn jump_if_scratch_matches_mask(
 /// Add statement that causes the BPF program return and prohibit the syscall
 fn return_fail(filter: &mut AllowList, log_only: bool) -> u32 {
     if log_only {
-        filter.list.push(bpf_ret(SECCOMP_RET_LOG));
+        filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_LOG));
     } else {
-        filter.list.push(bpf_ret(SECCOMP_RET_KILL));
+        filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_KILL));
     }
     1
 }
@@ -616,7 +603,7 @@ fn return_fail(filter: &mut AllowList, log_only: bool) -> u32 {
 /// Add statement that causes the BPF program return and allow the syscall
 fn return_success(filter: &mut AllowList) -> u32 {
     trace!("add_success");
-    filter.list.push(bpf_ret(SECCOMP_RET_ALLOW));
+    filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_ALLOW));
     1
 }
 
