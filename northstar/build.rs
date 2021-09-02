@@ -20,19 +20,9 @@ fn main() {
 
 fn generate_seccomp() {
     fn generate() -> anyhow::Result<()> {
-        let target = std::env::var("TARGET").unwrap();
-
-        // Need some extra include path for the cross images for aarch64 gnu and musl
-        let extra_arg = match target.as_str() {
-            "aarch64-unknown-linux-gnu" => "-I/usr/aarch64-linux-gnu/include",
-            "aarch64-unknown-linux-musl" => "-I/usr/local/aarch64-linux-musl/include",
-            _ => "",
-        };
-
         let lines = bindgen::Builder::default()
             .header_contents("syscall.h", "#include <sys/syscall.h>")
             .allowlist_var("SYS_[0-9a-zA-Z_]+")
-            .clang_arg(extra_arg)
             .generate()
             .expect("Failed to generate syscall bindings")
             .to_string();
@@ -75,7 +65,6 @@ fn generate_seccomp() {
 #include <linux/audit.h>"#,
             )
             .layout_tests(false)
-            .clang_arg(extra_arg)
             .allowlist_type("seccomp_data")
             .allowlist_type("sock_fprog")
             .allowlist_var("BPF_ABS")
