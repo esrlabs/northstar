@@ -171,9 +171,11 @@ impl Island {
                         groups,
                         capabilities,
                         seccomp,
-                        checkpoint: checkpoint_init,
                     };
-                    init.run();
+
+                    // Wait for the runtime to signal that init may start.
+                    let condition_notify = checkpoint_init.wait();
+                    init.run(condition_notify);
                 }
             },
             Err(e) => panic!("Fork error: {}", e),

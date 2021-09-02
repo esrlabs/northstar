@@ -12,10 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Capabilities, Checkpoint, SIGNAL_OFFSET,
-};
-use crate::npk::manifest::Manifest;
+use super::{clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Capabilities, SIGNAL_OFFSET};
+use crate::{npk::manifest::Manifest, runtime::pipe::ConditionNotify};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
@@ -42,11 +40,10 @@ pub(super) struct Init {
     pub groups: Vec<u32>,
     pub capabilities: Capabilities,
     pub seccomp: Option<AllowList>,
-    pub checkpoint: Checkpoint,
 }
 
 impl Init {
-    pub(super) fn run(self) -> ! {
+    pub(super) fn run(self, condition_notify: ConditionNotify) -> ! {
         // Set the process name to init. This process inherited the process name
         // from the runtime
         set_process_name();
@@ -89,7 +86,7 @@ impl Init {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
                     // Drop checkpoint. The fds are cloned into the child and are closed upon execve.
-                    drop(self.checkpoint);
+                    drop(condition_notify);
 
                     // Wait for the child to exit
                     loop {
@@ -124,11 +121,8 @@ impl Init {
                         filter.apply().expect("Failed to apply seccomp filter.");
                     }
 
-                    // Wait for the runtime to signal that the child shall start.
                     // Checkpoint fds are FD_CLOEXEC and act as a signal for the launcher that this child is started.
                     // Therefore no explicit drop (close) of _checkpoint_notify is needed here.
-                    let _checkpoint_notify = self.checkpoint.wait();
-
                     panic!(
                         "Execve: {:?} {:?}: {:?}",
                         &self.init,
@@ -179,6 +173,7 @@ impl Init {
             // caps::set cannot be called for bounded
             caps::drop(None, caps::CapSet::Bounding, *cap).expect("Failed to drop bounding cap");
         }
+        // TODO: Reenable or remove:
         // caps::set(None, caps::CapSet::Bounding, &self.capabilities.bounded)
         //     .expect("Failed to set effective caps");
         caps::set(None, caps::CapSet::Effective, &self.capabilities.set)

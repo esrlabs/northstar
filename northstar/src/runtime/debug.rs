@@ -119,6 +119,7 @@ impl Strace {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| Error::io("Failed to spawn strace", e))?;
+        debug!("Started strace with for PID {}", &pid.to_string());
 
         let token = CancellationToken::new();
         let stderr = child.stderr.take().expect("Failed to get stderr of strace");
