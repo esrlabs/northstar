@@ -1,0 +1,28 @@
+@startuml container_startup
+
+Runtime -> Runtime: Check and Mount container
+Runtime -> Runtime: Block signals
+create Init
+Runtime -> Init: Clone Init
+Init -> Init: Wait for run signal
+Runtime -> Runtime: Unblock signals
+Runtime -> Runtime: Configure cgroups
+Runtime -> Init: Signal run
+Runtime -> Runtime: Wait for execve
+Init -> Init: Set parent death signal
+Init -> Init: Mount, Chroot, UID / GID,\ndrop privileges, file descriptors
+create Container
+Init -> Container: Clone Container
+Init -> Init: Wait for container to exit (waitpid)
+Container -> Container: Set parent death signal
+Container -> Container: Unblock signals
+Container -> Container: Set seccomp filter
+Container -> Runtime: Execve 
+Container -> Container: Run container executable
+Runtime -> Runtime: Continue operation
+Container -> Init: Exit
+destroy Container
+Init -> Runtime: Exit
+destroy Init
+
+@enduml
