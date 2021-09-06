@@ -981,7 +981,7 @@ version = "0.1.0"
 [[package]]
 name = "memfd"
 version = "0.4.1-alpha.0"
-source = "git+https://github.com/flxo/memfd-rs?branch=pr-android#5d23ebc5c80e6c225ae35484b9d24284759e9069"
+source = "git+https://github.com/lucab/memfd-rs?rev=a7d11c2#a7d11c2d7f353c53a57d2b4a65961b103003f893"
 dependencies = [
  "libc",
 ]
