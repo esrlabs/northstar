@@ -42,12 +42,9 @@ mod cgroups;
 pub mod config;
 mod console;
 mod debug;
-#[allow(unused)]
-mod device_mapper;
 mod error;
 mod island;
 mod key;
-mod loopdev;
 mod mount;
 mod pipe;
 mod repository;

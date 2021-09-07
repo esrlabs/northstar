@@ -15,9 +15,3 @@ cpu = "northstar"
 #output = "file"
 #flags = "-f -s 256"
 #include_runtime = true
-
-[devices]
-loop_control = "/dev/loop-control"
-loop_dev = "/dev/block/loop"
-device_mapper = "/dev/device-mapper"
-device_mapper_dev = "/dev/block/dm-"

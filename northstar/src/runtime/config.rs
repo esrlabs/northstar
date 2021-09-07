@@ -32,7 +32,6 @@ pub struct Config {
 
     pub repositories: HashMap<RepositoryId, Repository>,
     pub cgroups: CGroups,
-    pub devices: Devices,
 
     /// Debugging options
     pub debug: Option<Debug>,
@@ -61,18 +60,6 @@ pub struct Repository {
 /// The directory is created if it does not exist.
 /// If not set for a specific cgroup, it defaults to "north".
 pub type CGroups = HashMap<NonNullString, PathBuf>;
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct Devices {
-    /// Device mapper control file e.g /dev/mapper/control
-    pub device_mapper: PathBuf,
-    /// Device mapper dev prefix e.g /dev/mapper/dm-
-    pub device_mapper_dev: String,
-    /// Loopback control file e.g /dev/loop-control
-    pub loop_control: PathBuf,
-    /// Loopback device files e.g /dev/loop or /dev/block/loop
-    pub loop_dev: String,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Debug {

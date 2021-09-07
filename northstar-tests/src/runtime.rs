@@ -102,20 +102,6 @@ impl Northstar {
             log_dir,
             repositories,
             cgroups,
-            #[cfg(target_os = "android")]
-            devices: config::Devices {
-                device_mapper: PathBuf::from("/dev/device-mapper"),
-                device_mapper_dev: "/dev/block/dm-".into(),
-                loop_control: PathBuf::from("/dev/loop-control"),
-                loop_dev: "/dev/block/loop".into(),
-            },
-            #[cfg(not(target_os = "android"))]
-            devices: config::Devices {
-                device_mapper: PathBuf::from("/dev/mapper/control"),
-                device_mapper_dev: "/dev/dm-".into(),
-                loop_control: PathBuf::from("/dev/loop-control"),
-                loop_dev: "/dev/loop".into(),
-            },
             debug: None,
         };
 
