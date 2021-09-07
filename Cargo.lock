@@ -980,8 +980,9 @@ version = "0.1.0"
 
 [[package]]
 name = "memfd"
-version = "0.4.1-alpha.0"
-source = "git+https://github.com/lucab/memfd-rs?rev=a7d11c2#a7d11c2d7f353c53a57d2b4a65961b103003f893"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6627dc657574b49d6ad27105ed671822be56e0d2547d413bfbf3e8d8fa92e7a"
 dependencies = [
  "libc",
 ]
