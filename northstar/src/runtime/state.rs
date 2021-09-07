@@ -19,7 +19,7 @@ use super::{
     error::Error,
     island::Island,
     key::PublicKey,
-    mount::MountControl,
+    mount::{MountControl, MountInfo},
     repository::{DirRepository, MemRepository},
     Container, Event, EventTx, ExitStatus, Notification, Pid, Repository, RepositoryId,
 };
@@ -38,7 +38,7 @@ use futures::{
     executor::{ThreadPool, ThreadPoolBuilder},
     future::{join_all, ready, Either},
     task::SpawnExt,
-    Future, FutureExt,
+    Future,
 };
 use log::{debug, error, info, warn};
 use nix::sys::signal::Signal;
@@ -55,7 +55,7 @@ use std::{
 };
 use tokio::{
     sync::{mpsc, oneshot},
-    task, time,
+    time,
 };
 use Signal::SIGKILL;
 
@@ -83,17 +83,11 @@ pub(super) struct State<'a> {
 }
 
 #[derive(Debug)]
-pub(super) enum BlockDevice {
-    Loopback(PathBuf),
-    Verity(PathBuf),
-}
-
-#[derive(Debug)]
 pub(super) struct MountedContainer {
     pub(super) container: Container,
     pub(super) manifest: Manifest,
     pub(super) root: PathBuf,
-    pub(super) device: BlockDevice,
+    pub(super) mount_info: MountInfo,
     pub(super) process: Option<ProcessContext>,
 }
 
@@ -131,7 +125,7 @@ impl<'a> State<'a> {
     /// Create a new empty State instance
     pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
         let repositories = Repositories::default();
-        let mount_control = Arc::new(MountControl::new(config).await.map_err(Error::Mount)?);
+        let mount_control = Arc::new(MountControl::new().await.map_err(Error::Mount)?);
         let launcher_island = Island::start(events_tx.clone(), config.clone())
             .await
             .expect("Failed to start launcher");
@@ -261,31 +255,22 @@ impl<'a> State<'a> {
         let mount_control = self.mount_control.clone();
         let container = container.clone();
         let key = key.cloned();
-        let task = task::spawn(async move {
-            let device = mount_control
+        let mount = async move {
+            let mount_info = mount_control
                 .mount(npk, &root, key.as_ref())
                 .await
-                .await
-                .map_err(Error::Mount)
-                .map(|device| {
-                    if key.is_some() {
-                        BlockDevice::Verity(device)
-                    } else {
-                        BlockDevice::Loopback(device)
-                    }
-                })?;
+                .map_err(Error::Mount)?;
 
             Ok(MountedContainer {
                 container: container.clone(),
                 manifest,
                 root,
-                device,
+                mount_info,
                 process: None,
             })
-        })
-        .then(|r| ready(r.expect("Internal task join error")));
+        };
 
-        Ok(task)
+        Ok(mount)
     }
 
     /// Umount a given container
@@ -325,14 +310,8 @@ impl<'a> State<'a> {
             return Err(Error::UmountBusy(container.clone()));
         }
 
-        // If the container is mounted with verity this needs to be passed to the umount
-        // code in order to wait for the verity device removal
-        let verity_device = match mounted_container.device {
-            BlockDevice::Loopback(_) => None,
-            BlockDevice::Verity(ref device) => Some(device.as_path()),
-        };
         self.mount_control
-            .umount(&mounted_container.root, verity_device)
+            .umount(&mounted_container.mount_info)
             .await
             .expect("Failed to umount");
         self.containers.remove(container);

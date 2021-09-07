@@ -12,18 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{
-    config::Config,
-    device_mapper as dm,
-    device_mapper::{self},
-    key::PublicKey,
-    loopdev::LoopControl,
-    state::Npk,
-};
-use crate::{npk, npk::dm_verity::VerityHeader};
+use super::{key::PublicKey, state::Npk};
+use crate::npk::dm_verity::VerityHeader;
+use devicemapper::{DevId, DmError, DmName, DmUuid};
 use floating_duration::TimeAsFloat;
-use futures::{future::ready, Future, FutureExt};
-use log::{debug, info};
+use futures::Future;
+use log::{debug, info, warn};
+use loopdev::LoopControl;
 pub use nix::mount::MsFlags as MountFlags;
 use std::{
     io,
@@ -34,124 +29,133 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tokio::{
-    fs,
-    task::{self, JoinError},
-    time,
-};
+use tokio::{fs, time};
 
 const FS_TYPE: &str = "squashfs";
 
+#[cfg(not(target_os = "android"))]
+const DEVICE_MAPPER_DEV: &str = "/dev/dm-";
+#[cfg(target_os = "android")]
+const DEVICE_MAPPER_DEV: &str = "/dev/block/dm-";
+
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Device mapper error: {0:?}")]
-    DeviceMapper(device_mapper::Error),
-    #[error("Loop device error: {0:?}")]
-    LoopDevice(super::loopdev::Error),
     #[error("IO error: {0}: {1:?}")]
     Io(String, io::Error),
-    #[error("DM Verity error: {0:?}")]
-    DmVerity(npk::dm_verity::Error),
-    #[error("NPK error: {0:?}")]
-    Npk(npk::npk::Error),
-    #[error("UTF-8 conversion error: {0:?}")]
-    Utf8Conversion(Utf8Error),
-    #[error("Inotify timeout error {0}")]
-    Timeout(String),
-    #[error("Task join error: {0}")]
-    Task(JoinError),
     #[error("Os error: {0}")]
     Os(nix::Error),
-    #[error("Repository error: {0:?}")]
-    MissingKey(String),
+    #[error("Device mapper error: {0:?}")]
+    DeviceMapper(DmError),
+    #[error("Loop device error: {0:?}")]
+    LoopDevice(io::Error),
+    #[error("NPK error: {0:?}")]
+    Npk(&'static str),
+    #[error("UTF-8 conversion error: {0:?}")]
+    Utf8Conversion(Utf8Error),
+    #[error("Timeout error {0}")]
+    Timeout(String),
 }
 
 #[derive(Debug)]
+pub(super) struct MountInfo {
+    device: PathBuf,
+    target: PathBuf,
+    dm_name: Option<String>,
+}
+
 pub(super) struct MountControl {
-    dm: Arc<dm::Dm>,
-    lc: Arc<LoopControl>,
-    device_mapper_dev: String,
+    dm: Arc<devicemapper::DM>,
+    lc: Arc<loopdev::LoopControl>,
+}
+
+impl std::fmt::Debug for MountControl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MountControl").finish()
+    }
 }
 
 impl MountControl {
-    pub(super) async fn new(config: &Config) -> Result<MountControl, Error> {
-        let lc = LoopControl::open(&config.devices.loop_control, &config.devices.loop_dev)
-            .await
-            .map_err(Error::LoopDevice)?;
-        let dm = dm::Dm::new(&config.devices.device_mapper).map_err(Error::DeviceMapper)?;
-        let device_mapper_dev = config.devices.device_mapper_dev.clone();
+    pub(super) async fn new() -> Result<MountControl, Error> {
+        let lc = LoopControl::open().map_err(Error::LoopDevice)?;
+        let dm = devicemapper::DM::new().map_err(Error::DeviceMapper)?;
         Ok(MountControl {
             lc: Arc::new(lc),
             dm: Arc::new(dm),
-            device_mapper_dev,
         })
     }
 
     /// Mounts the npk root fs to target and returns the device used to mount (loopback or device mapper)
-    pub(super) async fn mount(
+    pub(super) fn mount(
         &self,
         npk: Arc<Npk>,
         target: &Path,
         key: Option<&PublicKey>,
-    ) -> impl Future<Output = Result<PathBuf, Error>> {
+    ) -> impl Future<Output = Result<MountInfo, Error>> {
         let key = key.copied();
         let dm = self.dm.clone();
         let lc = self.lc.clone();
         let target = target.to_owned();
-        let device_mapper_dev = self.device_mapper_dev.clone();
 
-        task::spawn(async move {
+        async move {
             let start = time::Instant::now();
-            let manifest = npk.manifest();
 
-            debug!("Mounting {}:{}", manifest.name, manifest.version);
-            let device = attach(dm, lc, &device_mapper_dev, &npk, &target, key.is_some()).await?;
+            debug!(
+                "Mounting {}:{}",
+                npk.manifest().name,
+                npk.manifest().version
+            );
+            let device = mount(dm, lc, &npk, &target, key.is_some()).await?;
             let duration = start.elapsed();
             info!(
                 "Mounted {}:{} Mounting: {:.03}s",
-                manifest.name,
-                manifest.version,
+                npk.manifest().name,
+                npk.manifest().version,
                 duration.as_fractional_secs(),
             );
 
             Ok(device)
-        })
-        .then(|r| match r {
-            Ok(r) => ready(r),
-            Err(e) => ready(Err(Error::Task(e))),
-        })
+        }
     }
 
-    pub(super) async fn umount(
-        &self,
-        target: &Path,
-        verity_device: Option<&Path>,
-    ) -> Result<(), Error> {
-        nix::mount::umount(target).map_err(Error::Os)?;
+    pub(super) async fn umount(&self, mount_info: &MountInfo) -> Result<(), Error> {
+        nix::mount::umount(&mount_info.target).map_err(Error::Os)?;
 
-        if let Some(verity_device) = verity_device {
-            debug!("Waiting for dm device {}", verity_device.display());
-            wait_for_file_deleted(verity_device, std::time::Duration::from_secs(5)).await?;
+        if let Some(dm_name) = mount_info.dm_name.as_ref() {
+            debug!("Removing device {}", dm_name);
+            // Remove the device. The defered removal may have kicked in in between
+            // and the `device_remove` call returns an error in such a case. Ignore
+            // any error.
+            self.dm
+                .device_remove(
+                    &DevId::Name(DmName::new(dm_name).unwrap()),
+                    &devicemapper::DmOptions::new(),
+                )
+                .ok();
+
+            debug!("Waiting for dm device {}", mount_info.device.display());
+            wait_for_file_deleted(&mount_info.device, std::time::Duration::from_secs(5)).await?;
         }
 
-        debug!("Removing mountpoint {}", target.display());
-        // Root which is the container version
-        fs::remove_dir(&target)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to remove {}", target.display()), e))?;
+        debug!("Removing mountpoint {}", mount_info.target.display());
+
+        fs::remove_dir(&mount_info.target).await.map_err(|e| {
+            Error::Io(
+                format!("Failed to remove {}", mount_info.target.display()),
+                e,
+            )
+        })?;
 
         Ok(())
     }
 }
 
-async fn attach(
-    dm: Arc<dm::Dm>,
+async fn mount(
+    dm: Arc<devicemapper::DM>,
     lc: Arc<LoopControl>,
-    device_mapper_dev: &str,
     npk: &Arc<Npk>,
     target: &Path,
     verity: bool,
-) -> Result<PathBuf, Error> {
+) -> Result<MountInfo, Error> {
     let verity_header = npk.verity_header().to_owned();
     let fsimg_offset = npk.fsimg_offset();
     let fsimg_size = npk.fsimg_size();
@@ -163,28 +167,42 @@ async fn attach(
         manifest.version
     );
 
-    // Attach the fs image to a loopback device
-    // 1. Find a free loop dev
-    // 2. Attach
-    let loop_device = lc
-        .losetup(npk.as_raw_fd(), fsimg_offset, fsimg_size, true, true)
-        .await
-        .map_err(Error::LoopDevice)?;
+    // Acquire a loop device and attach the backing file. This operation is racy because
+    // getting the next free index and attaching is not atomic. Retry the operation in a
+    // loop until successful or timeout.
+    let start = time::Instant::now();
+    let loop_device = loop {
+        let loop_device = lc.next_free().map_err(Error::LoopDevice)?;
+        if loop_device
+            .with()
+            .offset(fsimg_offset)
+            .size_limit(fsimg_size)
+            .read_only(true)
+            .autoclear(true)
+            .attach_fd(npk.as_raw_fd())
+            .map_err(Error::LoopDevice)
+            .is_ok()
+        {
+            break loop_device;
+        }
+        if start.elapsed() > time::Duration::from_secs(5) {
+            return Err(Error::Timeout("Failed to acquire loop device".into()));
+        }
+    };
 
     let device = if !verity {
         // We're done. Use the loop device path e.g. /dev/loop4
-        loop_device.path().to_owned()
+        loop_device.path().unwrap()
     } else {
         match (&verity_header, &npk.hashes()) {
             (Some(header), Some(hashes)) => {
-                let (major, minor) = loop_device.dev_id();
+                let (major, minor) = (loop_device.major().unwrap(), loop_device.minor().unwrap());
                 let loop_device_id = format!("{}:{}", major, minor);
 
                 debug!("Loop device id is {}", loop_device_id);
 
                 let verity_device = dmsetup(
                     dm.clone(),
-                    device_mapper_dev,
                     &loop_device_id,
                     header,
                     &dm_name,
@@ -194,14 +212,19 @@ async fn attach(
                 .await?;
                 verity_device
             }
-            // TODO: Is this correct? No!
-            _ => loop_device.path().to_owned(),
+            _ => {
+                warn!(
+                    "Cannot mount {}:{} without verity information from a repository with key",
+                    manifest.name, manifest.version
+                );
+                return Err(Error::Npk("Missing verity information in NPK"));
+            }
         }
     };
 
     if !target.exists() {
         debug!("Creating mount point {}", target.display());
-        fs::create_dir_all(&target).await.map_err(|e| {
+        std::fs::create_dir_all(&target).map_err(|e| {
             Error::Io(
                 format!("Failed to create directory {}", target.display()),
                 e,
@@ -210,31 +233,45 @@ async fn attach(
     }
 
     // Finally mount
-    mount(
-        &device,
-        target,
+    debug!(
+        "Mounting {} fs on {} to {}",
         FS_TYPE,
-        MountFlags::MS_RDONLY | MountFlags::MS_NODEV | MountFlags::MS_NOSUID,
-        None,
-    )?;
+        device.display(),
+        target.display(),
+    );
+    let flags = MountFlags::MS_RDONLY | MountFlags::MS_NODEV | MountFlags::MS_NOSUID;
+    nix::mount::mount(
+        Some(&device),
+        target,
+        Some(FS_TYPE),
+        flags,
+        Option::<&str>::None,
+    )
+    .map_err(Error::Os)?;
 
     // Set the device to auto-remove once unmounted
-    if verity {
-        debug!("Enabling defered removal on device {}", dm_name);
+    let dm_name = if verity {
+        debug!("Enabling deferred removal on device {}", dm_name);
         dm.device_remove(
-            &dm_name,
-            device_mapper::DmOptions::new().set_flags(device_mapper::DmFlags::DM_DEFERRED_REMOVE),
+            &DevId::Name(DmName::new(&dm_name).unwrap()),
+            devicemapper::DmOptions::new().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )
-        .await
         .map_err(Error::DeviceMapper)?;
-    }
 
-    Ok(device.to_owned())
+        Some(dm_name)
+    } else {
+        None
+    };
+
+    Ok(MountInfo {
+        device,
+        target: target.to_owned(),
+        dm_name,
+    })
 }
 
 async fn dmsetup(
-    dm: Arc<dm::Dm>,
-    device_mapper_dev: &str,
+    dm: Arc<devicemapper::DM>,
     dev: &str,
     verity: &VerityHeader,
     name: &str,
@@ -262,28 +299,32 @@ async fn dmsetup(
     );
     let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
 
+    let name = DmName::new(name).unwrap();
+    let id = DevId::Name(name);
+
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let uuid = DmUuid::new(&uuid).map_err(Error::DeviceMapper)?;
+
     let dm_device = dm
         .device_create(
             name,
-            dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
+            Some(uuid),
+            devicemapper::DmOptions::new().set_flags(devicemapper::DmFlags::DM_READONLY),
         )
-        .await
         .map_err(Error::DeviceMapper)?;
-    let dm_dev = PathBuf::from(format!("{}{}", device_mapper_dev, dm_device.id() & 0xFF));
+    let dm_dev = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
 
     debug!("Created verity device {}", dm_dev.display());
 
-    dm.table_load_flags(
-        name,
+    dm.table_load(
+        &id,
         &table,
-        dm::DmOptions::new().set_flags(dm::DmFlags::DM_READONLY),
+        devicemapper::DmOptions::new().set_flags(devicemapper::DmFlags::DM_READONLY),
     )
-    .await
     .map_err(Error::DeviceMapper)?;
 
     debug!("Resuming device {}", dm_dev.display());
-    dm.device_suspend(name, &dm::DmOptions::new())
-        .await
+    dm.device_suspend(&id, &devicemapper::DmOptions::new())
         .map_err(Error::DeviceMapper)?;
 
     debug!("Waiting for device {}", dm_dev.display());
@@ -298,24 +339,6 @@ async fn dmsetup(
     );
 
     Ok(dm_dev)
-}
-
-fn mount(
-    dev: &Path,
-    target: &Path,
-    r#type: &str,
-    flags: MountFlags,
-    data: Option<&str>,
-) -> Result<(), Error> {
-    debug!(
-        "Mounting {} fs on {} to {}",
-        r#type,
-        dev.display(),
-        target.display(),
-    );
-    nix::mount::mount(Some(dev), target, Some(r#type), flags, data).map_err(Error::Os)?;
-
-    Ok(())
 }
 
 async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
