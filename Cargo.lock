@@ -1780,6 +1780,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 
 [[package]]
+name = "strace_parser"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger 0.8.4",
+ "itertools",
+ "regex",
+ "structopt",
+]
+
+[[package]]
 name = "stress"
 version = "0.1.0"
 dependencies = [

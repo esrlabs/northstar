@@ -208,7 +208,7 @@ impl Strace {
             .await
             .map_err(|e| Error::io("Join error", io::Error::new(io::ErrorKind::Other, e)))?;
 
-        // Stop strace - if not already existed - irgnore any error
+        // Stop strace - if not already existed - ignore any error
         let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
         debug!("Joining strace pid {}", pid);

@@ -267,7 +267,7 @@ async fn main() -> Result<()> {
                     .with_context(|| format!("Failed to connect to {}", opt.host))?;
                 let mut notifications = client.take(number.unwrap_or(usize::MAX));
                 while let Some(notification) = notifications.next().await {
-                    let notification = notification.context("Failed to receive notificaiton")?;
+                    let notification = notification.context("Failed to receive notification")?;
                     pretty::notification(&notification);
                 }
                 process::exit(0);
