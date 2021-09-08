@@ -14,7 +14,7 @@ members = [
     "northstar-tests",
     "northstar-tests/test-container",
     "tools/nstar",
-    "tools/strace_parser",
+    "tools/seccomp_util",
     "tools/sextant",
     "tools/stress",
 ]

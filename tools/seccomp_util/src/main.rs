@@ -15,45 +15,47 @@
 use anyhow::Result;
 use itertools::Itertools;
 use regex::Regex;
-use std::fmt::Write;
-use std::{fs::File, io, io::BufRead, path::PathBuf};
+use std::{fmt::Write, fs::File, io, io::BufRead, path::PathBuf};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-enum Opt {
-    /// Generate seccomp manifest entry
-    Generate {
-        /// Path to strace log file
-        #[structopt(short, long)]
-        strace_file: PathBuf,
-    },
+struct Opt {
+    /// Path to strace log file
+    input: PathBuf,
 }
 
 fn main() -> Result<()> {
     env_logger::init();
 
-    match Opt::from_args() {
-        Opt::Generate { strace_file } => generate(strace_file)?,
-    }
-    Ok(())
+    let opt = Opt::from_args();
+    generate(opt.input)
 }
 
 fn generate(strace_file: PathBuf) -> Result<()> {
-    let names = parse_strace(strace_file);
-    let entry = gen_seccomp_entry(&names).expect("Failed to generate seccomp entry");
+    let lines = open_file(strace_file);
+    let names = parse_strace(lines);
+    let entry = gen_seccomp_entry(names).expect("Failed to generate seccomp entry");
     println!("{}", &entry);
     Ok(())
 }
 
-fn parse_strace(strace_file: PathBuf) -> Vec<String> {
+fn open_file(strace_file: PathBuf) -> Vec<String> {
     let file = File::open(strace_file).expect("Failed to open strace input file");
-    let lines = io::BufReader::new(file).lines();
+    io::BufReader::new(file)
+        .lines()
+        .filter_map(|s| s.ok())
+        .collect::<Vec<String>>()
+}
 
+fn parse_strace<I>(lines: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
     // Collect syscall names and arguments
     let mut names = vec![];
     // unwrap(): Creating regex from constant expression will never fail
     let regex = Regex::new(r"^\s*(?:\[[^]]*]|\d+)?\s*([a-zA-Z0-9_]+)\(([^)<]*)").unwrap();
-    for line in lines.flatten() {
+    for line in lines {
         if let Some(caps) = regex.captures(line.as_str()) {
             let name = caps.get(1).map_or("", |m| m.as_str());
             let _args = caps.get(2).map_or("", |m| m.as_str());
@@ -64,7 +66,10 @@ fn parse_strace(strace_file: PathBuf) -> Vec<String> {
     names.into_iter().unique().collect()
 }
 
-fn gen_seccomp_entry(names: &[String]) -> Result<String> {
+fn gen_seccomp_entry<I>(names: I) -> Result<String>
+where
+    I: IntoIterator<Item = String>,
+{
     let mut entry = String::new();
     writeln!(&mut entry, "seccomp:")?;
     writeln!(&mut entry, "  allow:")?;
@@ -72,4 +77,42 @@ fn gen_seccomp_entry(names: &[String]) -> Result<String> {
         writeln!(&mut entry, "    {}: any", &name)?;
     }
     Ok(entry)
+}
+
+#[test]
+fn parse_strace_log() {
+    const EXPECTED: &str = "seccomp:
+  allow:
+    brk: any
+    arch_prctl: any
+    access: any
+    openat: any
+    newfstatat: any
+    read: any
+    mmap: any
+    mprotect: any
+    close: any
+    pread64: any
+    set_tid_address: any
+    set_robust_list: any
+    rt_sigaction: any
+    rt_sigprocmask: any
+    prlimit64: any
+    poll: any
+    sigaltstack: any
+    sched_getaffinity: any
+    write: any
+    clock_nanosleep: any
+    munmap: any
+    exit_group: any
+";
+    let test_data = include_str!("../res/test_strace_data.txt");
+    let lines = test_data
+        .lines()
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
+    let names = parse_strace(lines);
+    assert_eq!(22, names.len());
+    let entry = gen_seccomp_entry(names).expect("Failed to generate seccomp entry");
+    assert_eq!(&EXPECTED, &entry);
 }
