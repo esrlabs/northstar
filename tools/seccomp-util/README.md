@@ -6,10 +6,10 @@ Utility to generate seccomp profiles for Northstar containers.
 
 To enable seccomp for container, a suitable `seccomp` entry is required in the container's manifest 
 file.
-Using `seccomp_util`, such an entry can be created with the following steps:
+Using `seccomp-util`, such an entry can be created with the following steps:
 
 1. Run the container with strace to generate a syscall log.
-2. Run `seccomp_util` on the syscall log to generate a seccomp manifest entry. 
+2. Run `seccomp-util` on the syscall log to generate a seccomp manifest entry. 
 3. Optional: Restrict the arguments of syscalls to specific values.
 4. Add the seccomp manifest entry to the container's manifest.
 
@@ -29,10 +29,10 @@ $ cat ./target/northstar/logs/strace-259876-seccomp.strace
 [...]
 ```
 
-Running `seccomp_util` on the file gives the following output:
+Running `seccomp-util` on the file gives the following output:
 
 ```shell
-$ seccomp_util ./target/northstar/logs/strace-259876-seccomp.strace
+$ seccomp-util ./target/northstar/logs/strace-259876-seccomp.strace
 seccomp:
   allow:
     brk: any

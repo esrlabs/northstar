@@ -1,4 +1,4 @@
-// Copyright (c) 2019 - 2020 ESRLabs
+// Copyright (c) 2019 - 2021 ESRLabs
 //
 //   Licensed under the Apache License, Version 2.0 (the "License");
 //   you may not use this file except in compliance with the License.
@@ -319,6 +319,13 @@ pub struct Seccomp {
     pub allow: Option<HashMap<NonNullString, SyscallRule>>,
 }
 
+impl ToString for Seccomp {
+    fn to_string(&self) -> String {
+        // unwrap(): Can only if serialize fails which it does not for the types we use.
+        serde_yaml::to_string(self).unwrap()
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 //#[serde(untagged)]
 pub enum SyscallRule {
@@ -608,12 +615,12 @@ seccomp:
 
         assert_eq!(manifest.cgroups, Some(cgroups));
 
-        let mut seccomp: HashMap<NonNullString, SyscallRule> = HashMap::new();
-        seccomp.insert(
+        let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
+        syscalls.insert(
             NonNullString::try_from("fork".to_string())?,
             SyscallRule::Any,
         );
-        seccomp.insert(
+        syscalls.insert(
             NonNullString::try_from("waitpid".to_string())?,
             SyscallRule::Any,
         );
@@ -621,7 +628,7 @@ seccomp:
             manifest.seccomp,
             Some(Seccomp {
                 profile: None,
-                allow: Some(seccomp)
+                allow: Some(syscalls)
             })
         );
 
