@@ -1,0 +1,50 @@
+@startuml container_startup
+
+client -> runtime: start(container)
+activate client 
+activate runtime
+runtime -> runtime: mount container NPK
+runtime -> runtime: block signals
+
+create init
+runtime -> init: clone init
+activate init
+init -> init: wait for start (pipe)
+deactivate init
+
+runtime -> runtime: unblock signals
+runtime -> runtime: configure cgroups
+runtime -> runtime: configure debug stuff
+runtime -> init: start (close pipe)
+
+activate init
+runtime -> runtime: wait for execve (pipe closed)
+deactivate runtime
+init -> init: setup environment
+create container
+init -> container: clone container
+activate container
+init -> init: waitpid(container)
+deactivate init
+
+container -> container: set parent death signal
+container -> container: unblock signals
+container -> container: apply seccomp
+container -> : execve
+container -> runtime: closed pipe
+activate runtime
+runtime -> client: started
+deactivate runtime
+
+...
+
+container -> init: exit
+activate init
+destroy container
+destroy init
+init -> runtime: signal SIGCHLD
+activate runtime
+runtime -> runtime: waitpid (WNOHANG) -> exitstatus
+runtime -> client: notification exit(exitstatus)
+
+@enduml

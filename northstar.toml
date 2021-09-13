@@ -12,9 +12,9 @@ mount_parallel = 10
 cgroup = "northstar"
 
 # Start a `strace -p PID ...` instance after a container is started.
-# The execution of the application is defered until strace is attached.
+# The execution of the application is deferred until strace is attached.
 # [debug.strace]
-# Confgure the output of the strace instance attached to a started
+# Configure the output of the strace instance attached to a started
 # application. "file" for a file named strace-<PID>-name.log or "log"
 # to forward the strace output to the runtimes log.
 # output = "log"
@@ -33,10 +33,12 @@ cgroup = "northstar"
 # Optional additional flags passed to `perf`
 # flags = ""
 
+# NPK Repository `memory` configuration. This is a not persistent in memory repository
 [repositories.memory]
 key = "examples/northstar.pub"
 type = "mem"
 
+# NPK Repository `default` in `dir`
 [repositories.default]
 key = "examples/northstar.pub"
 type = { fs = { dir = "target/northstar/repository" }}

@@ -1,285 +1,298 @@
-[![LICENSE](https://img.shields.io/github/license/esrlabs/northstar?color=blue)](LICENSE.md)
-[![](https://github.com/esrlabs/northstar/workflows/Build/badge.svg)](https://github.com/esrlabs/northstar/actions)
-[![](https://github.com/esrlabs/northstar/workflows/CI/badge.svg)](https://github.com/esrlabs/northstar/actions)
+![GitHub Workflow Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
+![License](https://img.shields.io/github/license/esrlabs/northstar)
+![Issues](https://img.shields.io/github/issues/esrlabs/northstar)
+![Top Language](https://img.shields.io/github/languages/top/esrlabs/northstar)
 
-<img src="doc/images/box.png" class="inline" width=100/>
+<br/>
+<p align="center">
+  <h1 align="center">Northstar</h1>
+  <p align="center">
+    Northstar is an opinionated embedded container runtime prototype for Linux.
+    <br/>
+    ·
+    <a href="https://github.com/esrlabs/northstar/issues">Report Bug</a>
+    ·
+    <a href="https://github.com/esrlabs/northstar/issues">Request Feature</a>
+    ·
+    <br/>
+    <br/>
+    <a href="https://github.com/esrlabs/northstar">
+        <img src="images/northstar.gif">
+    </a>
+  </p>
+</p>
 
-# Minimal and secure containers for edge computing
+<details open="open">
+  <summary><h2 style="display: inline-block">Table of Contents</h2></summary>
+  <ol>
+    <li>
+      <a href="#about">About</a>
+      <ul>
+        <li><a href="#containers">Containers</a></li>
+        <li><a href="#processes">Processes</a></li>
+        <li><a href="#comparison">Comparison</a></li>
+      </ul>
+    </li>
+    <li><a href="#quickstart">Quickstart</a></li>
+    <li>
+      <a href="#configuration">Configuration</a>
+      <ul>
+        <li><a href="#repositories">Repositories</a></li>
+      </ul>
+    </li>
+    <li><a href="#integration-tests">Integration Tests</a></li>
+    <li><a href="#portability">Portability</a></li>
+    <li><a href="#internals">Internals</a>
+      <ul>
+        <li><a href="#container-launch-sequence">Container launch sequence</a></li>
+        <li><a href="#manifest-format">Manifest format</a></li>
+      </ul>
+    </li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#license">License</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="#acknowledgements">Acknowledgements</a></li>
+  </ol>
+</details>
 
-Northstar is an open source technology for securely running self sufficient sandboxed containers in a ressource constraint environment. It offers a runtime that monitors isolated containers. In addition it provides tooling to create and manage those containers.
 
-At its core, Northstar makes extensive use of sandboxing to isolate applications from the rest of the system while at the same time orchestrating efficient startup and secure update scenarios. Such applications run inside Northstar-containers and only rely on system services and ressource containers provided by the Northstar-platform. Similar sandboxing techniques were selected and used as are found in Docker and other containerization approaches to reach maximum isolation. To build the most efficient and robust solution, Northstar is completely developed in Rust, a language designed to afford the performance of C++ while at the same time guaranteeing memory safety.
+## About
 
-## Northstar Status
+Northstar is an open source embedded container runtime optimized for speed and
+resource usage. Northstar combines several standard Linux process isolation and
+sandboxing features to gain a medium level of isolation between
+containers/processes. The Northstar runtime consists out of two parts: The
+container handling and process spawning. To build the most efficient and robust
+solution, Northstar is completely developed in Rust, a language designed to
+afford the performance of C/C++ without their footguns.
 
-Northstar is still under heavy development. While we already have implemented most of the basic building blocks, Northstar is not production ready.
+#### Containers
 
-So far we tested Northstar on
+Northstar containers are called `NPK`. The NPK format is heavily inspired by the
+[Android APEX](https://source.android.com/devices/tech/ota/apex) technology. A
+Northstar container contains:
 
-* aarch64-linux-android
-* aarch64-unknown-linux-gnu
-* x86_64-unknown-linux-gnu
+* Root filesystem in a [Squashfs](https://github.com/plougher/squashfs-tools)
+  file system image (optionally compressed) Northstar manifest with container
+* spawning configuration Signature and DM verity hash for manifest and file
+* system integrity checks
 
-### Everything that is checked is implemented
+Container are created with the Northstar utility [sextant](tools/sextant/README.md).
 
-- [x] On-the-fly verification of container content
-- [x] Process supervision: memory control (using cgroups)
-- [x] Process supervision: cpu control (using cgroups)
-- [x] Limiting system calls (whitelist)
-- [x] Shared resource containers
-- [x] chroot environment - every process only sees it's own environment
-- [ ] User-support of configuring and managing network-namespaces
-- [ ] Dedicated UID for each container
-- [x] Management API of the runtime
-- [x] Signature Check of NPK [#54](https://github.com/esrlabs/northstar/issues/54)
-- [ ] PID Namespaces [#51](https://github.com/esrlabs/northstar/issues/51)
+#### Processes
 
-<br/><img src="doc/images/prison.png" class="inline" width=100/>
+Started Northstar contains are Linux processes. The attributes and environment
+for a spawned container is described in a container manifest which is included
+in a NPK. The container manifest allows to configure the following Linux
+subsystems:
 
-## Supported Sandboxing features
+* Arguments passed to the containers init
+* Environment variables set in the container context
+* User and group id
+* Mount namespace
+* PID namespace
+* Cgroups memory (optional)
+* CGroups CPU (optional)
+* Additional bind mounts (optional)
+* Capabilities (optional)
+* Stdout/stderr handling (optional)
+* Seccomp configuration (optional)
 
-* limited read/write access: a container can only access it's own data
-* restrict memory usage of a container
-* restrict CPU usage
-* limitation of network communication
-* containerized applications can only use whitelisted syscalls
+### Comparison
 
-## Integrity features
+*TODO*
 
-* secure update of verified packages
-* secure boot
-* verification on each read access prevents manipulation
+* Northstar containers are not portable and are tailored to a known system (uid/gid/mounts...)
+* ...
 
-## How do Northstar images/containers work
+## Quickstart
 
-### Northstar Packages (NPK)
+Northstar is written in [Rust](https://www.rust-lang.org). The minimum supported
+Rust version (MRSV) is *1.51*. Rust is best installed and managed by the rustup
+tool. Rust has a 6-week rapid release process and supports a great number of
+platforms, so there are many builds of Rust available at any time. rustup
+manages these builds in a consistent way on every platform that Rust supports,
+enabling installation of Rust from the beta and nightly release channels as well
+as support for additional cross-compilation targets.
 
-Similar as in the docker world, a Northstar **image** is the unit that gets deployed into a system. Once the runtime starts, all images in the repositiry will be loaded into **containers**. Containers are the entities that are managed by the Northstar runtime.
+Building Northstar is limited to Linux systems and runs on Linux systems *only*!
+The Northstar build generates bindings for various system libraries and uses the
+`mksquashfs` command line tool for NPK creation.
 
-Images are packaged as **Northstar Packages** or **NPK**s. At it's outer layer, such an NPK is just a plain zip-archive. The content looks like this:
+Install build dependencies on Debian based distributions by running
 
-<br/><img src="doc/images/npk.png" class="inline" width=400/>
-
-The `manifest.yaml` contains essential information about the package like id and version.
-
-This is what a typical manifest looks like (taken from the examples)
-
-```yaml
-name: ferris_says_hello
-version: 0.0.1
-init: /bin/ferris
-args:
-  - /message/hello
-mounts:
-    /dev: full
-    /lib:
-      host: /lib
-    /lib64:
-      host: /lib64
-    /system:
-      host: /system
-    /bin:
-      resource: ferris:0.0.2/
-    /message:
-      resource: hello_message:0.1.2/
-    /data: persist
+```sh
+sudo apt-get install build-essential libclang1 squashfs-tools
 ```
 
-The `signature.yaml` contains signatures that are used to verify the package and the included file system. It is automatically created by the tooling.
+Northstar comes with a set of [examples](./examples) that demonstrate most of
+the Northstar features. Building the example binaries and packing its
+corresponding NPKs is done via 
 
-Now the actual content is the `fs.img` file, which is a squashfs filesystem image that contains the actual content of what the user puts into a container.
-The image is packed a an zip archive with zero compression. Compression takes place via the SquashFS
-functionality. Not compression the outer package allows Northstar to access the content without
-unpacking the image to disk.
-
-### Installing a package
-
-<br/><img src="doc/images/mounting.png" class="inline" width=600/>
-
-A file system image of a Nortstar package is attached to a loopback device. The loopback device is used to setup a verity check block device with the dm-verity module. The verity hashes are appended to the file system image. The verity block device is finally mounted and used in operation.
-
-## Creating Northstar Packages
-
-In order to use an application in a northstar container, it needs to be packaged in a northstar package (NPK). The `sextant` tool can be used to create and package npk files. Install `sextant` with `cargo install --path tools/sextant`.
-
-```shell
-Northstar CLI
-
-USAGE:
-    sextant <SUBCOMMAND>
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-SUBCOMMANDS:
-    gen-key
-    help       Prints this message or the help of the given subcommand(s)
-    inspect    Print information about a Northstar container
-    pack       Pack Northstar containers
-    unpack     Unpack Northstar containers
+```sh
+./examples/build_examples.sh
 ```
 
-In order to create your own northstar packages, you will also need to generate a keypair that
-subsequently will be used to generate and verify the signatures of your images.
+Building and starting the [example runtime main](./main/src/main.rs) is triggered by a 
 
-Once the packages are created, they are stored in a repository directory. This repository needs to be configured later when starting the northstar runtime.
-
-## Configuring and Running Northstar
-
-### System Requirements
-
-Northstar is designed to be running a modern linux environment. When the kernel has the required features, it is basically possible to use northstar.
-Required Kernel features are:
-
-* device-mapper with dm-verity
-* SquashFS
-* loopback-blockdevice-support
-* PID namespaces
-* mount namespaces
-
-The script in `tools/check_conf.sh` can be used to check your running kernel for the correct configuration. The version provided is for Android, but can be adapted to any platform providing the shell on the platform supports arrays.
-
-
-
-
-
-### Build Northstar
-Open a terminal, clone the repository and build the solution and start the runtime:
-
-    $ git clone https://github.com/esrlabs/northstar.git
-    $ cargo build --release --bin northstar
-    $ cargo build --release --bin nstar
-    $ sudo ./target/release/northstar
-
-#### Build example containers
-The `examples/build_examples.sh` script can be used got build all the example
-containers inside the `example` folder.
-
-The containers are built for the host platform by default. The flag `-t,--target` can be used to build the containers for a different platform.
-
-    $ ./examples/build_examples.sh --help
-	USAGE:
-	    build_examples.sh [OPTIONS]
-
-	OPTIONS:
-	    -t, --target <platform>   Target platform
-	    -c, --comp   <algorithm>  Compression algorithm used by squashfs
-	                              (gzip, lzma, lzo, xz, zstd)
-	    -h, --help                Prints help information
-
-### Run sample code
-Open a second terminal navigate to the directory where the northstar source is located. Start `nstar` to interact with the runtime.
-Execute the following commands:
-
-1. `containers` to list all registered containers
-2. `start crashing` to start an example container which will crash within the next 10 seconds
-
-[//]: #
-
-
-    $ ./target/release/nstar
-    $ >> containers
-    Name              | Version | Type     | PID | Uptime
-    -------------------+---------+----------+-----+--------
-    cpueater          | 0.0.1   | App      |     |
-    crashing          | 0.0.1   | App      |     |
-    datarw            | 0.0.1   | App      |     |
-    ferris_says_hello | 0.0.3   | App      |     |
-    hello             | 0.0.2   | App      |     |
-    memeater          | 0.0.1   | App      |     |
-    ferris            | 0.0.2   | Resource |     |
-    hello_message     | 0.1.2   | Resource |     |
-    >> start crashing
-    crashing-0.0.1 was started
-    start succeeded
-    >> crashing-0.0.1 exited (Exited with code 101)
-
-
-
-
-### Starting Northstar
-
-The Northstar runtime is an executable and usually run as a daemon started by your system manager of choice. It can be started with a config file.
-
-```shell
-Northstar
-
-USAGE:
-    northstar [FLAGS] [OPTIONS]
-
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -c, --config <config>    File that contains the northstar configuration [default: northstar.toml]
+```sh
+cargo run --bin northstar
 ```
 
-The configuration of the runtime is done with a `*.toml` configuration file.
-Here is an example:
+The Northstar workspace configuration configures a cargo
+[runner](.cargo/runner-x86_64-unknown-linux-gnu) that invokes the runtimes
+example main binary with super user rights.
+
+Use the [nstar](./tools/nstar/README.md) utility to inspect and modify the
+runtimes state e.g
+
+```sh
+cargo build --release --bin nstar 
+...
+./target/release/nstar --help 
+...
+> ./target/release/nstar -j start hello-world 0.0.1
+{"Response":{"Err":{"StartContainerStarted":{"name":"hello-world","version":"0.0.1"}}}}
+> ./target/release/nstar -j kill hello-world 0.0.1
+{"Response":{"Ok":null}}
+```
+
+## Configuration
+
+The example executable `northstar` reads a configuration file that represents
+`northstar::runtime::config::Config`.
 
 ```toml
-log_level = "DEBUG"
+# Console URI
 console = "tcp://localhost:4200"
+# Directory where the runtime mounts images and keeps runtime data
 run_dir = "target/northstar/run"
+# Directory where the runtime creates the `persist` directories
 data_dir = "target/northstar/data"
+# Runtime log directory for `strace` and `perf`
+log_dir = "target/northstar/logs"
 
-[repositories.default]
-dir = "target/northstar/repository"
-writable = true
-key = "examples/keys/northstar.pub"
-
-
+# Cgroups v1 configuration
 [cgroups]
+# Name of the memory top level group the runtime shall use. If the groups
+# does not exist it is created.
 memory = "northstar"
+# Name of the memory top level group the runtime shall use. If the groups
+# does not exist it is created.
 cpu = "northstar"
 
+# Undocumented because this section is removed soon
 [devices]
 loop_control = "/dev/loop-control"
 loop_dev = "/dev/loop"
 device_mapper = "/dev/mapper/control"
 device_mapper_dev = "/dev/dm-"
+
+# Start a `strace -p PID ...` instance after a container is started.
+# The execution of the application is deferred until strace is attached.
+[debug.strace]
+# Configure the output of the strace instance attached to a started
+# application. "file" for a file named strace-<PID>-name.log or "log"
+# to forward the strace output to the runtimes log.
+output = "log"
+# Optional additional flags passed to `strace`
+flags = "-f -s 256"
+# Optional path to the strace binary
+path = "/bin/strace"
+# Include the runtime system calls prior to exeve
+include_runtime = true
+
+# Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
+# after a container is started.
+[debug.perf]
+# Optional path to the perf binary
+path = "/bin/perf"
+# Optional additional flags passed to `perf`
+flags = ""
+
+# NPK Repository `memory` configuration. This is a  not persistent in memory repository
+[repositories.memory]
+key = "examples/northstar.pub"
+type = "mem"
+
+# NPK Repository `default` in `dir`
+[repositories.default]
+key = "examples/northstar.pub"
+type = { fs = { dir = "target/northstar/repository" }}
 ```
 
-The `[repositories.default]` sections describes a container repository named `default`.
-Within it, the following options can be specified:
+### Repositories
 
-* **`dir`** -- The directory where to find `*.npk` packages for the correct architecture.
-* **`key`** -- The path to the public signing key used to sign the containers.
+TODO: Describe what a repository is and what are the attributes: with/without key/verity, etc...
 
-Multiple `[repositories.<name>]` sections can be specified for separate
-repositories, where `<name>` is the __repository identifier__.
+## Integration tests
 
-The [`cgroups`] optionally configures northstar applications CGroups settings.
-Both `memory` and `cpu` will tell northstar where to mount the cgroup hierarchies.
+Integrations tests start a runtime instance and assert on log output of
+container of notification sent from the runtime. The testsuite is invoked by the
+Rust test system:
 
-`[devices]`-section:
+```sh
+cargo test -p northstar-tests
+```
 
-* **`loop_control`** -- Location of the loopback block device control file
-* **`loop_dev`** -- Prefix of preconfigured loopback devices. Usually loopback devices are e.g /dev/block0
-* **`device_mapper`** -- Device mapper control file.
-* **`device_mapper_dev`** -- Prefix of device mapper mappings.
-* **`run_dir`** -- where the container content will be mounted
-* **`data_dir`** -- In data_dir a directory for each container is created if a mount of type data is used in the manifest
+and are executed by the project [CI](https://github.com/esrlabs/northstar/actions).
 
-## Controlling the runtime
+## Portability
 
-The northstar runtime can be controlled our `nstar` application or from a custom application. You can
+Northstar makes extensive use of Linux Kernel features and runs on Linux systems
+only. Northstar is tested on the architectures
 
-- start and stop containers
-- uninstall or upgrade containers
-- query information about running processes and setttings
-- ...
-With `nstar` we include a commandline interface that can be used to issue commands to the runtime. Underneth all communication happends via protocol-buffer objects over sockets (see [the runtime API README](north_common/README.md))
+* `aarch64-linux-android`
+* `aarch64-unknown-linux-gnu`
+* `aarch64-unknown-linux-musl`
+* `x86_64-unknown-linux-gnu` aka `Linux Desktop`
 
-## Examples
+Northstar cannot be run on 32 bit systems! In order to verify that all needed
+Kernel features are available, either run the
+[check_conf](./tools/check_conf.sh) script or manually compare the targets
+kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
-If you want to see how containers can look like, take a look at the examples in the examples directory.
-See [our examples README](examples/README.md)
+## Internals
 
-<br/><img src="doc/images/work.png" class="inline" width=100/>
+### Container launch sequence
 
-## For Northstar Devs
+TODO: <br/><img src="images/container-startup.png" class="inline" width=600/>
 
-See [HACKING](HACKING.md) for more on what you might need.
+### Manifest Format
+
+TODO
+
+## Roadmap
+
+See the [open issues](https://github.com/esrlabs/northstar/issues) for a list of
+proposed features (and known issues).
+
+## Contributing
+
+Contributions are what make the open source community such an amazing place to
+learn, inspire, and create. Any contributions you make are **greatly
+appreciated**.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+Distributed under the Apache 2.0 License. See [LICENSE](LICENSE.txt) for more information.
+
+## Contact
+
+Project Link: [https://github.com/esrlabs/northstar](https://github.com/esrlabs/northstar)
+
+## Acknowledgements
+
+* [The Rust Community](https://users.rust-lang.org) for providing
+  [crates](./northstar/Cargo.toml) that form the foundation of Northstar
+* [The Android Open Source Project](https://source.android.com) for the APEX inspiration 
+* [youki](https://github.com/containers/youki) for solving similar problems
+* [The manpage project](https://man7.org/linux/man-pages/dir_section_2.html)
+  for documenting the weird world of system calls
