@@ -9,7 +9,7 @@ anyhow = "1.0"
 assert_cmd = "2.0"
 env_logger = "0.8.3"
 itertools = "0.10.1"
-northstar = { path = "../../northstar" }
+northstar = { path = "../../northstar", features = ["npk"] }
 regex = "1.5"
 serde_yaml = "0.8.21"
 structopt = "0.3"
