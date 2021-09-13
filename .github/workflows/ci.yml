@@ -112,3 +112,5 @@ jobs:
         run: cargo install --path tools/sextant
       - name: Install stress
         run: cargo install --path tools/stress
+      - name: Install seccomp-util
+        run: cargo install --path tools/seccomp-util
