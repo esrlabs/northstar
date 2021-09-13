@@ -319,13 +319,6 @@ pub struct Seccomp {
     pub allow: Option<HashMap<NonNullString, SyscallRule>>,
 }
 
-impl ToString for Seccomp {
-    fn to_string(&self) -> String {
-        // unwrap(): Can only if serialize fails which it does not for the types we use.
-        serde_yaml::to_string(self).unwrap()
-    }
-}
-
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 //#[serde(untagged)]
 pub enum SyscallRule {

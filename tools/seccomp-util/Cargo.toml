@@ -11,4 +11,5 @@ env_logger = "0.8.3"
 itertools = "0.10.1"
 northstar = { path = "../../northstar" }
 regex = "1.5"
+serde_yaml = "0.8.21"
 structopt = "0.3"

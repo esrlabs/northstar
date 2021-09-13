@@ -53,6 +53,6 @@ fn main() -> Result<()> {
         profile: None,
         allow: Some(syscalls),
     };
-    println!("{}", &entry.to_string());
+    println!("{}", &serde_yaml::to_string(&entry)?);
     Ok(())
 }
