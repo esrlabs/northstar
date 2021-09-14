@@ -25,6 +25,8 @@ $ cat ./target/northstar/logs/strace-259876-seccomp.strace
 [pid 193911] openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
 [pid 193911] openat(AT_FDCWD, "/lib64/glibc-hwcaps/x86-64-v3/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
 [...]
+[pid 193911] delete_module(NULL, -1)                   = 0
+[...]
 [pid 193911] write(1, "Hello from the seccomp example version 0.0.1!\n", 46) = 46
 [...]
 ```
@@ -33,12 +35,29 @@ Running `seccomp-util` on the file gives the following output:
 
 ```shell
 $ seccomp-util ./target/northstar/logs/strace-259876-seccomp.strace
+profile: default
+seccomp:
+  allow:
+    delete_module: any
+```
+
+Since all syscalls from the trace file except `delete_module` are part of the default profile,
+`seccomp-util` did not explicitly add them to the `allow:` part of the entry.
+
+If we do not want to use the default profile, we can add the `--no-default-profile` command line
+switch to disable it.
+`seccomp-util` will then list all used syscalls explicitly:
+
+```shell
+$ seccomp-util --no-default-profile ./target/northstar/logs/strace-259876-seccomp.strace
 seccomp:
   allow:
     brk: any
     arch_prctl: any
     access: any
     openat: any
+[...]
+    delete_module: any
 [...]
     write: any
 [...]
@@ -68,4 +87,29 @@ seccomp:
 [...]
 ```
 
-The modified seccomp entry can now be added to the container's `manifest.yaml` file.
+Note that if there are multiple rules for a single syscall, then all rules are evaluated and the
+syscall only fails if none of the rules allow it.
+
+In particular, consider the following seccomp entry:
+
+```shell
+seccomp:
+  profile: default
+  allow:
+    write: 
+      args:
+        args:
+        index: 0
+        values: [
+            1,
+        ]
+```
+
+Since the default profile already allows the `write` syscall without imposing any restrictions on 
+the arguments, the entry for `write` in the `allow:` part of the entry is redundant.
+It is therefore equivalent to the following entry:
+
+```shell
+seccomp:
+  profile: default
+```
