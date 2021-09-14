@@ -72,6 +72,7 @@ npk = [
     "itertools",
     "rand",
     "sha2",
+    "seccomp",
     "serde_with",
     "serde_yaml",
     "tempfile",
@@ -104,6 +105,7 @@ runtime = [
     "url",
     "uuid",
 ]
+seccomp = ["caps", "lazy_static", "memoffset", "nix"]
 
 [build-dependencies]
 anyhow = "1.0"

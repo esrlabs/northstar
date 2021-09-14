@@ -14,8 +14,10 @@
 
 use crate::{
     common::non_null_string::NonNullString,
-    npk::manifest::{SyscallArgRule, SyscallRule},
-    runtime::island::seccomp::{builder_from_rules, Builder},
+    seccomp::{
+        bpf::{builder_from_rules, Builder},
+        SyscallArgRule, SyscallRule,
+    },
 };
 use std::{collections::HashMap, convert::TryInto};
 
