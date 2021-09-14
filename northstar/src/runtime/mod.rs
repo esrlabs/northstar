@@ -43,7 +43,7 @@ pub mod config;
 mod console;
 mod debug;
 mod error;
-mod island;
+pub mod island;
 mod key;
 mod mount;
 mod pipe;

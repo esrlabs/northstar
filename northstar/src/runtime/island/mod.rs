@@ -56,7 +56,7 @@ mod fs;
 mod init;
 mod io;
 pub(crate) mod seccomp;
-mod seccomp_profiles;
+pub mod seccomp_profiles;
 
 /// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;

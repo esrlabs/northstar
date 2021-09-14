@@ -100,6 +100,7 @@
 [pid 193911] read(3, "         /lib64/libc-2.33.so\n7f0b98a15000-7f0b98a18000 rw-p 001c2000 fd:01 1185814                    /lib64/libc-2.33.so\n7f0b98a18000-7f0b98a21000 rw-p 00000000 00:00 0 \n7f0b98a21000-7f0b98a23000 r--p 00000000 fd:01 1185817                    /lib64/libdl"..., 1024) = 1024
 [pid 193911] read(3, "001a000 fd:01 1185827                    /lib64/libpthread-2.33.so\n7f0b98a44000-7f0b98a45000 rw-p 0001b000 fd:01 1185827                    /lib64/libpthread-2.33.so\n7f0b98a45000-7f0b98a49000 rw-p 00000000 00:00 0 \n7f0b98a49000-7f0b98a4c000 r--p 00000000 f"..., 1024) = 1024
 [pid 193911] read(3, "001000 fd:01 1185806                    /lib64/ld-2.33.so\n7f0b98a8c000-7f0b98a96000 r--p 00026000 fd:01 1185806                    /lib64/ld-2.33.so\n7f0b98a96000-7f0b98a98000 r--p 0002f000 fd:01 1185806                    /lib64/ld-2.33.so\n7f0b98a98000-7f0"..., 1024) = 656
+[pid 193911] delete_module(NULL, -1)                   = 0
 [pid 193911] close(3)                   = 0
 [pid 193911] sched_getaffinity(2, 32, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) = 8
 [pid 193911] write(1, "Hello from the seccomp example version 0.0.1!\n", 46) = 46

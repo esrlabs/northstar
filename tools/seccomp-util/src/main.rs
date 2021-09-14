@@ -13,6 +13,8 @@
 //   limitations under the License.
 
 use anyhow::{Context, Result};
+use northstar::npk::manifest::Profile;
+use northstar::runtime::island::seccomp_profiles::default::SYSCALLS_BASE;
 use northstar::{
     common::non_null_string::NonNullString,
     npk::manifest::{Seccomp, SyscallRule},
@@ -25,17 +27,19 @@ use structopt::StructOpt;
 struct Opt {
     /// Path to strace log file
     input: PathBuf,
+    /// Whether or not to allow the syscalls defined by the default profile
+    #[structopt(long)]
+    no_default_profile: bool,
 }
 
 fn main() -> Result<()> {
     env_logger::init();
-
-    // Open strace log
     let path: PathBuf = Opt::from_args().input;
+    let no_default_profile = Opt::from_args().no_default_profile;
+
+    // Collect syscall names from strace file
     let file =
         File::open(&path).context(format!("Failed to open strace log: {}", &path.display()))?;
-
-    // Collect syscall names
     let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
     // unwrap(): Creating regex from constant expression will never fail
     let regex = Regex::new(r"^\s*(?:\[[^]]*]|\d+)?\s*([a-zA-Z0-9_]+)\(([^)<]*)").unwrap();
@@ -44,15 +48,25 @@ fn main() -> Result<()> {
         .try_for_each(|line| -> Result<()> {
             if let Some(caps) = regex.captures(line?.as_str()) {
                 if let Some(m) = caps.get(1) {
-                    syscalls.insert(NonNullString::try_from(m.as_str())?, SyscallRule::Any);
+                    if no_default_profile || !SYSCALLS_BASE.contains(&m.as_str()) {
+                        syscalls.insert(NonNullString::try_from(m.as_str())?, SyscallRule::Any);
+                    }
                 }
             }
             Ok(())
         })?;
-    let entry = Seccomp {
-        profile: None,
-        allow: Some(syscalls),
+
+    // Write manifest entry to stdout
+    let profile = if no_default_profile {
+        None
+    } else {
+        Some(Profile::Default)
     };
-    println!("{}", &serde_yaml::to_string(&entry)?);
+    let allow = if syscalls.len() == 0 {
+        None
+    } else {
+        Some(syscalls)
+    };
+    println!("{}", &serde_yaml::to_string(&Seccomp { profile, allow })?);
     Ok(())
 }
