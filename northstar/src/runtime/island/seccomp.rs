@@ -236,7 +236,7 @@ struct NumericSyscallRule {
 }
 
 /// Builder for AllowList struct
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct Builder {
     allowlist: Vec<NumericSyscallRule>,
     log_only: bool,
@@ -245,10 +245,7 @@ pub struct Builder {
 impl Builder {
     /// Create a new seccomp builder
     pub fn new() -> Self {
-        let mut builder = Builder {
-            allowlist: Vec::new(),
-            log_only: false,
-        };
+        let mut builder: Builder = Default::default();
 
         // Add required syscalls (e.g. for execve)
         for syscall in REQUIRED_SYSCALLS {

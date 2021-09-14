@@ -13,11 +13,10 @@
 //   limitations under the License.
 
 use anyhow::{Context, Result};
-use northstar::npk::manifest::Profile;
-use northstar::runtime::island::seccomp_profiles::default::SYSCALLS_BASE;
 use northstar::{
     common::non_null_string::NonNullString,
-    npk::manifest::{Seccomp, SyscallRule},
+    npk::manifest::{Profile, Seccomp, SyscallRule},
+    runtime::island::seccomp_profiles::default::SYSCALLS_BASE,
 };
 use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, fs::File, io, io::BufRead, path::PathBuf};
@@ -62,7 +61,7 @@ fn main() -> Result<()> {
     } else {
         Some(Profile::Default)
     };
-    let allow = if syscalls.len() == 0 {
+    let allow = if syscalls.is_empty() {
         None
     } else {
         Some(syscalls)

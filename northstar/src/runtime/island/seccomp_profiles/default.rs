@@ -457,9 +457,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_DAC_READ_SEARCH: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_DAC_READ_SEARCH.len());
         for name in SYSCALLS_CAP_DAC_READ_SEARCH {
@@ -467,9 +464,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_ADMIN: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_ADMIN.len());
         for name in SYSCALLS_CAP_SYS_ADMIN {
@@ -477,9 +471,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_BOOT: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_BOOT.len());
         for name in SYSCALLS_CAP_SYS_BOOT {
@@ -487,9 +478,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_CHROOT: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_CHROOT.len());
         for name in SYSCALLS_CAP_SYS_CHROOT {
@@ -497,9 +485,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_MODULE: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_MODULE.len());
         for name in SYSCALLS_CAP_SYS_MODULE {
@@ -507,9 +492,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_PACCT: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PACCT.len());
         for name in SYSCALLS_CAP_SYS_PACCT {
@@ -517,9 +499,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_PTRACE: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PTRACE.len());
         for name in SYSCALLS_CAP_SYS_PTRACE {
@@ -527,9 +506,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_RAWIO: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_RAWIO.len());
         for name in SYSCALLS_CAP_SYS_RAWIO {
@@ -537,9 +513,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_TIME: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TIME.len());
         for name in SYSCALLS_CAP_SYS_TIME {
@@ -547,9 +520,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_TTY_CONFIG: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TTY_CONFIG.len());
         for name in SYSCALLS_CAP_SYS_TTY_CONFIG {
@@ -557,9 +527,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYS_NICE: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_NICE.len());
         for name in SYSCALLS_CAP_SYS_NICE {
@@ -567,9 +534,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref CAP_SYSLOG: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYSLOG.len());
         for name in SYSCALLS_CAP_SYSLOG {
@@ -577,9 +541,6 @@ lazy_static::lazy_static! {
         }
         builder_from_rules(&hm)
     };
-}
-
-lazy_static::lazy_static! {
     pub static ref NON_CAP_SYS_ADMIN: Builder = {
         let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_NON_CAP_SYS_ADMIN.len());
         for name in SYSCALLS_NON_CAP_SYS_ADMIN {
