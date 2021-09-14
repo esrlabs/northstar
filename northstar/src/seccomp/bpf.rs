@@ -14,13 +14,13 @@
 
 use crate::{
     common::non_null_string::NonNullString,
-    npk::manifest::{Capability, Profile, SyscallArgRule, SyscallRule},
-    runtime::island::seccomp_profiles::default,
+    seccomp::{profiles::default, Profile, SyscallArgRule, SyscallRule},
 };
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_ALU, BPF_AND, BPF_IMM, BPF_JEQ, BPF_JMP,
     BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM, BPF_NEG, BPF_OR, BPF_RET, BPF_ST, BPF_W, SYSCALL_MAP,
 };
+use caps::Capability;
 use log::trace;
 use nix::errno::Errno;
 use std::{
@@ -59,7 +59,7 @@ pub enum Error {
 }
 
 /// Construct a allowlist syscall filter that is applied post clone.
-pub(super) fn seccomp_filter(
+pub fn seccomp_filter(
     profile: Option<&Profile>,
     rules: Option<&HashMap<NonNullString, SyscallRule>>,
     caps: Option<&HashSet<Capability>>,

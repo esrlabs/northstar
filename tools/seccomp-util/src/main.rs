@@ -15,8 +15,7 @@
 use anyhow::{Context, Result};
 use northstar::{
     common::non_null_string::NonNullString,
-    npk::manifest::{Profile, Seccomp, SyscallRule},
-    runtime::island::seccomp_profiles::default::SYSCALLS_BASE,
+    seccomp::{profiles::default::SYSCALLS_BASE, Profile, Seccomp, SyscallRule},
 };
 use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, fs::File, io, io::BufRead, path::PathBuf};

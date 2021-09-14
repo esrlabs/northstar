@@ -12,8 +12,8 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{clone::clone, fs::Mount, io::Fd, seccomp::AllowList, Capabilities, SIGNAL_OFFSET};
-use crate::{npk::manifest::Manifest, runtime::pipe::ConditionNotify};
+use super::{clone::clone, fs::Mount, io::Fd, Capabilities, SIGNAL_OFFSET};
+use crate::{npk::manifest::Manifest, runtime::pipe::ConditionNotify, seccomp::AllowList};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},

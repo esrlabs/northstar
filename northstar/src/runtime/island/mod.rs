@@ -23,6 +23,7 @@ use super::{
 use crate::{
     common::{container::Container, non_null_string::NonNullString},
     npk::manifest::Manifest,
+    seccomp,
 };
 use async_trait::async_trait;
 use caps::CapsHashSet;
@@ -55,8 +56,6 @@ mod clone;
 mod fs;
 mod init;
 mod io;
-pub(crate) mod seccomp;
-pub mod seccomp_profiles;
 
 /// Offset for signal as exit code encoding
 const SIGNAL_OFFSET: i32 = 128;
