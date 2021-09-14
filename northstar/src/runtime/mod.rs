@@ -45,7 +45,7 @@ mod debug;
 #[allow(unused)]
 mod device_mapper;
 mod error;
-mod island;
+pub mod island;
 mod key;
 mod loopdev;
 mod mount;
