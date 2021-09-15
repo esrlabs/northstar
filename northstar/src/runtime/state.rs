@@ -21,6 +21,7 @@ use super::{
     mount::{MountControl, MountInfo},
     process::Launcher,
     repository::{DirRepository, MemRepository},
+    stats::ContainerStats,
     Container, Event, EventTx, ExitStatus, Notification, Pid, Repository, RepositoryId,
 };
 use crate::{
@@ -96,7 +97,7 @@ pub(super) struct ProcessContext {
     process: Box<dyn Process>,
     started: time::Instant,
     debug: super::debug::Debug,
-    cgroups: Option<cgroups::CGroups>,
+    cgroups: cgroups::CGroups,
 }
 
 impl ProcessContext {
@@ -115,9 +116,7 @@ impl ProcessContext {
             .await
             .expect("Failed to destroy debug utilities");
 
-        if let Some(cgroups) = self.cgroups.take() {
-            cgroups.destroy().await;
-        }
+        self.cgroups.destroy().await;
     }
 }
 
@@ -425,22 +424,24 @@ impl<'a> State<'a> {
         let debug = super::debug::Debug::new(self.config, &mounted_container.manifest, pid).await?;
 
         // CGroups
-        let cgroups = if let Some(ref cgroup) = mounted_container.manifest.cgroups {
+        let cgroups = {
             debug!("Configuring CGroups for {}", container);
+            let config = mounted_container
+                .manifest
+                .cgroups
+                .clone()
+                .unwrap_or_default();
+
             // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
-            Some(
-                cgroups::CGroups::new(
-                    &self.config.cgroup,
-                    self.events_tx.clone(),
-                    container,
-                    cgroup,
-                    pid,
-                )
-                .await
-                .expect("Failed to create cgroup"),
+            cgroups::CGroups::new(
+                &self.config.cgroup,
+                self.events_tx.clone(),
+                container,
+                &config,
+                pid,
             )
-        } else {
-            None
+            .await
+            .expect("Failed to create cgroup")
         };
 
         // Signal the process to continue starting. This can fail because of the container content
@@ -449,9 +450,7 @@ impl<'a> State<'a> {
             result::Result::Err(e) => {
                 warn!("Failed to start {} ({}): {}", container, pid, e);
                 debug.destroy().await.expect("Failed to destroy debug");
-                if let Some(cgroups) = cgroups {
-                    cgroups.destroy().await;
-                }
+                cgroups.destroy().await;
                 return Err(e);
             }
         };
@@ -568,6 +567,23 @@ impl<'a> State<'a> {
             .await;
 
         Ok(())
+    }
+
+    async fn container_stats(
+        &mut self,
+        container: &Container,
+    ) -> result::Result<ContainerStats, Error> {
+        if let Some(process) = self
+            .containers
+            .get(container)
+            .and_then(|c| c.process.as_ref())
+        {
+            info!("Collecting stats of {}", container);
+            let stats = process.cgroups.stats();
+            Ok(stats)
+        } else {
+            Err(Error::StopContainerNotStarted(container.clone()))
+        }
     }
 
     /// Handle the exit of a container. The restarting of containers is a subject
@@ -740,6 +756,21 @@ impl<'a> State<'a> {
                                 Ok(_) => api::model::Response::Ok(()),
                                 Err(e) => {
                                     warn!("Failed to uninstall {}: {}", container, e);
+                                    api::model::Response::Err(e.into())
+                                }
+                            }
+                        }
+                        api::model::Request::ContainerStats(container) => {
+                            match self.container_stats(container).await {
+                                Ok(stats) => {
+                                    let stats = api::model::ContainerStats {
+                                        container: container.clone(),
+                                        stats,
+                                    };
+                                    api::model::Response::ContainerStats(stats)
+                                }
+                                Err(e) => {
+                                    warn!("Failed to gather stats for {}: {}", container, e);
                                     api::model::Response::Err(e.into())
                                 }
                             }

@@ -147,6 +147,11 @@ pub fn response(response: &Response) -> i32 {
             println!("ok");
             0
         }
+        Response::ContainerStats(stats) => {
+            println!("{}:", stats.container);
+            println!("{}", serde_json::to_string_pretty(&stats.stats).unwrap());
+            0
+        }
         Response::Err(e) => {
             eprintln!("{}", format_err(e));
             1

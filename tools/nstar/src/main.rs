@@ -126,6 +126,12 @@ pub enum Subcommand {
         #[structopt(short, long)]
         shell: clap::Shell,
     },
+    ContainerStats {
+        /// Container name
+        name: String,
+        /// Container version
+        version: Version,
+    },
 }
 
 /// CLI
@@ -231,6 +237,9 @@ impl TryFrom<Subcommand> for Request {
                 version,
             ))),
             Subcommand::Shutdown => Ok(Request::Shutdown),
+            Subcommand::ContainerStats { name, version } => Ok(Request::ContainerStats(
+                Container::new(name.try_into()?, version),
+            )),
             Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
         }
     }

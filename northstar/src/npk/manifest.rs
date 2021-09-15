@@ -524,7 +524,7 @@ pub mod cgroups {
     use serde::{Deserialize, Serialize};
 
     /// CGroups configuration
-    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
     pub struct CGroups {
         /// Memory controller
         pub memory: Option<Memory>,

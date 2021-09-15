@@ -15,8 +15,8 @@
 use super::{
     codec::{self, framed},
     model::{
-        self, Connect, Container, ContainerData, Message, MountResult, Notification, RepositoryId,
-        Request, Response,
+        self, Connect, Container, ContainerData, ContainerStats, Message, MountResult,
+        Notification, RepositoryId, Request, Response,
     },
 };
 use crate::common::{
@@ -594,6 +594,35 @@ impl<'a> Client {
         let container = container.try_into().map_err(Into::into)?;
         match self.request(Request::Umount(container)).await? {
             Response::Ok(()) => Ok(()),
+            Response::Err(e) => Err(Error::Api(e)),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
+        }
+    }
+
+    /// Gather container statistics
+    ///
+    /// ```no_run
+    /// # use std::time::Duration;
+    /// # use std::path::Path;
+    /// # use northstar::api::client::Client;
+    /// # use northstar::common::version::Version;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// println!("{:?}", client.container_stats("hello:0.0.1").await.unwrap());
+    /// # }
+    /// ```
+    pub async fn container_stats(
+        &mut self,
+        container: impl TryInto<Container, Error = impl Into<Error>>,
+    ) -> Result<ContainerStats, Error> {
+        let container = container.try_into().map_err(Into::into)?;
+        match self.request(Request::ContainerStats(container)).await? {
+            Response::ContainerStats(s) => Ok(s),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
                 self.fuse();
