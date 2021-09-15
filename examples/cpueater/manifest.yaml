@@ -5,9 +5,6 @@ uid: 1000
 gid: 1000
 env:
   THREADS: 4
-cgroups:
-  cpu:
-    shares: 100
 mounts:
   /lib:
     type: bind

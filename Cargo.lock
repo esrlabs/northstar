@@ -304,6 +304,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cgroups-rs"
+version = "0.2.6"
+source = "git+https://github.com/kata-containers/cgroups-rs.git?rev=6375088#63750887c2bfa18bc8f992cd29f9f3990cb924a1"
+dependencies = [
+ "libc",
+ "log",
+ "nix 0.20.1",
+ "regex",
+ "serde",
+]
+
+[[package]]
 name = "clang-sys"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1144,6 +1156,7 @@ dependencies = [
  "bytes",
  "bytesize",
  "caps",
+ "cgroups-rs",
  "derive-new",
  "devicemapper",
  "ed25519-dalek",

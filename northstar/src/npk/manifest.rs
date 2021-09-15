@@ -32,9 +32,8 @@ use std::{
 use thiserror::Error;
 
 pub type Capability = caps::Capability;
-pub type CGroupConfig = HashMap<NonNullString, NonNullString>;
-pub type CGroups = HashMap<NonNullString, CGroupConfig>;
 pub type MountOptions = HashSet<MountOption>;
+pub use cgroups_rs::Resources as CGroups;
 
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -573,11 +572,6 @@ mounts:
     dir: /bin/foo
     options: noexec
 autostart: critical
-cgroups:
-  memory:
-    limit_in_bytes: 30
-  cpu:
-    shares: 100
 seccomp:
   allow: 
     fork: any
@@ -622,16 +616,6 @@ seccomp:
         mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs(Tmpfs { size: 42 }));
         mounts.insert(PathBuf::from("/dev"), Mount::Dev);
         assert_eq!(manifest.mounts, mounts);
-
-        let mut cgroups = HashMap::new();
-        let mut mem = HashMap::new();
-        let mut cpu = HashMap::new();
-        mem.insert("limit_in_bytes".try_into()?, "30".try_into()?);
-        cpu.insert("shares".try_into()?, "100".try_into()?);
-        cgroups.insert("memory".try_into()?, mem);
-        cgroups.insert("cpu".try_into()?, cpu);
-
-        assert_eq!(manifest.cgroups, Some(cgroups));
 
         let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
         syscalls.insert(
@@ -831,11 +815,6 @@ rlimits:
   nproc:
     soft: 100
     hard: 1000
-cgroups:
-  memory:
-    limit_in_bytes: 30
-  cpu:
-    shares: 100
 seccomp:
   allow:
     fork: any
