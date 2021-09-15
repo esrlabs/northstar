@@ -22,12 +22,16 @@ use northstar::{
         client::Client,
         model::{Container, ExitStatus, Notification},
     },
+    common::non_null_string::NonNullString,
     runtime::{
         self,
         config::{self, Config, RepositoryType},
     },
 };
-use std::{collections::HashMap, convert::TryInto, path::PathBuf};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+};
 use tempfile::{NamedTempFile, TempDir};
 use tokio::{fs, pin, select, time};
 
@@ -78,16 +82,6 @@ impl Northstar {
             },
         );
 
-        let mut cgroups = HashMap::new();
-        cgroups.insert(
-            "memory".try_into()?,
-            PathBuf::from(format!("northstar-{}", pid)),
-        );
-        cgroups.insert(
-            "cpu".try_into()?,
-            PathBuf::from(format!("northstar-{}", pid)),
-        );
-
         let console = format!(
             "unix://{}/northstar-{}",
             tmpdir.path().display(),
@@ -100,8 +94,8 @@ impl Northstar {
             run_dir,
             data_dir: data_dir.clone(),
             log_dir,
+            cgroup: NonNullString::try_from(format!("northstar-{}", pid)).unwrap(),
             repositories,
-            cgroups,
             debug: None,
         };
 

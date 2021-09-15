@@ -430,7 +430,7 @@ impl<'a> State<'a> {
             // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
             Some(
                 cgroups::CGroups::new(
-                    &self.config.cgroups,
+                    &self.config.cgroup,
                     self.events_tx.clone(),
                     container,
                     cgroup,

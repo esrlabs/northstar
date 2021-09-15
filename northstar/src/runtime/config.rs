@@ -31,7 +31,7 @@ pub struct Config {
     pub log_dir: PathBuf,
 
     pub repositories: HashMap<RepositoryId, Repository>,
-    pub cgroups: CGroups,
+    pub cgroup: NonNullString,
 
     /// Debugging options
     pub debug: Option<Debug>,
@@ -55,11 +55,6 @@ pub struct Repository {
     /// Repository type: fs or mem
     pub r#type: RepositoryType,
 }
-
-/// This map specifies the root cgroup under which the application cgroups are inserted.
-/// The directory is created if it does not exist.
-/// If not set for a specific cgroup, it defaults to "north".
-pub type CGroups = HashMap<NonNullString, PathBuf>;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Debug {
