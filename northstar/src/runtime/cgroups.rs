@@ -14,8 +14,8 @@
 
 use super::{Container, EventTx, Pid};
 use crate::npk::manifest;
-use log::debug;
-use std::path::Path;
+use log::{debug, info};
+use std::{fmt::Debug, path::Path};
 use thiserror::Error;
 use tokio::io;
 
@@ -23,6 +23,8 @@ use tokio::io;
 pub enum Error {
     #[error("Io error: {0}: {1:?}")]
     Io(String, io::Error),
+    #[error("CGroups error: {0}")]
+    CGroups(String),
 }
 
 /// Create the top level cgroups used by northstar
@@ -42,19 +44,50 @@ pub async fn shutdown(dir: &Path) -> Result<(), Error> {
 }
 
 #[derive(Debug)]
-pub struct CGroups;
+pub struct CGroups {
+    cgroup: cgroups_rs::Cgroup,
+}
 
 impl CGroups {
     pub(super) async fn new(
-        _top_level_dir: &str,
+        top_level_dir: &str,
         _tx: EventTx,
-        _container: &Container,
-        _cgroups: &manifest::cgroups::CGroups,
-        _pid: Pid,
+        container: &Container,
+        config: &manifest::cgroups::CGroups,
+        pid: Pid,
     ) -> Result<CGroups, Error> {
-        let _hier = cgroups_rs::hierarchies::auto();
-        Ok(CGroups {})
+        info!("Creating cgroups for {}", container);
+        let hierarchy = cgroups_rs::hierarchies::auto();
+        let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(
+            hierarchy,
+            Path::new(top_level_dir).join(container.name().to_str()),
+        );
+        let resources = cgroups_rs::Resources {
+            memory: config.memory.clone().unwrap_or_default(),
+            pid: cgroups_rs::PidResources::default(),
+            cpu: config.cpu.clone().unwrap_or_default(),
+            devices: cgroups_rs::DeviceResources::default(),
+            network: cgroups_rs::NetworkResources::default(),
+            hugepages: cgroups_rs::HugePageResources::default(),
+            blkio: cgroups_rs::BlkIoResources::default(),
+        };
+
+        cgroup
+            .apply(&resources)
+            .map_err(|e| Error::CGroups(e.to_string()))?;
+
+        // If adding the task fails it's a fault of the runtime or it's integration
+        // and not of the container
+        debug!("Assigning pid {} to cgroups", pid);
+        cgroup
+            .add_task(cgroups_rs::CgroupPid::from(pid as u64))
+            .expect("Failed to assign pid");
+
+        Ok(CGroups { cgroup })
     }
 
-    pub async fn destroy(self) {}
+    pub async fn destroy(self) {
+        info!("Destroying cgroups");
+        self.cgroup.delete().expect("Failed to remove cgroups");
+    }
 }
