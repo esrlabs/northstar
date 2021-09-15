@@ -41,7 +41,7 @@ impl CGroups {
         _configuration: &config::CGroups,
         _tx: EventTx,
         _container: &Container,
-        _cgroups: &manifest::CGroups,
+        _cgroups: &manifest::cgroups::CGroups,
         _pid: Pid,
     ) -> Result<CGroups, Error> {
         Ok(CGroups {})

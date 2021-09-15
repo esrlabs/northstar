@@ -33,7 +33,6 @@ use thiserror::Error;
 
 pub type Capability = caps::Capability;
 pub type MountOptions = HashSet<MountOption>;
-pub use cgroups_rs::Resources as CGroups;
 
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -56,7 +55,7 @@ pub struct Manifest {
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup config
-    pub cgroups: Option<CGroups>,
+    pub cgroups: Option<cgroups::CGroups>,
     /// Seccomp configuration
     pub seccomp: Option<Seccomp>,
     /// List of bind mounts and resources
@@ -520,6 +519,22 @@ mod serde_caps {
     }
 }
 
+/// CGroups
+pub mod cgroups {
+    use serde::{Deserialize, Serialize};
+
+    /// CGroups configuration
+    #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+    pub struct CGroups {
+        /// Memory controller
+        memory: Option<Memory>,
+        /// Cpu controller
+        cpu: Option<Cpu>,
+    }
+
+    pub use cgroups_rs::{CpuResources as Cpu, MemoryResources as Memory};
+}
+
 #[cfg(test)]
 mod tests {
     use crate::npk::manifest::*;
@@ -576,6 +591,16 @@ seccomp:
   allow: 
     fork: any
     waitpid: any
+cgroups:
+    memory:
+      memory_hard_limit: 1000000
+      memory_soft_limit: 1000000
+      swappiness: 0
+      attrs: {}
+    cpu:
+      cpus: 0,1
+      shares: 1024
+      attrs: {}
 ";
 
         let manifest = Manifest::from_str(&manifest)?;
@@ -827,6 +852,16 @@ io:
       level: DEBUG
       tag: test
   stderr: pipe
+cgroups:
+    memory:
+      memory_hard_limit: 1000000
+      memory_soft_limit: 1000000
+      swappiness: 0
+      attrs: {}
+    cpu:
+      cpus: 0,1
+      shares: 1024
+      attrs: {}
 custom:
     blah: foo
     foo: 234
