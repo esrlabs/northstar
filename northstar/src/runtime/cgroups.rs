@@ -12,8 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{config, Container, EventTx, Pid};
+use super::{Container, EventTx, Pid};
 use crate::npk::manifest;
+use log::debug;
+use std::path::Path;
 use thiserror::Error;
 use tokio::io;
 
@@ -24,12 +26,18 @@ pub enum Error {
 }
 
 /// Create the top level cgroups used by northstar
-pub async fn init(_configuration: &config::CGroups) -> Result<(), Error> {
+pub async fn init(dir: &Path) -> Result<(), Error> {
+    debug!("Initializing root cgroup");
+    cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir);
     Ok(())
 }
 
 /// Shutdown the cgroups config by removing the dir
-pub async fn shutdown(_configuration: &config::CGroups) -> Result<(), Error> {
+pub async fn shutdown(dir: &Path) -> Result<(), Error> {
+    debug!("Shutting down root cgroup");
+    cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir)
+        .delete()
+        .expect("Failed to remove top level cgroup");
     Ok(())
 }
 
@@ -38,12 +46,13 @@ pub struct CGroups;
 
 impl CGroups {
     pub(super) async fn new(
-        _configuration: &config::CGroups,
+        _top_level_dir: &str,
         _tx: EventTx,
         _container: &Container,
         _cgroups: &manifest::cgroups::CGroups,
         _pid: Pid,
     ) -> Result<CGroups, Error> {
+        let _hier = cgroups_rs::hierarchies::auto();
         Ok(CGroups {})
     }
 

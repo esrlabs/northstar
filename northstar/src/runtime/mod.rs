@@ -28,6 +28,7 @@ use state::State;
 use std::{
     fmt::{self},
     future::Future,
+    path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -177,7 +178,8 @@ impl Future for Runtime {
 }
 
 async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(), Error> {
-    cgroups::init(&config.cgroups).await?;
+    let cgroup = Path::new(&*config.cgroup.as_str());
+    cgroups::init(cgroup).await?;
 
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(MAIN_BUFFER);
@@ -234,7 +236,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
         }
     }?;
 
-    cgroups::shutdown(&config.cgroups).await?;
+    cgroups::shutdown(cgroup).await?;
 
     debug!("Shutdown complete");
 

@@ -2,10 +2,7 @@ console = "tcp://localhost:4200"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 log_dir = "target/northstar/logs"
-
-[cgroups]
-memory = "northstar"
-cpu = "northstar"
+cgroup = "northstar"
 
 # Start a `strace -p PID ...` instance after a container is started.
 # The execution of the application is defered until strace is attached.
