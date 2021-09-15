@@ -28,7 +28,7 @@ pub type Version = crate::common::version::Version;
 const VERSION: Version = Version {
     major: 0,
     minor: 1,
-    patch: 0,
+    patch: 1,
     pre: vec![],
     build: vec![],
 };
@@ -96,6 +96,7 @@ pub enum Request {
     Kill(Container, i32),
     Umount(Container),
     Uninstall(Container),
+    ContainerStats(Container),
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
@@ -127,7 +128,14 @@ pub enum Response {
     Containers(Vec<ContainerData>),
     Repositories(HashSet<RepositoryId>),
     Mount(Vec<MountResult>),
+    ContainerStats(ContainerStats),
     Err(Error),
+}
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct ContainerStats {
+    pub container: Container,
+    pub stats: HashMap<String, serde_json::Value>,
 }
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

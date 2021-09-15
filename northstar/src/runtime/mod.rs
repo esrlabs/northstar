@@ -50,6 +50,7 @@ mod pipe;
 pub mod process;
 mod repository;
 mod state;
+pub mod stats;
 
 type EventTx = mpsc::Sender<Event>;
 type RepositoryId = String;

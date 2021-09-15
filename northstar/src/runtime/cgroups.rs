@@ -12,10 +12,13 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Container, EventTx, Pid};
+use super::{
+    stats::{to_value, ContainerStats},
+    Container, EventTx, Pid,
+};
 use crate::npk::manifest;
 use log::{debug, info};
-use std::{fmt::Debug, path::Path};
+use std::{collections::HashMap, fmt::Debug, path::Path};
 use thiserror::Error;
 use tokio::io;
 
@@ -89,5 +92,31 @@ impl CGroups {
     pub async fn destroy(self) {
         info!("Destroying cgroups");
         self.cgroup.delete().expect("Failed to remove cgroups");
+    }
+
+    /// Gather statistics from controllers
+    pub(super) fn stats(&self) -> ContainerStats {
+        let mut stats = HashMap::new();
+        for c in self.cgroup.subsystems() {
+            match c {
+                cgroups_rs::Subsystem::Mem(c) => {
+                    stats.insert("memory".into(), to_value(c.memory_stat()).unwrap());
+                    stats.insert("kmem".into(), to_value(c.kmem_stat()).unwrap());
+                    stats.insert("kmem_tcp".into(), to_value(c.kmem_tcp_stat()).unwrap());
+                }
+                cgroups_rs::Subsystem::BlkIo(c) => {
+                    stats.insert("blkio".into(), to_value(c.blkio()).unwrap());
+                }
+                cgroups_rs::Subsystem::Cpu(c) => {
+                    stats.insert("cpu".into(), to_value(c.cpu()).unwrap());
+                }
+                cgroups_rs::Subsystem::CpuAcct(c) => {
+                    stats.insert("cpuacct".into(), to_value(c.cpuacct()).unwrap());
+                }
+                _ => (),
+            }
+        }
+
+        stats
     }
 }
