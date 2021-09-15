@@ -527,9 +527,9 @@ pub mod cgroups {
     #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
     pub struct CGroups {
         /// Memory controller
-        memory: Option<Memory>,
+        pub memory: Option<Memory>,
         /// Cpu controller
-        cpu: Option<Cpu>,
+        pub cpu: Option<Cpu>,
     }
 
     pub use cgroups_rs::{CpuResources as Cpu, MemoryResources as Memory};
