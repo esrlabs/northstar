@@ -402,24 +402,6 @@ test!(check_api_version_on_connect, {
     runtime.shutdown().await
 });
 
-// Verify that a container that exceeds it's memory limit is detected
-// test!(cgroups_memory, {
-//     let mut runtime = Northstar::launch_install_test_container().await?;
-
-//     for _ in 0..10 {
-//         runtime.test_cmds("leak-memory").await;
-//         runtime.start(TEST_CONTAINER).await?;
-//         assume("Process test-container:0.0.1 is out of memory", 10).await?;
-//         assume(
-//             "Stopped test-container:0.0.1 with status Signaled\\(SIGTERM\\)",
-//             10,
-//         )
-//         .await?;
-//     }
-
-//     runtime.shutdown().await
-// });
-
 mod example {
     use super::*;
 
@@ -488,8 +470,7 @@ mod example {
         let mut runtime = Northstar::launch().await?;
         runtime.install(&EXAMPLE_MEMEATER_NPK).await?;
         runtime.start(EXAMPLE_MEMEATER).await?;
-        // TODO
-        runtime.stop(EXAMPLE_MEMEATER, 5).await?;
+        assume("Process memeater:0.0.1 is out of memory", 20).await?;
         runtime.shutdown().await
     });
 

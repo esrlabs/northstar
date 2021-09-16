@@ -18,9 +18,7 @@ use nix::{
     unistd::{self, Gid},
 };
 use std::{
-    env,
-    ffi::c_void,
-    fs,
+    env, fs,
     io::{self, Write},
     path::{Path, PathBuf},
     ptr::null_mut,
@@ -45,7 +43,6 @@ enum Command {
         message: Vec<String>,
     },
     Inspect,
-    LeakMemory,
     Touch {
         path: PathBuf,
     },
@@ -67,7 +64,6 @@ fn main() -> Result<()> {
         Command::Crash => crash(),
         Command::Echo { message } => echo(&message),
         Command::Inspect => inspect(),
-        Command::LeakMemory => leak_memory(),
         Command::Touch { path } => touch(&path)?,
         Command::Sleep => (),
         Command::Write { message, path } => write(&message, path.as_path())?,
@@ -118,16 +114,6 @@ fn write(input: &str, path: &Path) -> Result<()> {
 fn touch(path: &Path) -> Result<()> {
     fs::File::create(path)?;
     Ok(())
-}
-
-fn leak_memory() {
-    extern "C" {
-        fn malloc(size: usize) -> *mut c_void;
-    }
-
-    loop {
-        unsafe { malloc(1_000) };
-    }
 }
 
 /// Call the 'delete_module' syscall with an empty module name. This has no effect and just returns -1.
