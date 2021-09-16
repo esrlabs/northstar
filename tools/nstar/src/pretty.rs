@@ -23,7 +23,9 @@ use tokio::time;
 
 pub(crate) fn notification(notification: &Notification) {
     match notification {
-        Notification::OutOfMemory(c) => println!("container {} is out of memory", c),
+        Notification::CGroup(container, event) => {
+            println!("container {} memory event {:?}", container, event)
+        }
         Notification::Exit(container, status) => println!(
             "container {} exited with status {}",
             container,

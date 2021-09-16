@@ -18,7 +18,7 @@ use super::{
     error::Error,
     pipe::{Condition, ConditionNotify, ConditionWait},
     state::MountedContainer,
-    Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
+    ContainerEvent, Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
     common::{container::Container, non_null_string::NonNullString},
@@ -266,8 +266,11 @@ fn waitpid(container: Container, pid: Pid, tx: EventTx) -> impl Future<Output = 
         };
 
         drop(
-            tx.send(Event::Exit(container.clone(), exit_status.clone()))
-                .await,
+            tx.send(Event::Container(
+                container,
+                ContainerEvent::Exit(exit_status.clone()),
+            ))
+            .await,
         );
         exit_status
     })

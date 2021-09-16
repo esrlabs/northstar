@@ -22,14 +22,14 @@ use super::{
     process::Launcher,
     repository::{DirRepository, MemRepository},
     stats::ContainerStats,
-    Container, Event, EventTx, ExitStatus, Notification, Pid, Repository, RepositoryId,
+    Container, ContainerEvent, Event, EventTx, ExitStatus, Pid, Repository, RepositoryId,
 };
 use crate::{
     api::{self, model::MountResult},
     common::non_null_string::NonNullString,
     npk,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
-    runtime::{ENV_NAME, ENV_VERSION},
+    runtime::{CGroupEvent, ENV_NAME, ENV_VERSION},
 };
 use api::model::Response;
 use async_trait::async_trait;
@@ -472,7 +472,7 @@ impl<'a> State<'a> {
             start.elapsed().as_fractional_secs()
         );
 
-        self.notification(Notification::Started(container.clone()))
+        self.send_container_event(container, ContainerEvent::Started)
             .await;
 
         Ok(())
@@ -543,7 +543,8 @@ impl<'a> State<'a> {
 
         info!("Successfully installed {}", container);
 
-        self.notification(Notification::Install(container)).await;
+        self.send_container_event(&container, ContainerEvent::Installed)
+            .await;
 
         Ok(())
     }
@@ -563,7 +564,7 @@ impl<'a> State<'a> {
 
         info!("Successfully uninstalled {}", container);
 
-        self.notification(Notification::Uninstall(container.clone()))
+        self.send_container_event(container, ContainerEvent::Uninstalled)
             .await;
 
         Ok(())
@@ -588,12 +589,12 @@ impl<'a> State<'a> {
 
     /// Handle the exit of a container. The restarting of containers is a subject
     /// to be removed and handled externally
-    pub(super) async fn on_exit(
+    async fn on_exit(
         &mut self,
-        container: Container,
-        exit_status: ExitStatus,
+        container: &Container,
+        exit_status: &ExitStatus,
     ) -> Result<(), Error> {
-        if let Some(mounted_container) = self.containers.get_mut(&container) {
+        if let Some(mounted_container) = self.containers.get_mut(container) {
             if let Some(process) = mounted_container.process.take() {
                 let critical = mounted_container.manifest.autostart == Some(Autostart::Critical);
                 if critical {
@@ -614,80 +615,41 @@ impl<'a> State<'a> {
 
                 process.destroy().await;
 
-                self.notification(Notification::Exit(container.clone(), exit_status.clone()))
-                    .await;
-
                 // This is a critical flagged container that exited with a error exit code. That's not good...
                 if !exit_status.success() && critical {
-                    return Err(Error::CriticalContainer(container, exit_status));
+                    return Err(Error::CriticalContainer(
+                        container.clone(),
+                        exit_status.clone(),
+                    ));
                 }
             }
         }
         Ok(())
     }
 
-    /// Handle out of memory conditions for container `name`
-    pub(super) async fn on_oom(&mut self, container: &Container) -> Result<(), Error> {
-        if self
-            .containers
-            .get(container)
-            .and_then(|c| c.process.as_ref())
-            .is_some()
-        {
-            warn!("Process {} is out of memory", container);
-            self.notification(Notification::OutOfMemory(container.clone()))
-                .await;
-        }
-        Ok(())
-    }
-
-    async fn mount_all(&mut self, containers: &[Container]) -> Vec<Result<Container, Error>> {
-        let mut mounts = Vec::with_capacity(containers.len());
-
-        // Create mount futures
-        for c in containers {
-            // Containers cannot be mounted twice
-            if self.containers.contains_key(c) {
-                mounts.push(Either::Right(ready(Err(Error::MountBusy(c.clone())))));
-            } else {
-                let m = match self.mount(c).await {
-                    Ok(m) => Either::Left(m),
-                    Err(e) => Either::Right(ready(Err(e))),
-                };
-                mounts.push(m);
+    // Handle global events
+    pub(super) async fn on_event(
+        &mut self,
+        container: &Container,
+        event: &ContainerEvent,
+    ) -> Result<(), Error> {
+        match event {
+            ContainerEvent::Started => (),
+            ContainerEvent::Exit(exit_status) => {
+                self.on_exit(container, exit_status).await?;
+            }
+            ContainerEvent::Installed => (),
+            ContainerEvent::Uninstalled => (),
+            ContainerEvent::CGroup(CGroupEvent::Memory(_)) => {
+                warn!("Process {} is out of memory", container);
             }
         }
 
-        // Spawn mount tasks onto the executor
-        let mounts = mounts
-            .drain(..)
-            .map(|t| self.executor.spawn_with_handle(t).unwrap());
-
-        // Insert all mounted containers into containers map
-        join_all(mounts)
-            .await
-            .drain(..)
-            .zip(containers)
-            .map(|(r, c)| {
-                match r {
-                    Ok(c) => {
-                        // Add mounted container to our internal housekeeping
-                        info!("Mounted {}", c.container);
-                        let container = c.container.clone();
-                        self.containers.insert(container.clone(), c);
-                        Ok(container)
-                    }
-                    Err(e) => {
-                        warn!("Failed to mount {}: {}", c, e);
-                        Err(e)
-                    }
-                }
-            })
-            .collect()
+        Ok(())
     }
 
     /// Process console events
-    pub(super) async fn console_request(
+    pub(super) async fn on_request(
         &mut self,
         request: &mut Request,
         response_tx: oneshot::Sender<api::model::Response>,
@@ -798,6 +760,51 @@ impl<'a> State<'a> {
         Ok(())
     }
 
+    async fn mount_all(&mut self, containers: &[Container]) -> Vec<Result<Container, Error>> {
+        let mut mounts = Vec::with_capacity(containers.len());
+
+        // Create mount futures
+        for c in containers {
+            // Containers cannot be mounted twice
+            if self.containers.contains_key(c) {
+                mounts.push(Either::Right(ready(Err(Error::MountBusy(c.clone())))));
+            } else {
+                let m = match self.mount(c).await {
+                    Ok(m) => Either::Left(m),
+                    Err(e) => Either::Right(ready(Err(e))),
+                };
+                mounts.push(m);
+            }
+        }
+
+        // Spawn mount tasks onto the executor
+        let mounts = mounts
+            .drain(..)
+            .map(|t| self.executor.spawn_with_handle(t).unwrap());
+
+        // Insert all mounted containers into containers map
+        join_all(mounts)
+            .await
+            .drain(..)
+            .zip(containers)
+            .map(|(r, c)| {
+                match r {
+                    Ok(c) => {
+                        // Add mounted container to our internal housekeeping
+                        info!("Mounted {}", c.container);
+                        let container = c.container.clone();
+                        self.containers.insert(container.clone(), c);
+                        Ok(container)
+                    }
+                    Err(e) => {
+                        warn!("Failed to mount {}: {}", c, e);
+                        Err(e)
+                    }
+                }
+            })
+            .collect()
+    }
+
     async fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut containers = Vec::new();
         for (repository_name, repository) in &self.repositories {
@@ -830,10 +837,10 @@ impl<'a> State<'a> {
         self.repositories.keys().cloned().collect()
     }
 
-    async fn notification(&self, n: Notification) {
+    async fn send_container_event(&self, container: &Container, event: ContainerEvent) {
         if !self.events_tx.is_closed() {
             self.events_tx
-                .send(Event::Notification(n))
+                .send(Event::Container(container.clone(), event))
                 .await
                 .expect("Internal channel error on main");
         }

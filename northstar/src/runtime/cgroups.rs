@@ -16,11 +16,14 @@ use super::{
     stats::{to_value, ContainerStats},
     Container, EventTx, Pid,
 };
-use crate::{npk::manifest, runtime::Event};
+use crate::{
+    npk::manifest,
+    runtime::{CGroupEvent, ContainerEvent, Event, MemoryEvent},
+};
 use cgroups_rs::{memory::MemController, Controller, Hierarchy};
 use futures::stream::StreamExt;
 use inotify::{Inotify, WatchMask};
-use log::{debug, info};
+use log::{debug, info, warn};
 use std::{collections::HashMap, fmt::Debug, os::unix::io::AsRawFd, path::Path};
 use thiserror::Error;
 use tokio::{
@@ -261,7 +264,12 @@ impl MemoryMonitor {
                         _ = tx.closed() => break 'outer,
                         _ = event_fd.read(&mut buffer) => {
                             'inner: loop {
-                                match tx.try_send(Event::Oom(container.clone())) {
+                                warn!("Process {} is out of memory", container);
+                                let event = Event::Container(container.clone(), ContainerEvent::CGroup(CGroupEvent::Memory(MemoryEvent {
+                                    oom: Some(1),
+                                    ..Default::default()
+                                })));
+                                match tx.try_send(event) {
                                     Ok(_) => break 'inner,
                                     Err(TrySendError::Closed(_)) => break 'outer,
                                     Err(TrySendError::Full(_)) => time::sleep(time::Duration::from_millis(1)).await,
@@ -308,11 +316,12 @@ impl MemoryMonitor {
                         _ = stop.cancelled() => break 'outer,
                         _ = tx.closed() => break 'outer,
                         _ = stream.next() => {
-                            // TODO: events
-                            //let events = fs::read_to_string(&path).await.expect("Failed to read memory events");
-                            //info!("{}: {}", events, container);
+                            let events = fs::read_to_string(&path).await.expect("Failed to read memory events");
+                            let event = parse_cgroups_event(&events);
                             'inner: loop {
-                                match tx.try_send(Event::Oom(container.clone())) {
+                                let event = Event::Container(container.clone(), ContainerEvent::CGroup(event.clone()));
+                                warn!("Process {} is out of memory", container);
+                                match tx.try_send(event) {
                                     Ok(_) => break 'inner,
                                     Err(TrySendError::Closed(_)) => break 'outer,
                                     Err(TrySendError::Full(_)) => time::sleep(time::Duration::from_millis(1)).await,
@@ -334,4 +343,22 @@ impl MemoryMonitor {
         self.token.cancel();
         self.task.await.expect("Task error");
     }
+}
+
+/// Parse the cgroup v2 memory.events file
+fn parse_cgroups_event(s: &str) -> CGroupEvent {
+    let mut event = MemoryEvent::default();
+    for line in s.lines() {
+        let mut iter = line.split_whitespace().rev();
+        let value = iter.next().and_then(|s| s.parse::<u64>().ok());
+        match iter.next() {
+            Some("low") => event.low = value,
+            Some("high") => event.high = value,
+            Some("max") => event.max = value,
+            Some("oom") => event.oom = value,
+            Some("oom_kill") => event.oom_kill = value,
+            Some(_) | None => panic!("Invalid content of memory.events"),
+        }
+    }
+    CGroupEvent::Memory(event)
 }

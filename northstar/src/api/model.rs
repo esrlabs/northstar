@@ -28,7 +28,7 @@ pub type Version = crate::common::version::Version;
 const VERSION: Version = Version {
     major: 0,
     minor: 1,
-    patch: 1,
+    patch: 2,
     pre: vec![],
     build: vec![],
 };
@@ -57,12 +57,26 @@ pub enum Message {
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Notification {
-    OutOfMemory(Container),
+    Started(Container),
     Exit(Container, ExitStatus),
     Install(Container),
     Uninstall(Container),
-    Started(Container),
+    CGroup(Container, CgroupNotification),
     Shutdown,
+}
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CgroupNotification {
+    Memory(MemoryNotification),
+}
+
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct MemoryNotification {
+    pub low: Option<u64>,
+    pub high: Option<u64>,
+    pub max: Option<u64>,
+    pub oom: Option<u64>,
+    pub oom_kill: Option<u64>,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

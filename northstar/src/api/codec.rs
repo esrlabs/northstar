@@ -24,7 +24,7 @@ use task::Context;
 use tokio::io::{self, AsyncRead, AsyncWrite};
 use tokio_util::codec::{Decoder, Encoder, FramedParts};
 
-/// Newline delimited json codec for api::Message that on top implementes AsyncRead and Write
+/// Newline delimited json codec for api::Message that on top implements AsyncRead and Write
 pub struct Framed<T> {
     inner: tokio_util::codec::Framed<T, Codec>,
 }
@@ -159,7 +159,9 @@ mod tests {
     use std::convert::TryInto;
 
     use super::*;
-    use crate::api::model::{Message, Notification, Request, Response};
+    use crate::api::model::{
+        CgroupNotification, MemoryNotification, Message, Notification, Request, Response,
+    };
     use bytes::BytesMut;
     use proptest::{prelude::Just, prop_oneof, proptest, strategy::Strategy};
 
@@ -187,8 +189,15 @@ mod tests {
             Just(Message::Request(Request::Mount(vec!()))),
             Just(Message::Response(Response::Ok(()))),
             Just(Message::Notification(Notification::Shutdown)),
-            Just(Message::Notification(Notification::OutOfMemory(
-                "test:0.0.1".try_into().unwrap()
+            Just(Message::Notification(Notification::CGroup(
+                "test:0.0.1".try_into().unwrap(),
+                CgroupNotification::Memory(MemoryNotification {
+                    low: None,
+                    high: Some(10),
+                    max: Some(12),
+                    oom: None,
+                    oom_kill: Some(99),
+                })
             ))),
         ]
     }
