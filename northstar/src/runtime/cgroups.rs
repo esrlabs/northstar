@@ -17,7 +17,7 @@ use super::{
     Container, EventTx, Pid,
 };
 use crate::{npk::manifest, runtime::Event};
-use cgroups_rs::{memory::MemController, Controller};
+use cgroups_rs::{memory::MemController, Controller, Hierarchy};
 use futures::stream::StreamExt;
 use inotify::{Inotify, WatchMask};
 use log::{debug, info};
@@ -42,10 +42,18 @@ pub enum Error {
     CGroups(String),
 }
 
+/// Default runtime hierarchy that yields only implemented and supported controllers
+/// instead of the default list.
+fn hierarchy() -> Box<dyn Hierarchy> {
+    Box::new(RuntimeHierarchy::new())
+}
+
 /// Create the top level cgroups used by northstar
-pub async fn init(dir: &Path) -> Result<(), Error> {
+pub async fn init(name: &Path) -> Result<(), Error> {
+    // TODO: Add check for supported controllers
+
     info!("Initializing cgroups",);
-    let cgroup = cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir);
+    let cgroup = cgroups_rs::Cgroup::new(hierarchy(), name);
     debug!("Using cgroups {}", if cgroup.v2() { "v2" } else { "v1" });
     Ok(())
 }
@@ -53,9 +61,62 @@ pub async fn init(dir: &Path) -> Result<(), Error> {
 /// Shutdown the cgroups config by removing the dir
 pub async fn shutdown(dir: &Path) -> Result<(), Error> {
     info!("Shutting down cgroups");
-    cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir)
+    cgroups_rs::Cgroup::new(hierarchy(), dir)
         .delete()
         .map_err(|e| Error::CGroups(e.to_string()))
+}
+
+/// Implement a custom type for Hierarchy that filters subsystems
+#[derive(Debug)]
+struct RuntimeHierarchy {
+    inner: Box<dyn Hierarchy>,
+}
+
+impl RuntimeHierarchy {
+    /// Create a new instance
+    fn new() -> RuntimeHierarchy {
+        RuntimeHierarchy {
+            inner: cgroups_rs::hierarchies::auto(),
+        }
+    }
+}
+
+impl Hierarchy for RuntimeHierarchy {
+    /// Filter unimplemented controllers
+    fn subsystems(&self) -> Vec<cgroups_rs::Subsystem> {
+        self.inner
+            .subsystems()
+            .drain(..)
+            .filter(|s| match s {
+                cgroups_rs::Subsystem::Pid(_) => false,
+                cgroups_rs::Subsystem::Mem(_) => true,
+                cgroups_rs::Subsystem::CpuSet(_) => false,
+                cgroups_rs::Subsystem::CpuAcct(_) => false,
+                cgroups_rs::Subsystem::Cpu(_) => true,
+                cgroups_rs::Subsystem::Devices(_) => false,
+                cgroups_rs::Subsystem::Freezer(_) => false,
+                cgroups_rs::Subsystem::NetCls(_) => false,
+                cgroups_rs::Subsystem::BlkIo(_) => false,
+                cgroups_rs::Subsystem::PerfEvent(_) => false,
+                cgroups_rs::Subsystem::NetPrio(_) => false,
+                cgroups_rs::Subsystem::HugeTlb(_) => false,
+                cgroups_rs::Subsystem::Rdma(_) => false,
+                cgroups_rs::Subsystem::Systemd(_) => false,
+            })
+            .collect()
+    }
+
+    fn root(&self) -> std::path::PathBuf {
+        self.inner.root()
+    }
+
+    fn root_control_group(&self) -> cgroups_rs::Cgroup {
+        self.inner.root_control_group()
+    }
+
+    fn v2(&self) -> bool {
+        self.inner.v2()
+    }
 }
 
 #[derive(Debug)]
@@ -74,11 +135,11 @@ impl CGroups {
         pid: Pid,
     ) -> Result<CGroups, Error> {
         info!("Creating cgroups for {}", container);
-        let hierarchy = cgroups_rs::hierarchies::auto();
         let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(
-            hierarchy,
+            hierarchy(),
             Path::new(top_level_dir).join(container.name().to_str()),
         );
+
         let resources = cgroups_rs::Resources {
             memory: config.memory.clone().unwrap_or_default(),
             pid: cgroups_rs::PidResources::default(),
@@ -129,18 +190,14 @@ impl CGroups {
         for c in self.cgroup.subsystems() {
             match c {
                 cgroups_rs::Subsystem::Mem(c) => {
-                    stats.insert("memory".into(), to_value(c.memory_stat()).unwrap());
-                    stats.insert("kmem".into(), to_value(c.kmem_stat()).unwrap());
-                    stats.insert("kmem_tcp".into(), to_value(c.kmem_tcp_stat()).unwrap());
-                }
-                cgroups_rs::Subsystem::BlkIo(c) => {
-                    stats.insert("blkio".into(), to_value(c.blkio()).unwrap());
+                    let mut memory = HashMap::new();
+                    memory.insert("memory".to_string(), to_value(c.memory_stat()).unwrap());
+                    memory.insert("kmem".to_string(), to_value(c.kmem_stat()).unwrap());
+                    memory.insert("kmem_tcp".to_string(), to_value(c.kmem_tcp_stat()).unwrap());
+                    stats.insert("memory".to_string(), to_value(memory).unwrap());
                 }
                 cgroups_rs::Subsystem::Cpu(c) => {
                     stats.insert("cpu".into(), to_value(c.cpu()).unwrap());
-                }
-                cgroups_rs::Subsystem::CpuAcct(c) => {
-                    stats.insert("cpuacct".into(), to_value(c.cpuacct()).unwrap());
                 }
                 _ => (),
             }

@@ -29,10 +29,10 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Directory for logfile
     pub log_dir: PathBuf,
-
-    pub repositories: HashMap<RepositoryId, Repository>,
+    /// Top level cgroup name
     pub cgroup: NonNullString,
-
+    /// Repositories
+    pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options
     pub debug: Option<Debug>,
 }
@@ -69,12 +69,11 @@ pub mod debug {
     use std::path::PathBuf;
 
     #[derive(Clone, Debug, Deserialize)]
+    #[serde(rename_all(deserialize = "snake_case"))]
     pub enum StraceOutput {
         /// Log to a file in log_dir
-        #[serde(rename = "file")]
         File,
         /// Log the runtimes logging system
-        #[serde(rename = "log")]
         Log,
     }
 
