@@ -938,6 +938,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "inotify"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b031475cb1b103ee221afb806a23d35e0570bf7271d7588762ceba8127ed43b3"
+dependencies = [
+ "bitflags",
+ "futures-core",
+ "inotify-sys",
+ "libc 0.2.102",
+ "tokio",
+]
+
+[[package]]
+name = "inotify-sys"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
+dependencies = [
+ "libc 0.2.102",
+]
+
+[[package]]
 name = "inspect"
 version = "0.1.0"
 dependencies = [
@@ -1180,6 +1202,7 @@ dependencies = [
  "futures",
  "hex",
  "humanize-rs",
+ "inotify",
  "itertools",
  "lazy_static",
  "log",
