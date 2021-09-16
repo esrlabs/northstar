@@ -16,11 +16,21 @@ use super::{
     stats::{to_value, ContainerStats},
     Container, EventTx, Pid,
 };
-use crate::npk::manifest;
+use crate::{npk::manifest, runtime::Event};
+use cgroups_rs::{memory::MemController, Controller};
 use log::{debug, info};
-use std::{collections::HashMap, fmt::Debug, path::Path};
+use std::{collections::HashMap, fmt::Debug, os::unix::io::AsRawFd, path::Path};
 use thiserror::Error;
-use tokio::io;
+use tokio::{
+    fs,
+    io::{self, AsyncReadExt, AsyncWriteExt},
+    select,
+    sync::mpsc::error::TrySendError,
+    task::{self, JoinHandle},
+    time,
+};
+use tokio_eventfd::EventFd;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -32,29 +42,31 @@ pub enum Error {
 
 /// Create the top level cgroups used by northstar
 pub async fn init(dir: &Path) -> Result<(), Error> {
-    debug!("Initializing root cgroup");
-    cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir);
+    info!("Initializing cgroups",);
+    let cgroup = cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir);
+    debug!("Using cgroups {}", if cgroup.v2() { "v2" } else { "v1" });
     Ok(())
 }
 
 /// Shutdown the cgroups config by removing the dir
 pub async fn shutdown(dir: &Path) -> Result<(), Error> {
-    debug!("Shutting down root cgroup");
+    info!("Shutting down cgroups");
     cgroups_rs::Cgroup::new(cgroups_rs::hierarchies::auto(), dir)
         .delete()
-        .expect("Failed to remove top level cgroup");
-    Ok(())
+        .map_err(|e| Error::CGroups(e.to_string()))
 }
 
 #[derive(Debug)]
 pub struct CGroups {
+    container: Container,
     cgroup: cgroups_rs::Cgroup,
+    memory_monitor: MemoryMonitor,
 }
 
 impl CGroups {
     pub(super) async fn new(
         top_level_dir: &str,
-        _tx: EventTx,
+        tx: EventTx,
         container: &Container,
         config: &manifest::cgroups::CGroups,
         pid: Pid,
@@ -81,16 +93,31 @@ impl CGroups {
 
         // If adding the task fails it's a fault of the runtime or it's integration
         // and not of the container
-        debug!("Assigning pid {} to cgroups", pid);
+        debug!("Assigning pid {} of {} to cgroups", pid, container);
         cgroup
             .add_task(cgroups_rs::CgroupPid::from(pid as u64))
             .expect("Failed to assign pid");
 
-        Ok(CGroups { cgroup })
+        let memory_controller = cgroup
+            .controller_of::<MemController>()
+            .expect("Failed to get memory controller");
+        let memory_path = memory_controller.path();
+        let memory_monitor = if cgroup.v2() {
+            MemoryMonitor::new_v2(container.clone(), memory_path, tx).await
+        } else {
+            MemoryMonitor::new_v1(container.clone(), memory_path, tx).await
+        };
+
+        Ok(CGroups {
+            container: container.clone(),
+            cgroup,
+            memory_monitor,
+        })
     }
 
     pub async fn destroy(self) {
-        info!("Destroying cgroups");
+        info!("Destroying cgroups of {}", self.container);
+        self.memory_monitor.stop().await;
         self.cgroup.delete().expect("Failed to remove cgroups");
     }
 
@@ -118,5 +145,88 @@ impl CGroups {
         }
 
         stats
+    }
+}
+
+#[derive(Debug)]
+struct MemoryMonitor {
+    token: CancellationToken,
+    task: JoinHandle<()>,
+}
+
+impl MemoryMonitor {
+    /// Setup an event fd and oom event listening.
+    async fn new_v1(container: Container, path: &Path, tx: EventTx) -> MemoryMonitor {
+        const OOM_CONTROL: &str = "memory.oom_control";
+        const EVENT_CONTROL: &str = "cgroup.event_control";
+
+        // Configure oom
+        let oom_control = path.join(OOM_CONTROL);
+        let event_control = path.join(EVENT_CONTROL);
+        let token = CancellationToken::new();
+
+        let mut event_fd = EventFd::new(0, false).expect("Failed to create eventfd");
+
+        debug!("Opening oom_control: {}", oom_control.display());
+        let oom_control = fs::OpenOptions::new()
+            .write(true)
+            .open(&oom_control)
+            .await
+            .expect("Failed to open oom_control");
+
+        debug!("Opening event_control: {}", event_control.display());
+        let mut event_control = fs::OpenOptions::new()
+            .write(true)
+            .open(&event_control)
+            .await
+            .expect("Failed to open event_control");
+        event_control
+            .write_all(format!("{} {}", event_fd.as_raw_fd(), oom_control.as_raw_fd()).as_bytes())
+            .await
+            .expect("Failed to setup event_control");
+        event_control
+            .flush()
+            .await
+            .expect("Failed to setup oom event fd");
+
+        // This task stops when the main loop receiver closes
+        let task = {
+            let stop = token.clone();
+            task::spawn(async move {
+                debug!("Listening for oom events of {}", container);
+                let mut buffer = [0u8; 16];
+
+                'outer: loop {
+                    select! {
+                        _ = stop.cancelled() => break 'outer,
+                        _ = tx.closed() => break 'outer,
+                        _ = event_fd.read(&mut buffer) => {
+                            loop {
+                                match tx.try_send(Event::Oom(container.clone())) {
+                                    Ok(_) => break 'outer,
+                                    Err(TrySendError::Closed(_)) => break 'outer,
+                                    Err(TrySendError::Full(_)) => time::sleep(time::Duration::from_millis(1)).await,
+                                }
+                            }
+                        }
+                    }
+                }
+
+                debug!("Stopped oom monitor of {}", container);
+            })
+        };
+
+        MemoryMonitor { token, task }
+    }
+
+    /// Construct a new cgroups v2 memory monitor
+    async fn new_v2(_container: Container, _path: &Path, _tx: EventTx) -> MemoryMonitor {
+        unimplemented!("CGroup v2 memory monitor");
+    }
+
+    /// Stop the monitor and wait for the task termination
+    async fn stop(self) {
+        self.token.cancel();
+        self.task.await.expect("Task error");
     }
 }

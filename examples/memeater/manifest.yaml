@@ -5,8 +5,7 @@ uid: 1000
 gid: 1000
 cgroups:
     memory:
-      memory_hard_limit: 1000000
-      memory_soft_limit: 1000000
+      memory_hard_limit: 10000000
       swappiness: 0
       attrs: {}
 mounts:
