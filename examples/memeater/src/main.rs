@@ -12,23 +12,23 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use std::{fs, io::Read, thread};
+use std::{fs, io::Read, thread, time};
 
-const MB: u64 = 1000000;
+const SIZE: u64 = 1000 * 1024;
 
 fn main() {
-    let mut allocated: usize = 0;
+    let mut leaked = 0;
     loop {
         let mut buffer = Vec::new();
         fs::File::open("/dev/urandom")
             .unwrap()
-            .take(MB)
+            .take(SIZE)
             .read_to_end(&mut buffer)
             .unwrap();
         buffer.leak();
-        allocated += 1;
-        println!("Leaked {} MB", allocated);
+        leaked += SIZE;
+        println!("Leaked {} KiB", leaked / 1024);
 
-        thread::sleep(std::time::Duration::from_millis(200));
+        thread::sleep(time::Duration::from_millis(100));
     }
 }

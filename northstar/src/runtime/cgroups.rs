@@ -18,6 +18,8 @@ use super::{
 };
 use crate::{npk::manifest, runtime::Event};
 use cgroups_rs::{memory::MemController, Controller};
+use futures::stream::StreamExt;
+use inotify::{Inotify, WatchMask};
 use log::{debug, info};
 use std::{collections::HashMap, fmt::Debug, os::unix::io::AsRawFd, path::Path};
 use thiserror::Error;
@@ -201,9 +203,9 @@ impl MemoryMonitor {
                         _ = stop.cancelled() => break 'outer,
                         _ = tx.closed() => break 'outer,
                         _ = event_fd.read(&mut buffer) => {
-                            loop {
+                            'inner: loop {
                                 match tx.try_send(Event::Oom(container.clone())) {
-                                    Ok(_) => break 'outer,
+                                    Ok(_) => break 'inner,
                                     Err(TrySendError::Closed(_)) => break 'outer,
                                     Err(TrySendError::Full(_)) => time::sleep(time::Duration::from_millis(1)).await,
                                 }
@@ -220,8 +222,54 @@ impl MemoryMonitor {
     }
 
     /// Construct a new cgroups v2 memory monitor
-    async fn new_v2(_container: Container, _path: &Path, _tx: EventTx) -> MemoryMonitor {
-        unimplemented!("CGroup v2 memory monitor");
+    async fn new_v2(container: Container, path: &Path, tx: EventTx) -> MemoryMonitor {
+        const MEMORY_EVENTS: &str = "memory.events";
+
+        let token = CancellationToken::new();
+        let path = path.join(MEMORY_EVENTS);
+
+        // This task stops when the main loop receiver closes
+        let task = {
+            let stop = token.clone();
+            task::spawn(async move {
+                debug!("Listening for oom events of {}", container);
+
+                let mut inotify =
+                    Inotify::init().expect("Error while initializing inotify instance");
+
+                inotify
+                    .add_watch(&path, WatchMask::MODIFY)
+                    .expect("Failed to add file watch");
+
+                let mut buffer = [0; 1024];
+                let mut stream = inotify
+                    .event_stream(&mut buffer)
+                    .expect("Failed to initialize inotify event stream");
+
+                'outer: loop {
+                    select! {
+                        _ = stop.cancelled() => break 'outer,
+                        _ = tx.closed() => break 'outer,
+                        _ = stream.next() => {
+                            // TODO: events
+                            //let events = fs::read_to_string(&path).await.expect("Failed to read memory events");
+                            //info!("{}: {}", events, container);
+                            'inner: loop {
+                                match tx.try_send(Event::Oom(container.clone())) {
+                                    Ok(_) => break 'inner,
+                                    Err(TrySendError::Closed(_)) => break 'outer,
+                                    Err(TrySendError::Full(_)) => time::sleep(time::Duration::from_millis(1)).await,
+                                }
+                            }
+                        }
+                    }
+                }
+
+                debug!("Stopped oom monitor of {}", container);
+            })
+        };
+
+        MemoryMonitor { token, task }
     }
 
     /// Stop the monitor and wait for the task termination
