@@ -12,9 +12,10 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{Event, Notification, RepositoryId};
+use super::{ContainerEvent, Event, RepositoryId};
 use crate::{
     api,
+    common::container::Container,
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
@@ -57,7 +58,7 @@ pub(crate) struct Console {
     /// Listening address/url
     url: Url,
     /// Broadcast channel passed to connections to forward notifications
-    notification_tx: broadcast::Sender<Notification>,
+    notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     /// Shutdown the console by canceling this token
     stop: CancellationToken,
     /// Listener tasks. Currently there's just one task but when the console
@@ -121,8 +122,10 @@ impl Console {
     }
 
     /// Send a notification to the notification broadcast
-    pub(super) async fn notification(&self, notification: Notification) {
-        self.notification_tx.send(notification).ok();
+    pub(super) async fn on_event(&self, container: &Container, event: &ContainerEvent) {
+        self.notification_tx
+            .send((container.clone(), event.clone()))
+            .ok();
     }
 
     async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
@@ -130,7 +133,7 @@ impl Console {
         peer: ClientId,
         stop: CancellationToken,
         event_tx: EventTx,
-        mut notification_rx: broadcast::Receiver<Notification>,
+        mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
     ) -> Result<(), Error> {
         debug!("Client {} connected", peer);
 
@@ -210,7 +213,7 @@ impl Console {
                     // Process notifications received via the notification
                     // broadcast channel
                     let notification = match notification {
-                        Some(Ok(notification)) => notification.into(),
+                        Some(Ok((container, event))) => (container, event).into(),
                         Some(Err(broadcast::error::RecvError::Closed)) => break,
                         Some(Err(broadcast::error::RecvError::Lagged(_))) => {
                             warn!("Client connection lagged notifications. Closing");
@@ -367,7 +370,7 @@ impl Listener {
 async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
     accept: AcceptConnection,
     event_tx: EventTx,
-    notification_tx: broadcast::Sender<Notification>,
+    notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
 ) where
     AcceptConnection: Fn() -> Connection,
@@ -435,22 +438,34 @@ impl fmt::Display for ClientId {
 impl From<ExitStatus> for model::ExitStatus {
     fn from(e: ExitStatus) -> Self {
         match e {
-            ExitStatus::Exit(e) => model::ExitStatus::Exit(e),
-            ExitStatus::Signaled(s) => model::ExitStatus::Signaled(s as u32),
+            ExitStatus::Exit(e) => api::model::ExitStatus::Exit(e),
+            ExitStatus::Signaled(s) => api::model::ExitStatus::Signaled(s as u32),
         }
     }
 }
 
-impl From<Notification> for model::Notification {
-    fn from(n: Notification) -> Self {
-        match n {
-            Notification::OutOfMemory(container) => model::Notification::OutOfMemory(container),
-            Notification::Exit(container, status) => {
-                model::Notification::Exit(container, status.into())
+impl From<(Container, ContainerEvent)> for model::Notification {
+    fn from(p: (Container, ContainerEvent)) -> model::Notification {
+        let container = p.0.clone();
+        match p.1 {
+            ContainerEvent::Started => api::model::Notification::Started(container),
+            ContainerEvent::Exit(status) => {
+                api::model::Notification::Exit(container, status.into())
             }
-            Notification::Install(container) => model::Notification::Install(container),
-            Notification::Uninstall(container) => model::Notification::Uninstall(container),
-            Notification::Started(container) => model::Notification::Started(container),
+            ContainerEvent::Installed => api::model::Notification::Install(container),
+            ContainerEvent::Uninstalled => api::model::Notification::Uninstall(container),
+            ContainerEvent::CGroup(event) => match event {
+                super::CGroupEvent::Memory(memory) => api::model::Notification::CGroup(
+                    container,
+                    api::model::CgroupNotification::Memory(api::model::MemoryNotification {
+                        low: memory.low,
+                        high: memory.high,
+                        max: memory.max,
+                        oom: memory.oom,
+                        oom_kill: memory.oom_kill,
+                    }),
+                ),
+            },
         }
     }
 }
