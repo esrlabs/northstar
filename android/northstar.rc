@@ -157,6 +157,6 @@ service northstar /system/bin/logwrapper -- /system/bin/northstar --disable-moun
     user system
     group system inet shell
     devmode
-    capabilities CHOWN KILL MKNOD NET_ADMIN NET_RAW SETFCAP SETPCAP SETGID SETUID SYS_ADMIN SYS_BOOT SYS_CHROOT 
+    capabilities CHOWN KILL MKNOD NET_ADMIN NET_RAW SETFCAP SETPCAP SETGID SETUID SYS_ADMIN SYS_BOOT SYS_CHROOT SYS_RESOURCE
     namespace mnt
     disabled

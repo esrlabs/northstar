@@ -109,7 +109,7 @@ test!(try_to_start_unknown_container, {
     runtime.shutdown().await
 });
 
-// Try to start a container where a dependecy is missing
+// Try to start a container where a dependency is missing
 test!(try_to_start_containter_that_misses_a_resource, {
     let mut runtime = Northstar::launch().await?;
     runtime.install_test_container().await?;
@@ -242,8 +242,21 @@ test!(container_shall_only_have_configured_capabilities, {
     runtime.shutdown().await
 });
 
-// Check whether after a runtime start, container start and shutdow
-// any filedescriptor is leaked
+// The test container has a configured resource limit of tasks
+test!(container_rlimits, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+    assume(
+        "Max processes             10000                20000                processes",
+        10,
+    )
+    .await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
+    runtime.shutdown().await
+});
+
+// Check whether after a runtime start, container start and shutdown
+// any file descriptor is leaked
 test!(
     start_stop_runtime_and_containers_shall_not_leak_file_descriptors,
     {

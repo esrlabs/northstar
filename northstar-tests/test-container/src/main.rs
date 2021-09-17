@@ -194,4 +194,5 @@ fn inspect() {
     );
 
     dump("/proc/self/mounts");
+    dump("/proc/self/limits");
 }
