@@ -526,13 +526,16 @@ pub mod cgroups {
     /// CGroups configuration
     #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
     pub struct CGroups {
-        /// Memory controller
-        pub memory: Option<Memory>,
+        /// BlkIo controller
+        pub blkio: Option<BlkIo>,
         /// Cpu controller
         pub cpu: Option<Cpu>,
+        /// Memory controller
+        pub memory: Option<Memory>,
     }
 
-    pub use cgroups_rs::{CpuResources as Cpu, MemoryResources as Memory};
+    // Reuse the huge and well documented structs from cgroups-rs
+    pub use cgroups_rs::{BlkIoResources as BlkIo, CpuResources as Cpu, MemoryResources as Memory};
 }
 
 #[cfg(test)]

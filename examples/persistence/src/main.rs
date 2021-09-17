@@ -19,16 +19,15 @@ fn main() -> io::Result<()> {
     let file = Path::new("/data").join("file");
     let text = "Hello!";
 
-    // Write
-    let mut f = fs::File::create(&file).expect("Failed to create foo");
-    println!("Writing {} to {}", text, file.display());
-    f.write_all(text.as_bytes())?;
+    loop {
+        // Write
+        let mut f = fs::File::create(&file).expect("Failed to create foo");
+        println!("Writing {} to {}", text, file.display());
+        f.write_all(text.as_bytes())?;
 
-    std::thread::sleep(time::Duration::from_secs(1));
-
-    // Read
-    let text = fs::read_to_string(&file)?;
-    println!("Content of {}: {}", file.display(), text);
-
-    Ok(())
+        // Read
+        let text = fs::read_to_string(&file)?;
+        println!("Content of {}: {}", file.display(), text);
+        std::thread::sleep(time::Duration::from_secs(1));
+    }
 }
