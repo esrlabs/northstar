@@ -100,6 +100,15 @@ pub enum Error {
     Version(Version, Version),
 }
 
+impl Error {
+    fn io<T: ToString>(context: T, error: io::Error) -> Error {
+        Error::Io {
+            context: context.to_string(),
+            error,
+        }
+    }
+}
+
 /// NPK archive comment
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
@@ -635,58 +644,119 @@ fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Err
 
 /// Returns a temporary file with all the pseudo file definitions
 fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
-    let pseudo_file_entries = NamedTempFile::new().map_err(|error| Error::Io {
+    let mut pseudo_file_entries = NamedTempFile::new().map_err(|error| Error::Io {
         context: "Failed to create temporary file".to_string(),
         error,
     })?;
-    let file = pseudo_file_entries.as_file();
+    let file = pseudo_file_entries.as_file_mut();
     let uid = manifest.uid;
     let gid = manifest.gid;
 
     fn add_directory(
-        mut file: &fs::File,
-        directory: &Path,
+        file: &mut fs::File,
+        dir: &Path,
         mode: u16,
         uid: u16,
         gid: u16,
     ) -> Result<(), Error> {
-        writeln!(file, "{} d {} {} {}", directory.display(), mode, uid, gid).map_err(|e| {
-            Error::Io {
-                context: format!("Failed to write entry {} to temp file", directory.display()),
-                error: e,
-            }
-        })
+        // Each directory level needs to be passed to mksquashfs e.g:
+        // /dev d 755 x x x
+        // /dev/block d 755 x x x
+        dir.iter()
+            .skip(1)
+            .try_fold(PathBuf::from("/"), |mut p, dir| {
+                p.push(dir);
+                writeln!(file, "{} d {} {} {}", p.display(), mode, uid, gid).map_err(|e| {
+                    Error::Io {
+                        context: format!("Failed to write entry {} to temp file", p.display()),
+                        error: e,
+                    }
+                })?;
+                Ok(p)
+            })
+            .map(drop)
     }
 
     if manifest.init.is_some() {
         // The default is to have at least a minimal /dev mount
-        add_directory(file, Path::new("/dev"), 444, uid, gid)?;
         add_directory(file, Path::new("/proc"), 444, uid, gid)?;
     }
 
+    // Create mountpoints as pseudofiles/dirs
     for (target, mount) in &manifest.mounts {
-        let mode = match mount {
+        match mount {
             Mount::Bind(Bind { options: flags, .. }) => {
-                if flags.contains(&MountOption::Rw) {
-                    777
+                let mode = if flags.contains(&MountOption::Rw) {
+                    755
                 } else {
                     555
-                }
+                };
+                add_directory(file, target, mode, uid, gid)?;
             }
-            Mount::Persist => 777,
-            Mount::Resource { .. } => 555,
-            Mount::Tmpfs { .. } => 777,
-            // /dev is default
-            Mount::Dev { .. } => continue,
-        };
+            Mount::Persist => add_directory(file, target, 755, uid, gid)?,
+            Mount::Resource { .. } => add_directory(file, target, 555, uid, gid)?,
+            Mount::Tmpfs { .. } => add_directory(file, target, 755, uid, gid)?,
+            Mount::Dev => {
+                // Create a minimal set of chardevs:
+                // └─ dev
+                //     ├── fd -> /proc/self/fd
+                //     ├── full
+                //     ├── null
+                //     ├── random
+                //     ├── stderr -> /proc/self/fd/2
+                //     ├── stdin -> /proc/self/fd/0
+                //     ├── stdout -> /proc/self/fd/1
+                //     ├── tty
+                //     ├── urandom
+                //     └── zero
 
-        // In order to support mount points with multiple path segments, we need to call mksquashfs multiple times:
-        // e.g. to support res/foo in our image, we need to add /res/foo AND /res
-        // ==> mksquashfs ... -p "/res/foo d 444 1000 1000"  -p "/res d 444 1000 1000" */
-        let mut subdir = PathBuf::from("/");
-        for dir in target.iter().skip(1) {
-            subdir.push(dir);
-            add_directory(file, &subdir, mode, uid, gid)?;
+                // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
+                add_directory(file, target, 755, uid, gid)?;
+
+                // Create chardevs
+                for (dev, major, minor) in &[
+                    ("full", 1, 7),
+                    ("null", 1, 3),
+                    ("random", 1, 8),
+                    ("tty", 5, 0),
+                    ("urandom", 1, 9),
+                    ("zero", 1, 5),
+                ] {
+                    writeln!(
+                        file,
+                        "{} c {} {} {} {} {}",
+                        target.join(dev).display(),
+                        666,
+                        uid,
+                        gid,
+                        major,
+                        minor
+                    )
+                    .map_err(|e| Error::io("Failed to write pseudofile", e))?;
+                }
+
+                // Link fds
+                writeln!(file, "/proc/self/fd d 777 {} {}", uid, gid)
+                    .map_err(|e| Error::io("Failed to write pseudofile", e))?;
+                for (link, name) in &[
+                    ("/proc/self/fd", "fd"),
+                    ("/proc/self/fd/0", "stdin"),
+                    ("/proc/self/fd/1", "stdout"),
+                    ("/proc/self/fd/2", "stderr"),
+                ] {
+                    writeln!(
+                        file,
+                        "{} s {} {} {} {}",
+                        target.join(name).display(),
+                        777,
+                        uid,
+                        gid,
+                        link,
+                    )
+                    .map_err(|e| Error::io("Failed to write pseudofile", e))?;
+                }
+                continue;
+            }
         }
     }
 

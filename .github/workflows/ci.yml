@@ -105,8 +105,6 @@ jobs:
           override: true
       - name: Cache
         uses: Swatinem/rust-cache@v1
-      - name: Docker Cache
-        uses: satackey/action-docker-layer-caching@v0.0.11
       - name: Checkout
         uses: actions/checkout@v2
       - name: Build

@@ -9,6 +9,8 @@ cgroups:
       swappiness: 0
       attrs: {}
 mounts:
+  /dev:
+    type: dev
   /lib:
     type: bind
     host: /lib

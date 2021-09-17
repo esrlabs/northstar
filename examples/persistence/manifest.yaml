@@ -4,6 +4,8 @@ init: /persistence
 uid: 1000
 gid: 1000
 mounts:
+  /dev:
+    type: dev
   /data:
     type: persist
   /lib:

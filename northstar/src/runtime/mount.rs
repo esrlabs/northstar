@@ -239,7 +239,7 @@ async fn mount(
         device.display(),
         target.display(),
     );
-    let flags = MountFlags::MS_RDONLY | MountFlags::MS_NODEV | MountFlags::MS_NOSUID;
+    let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
     nix::mount::mount(
         Some(&device),
         target,

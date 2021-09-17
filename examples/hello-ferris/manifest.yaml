@@ -8,6 +8,8 @@ gid: 1000
 args:
   - /message/hello
 mounts:
+  /dev:
+    type: dev
   /bin:
     type: resource
     name: ferris

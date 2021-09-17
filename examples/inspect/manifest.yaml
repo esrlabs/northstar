@@ -13,6 +13,8 @@ io:
       level: WARN
       tag: inspect
 mounts:
+  /dev:
+    type: dev
   /lib:
     type: bind
     host: /lib

@@ -6,6 +6,8 @@ gid: 1000
 env:
   RUST_BACKTRACE: 1
 mounts:
+  /dev:
+    type: dev
   /lib:
     type: bind
     host: /lib

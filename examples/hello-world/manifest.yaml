@@ -11,6 +11,8 @@ io:
       level: DEBUG
       tag: hello
 mounts:
+  /dev:
+    type: dev
   /lib:
     type: bind
     host: /lib

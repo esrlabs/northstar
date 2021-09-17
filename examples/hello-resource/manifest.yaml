@@ -4,6 +4,8 @@ init: /hello-resource
 uid: 1000
 gid: 1000
 mounts:
+  /dev:
+    type: dev
   /lib:
     type: bind
     host: /lib
