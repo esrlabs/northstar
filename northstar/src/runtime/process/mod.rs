@@ -17,7 +17,7 @@ use super::{
     config::Config,
     error::Error,
     pipe::{Condition, ConditionNotify, ConditionWait},
-    state::{MountedContainer, Process},
+    state::MountedContainer,
     Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
@@ -61,12 +61,12 @@ mod io;
 const SIGNAL_OFFSET: i32 = 128;
 
 #[derive(Debug)]
-pub(super) struct Island {
+pub(super) struct Launcher {
     tx: EventTx,
     config: Config,
 }
 
-pub(super) struct IslandProcess {
+pub(super) struct Process {
     pid: Pid,
     checkpoint: Option<Checkpoint>,
     io: (Option<io::Log>, Option<io::Log>),
@@ -74,18 +74,18 @@ pub(super) struct IslandProcess {
     _dev: Dev,
 }
 
-impl fmt::Debug for IslandProcess {
+impl fmt::Debug for Process {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("IslandProcess")
+        f.debug_struct("Process")
             .field("pid", &self.pid)
             .field("checkpoint", &self.checkpoint)
             .finish()
     }
 }
 
-impl Island {
+impl Launcher {
     pub async fn start(tx: EventTx, config: Config) -> Result<Self, Error> {
-        Ok(Island { tx, config })
+        Ok(Launcher { tx, config })
     }
 
     pub async fn shutdown(self) -> Result<(), Error> {
@@ -97,7 +97,7 @@ impl Island {
         container: &MountedContainer,
         args: Option<&Vec<NonNullString>>,
         env: Option<&HashMap<NonNullString, NonNullString>>,
-    ) -> Result<IslandProcess, Error> {
+    ) -> Result<impl super::state::Process, Error> {
         let root = container
             .root
             .canonicalize()
@@ -149,7 +149,7 @@ impl Island {
 
                     let exit_status = waitpid(container, pid, self.tx.clone());
 
-                    Ok(IslandProcess {
+                    Ok(Process {
                         pid,
                         io: (stdout, stderr),
                         checkpoint: Some(checkpoint_runtime),
@@ -183,7 +183,7 @@ impl Island {
 }
 
 #[async_trait]
-impl Process for IslandProcess {
+impl super::state::Process for Process {
     fn pid(&self) -> Pid {
         self.pid
     }

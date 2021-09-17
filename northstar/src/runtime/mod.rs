@@ -43,10 +43,10 @@ pub mod config;
 mod console;
 mod debug;
 mod error;
-pub mod island;
 mod key;
 mod mount;
 mod pipe;
+pub mod process;
 mod repository;
 mod state;
 

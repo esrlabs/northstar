@@ -17,9 +17,9 @@ use super::{
     config::{Config, RepositoryType},
     console::Request,
     error::Error,
-    island::Island,
     key::PublicKey,
     mount::{MountControl, MountInfo},
+    process::Launcher,
     repository::{DirRepository, MemRepository},
     Container, Event, EventTx, ExitStatus, Notification, Pid, Repository, RepositoryId,
 };
@@ -78,7 +78,7 @@ pub(super) struct State<'a> {
     repositories: Repositories,
     containers: HashMap<Container, MountedContainer>,
     mount_control: Arc<MountControl>,
-    launcher_island: Island,
+    launcher: Launcher,
     executor: ThreadPool,
 }
 
@@ -126,7 +126,7 @@ impl<'a> State<'a> {
     pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
         let repositories = Repositories::default();
         let mount_control = Arc::new(MountControl::new().await.map_err(Error::Mount)?);
-        let launcher_island = Island::start(events_tx.clone(), config.clone())
+        let launcher = Launcher::start(events_tx.clone(), config.clone())
             .await
             .expect("Failed to start launcher");
         let executor = ThreadPoolBuilder::new()
@@ -139,7 +139,7 @@ impl<'a> State<'a> {
             repositories,
             containers: HashMap::new(),
             config,
-            launcher_island,
+            launcher,
             mount_control,
             executor,
         };
@@ -410,11 +410,7 @@ impl<'a> State<'a> {
 
         // Spawn process
         info!("Creating {}", container);
-        let mut process = match self
-            .launcher_island
-            .create(mounted_container, args, env)
-            .await
-        {
+        let mut process = match self.launcher.create(mounted_container, args, env).await {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -526,7 +522,7 @@ impl<'a> State<'a> {
             self.umount(container).await?;
         }
 
-        self.launcher_island.shutdown().await?;
+        self.launcher.shutdown().await?;
 
         Ok(())
     }

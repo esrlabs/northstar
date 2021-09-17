@@ -34,7 +34,7 @@ use tempfile::TempDir;
 use tokio::fs::symlink;
 
 /// The minimal version of the /dev is maintained in a tmpdir. This tmpdir
-/// must be held for the lifetime of the IslandProcess
+/// must be held for the lifetime of the Process
 pub(crate) type Dev = Option<TempDir>;
 
 /// Instructions for mount system call done in init
