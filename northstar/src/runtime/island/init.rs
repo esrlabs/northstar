@@ -173,9 +173,6 @@ impl Init {
             // caps::set cannot be called for bounded
             caps::drop(None, caps::CapSet::Bounding, *cap).expect("Failed to drop bounding cap");
         }
-        // TODO: Reenable or remove:
-        // caps::set(None, caps::CapSet::Bounding, &self.capabilities.bounded)
-        //     .expect("Failed to set effective caps");
         caps::set(None, caps::CapSet::Effective, &self.capabilities.set)
             .expect("Failed to set effective caps");
         caps::set(None, caps::CapSet::Permitted, &self.capabilities.set)
