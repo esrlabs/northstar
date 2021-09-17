@@ -12,7 +12,6 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use self::fs::Dev;
 use super::{
     config::Config,
     error::Error,
@@ -71,7 +70,6 @@ pub(super) struct Process {
     checkpoint: Option<Checkpoint>,
     io: (Option<io::Log>, Option<io::Log>),
     exit_status: Option<Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpin>>,
-    _dev: Dev,
 }
 
 impl fmt::Debug for Process {
@@ -100,7 +98,7 @@ impl Launcher {
         args: Option<&Vec<NonNullString>>,
         env: Option<&HashMap<NonNullString, NonNullString>>,
     ) -> Result<impl super::state::Process, Error> {
-        let (mounts, dev) = fs::prepare_mounts(&self.config, &root, manifest.clone()).await?;
+        let mounts = fs::prepare_mounts(&self.config, &root, manifest.clone()).await?;
         let (init, argv) = init_argv(&manifest, args);
         let env = self::env(&manifest, env);
         let (stdout, stderr, mut fds) = io::from_manifest(&manifest).await?;
@@ -151,7 +149,6 @@ impl Launcher {
                         io: (stdout, stderr),
                         checkpoint: Some(checkpoint_runtime),
                         exit_status: Some(Box::new(exit_status)),
-                        _dev: dev,
                     })
                 }
                 unistd::ForkResult::Child => {

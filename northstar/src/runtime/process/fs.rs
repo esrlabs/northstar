@@ -23,20 +23,9 @@ use crate::{
     util::PathExt,
 };
 use log::debug;
-use nix::{
-    libc::makedev,
-    mount::MsFlags,
-    sys::stat::{Mode, SFlag},
-    unistd,
-    unistd::{chown, Gid, Uid},
-};
+use nix::{mount::MsFlags, unistd};
 use std::path::{Path, PathBuf};
-use tempfile::TempDir;
-use tokio::fs::symlink;
-
-/// The minimal version of the /dev is maintained in a tmpdir. This tmpdir
-/// must be held for the lifetime of the Process
-pub(crate) type Dev = Option<TempDir>;
+use tokio::fs;
 
 /// Instructions for mount system call done in init
 #[derive(Debug)]
@@ -95,11 +84,8 @@ pub(super) async fn prepare_mounts(
     config: &Config,
     root: &Path,
     manifest: Manifest,
-) -> Result<(Vec<Mount>, Dev), Error> {
-    let mut mounts = Vec::new();
-    let mut dev = None;
-
-    mounts.push(proc(root));
+) -> Result<Vec<Mount>, Error> {
+    let mut mounts = vec![proc(root)];
 
     let manifest_mounts = &manifest.mounts;
 
@@ -121,24 +107,11 @@ pub(super) async fn prepare_mounts(
                 mounts.push(remount_ro);
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
-            manifest::Mount::Dev => {
-                let (d, mount, remount) = self::dev(root, manifest.uid, manifest.gid).await;
-                mounts.push(mount);
-                mounts.push(remount);
-                dev = d
-            }
+            manifest::Mount::Dev => {}
         }
     }
 
-    // No dev configured in mounts: Use minimal version
-    if dev.is_none() && !manifest_mounts.contains_key(Path::new("/dev")) {
-        let (d, mount, remount) = self::dev(root, manifest.uid, manifest.gid).await;
-        mounts.push(mount);
-        mounts.push(remount);
-        dev = d;
-    }
-
-    Ok((mounts, dev))
+    Ok(mounts)
 }
 
 fn proc(root: &Path) -> Mount {
@@ -197,7 +170,7 @@ async fn persist(
 ) -> Result<Mount, Error> {
     if !source.exists() {
         debug!("Creating {}", source.display());
-        tokio::fs::create_dir_all(&source)
+        fs::create_dir_all(&source)
             .await
             .map_err(|e| Error::Io(format!("Failed to create {}", source.display()), e))?;
     }
@@ -298,65 +271,4 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
         }
     }
     flags
-}
-
-async fn dev(root: &Path, uid: u16, gid: u16) -> (Dev, Mount, Mount) {
-    let dir = TempDir::new().expect("Failed to create tempdir");
-    debug!("Creating devfs in {}", dir.path().display());
-
-    dev_devices(dir.path(), uid, gid);
-    dev_symlinks(dir.path()).await;
-
-    let source = dir.path().to_path_buf();
-    let mut flags = MsFlags::MS_BIND | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
-    let target = root.join("dev");
-    let mount = Mount::new(Some(source.clone()), target.clone(), None, flags, None);
-
-    flags.set(MsFlags::MS_REMOUNT, true);
-    let remount = Mount::new(Some(source), target, None, flags, None);
-    (Some(dir), mount, remount)
-}
-
-fn dev_devices(dir: &Path, uid: u16, gid: u16) {
-    use nix::sys::stat::mknod;
-
-    for (dev, major, minor) in &[
-        ("full", 1, 7),
-        ("null", 1, 3),
-        ("random", 1, 8),
-        ("tty", 5, 0),
-        ("urandom", 1, 9),
-        ("zero", 1, 5),
-    ] {
-        let dev_path = dir.join(dev);
-        let dev = unsafe { makedev(*major, *minor) };
-        mknod(dev_path.as_path(), SFlag::S_IFCHR, Mode::all(), dev).expect("Failed to mknod");
-        chown(
-            dev_path.as_path(),
-            Some(Uid::from_raw(uid.into())),
-            Some(Gid::from_raw(gid.into())),
-        )
-        .expect("Failed to chown");
-    }
-}
-
-async fn dev_symlinks(dir: &Path) {
-    let kcore = Path::new("/proc/kcore");
-    if kcore.exists() {
-        symlink(kcore, dir.join("kcore"))
-            .await
-            .expect("Failed to create symlink");
-    }
-
-    let defaults = [
-        ("/proc/self/fd", "fd"),
-        ("/proc/self/fd/0", "stdin"),
-        ("/proc/self/fd/1", "stdout"),
-        ("/proc/self/fd/2", "stderr"),
-    ];
-    for &(src, dst) in defaults.iter() {
-        symlink(src, dir.join(dst))
-            .await
-            .expect("Failed to create symlink");
-    }
 }

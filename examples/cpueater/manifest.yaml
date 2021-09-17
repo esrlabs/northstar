@@ -10,6 +10,8 @@ cgroups:
     shares: 100
     attrs: {}
 mounts:
+  /dev:
+    type: dev
   /lib:
     type: bind
     host: /lib
