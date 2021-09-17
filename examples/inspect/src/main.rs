@@ -94,6 +94,11 @@ fn main() {
         println!("{:>8}: {:>10}: {}", pid, name, cmdline);
     }
 
+    println!(
+        "{}",
+        std::fs::read_to_string("/proc/self/limits").expect("read limits")
+    );
+
     loop {
         unistd::pause();
     }

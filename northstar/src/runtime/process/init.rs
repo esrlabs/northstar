@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{clone::clone, fs::Mount, io::Fd, Capabilities, SIGNAL_OFFSET};
+use super::{clone::clone, fs::Mount, io::Fd, Capabilities, RLimits, SIGNAL_OFFSET};
 use crate::{npk::manifest::Manifest, runtime::pipe::ConditionNotify, seccomp::AllowList};
 use nix::{
     errno::Errno,
@@ -39,6 +39,7 @@ pub(super) struct Init {
     pub fds: Vec<(RawFd, Fd)>,
     pub groups: Vec<u32>,
     pub capabilities: Capabilities,
+    pub rlimits: RLimits,
     pub seccomp: Option<AllowList>,
 }
 
@@ -71,6 +72,9 @@ impl Init {
 
         // Supplementary groups
         self.set_groups();
+
+        // Apply resource limits
+        self.set_rlimits();
 
         // No new privileges
         set_no_new_privs(true);
@@ -165,6 +169,17 @@ impl Init {
         Errno::result(result)
             .map(drop)
             .expect("Failed to set supplementary groups");
+    }
+
+    fn set_rlimits(&self) {
+        for (r, l) in &self.rlimits {
+            println!("{:?}", l);
+            r.set(
+                l.soft.unwrap_or(rlimit::INFINITY),
+                l.hard.unwrap_or(rlimit::INFINITY),
+            )
+            .expect("Failed to set rlimit");
+        }
     }
 
     /// Drop capabilities

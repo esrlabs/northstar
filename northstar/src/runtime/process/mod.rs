@@ -22,7 +22,7 @@ use super::{
 };
 use crate::{
     common::{container::Container, non_null_string::NonNullString},
-    npk::manifest::Manifest,
+    npk::manifest::{Manifest, RLimitResource, RLimitValue},
     seccomp,
 };
 use async_trait::async_trait;
@@ -112,6 +112,7 @@ impl Launcher {
         let (checkpoint_runtime, checkpoint_init) = checkpoints();
         let groups = groups(&manifest);
         let capabilities = capabilities(&manifest);
+        let rlimits = rlimits(&manifest);
         let seccomp = seccomp_filter(&manifest);
 
         debug!("{} init is {:?}", manifest.name, init);
@@ -169,6 +170,7 @@ impl Launcher {
                         fds,
                         groups,
                         capabilities,
+                        rlimits,
                         seccomp,
                     };
 
@@ -468,6 +470,41 @@ fn capabilities(manifest: &Manifest) -> Capabilities {
     let set = manifest.capabilities.clone().unwrap_or_default();
     bounded.retain(|c| !set.contains(c));
     Capabilities { all, bounded, set }
+}
+
+type RLimits = HashMap<rlimit::Resource, RLimitValue>;
+
+fn rlimits(manifest: &Manifest) -> RLimits {
+    manifest
+        .rlimits
+        .as_ref()
+        .map(|l| {
+            l.iter()
+                .map(|(k, v)| {
+                    let resource = match k {
+                        RLimitResource::AS => rlimit::Resource::AS,
+                        RLimitResource::CORE => rlimit::Resource::CORE,
+                        RLimitResource::CPU => rlimit::Resource::CPU,
+                        RLimitResource::DATA => rlimit::Resource::DATA,
+                        RLimitResource::FSIZE => rlimit::Resource::FSIZE,
+                        RLimitResource::LOCKS => rlimit::Resource::LOCKS,
+                        RLimitResource::MEMLOCK => rlimit::Resource::MEMLOCK,
+                        RLimitResource::MSGQUEUE => rlimit::Resource::MSGQUEUE,
+                        RLimitResource::NICE => rlimit::Resource::NICE,
+                        RLimitResource::NOFILE => rlimit::Resource::NOFILE,
+                        RLimitResource::NPROC => rlimit::Resource::NPROC,
+                        RLimitResource::RSS => rlimit::Resource::RSS,
+                        RLimitResource::RTPRIO => rlimit::Resource::RTPRIO,
+                        #[cfg(not(target_os = "android"))]
+                        RLimitResource::RTTIME => rlimit::Resource::RTTIME,
+                        RLimitResource::SIGPENDING => rlimit::Resource::SIGPENDING,
+                        RLimitResource::STACK => rlimit::Resource::STACK,
+                    };
+                    (resource, v.clone())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone)]

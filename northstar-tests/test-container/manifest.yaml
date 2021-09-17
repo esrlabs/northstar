@@ -42,8 +42,10 @@ io:
     log:
       level: DEBUG
       tag: test-container
-custom:
-  priority: 123
+rlimits:
+  nproc:
+    soft: 10000
+    hard: 20000
 seccomp:
   profile:
     default

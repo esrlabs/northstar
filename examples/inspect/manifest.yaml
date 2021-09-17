@@ -26,4 +26,8 @@ mounts:
     type: tmpfs
     size: 10MB
 capabilities: [CAP_KILL]
+rlimits:
+  nproc:
+    soft: 1000
+    hard: 2000
 suppl_groups: [src, inet]

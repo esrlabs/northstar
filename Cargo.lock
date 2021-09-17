@@ -932,7 +932,6 @@ dependencies = [
  "anyhow",
  "caps",
  "nix 0.20.1",
- "proc-mounts",
 ]
 
 [[package]]
@@ -1162,6 +1161,7 @@ dependencies = [
  "proc-mounts",
  "proptest",
  "rand 0.7.3",
+ "rlimit",
  "semver 0.11.0",
  "serde",
  "serde_json",
@@ -1599,6 +1599,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3acd125665422973a33ac9d3dd2df85edad0f4ae9b00dafb1a05e43a9f5ef8e7"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "rlimit"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc0bf25554376fd362f54332b8410a625c71f15445bca32ffdfdf4ec9ac91726"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
