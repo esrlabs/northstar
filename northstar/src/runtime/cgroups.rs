@@ -99,7 +99,7 @@ impl Hierarchy for RuntimeHierarchy {
                 cgroups_rs::Subsystem::Devices(_) => false,
                 cgroups_rs::Subsystem::Freezer(_) => false,
                 cgroups_rs::Subsystem::NetCls(_) => false,
-                cgroups_rs::Subsystem::BlkIo(_) => false,
+                cgroups_rs::Subsystem::BlkIo(_) => true,
                 cgroups_rs::Subsystem::PerfEvent(_) => false,
                 cgroups_rs::Subsystem::NetPrio(_) => false,
                 cgroups_rs::Subsystem::HugeTlb(_) => false,
@@ -192,15 +192,18 @@ impl CGroups {
         let mut stats = HashMap::new();
         for c in self.cgroup.subsystems() {
             match c {
+                cgroups_rs::Subsystem::BlkIo(c) => {
+                    stats.insert("blkio".into(), to_value(c.blkio()).unwrap());
+                }
+                cgroups_rs::Subsystem::Cpu(c) => {
+                    stats.insert("cpu".into(), to_value(c.cpu()).unwrap());
+                }
                 cgroups_rs::Subsystem::Mem(c) => {
                     let mut memory = HashMap::new();
                     memory.insert("memory".to_string(), to_value(c.memory_stat()).unwrap());
                     memory.insert("kmem".to_string(), to_value(c.kmem_stat()).unwrap());
                     memory.insert("kmem_tcp".to_string(), to_value(c.kmem_tcp_stat()).unwrap());
                     stats.insert("memory".to_string(), to_value(memory).unwrap());
-                }
-                cgroups_rs::Subsystem::Cpu(c) => {
-                    stats.insert("cpu".into(), to_value(c.cpu()).unwrap());
                 }
                 _ => (),
             }
