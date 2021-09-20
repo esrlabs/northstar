@@ -1,4 +1,7 @@
 FROM rustembedded/cross:aarch64-unknown-linux-musl
 
-RUN apt update && apt install --assume-yes squashfs-tools musl-dev libclang-dev
+RUN apt update && apt install --assume-yes musl-dev libclang-dev libz-dev
 ENV BINDGEN_EXTRA_CLANG_ARGS="-I/usr/local/aarch64-linux-musl/include"
+
+COPY install-squashfs-tools.sh /
+RUN /install-squashfs-tools.sh && rm /install-squashfs-tools.sh
