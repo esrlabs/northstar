@@ -45,7 +45,7 @@ jobs:
           token: ${{secrets.GITHUB_TOKEN}}
 
   check:
-    name: Tests
+    name: Check
     runs-on: ubuntu-latest
     strategy:
       matrix:
