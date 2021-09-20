@@ -2,7 +2,8 @@ use super::{key::PublicKey, state::Npk};
 use crate::npk::dm_verity::VerityHeader;
 use devicemapper::{DevId, DmError, DmName, DmUuid};
 use floating_duration::TimeAsFloat;
-use futures::Future;
+use futures::{Future, StreamExt};
+use inotify::WatchMask;
 use log::{debug, info, warn};
 use loopdev::LoopControl;
 pub use nix::mount::MsFlags as MountFlags;
@@ -105,13 +106,11 @@ impl MountControl {
     }
 
     pub(super) async fn umount(&self, mount_info: &MountInfo) -> Result<(), Error> {
-        nix::mount::umount(&mount_info.target).map_err(Error::Os)?;
+        debug!("Unmounting {}", mount_info.target.display());
 
         if let Some(dm_name) = mount_info.dm_name.as_ref() {
             debug!("Removing device {}", dm_name);
-            // Remove the device. The defered removal may have kicked in in between
-            // and the `device_remove` call returns an error in such a case. Ignore
-            // any error.
+
             self.dm
                 .device_remove(
                     &DevId::Name(DmName::new(dm_name).unwrap()),
@@ -119,8 +118,12 @@ impl MountControl {
                 )
                 .ok();
 
+            nix::mount::umount(&mount_info.target).map_err(Error::Os)?;
+
             debug!("Waiting for dm device {}", mount_info.device.display());
-            wait_for_file_deleted(&mount_info.device, std::time::Duration::from_secs(5)).await?;
+            wait_file_deleted(&mount_info.device, time::Duration::from_secs(5)).await?;
+        } else {
+            nix::mount::umount(&mount_info.target).map_err(Error::Os)?;
         }
 
         debug!("Removing mountpoint {}", mount_info.target.display());
@@ -329,15 +332,63 @@ fn dmsetup(
     Ok(dm_dev)
 }
 
-async fn wait_for_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
-    let wait = async {
-        while path.exists() {
-            time::sleep(time::Duration::from_millis(1)).await;
+async fn wait_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
+    let mut inotify =
+        inotify::Inotify::init().map_err(|e| Error::Io("Initialize inotify".into(), e))?;
+
+    let path = path.to_owned();
+    match inotify.add_watch(&path, WatchMask::DELETE) {
+        Ok(_) => (),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(Error::Io(
+                format!("Inotify watch path: {}", path.display()),
+                e,
+            ));
         }
-        Ok(())
     };
-    time::timeout(timeout, wait)
+
+    let buffer = [0u8; 1024];
+    let mut stream = inotify
+        .event_stream(buffer)
+        .map_err(|e| Error::Io("Inotify event stream".into(), e))?;
+
+    match time::timeout(timeout, stream.next())
         .await
-        .map_err(|_| Error::Timeout(format!("Failed to wait for removal of {}", &path.display())))
-        .and_then(|r| r)
+        .map_err(|_| Error::Timeout(format!("Inotify timeout deletion of {}", path.display())))?
+    {
+        Some(Ok(_)) => Ok(()),
+        Some(Err(e)) => Err(Error::Io("Inotify stream error".into(), e)),
+        None => unreachable!("Inotify closed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wait_file_deleted;
+    use std::{path::Path, time::Duration};
+    use tokio::{fs, task};
+
+    #[tokio::test]
+    async fn wait_for_non_existing_file() {
+        assert!(
+            wait_file_deleted(Path::new("non_existing_file"), Duration::from_millis(0))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_for_file_deleted() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let path = tmpdir.path().join("foo");
+        for _ in 0..1000 {
+            let _ = fs::File::create(&path).await.unwrap();
+            task::spawn(fs::remove_file(path.clone()));
+            wait_file_deleted(&path, Duration::from_secs(5))
+                .await
+                .unwrap();
+            assert!(!path.exists());
+        }
+    }
 }
