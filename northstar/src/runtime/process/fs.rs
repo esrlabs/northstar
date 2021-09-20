@@ -14,11 +14,12 @@
 
 use super::Error;
 use crate::{
+    common::container::Container,
     npk::{
         manifest,
-        manifest::{MountOption, MountOptions, Resource, Tmpfs},
+        manifest::{Manifest, MountOption, MountOptions, Resource, Tmpfs},
     },
-    runtime::{config::Config, state::MountedContainer},
+    runtime::config::Config,
     util::PathExt,
 };
 use log::debug;
@@ -92,35 +93,36 @@ impl Mount {
 /// is referenced that does not exist.
 pub(super) async fn prepare_mounts(
     config: &Config,
-    container: &MountedContainer,
+    root: &Path,
+    manifest: Manifest,
 ) -> Result<(Vec<Mount>, Dev), Error> {
     let mut mounts = Vec::new();
     let mut dev = None;
-    let root = container
-        .root
-        .canonicalize()
-        .map_err(|e| Error::io("Canonicalize root", e))?;
 
-    mounts.push(proc(&root));
+    mounts.push(proc(root));
 
-    let manifest_mounts = &container.manifest.mounts;
+    let manifest_mounts = &manifest.mounts;
 
     for (target, mount) in manifest_mounts {
         match &mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
-                mounts.extend(bind(&root, target, host, options));
+                mounts.extend(bind(root, target, host, options));
             }
             manifest::Mount::Persist => {
-                mounts.push(persist(&root, target, config, container).await?);
+                // Note that the version is intentionally not part of the path. This allows
+                // upgrades with persistent data migration
+                let source = config.data_dir.join(manifest.name.to_string());
+                mounts.push(persist(root, &source, target, manifest.uid, manifest.gid).await?);
             }
             manifest::Mount::Resource(res) => {
-                let (mount, remount_ro) = resource(&root, target, config, container, res)?;
+                let container = Container::new(manifest.name.clone(), manifest.version.clone());
+                let (mount, remount_ro) = resource(root, target, config, container, res)?;
                 mounts.push(mount);
                 mounts.push(remount_ro);
             }
-            manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(&root, target, *size)),
+            manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
             manifest::Mount::Dev => {
-                let (d, mount, remount) = self::dev(&root, container).await;
+                let (d, mount, remount) = self::dev(root, manifest.uid, manifest.gid).await;
                 mounts.push(mount);
                 mounts.push(remount);
                 dev = d
@@ -130,7 +132,7 @@ pub(super) async fn prepare_mounts(
 
     // No dev configured in mounts: Use minimal version
     if dev.is_none() && !manifest_mounts.contains_key(Path::new("/dev")) {
-        let (d, mount, remount) = self::dev(&root, container).await;
+        let (d, mount, remount) = self::dev(root, manifest.uid, manifest.gid).await;
         mounts.push(mount);
         mounts.push(remount);
         dev = d;
@@ -188,47 +190,49 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
 
 async fn persist(
     root: &Path,
+    source: &Path,
     target: &Path,
-    config: &Config,
-    container: &MountedContainer,
+    uid: u16,
+    gid: u16,
 ) -> Result<Mount, Error> {
-    let uid = container.manifest.uid;
-    let gid = container.manifest.gid;
-    let dir = config.data_dir.join(container.manifest.name.to_string());
-
-    if !dir.exists() {
-        debug!("Creating {}", dir.display());
-        tokio::fs::create_dir_all(&dir)
+    if !source.exists() {
+        debug!("Creating {}", source.display());
+        tokio::fs::create_dir_all(&source)
             .await
-            .map_err(|e| Error::Io(format!("Failed to create {}", dir.display()), e))?;
+            .map_err(|e| Error::Io(format!("Failed to create {}", source.display()), e))?;
     }
 
-    debug!("Chowning {} to {}:{}", dir.display(), uid, gid);
+    debug!("Chowning {} to {}:{}", source.display(), uid, gid);
     unistd::chown(
-        dir.as_os_str(),
+        source.as_os_str(),
         Some(unistd::Uid::from_raw(uid.into())),
         Some(unistd::Gid::from_raw(gid.into())),
     )
     .map_err(|e| {
         Error::os(
-            format!("Failed to chown {} to {}:{}", dir.display(), uid, gid),
+            format!("Failed to chown {} to {}:{}", source.display(), uid, gid),
             e,
         )
     })?;
 
-    debug!("Mounting {} on {}", dir.display(), target.display(),);
+    debug!("Mounting {} on {}", source.display(), target.display(),);
 
-    let source = dir;
     let target = root.join_strip(target);
     let flags = MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
-    Ok(Mount::new(Some(source), target, None, flags, None))
+    Ok(Mount::new(
+        Some(source.to_owned()),
+        target,
+        None,
+        flags,
+        None,
+    ))
 }
 
 fn resource(
     root: &Path,
     target: &Path,
     config: &Config,
-    container: &MountedContainer,
+    container: Container,
     resource: &Resource,
 ) -> Result<(Mount, Mount), Error> {
     let src = {
@@ -244,8 +248,8 @@ fn resource(
 
         if !dir.exists() {
             return Err(Error::StartContainerMissingResource(
-                container.container.clone(),
-                container.container.clone(),
+                container.clone(),
+                container,
             ));
         }
 
@@ -296,11 +300,11 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
     flags
 }
 
-async fn dev(root: &Path, container: &MountedContainer) -> (Dev, Mount, Mount) {
+async fn dev(root: &Path, uid: u16, gid: u16) -> (Dev, Mount, Mount) {
     let dir = TempDir::new().expect("Failed to create tempdir");
     debug!("Creating devfs in {}", dir.path().display());
 
-    dev_devices(dir.path(), container.manifest.uid, container.manifest.gid);
+    dev_devices(dir.path(), uid, gid);
     dev_symlinks(dir.path()).await;
 
     let source = dir.path().to_path_buf();

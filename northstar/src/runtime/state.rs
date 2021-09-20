@@ -17,7 +17,6 @@ use super::{
     config::{Config, RepositoryType},
     console::Request,
     error::Error,
-    key::PublicKey,
     mount::{MountControl, MountInfo},
     process::Launcher,
     repository::{DirRepository, MemRepository},
@@ -28,7 +27,7 @@ use crate::{
     api::{self, model::MountResult},
     common::non_null_string::NonNullString,
     npk,
-    npk::manifest::{Autostart, Manifest, Mount, Resource},
+    npk::manifest::{Autostart, Mount, Resource},
     runtime::{CGroupEvent, ENV_NAME, ENV_VERSION},
 };
 use api::model::Response;
@@ -85,8 +84,6 @@ pub(super) struct State<'a> {
 
 #[derive(Debug)]
 pub(super) struct MountedContainer {
-    pub(super) container: Container,
-    pub(super) manifest: Manifest,
     pub(super) root: PathBuf,
     pub(super) mount_info: MountInfo,
     pub(super) process: Option<ProcessContext>,
@@ -227,13 +224,16 @@ impl<'a> State<'a> {
         Ok(())
     }
 
-    fn npk(&self, container: &Container) -> Option<(Arc<Npk>, Option<&PublicKey>)> {
-        for repository in self.repositories.values() {
-            if let Some(npk) = repository.get(container) {
-                return Some((npk, repository.key()));
-            }
-        }
-        None
+    /// Find the container's NPK
+    fn find_npk(&self, container: &Container) -> Option<Arc<Npk>> {
+        self.repositories.values().find_map(|r| r.get(container))
+    }
+
+    /// Find the repository that has the given container
+    fn find_repository(&self, container: &Container) -> Option<&(dyn Repository + Send + Sync)> {
+        self.repositories
+            .values()
+            .find_map(|r| r.get(container).is_some().then(|| r.as_ref()))
     }
 
     /// Mount `container`
@@ -241,19 +241,17 @@ impl<'a> State<'a> {
         &self,
         container: &Container,
     ) -> Result<impl Future<Output = Result<MountedContainer, Error>>, Error> {
-        // Find npk and optional key
-        let (npk, key) = self
-            .npk(container)
+        // Find the repository that has the container
+        let repository = self
+            .find_repository(container)
             .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
-
-        let manifest = npk.manifest().clone();
+        let key = repository.key().cloned();
+        let npk = repository.get(container).unwrap();
 
         // Try to mount the npk found. If this fails return with an error - nothing needs to
         // be cleaned up.
         let root = self.config.run_dir.join(container.to_string());
         let mount_control = self.mount_control.clone();
-        let container = container.clone();
-        let key = key.cloned();
         let mount = async move {
             let mount_info = mount_control
                 .mount(npk, &root, key.as_ref())
@@ -261,8 +259,6 @@ impl<'a> State<'a> {
                 .map_err(Error::Mount)?;
 
             Ok(MountedContainer {
-                container: container.clone(),
-                manifest,
                 root,
                 mount_info,
                 process: None,
@@ -285,21 +281,25 @@ impl<'a> State<'a> {
             return Err(Error::UmountBusy(container.clone()));
         }
 
+        let npk = self.find_npk(container).unwrap();
+        let manifest = npk.manifest();
+
         // If this is a resource check if it can be uninstalled or if it's
         // used by any (mounted) container. The not mounted containers are
         // not interesting because the check for all resources is done when
         // it's mounted/started.
-        if mounted_container.manifest.init.is_none()
+        if manifest.init.is_none()
             && self
-                .containers
-                .values()
-                .filter(|c| c.process.is_some()) // Just started containers count
-                .map(|c| &c.manifest.mounts)
+                .running_containers()
+                .filter_map(|container| {
+                    self.find_npk(container)
+                        .map(|n| n.manifest().clone().mounts)
+                })
                 .flatten() // A iter of Mounts
                 .map(|(_, mount)| mount)
                 .filter_map(|mount| match mount {
                     Mount::Resource(Resource { name, version, .. }) => {
-                        Some(Container::new(name.clone(), version.clone()))
+                        Some(Container::new(name, version))
                     }
                     _ => None,
                 })
@@ -332,11 +332,9 @@ impl<'a> State<'a> {
 
         let mut need_mount = HashSet::new();
 
-        let npk = if let Some((npk, _)) = self.npk(container) {
-            npk
-        } else {
-            return Err(Error::InvalidContainer(container.clone()));
-        };
+        let npk = self
+            .find_npk(container)
+            .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
 
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
         if let Some(env) = env {
@@ -376,7 +374,7 @@ impl<'a> State<'a> {
             _ => None,
         }) {
             // Check if the resource is available
-            if self.npk(&resource).is_none() {
+            if self.find_npk(&resource).is_none() {
                 return Err(Error::StartContainerMissingResource(
                     container.clone(),
                     resource,
@@ -406,10 +404,21 @@ impl<'a> State<'a> {
 
         // This must exist
         let mounted_container = self.containers.get(container).expect("Internal error");
+        let npk = self.find_npk(container).unwrap();
+        let manifest = npk.manifest();
 
         // Spawn process
         info!("Creating {}", container);
-        let mut process = match self.launcher.create(mounted_container, args, env).await {
+        let root = mounted_container
+            .root
+            .canonicalize()
+            .expect("Failed to canonicalize root");
+
+        let mut process = match self
+            .launcher
+            .create(root, container.clone(), manifest.clone(), args, env)
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
@@ -421,16 +430,12 @@ impl<'a> State<'a> {
         let pid = process.pid();
 
         // Debug
-        let debug = super::debug::Debug::new(self.config, &mounted_container.manifest, pid).await?;
+        let debug = super::debug::Debug::new(self.config, manifest, pid).await?;
 
         // CGroups
         let cgroups = {
             debug!("Configuring CGroups for {}", container);
-            let config = mounted_container
-                .manifest
-                .cgroups
-                .clone()
-                .unwrap_or_default();
+            let config = manifest.cgroups.clone().unwrap_or_default();
 
             // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
             cgroups::CGroups::new(
@@ -594,9 +599,12 @@ impl<'a> State<'a> {
         container: &Container,
         exit_status: &ExitStatus,
     ) -> Result<(), Error> {
+        let npk = self.find_npk(container).unwrap();
+        let manifest = npk.manifest();
+
         if let Some(mounted_container) = self.containers.get_mut(container) {
             if let Some(process) = mounted_container.process.take() {
-                let critical = mounted_container.manifest.autostart == Some(Autostart::Critical);
+                let critical = manifest.autostart == Some(Autostart::Critical);
                 if critical {
                     error!(
                         "Critical process {} exited after {:?} with status {:?}",
@@ -783,17 +791,16 @@ impl<'a> State<'a> {
             .await
             .drain(..)
             .zip(containers)
-            .map(|(r, c)| {
+            .map(|(r, container)| {
                 match r {
-                    Ok(c) => {
+                    Ok(mounted) => {
                         // Add mounted container to our internal housekeeping
-                        info!("Mounted {}", c.container);
-                        let container = c.container.clone();
-                        self.containers.insert(container.clone(), c);
-                        Ok(container)
+                        info!("Mounted {}", container);
+                        self.containers.insert(container.clone(), mounted);
+                        Ok(container.clone())
                     }
                     Err(e) => {
-                        warn!("Failed to mount {}: {}", c, e);
+                        warn!("Failed to mount {}: {}", container, e);
                         Err(e)
                     }
                 }
@@ -840,5 +847,12 @@ impl<'a> State<'a> {
                 .await
                 .expect("Internal channel error on main");
         }
+    }
+
+    /// Returns an iterator over the containers currently running
+    fn running_containers(&self) -> impl Iterator<Item = &Container> {
+        self.containers
+            .iter()
+            .filter_map(|(container, state)| state.process.is_some().then(|| container))
     }
 }

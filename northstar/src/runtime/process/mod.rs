@@ -17,7 +17,6 @@ use super::{
     config::Config,
     error::Error,
     pipe::{Condition, ConditionNotify, ConditionWait},
-    state::MountedContainer,
     ContainerEvent, Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
@@ -46,6 +45,7 @@ use std::{
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
+    path::PathBuf,
     ptr::null,
 };
 use sys::wait;
@@ -94,17 +94,13 @@ impl Launcher {
 
     pub async fn create(
         &self,
-        container: &MountedContainer,
+        root: PathBuf,
+        container: Container,
+        manifest: Manifest,
         args: Option<&Vec<NonNullString>>,
         env: Option<&HashMap<NonNullString, NonNullString>>,
     ) -> Result<impl super::state::Process, Error> {
-        let root = container
-            .root
-            .canonicalize()
-            .expect("Failed to canonicalize root");
-        let manifest = container.manifest.clone();
-        let (mounts, dev) = fs::prepare_mounts(&self.config, container).await?;
-        let container = container.container.clone();
+        let (mounts, dev) = fs::prepare_mounts(&self.config, &root, manifest.clone()).await?;
         let (init, argv) = init_argv(&manifest, args);
         let env = self::env(&manifest, env);
         let (stdout, stderr, mut fds) = io::from_manifest(&manifest).await?;
