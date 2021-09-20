@@ -55,9 +55,8 @@ pub(super) trait Repository: fmt::Debug {
     fn get(&self, container: &Container) -> Option<Arc<Npk>>;
 
     /// Key of this repository
-    fn key(&self) -> Option<&PublicKey> {
-        None
-    }
+    fn key(&self) -> Option<&PublicKey>;
+
     /// All containers in this repositoriy
     fn containers(&self) -> Vec<Arc<Npk>>;
 
@@ -159,10 +158,7 @@ impl DirRepository {
 
 #[async_trait::async_trait]
 impl<'a> Repository for DirRepository {
-    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>
-    where
-        Self: Sized,
-    {
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         let dest = self.dir.join(format!("{}.npk", uuid::Uuid::new_v4()));
         let mut file = fs::File::create(&dest)
             .await
@@ -205,10 +201,7 @@ impl<'a> Repository for DirRepository {
         }
     }
 
-    async fn remove(&mut self, container: &Container) -> Result<(), Error>
-    where
-        Self: Sized,
-    {
+    async fn remove(&mut self, container: &Container) -> Result<(), Error> {
         if let Some((path, npk)) = self.containers.remove(container) {
             debug!("Removing {} from {}", path.display(), self.id);
             drop(npk);
@@ -221,34 +214,22 @@ impl<'a> Repository for DirRepository {
         }
     }
 
-    fn get(&self, container: &Container) -> Option<Arc<Npk>>
-    where
-        Self: Sized,
-    {
+    fn get(&self, container: &Container) -> Option<Arc<Npk>> {
         self.containers.get(container).map(|(_, npk)| npk.clone())
     }
 
-    fn key(&self) -> Option<&PublicKey>
-    where
-        Self: Sized,
-    {
+    fn key(&self) -> Option<&PublicKey> {
         self.key.as_ref()
     }
 
-    fn containers(&self) -> Vec<Arc<Npk>>
-    where
-        Self: Sized,
-    {
+    fn containers(&self) -> Vec<Arc<Npk>> {
         self.containers
             .values()
             .map(|(_, npk)| npk.clone())
             .collect()
     }
 
-    fn list(&self) -> Vec<Container>
-    where
-        Self: Sized,
-    {
+    fn list(&self) -> Vec<Container> {
         self.containers.keys().cloned().collect()
     }
 }
@@ -275,10 +256,7 @@ impl MemRepository {
 
 #[async_trait::async_trait]
 impl<'a> Repository for MemRepository {
-    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>
-    where
-        Self: Sized,
-    {
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);
         let fd = opts.create(uuid::Uuid::new_v4().to_string()).map_err(|e| {
@@ -319,7 +297,8 @@ impl<'a> Repository for MemRepository {
 
         // Load npk
         debug!("Loading buffer");
-        let npk = npk::Npk::from_reader(file, None).map_err(|e| Error::Npk("Memory".into(), e))?;
+        let npk = npk::Npk::from_reader(file, self.key.as_ref())
+            .map_err(|e| Error::Npk("Memory".into(), e))?;
         let manifest = npk.manifest();
         let container = Container::new(manifest.name.clone(), manifest.version.clone());
 
@@ -332,32 +311,24 @@ impl<'a> Repository for MemRepository {
         }
     }
 
-    async fn remove(&mut self, container: &Container) -> Result<(), Error>
-    where
-        Self: Sized,
-    {
+    async fn remove(&mut self, container: &Container) -> Result<(), Error> {
         self.containers.remove(container);
         Ok(())
     }
 
-    fn get(&self, container: &Container) -> Option<Arc<Npk>>
-    where
-        Self: Sized,
-    {
+    fn get(&self, container: &Container) -> Option<Arc<Npk>> {
         self.containers.get(container).cloned()
     }
 
-    fn containers(&self) -> Vec<Arc<Npk>>
-    where
-        Self: Sized,
-    {
+    fn containers(&self) -> Vec<Arc<Npk>> {
         self.containers.values().cloned().collect()
     }
 
-    fn list(&self) -> Vec<Container>
-    where
-        Self: Sized,
-    {
+    fn list(&self) -> Vec<Container> {
         self.containers.keys().cloned().collect()
+    }
+
+    fn key(&self) -> Option<&PublicKey> {
+        self.key.as_ref()
     }
 }
