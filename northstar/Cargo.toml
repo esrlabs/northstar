@@ -118,6 +118,7 @@ seccomp = [
 anyhow = "1.0.44"
 nix = "0.23.0"
 proptest = "1.0.0"
+tempfile = "3.2.0"
 
 [build-dependencies]
 anyhow = { version = "1.0.44", optional = true }

@@ -46,7 +46,7 @@ test!(install_duplicate, {
 });
 
 // Start and stop a container multiple times
-test!(start_stop_test_container_with_waiting, {
+test!(start_stop, {
     let mut runtime = Northstar::launch_install_test_container().await?;
 
     for _ in 0..10u32 {
@@ -60,19 +60,33 @@ test!(start_stop_test_container_with_waiting, {
 });
 
 // Mount and umount all containers known to the runtime
-test!(mount_umount_test_container_via_client, {
-    let mut runtime = Northstar::launch_install_test_container().await?;
+test!(mount_umount, {
+    let mut runtime = Northstar::launch().await?;
 
-    // Mount
-    let mut containers = runtime.containers().await?;
-    runtime
-        .mount(containers.drain(..).map(|c| c.container))
-        .await?;
+    runtime.install(&EXAMPLE_CPUEATER_NPK).await?;
+    runtime.install(&EXAMPLE_CRASHING_NPK).await?;
+    runtime.install(&EXAMPLE_FERRIS_NPK).await?;
+    runtime.install(&EXAMPLE_HELLO_FERRIS_NPK).await?;
+    runtime.install(&EXAMPLE_HELLO_RESOURCE_NPK).await?;
+    runtime.install(&EXAMPLE_INSPECT_NPK).await?;
+    runtime.install(&EXAMPLE_MEMEATER_NPK).await?;
+    runtime.install(&EXAMPLE_MESSAGE_0_0_1_NPK).await?;
+    runtime.install(&EXAMPLE_MESSAGE_0_0_2_NPK).await?;
+    runtime.install(&EXAMPLE_PERSISTENCE_NPK).await?;
+    runtime.install(&EXAMPLE_SECCOMP_NPK).await?;
+    runtime.install(&TEST_CONTAINER_NPK).await?;
+    runtime.install(&TEST_RESOURCE_NPK).await?;
 
-    // Umount
-    let containers = &mut runtime.containers().await?;
-    for c in containers.iter().filter(|c| c.mounted) {
-        runtime.umount(c.container.clone()).await?;
+    for _ in 0..10u32 {
+        let mut containers = runtime.containers().await?;
+        runtime
+            .mount(containers.drain(..).map(|c| c.container))
+            .await?;
+
+        let containers = &mut runtime.containers().await?;
+        for c in containers.iter().filter(|c| c.mounted) {
+            runtime.umount(c.container.clone()).await?;
+        }
     }
 
     runtime.shutdown().await
