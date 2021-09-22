@@ -85,8 +85,7 @@ pub(super) async fn prepare_mounts(
     root: &Path,
     manifest: Manifest,
 ) -> Result<Vec<Mount>, Error> {
-    let mut mounts = vec![proc(root)];
-
+    let mut mounts = vec![];
     let manifest_mounts = &manifest.mounts;
 
     for (target, mount) in manifest_mounts {
@@ -100,6 +99,7 @@ pub(super) async fn prepare_mounts(
                 let source = config.data_dir.join(manifest.name.to_string());
                 mounts.push(persist(root, &source, target, manifest.uid, manifest.gid).await?);
             }
+            manifest::Mount::Proc => mounts.push(proc(root, target)),
             manifest::Mount::Resource(res) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let (mount, remount_ro) = resource(root, target, config, container, res)?;
@@ -114,10 +114,10 @@ pub(super) async fn prepare_mounts(
     Ok(mounts)
 }
 
-fn proc(root: &Path) -> Mount {
-    debug!("Mounting /proc");
+fn proc(root: &Path, target: &Path) -> Mount {
+    debug!("Mounting proc on {}", target.display());
     let source = PathBuf::from("proc");
-    let target = root.join("proc");
+    let target = root.join_strip(target);
     let fstype = "proc";
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
     Mount::new(Some(source), target, Some(fstype), flags, None)
