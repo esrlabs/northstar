@@ -124,7 +124,6 @@ impl Hierarchy for RuntimeHierarchy {
 
 #[derive(Debug)]
 pub struct CGroups {
-    container: Container,
     cgroup: cgroups_rs::Cgroup,
     memory_monitor: MemoryMonitor,
 }
@@ -175,15 +174,14 @@ impl CGroups {
         };
 
         Ok(CGroups {
-            container: container.clone(),
             cgroup,
             memory_monitor,
         })
     }
 
     pub async fn destroy(self) {
-        info!("Destroying cgroups of {}", self.container);
         self.memory_monitor.stop().await;
+        info!("Destroying cgroup");
         self.cgroup.delete().expect("Failed to remove cgroups");
     }
 
@@ -263,7 +261,10 @@ impl MemoryMonitor {
 
                 'outer: loop {
                     select! {
-                        _ = stop.cancelled() => break 'outer,
+                        _ = stop.cancelled() => {
+                            debug!("Stopping oom monitor of {}", container);
+                            break 'outer;
+                        }
                         _ = tx.closed() => break 'outer,
                         _ = event_fd.read(&mut buffer) => {
                             'inner: loop {
@@ -281,8 +282,6 @@ impl MemoryMonitor {
                         }
                     }
                 }
-
-                debug!("Stopped oom monitor of {}", container);
             })
         };
 
@@ -316,7 +315,10 @@ impl MemoryMonitor {
 
                 'outer: loop {
                     select! {
-                        _ = stop.cancelled() => break 'outer,
+                        _ = stop.cancelled() => {
+                            debug!("Stopping oom monitor of {}", container);
+                            break 'outer;
+                        }
                         _ = tx.closed() => break 'outer,
                         _ = stream.next() => {
                             let events = fs::read_to_string(&path).await.expect("Failed to read memory events");
@@ -333,8 +335,6 @@ impl MemoryMonitor {
                         }
                     }
                 }
-
-                debug!("Stopped oom monitor of {}", container);
             })
         };
 
