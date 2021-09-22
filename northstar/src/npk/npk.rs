@@ -644,117 +644,98 @@ fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Err
 
 /// Returns a temporary file with all the pseudo file definitions
 fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
-    let mut pseudo_file_entries = NamedTempFile::new().map_err(|error| Error::Io {
-        context: "Failed to create temporary file".to_string(),
-        error,
-    })?;
-    let file = pseudo_file_entries.as_file_mut();
     let uid = manifest.uid;
     let gid = manifest.gid;
 
-    fn add_directory(
-        file: &mut fs::File,
-        dir: &Path,
-        mode: u16,
-        uid: u16,
-        gid: u16,
-    ) -> Result<(), Error> {
+    let pseudo_directory = |dir: &Path, mode: u16| -> Vec<String> {
+        let mut pseudos = Vec::new();
         // Each directory level needs to be passed to mksquashfs e.g:
         // /dev d 755 x x x
         // /dev/block d 755 x x x
-        dir.iter()
-            .skip(1)
-            .try_fold(PathBuf::from("/"), |mut p, dir| {
-                p.push(dir);
-                writeln!(file, "{} d {} {} {}", p.display(), mode, uid, gid).map_err(|e| {
-                    Error::Io {
-                        context: format!("Failed to write entry {} to temp file", p.display()),
-                        error: e,
-                    }
-                })?;
-                Ok(p)
-            })
-            .map(drop)
-    }
+        let mut p = PathBuf::from("/");
+        for d in dir.iter().skip(1) {
+            p.push(d);
+            pseudos.push(format!("{} d {} {} {}", p.display(), mode, uid, gid));
+        }
+        pseudos
+    };
 
     // Create mountpoints as pseudofiles/dirs
-    for (target, mount) in &manifest.mounts {
-        match mount {
-            Mount::Bind(Bind { options: flags, .. }) => {
-                let mode = if flags.contains(&MountOption::Rw) {
-                    755
-                } else {
-                    555
-                };
-                add_directory(file, target, mode, uid, gid)?;
-            }
-            Mount::Persist => add_directory(file, target, 755, uid, gid)?,
-            Mount::Proc => add_directory(file, target, 444, uid, gid)?,
-            Mount::Resource { .. } => add_directory(file, target, 555, uid, gid)?,
-            Mount::Tmpfs { .. } => add_directory(file, target, 755, uid, gid)?,
-            Mount::Dev => {
-                // Create a minimal set of chardevs:
-                // └─ dev
-                //     ├── fd -> /proc/self/fd
-                //     ├── full
-                //     ├── null
-                //     ├── random
-                //     ├── stderr -> /proc/self/fd/2
-                //     ├── stdin -> /proc/self/fd/0
-                //     ├── stdout -> /proc/self/fd/1
-                //     ├── tty
-                //     ├── urandom
-                //     └── zero
-
-                // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
-                add_directory(file, target, 755, uid, gid)?;
-
-                // Create chardevs
-                for (dev, major, minor) in &[
-                    ("full", 1, 7),
-                    ("null", 1, 3),
-                    ("random", 1, 8),
-                    ("tty", 5, 0),
-                    ("urandom", 1, 9),
-                    ("zero", 1, 5),
-                ] {
-                    writeln!(
-                        file,
-                        "{} c {} {} {} {} {}",
-                        target.join(dev).display(),
-                        666,
-                        uid,
-                        gid,
-                        major,
-                        minor
-                    )
-                    .map_err(|e| Error::io("Failed to write pseudofile", e))?;
+    let pseudos = manifest
+        .mounts
+        .iter()
+        .map(|(target, mount)| {
+            match mount {
+                Mount::Bind(Bind { options: flags, .. }) => {
+                    let mode = if flags.contains(&MountOption::Rw) {
+                        755
+                    } else {
+                        555
+                    };
+                    pseudo_directory(target, mode)
                 }
+                Mount::Persist => pseudo_directory(target, 755),
+                Mount::Proc => pseudo_directory(target, 444),
+                Mount::Resource { .. } => pseudo_directory(target, 555),
+                Mount::Tmpfs { .. } => pseudo_directory(target, 755),
+                Mount::Dev => {
+                    // Create a minimal set of chardevs:
+                    // └─ dev
+                    //     ├── fd -> /proc/self/fd
+                    //     ├── full
+                    //     ├── null
+                    //     ├── random
+                    //     ├── stderr -> /proc/self/fd/2
+                    //     ├── stdin -> /proc/self/fd/0
+                    //     ├── stdout -> /proc/self/fd/1
+                    //     ├── tty
+                    //     ├── urandom
+                    //     └── zero
 
-                // Link fds
-                writeln!(file, "/proc/self/fd d 777 {} {}", uid, gid)
-                    .map_err(|e| Error::io("Failed to write pseudofile", e))?;
-                for (link, name) in &[
-                    ("/proc/self/fd", "fd"),
-                    ("/proc/self/fd/0", "stdin"),
-                    ("/proc/self/fd/1", "stdout"),
-                    ("/proc/self/fd/2", "stderr"),
-                ] {
-                    writeln!(
-                        file,
-                        "{} s {} {} {} {}",
-                        target.join(name).display(),
-                        777,
-                        uid,
-                        gid,
-                        link,
-                    )
-                    .map_err(|e| Error::io("Failed to write pseudofile", e))?;
+                    // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
+                    let mut pseudos = pseudo_directory(target, 755);
+
+                    // Create chardevs
+                    for (dev, major, minor) in &[
+                        ("full", 1, 7),
+                        ("null", 1, 3),
+                        ("random", 1, 8),
+                        ("tty", 5, 0),
+                        ("urandom", 1, 9),
+                        ("zero", 1, 5),
+                    ] {
+                        let target = target.join(dev).display().to_string();
+                        pseudos.push(format!(
+                            "{} c {} {} {} {} {}",
+                            target, 666, uid, gid, major, minor
+                        ));
+                    }
+
+                    // Link fds
+                    pseudos.push(format!("/proc/self/fd d 777 {} {}", uid, gid));
+                    for (link, name) in &[
+                        ("/proc/self/fd", "fd"),
+                        ("/proc/self/fd/0", "stdin"),
+                        ("/proc/self/fd/1", "stdout"),
+                        ("/proc/self/fd/2", "stderr"),
+                    ] {
+                        let target = target.join(name).display().to_string();
+                        pseudos.push(format!("{} s {} {} {} {}", target, 777, uid, gid, link,));
+                    }
+                    pseudos
                 }
-                continue;
             }
-        }
-    }
+        })
+        .flatten()
+        .collect::<Vec<String>>();
+
+    let mut pseudo_file_entries = NamedTempFile::new()
+        .map_err(|error| Error::io("Failed to create temporary file", error))?;
+
+    pseudos.iter().try_for_each(|l| {
+        writeln!(pseudo_file_entries, "{}", l)
+            .map_err(|e| Error::io("Failed to create pseudo files", e))
+    })?;
 
     Ok(pseudo_file_entries)
 }
