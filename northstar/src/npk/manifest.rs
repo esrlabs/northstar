@@ -288,12 +288,15 @@ pub enum Mount {
     /// Bind mount of a host dir with options
     #[serde(rename = "bind")]
     Bind(Bind),
-    /// Mount /dev with flavor `dev`
+    /// Use a minimal dev tree
     #[serde(rename = "dev")]
     Dev,
     /// Mount a rw host directory dedicated to this container rw
     #[serde(rename = "persist")]
     Persist,
+    /// Mount proc
+    #[serde(rename = "proc")]
+    Proc,
     /// Mount a directory from a resource
     #[serde(rename = "resource")]
     Resource(Resource),

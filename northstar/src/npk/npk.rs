@@ -677,11 +677,6 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
             .map(drop)
     }
 
-    if manifest.init.is_some() {
-        // The default is to have at least a minimal /dev mount
-        add_directory(file, Path::new("/proc"), 444, uid, gid)?;
-    }
-
     // Create mountpoints as pseudofiles/dirs
     for (target, mount) in &manifest.mounts {
         match mount {
@@ -694,6 +689,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                 add_directory(file, target, mode, uid, gid)?;
             }
             Mount::Persist => add_directory(file, target, 755, uid, gid)?,
+            Mount::Proc => add_directory(file, target, 444, uid, gid)?,
             Mount::Resource { .. } => add_directory(file, target, 555, uid, gid)?,
             Mount::Tmpfs { .. } => add_directory(file, target, 755, uid, gid)?,
             Mount::Dev => {

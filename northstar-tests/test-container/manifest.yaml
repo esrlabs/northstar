@@ -10,6 +10,8 @@ gid: 1000
 mounts:
   /dev:
     type: dev
+  /proc:
+    type: proc
   /data:
     type: persist
   /lib:
