@@ -622,7 +622,7 @@ impl<'a> Client {
     ) -> Result<ContainerStats, Error> {
         let container = container.try_into().map_err(Into::into)?;
         match self.request(Request::ContainerStats(container)).await? {
-            Response::ContainerStats(s) => Ok(s),
+            Response::ContainerStats(_, stats) => Ok(stats),
             Response::Err(e) => Err(Error::Api(e)),
             _ => {
                 self.fuse();

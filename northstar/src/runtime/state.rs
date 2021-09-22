@@ -725,11 +725,7 @@ impl<'a> State<'a> {
                         api::model::Request::ContainerStats(container) => {
                             match self.container_stats(container).await {
                                 Ok(stats) => {
-                                    let stats = api::model::ContainerStats {
-                                        container: container.clone(),
-                                        stats,
-                                    };
-                                    api::model::Response::ContainerStats(stats)
+                                    api::model::Response::ContainerStats(container.clone(), stats)
                                 }
                                 Err(e) => {
                                     warn!("Failed to gather stats for {}: {}", container, e);

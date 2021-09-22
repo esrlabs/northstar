@@ -142,15 +142,11 @@ pub enum Response {
     Containers(Vec<ContainerData>),
     Repositories(HashSet<RepositoryId>),
     Mount(Vec<MountResult>),
-    ContainerStats(ContainerStats),
+    ContainerStats(Container, ContainerStats),
     Err(Error),
 }
 
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-pub struct ContainerStats {
-    pub container: Container,
-    pub stats: HashMap<String, serde_json::Value>,
-}
+pub type ContainerStats = HashMap<String, serde_json::Value>;
 
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Error {
