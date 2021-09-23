@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicUsize;
+
 // Copyright (c) 2021 E.S.R.Labs. All rights reserved.
 //
 // NOTICE:  All information contained herein is, and remains
@@ -20,11 +22,13 @@ pub fn init() {
         .init();
 }
 
+static TAG_SIZE: AtomicUsize = AtomicUsize::new(20);
+
 /// Initialize the logger
 #[cfg(not(target_os = "android"))]
 pub fn init() {
     use env_logger::fmt::Color;
-    use std::io::Write;
+    use std::{io::Write, sync::atomic::Ordering};
 
     let mut builder = env_logger::Builder::new();
     builder.parse_filters("northstar=debug");
@@ -39,6 +43,8 @@ pub fn init() {
             .module_path()
             .and_then(|module_path| module_path.find(&"::").map(|p| &module_path[p + 2..]))
         {
+            TAG_SIZE.fetch_max(module_path.len(), Ordering::SeqCst);
+            let tag_size = TAG_SIZE.load(Ordering::SeqCst);
             fn hashed_color(i: &str) -> Color {
                 // Some colors are hard to read on (at least) dark terminals
                 // and I consider some others as ugly ;-)
@@ -56,14 +62,22 @@ pub fn init() {
 
             writeln!(
                 buf,
-                "{}: {:<5}: {} {}",
+                "{}: {:>s$} {:<5}: {}",
                 timestamp,
-                level,
                 style.value(module_path),
+                level,
                 record.args(),
+                s = tag_size
             )
         } else {
-            writeln!(buf, "{}: {:<5}: {}", timestamp, level, record.args(),)
+            writeln!(
+                buf,
+                "{}: {} {:<5}: {}",
+                timestamp,
+                " ".repeat(TAG_SIZE.load(Ordering::SeqCst)),
+                level,
+                record.args(),
+            )
         }
     });
 
