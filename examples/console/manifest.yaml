@@ -1,0 +1,23 @@
+name: console
+version: 0.0.1
+init: /console
+console: true
+uid: 1000
+gid: 1000
+io:
+  stdout:
+    log:
+      level: DEBUG
+      tag: console
+mounts:
+  /dev:
+    type: dev
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+  /system:
+    type: bind
+    host: /system

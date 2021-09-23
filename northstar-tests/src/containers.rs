@@ -15,6 +15,7 @@
 use lazy_static::lazy_static;
 
 pub const EXAMPLE_CPUEATER: &str = "cpueater:0.0.1";
+pub const EXAMPLE_CONSOLE: &str = "console:0.0.1";
 pub const EXAMPLE_CRASHING: &str = "crashing:0.0.1";
 pub const EXAMPLE_FERRIS: &str = "ferris:0.0.1";
 pub const EXAMPLE_HELLO_FERRIS: &str = "hello-ferris:0.0.1";
@@ -31,6 +32,8 @@ pub const TEST_RESOURCE: &str = "test-resource:0.0.1";
 lazy_static! {
     pub static ref EXAMPLE_CRASHING_NPK: &'static [u8] =
         include_bytes!(concat!(env!("OUT_DIR"), "/crashing-0.0.1.npk"));
+    pub static ref EXAMPLE_CONSOLE_NPK: &'static [u8] =
+        include_bytes!(concat!(env!("OUT_DIR"), "/console-0.0.1.npk"));
     pub static ref EXAMPLE_CPUEATER_NPK: &'static [u8] =
         include_bytes!(concat!(env!("OUT_DIR"), "/cpueater-0.0.1.npk"));
     pub static ref EXAMPLE_FERRIS_NPK: &'static [u8] =

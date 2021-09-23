@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "examples/cpueater",
+    "examples/console",
     "examples/crashing",
     "examples/hello-world",
     "examples/inspect",
