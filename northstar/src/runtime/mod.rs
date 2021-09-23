@@ -8,7 +8,6 @@ use nix::{
     libc::{EXIT_FAILURE, EXIT_SUCCESS},
     sys::signal,
 };
-use repository::Repository;
 use state::State;
 use std::{
     fmt::{self},
@@ -28,6 +27,7 @@ mod cgroups;
 /// Runtime configuration
 pub mod config;
 mod console;
+mod containerdb;
 mod debug;
 mod error;
 mod key;
@@ -40,7 +40,6 @@ pub(crate) mod stats;
 
 type EventTx = mpsc::Sender<Event>;
 type NotificationTx = broadcast::Sender<(Container, ContainerEvent)>;
-type RepositoryId = String;
 type ExitCode = i32;
 type Pid = u32;
 

@@ -1,8 +1,12 @@
-use super::{Error, RepositoryId};
-use crate::{common::non_null_string::NonNullString, util::is_rw};
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;
+
+use crate::{
+    common::non_null_string::NonNullString,
+    runtime::{repository::RepositoryId, Error},
+    util::is_rw,
+};
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]

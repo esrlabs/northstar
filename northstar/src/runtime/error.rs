@@ -1,10 +1,11 @@
-use super::{Container, ExitStatus, RepositoryId};
-use crate::{
-    api::{self},
-    npk,
-};
 use std::io;
+
 use thiserror::Error;
+
+use crate::{
+    api, npk,
+    runtime::{repository::RepositoryId, Container, ExitStatus},
+};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -100,7 +101,7 @@ impl From<Error> for api::model::Error {
                 api::model::Error::StopContainerNotStarted(container)
             }
             Error::InvalidRepository(repository) => {
-                api::model::Error::InvalidRepository(repository)
+                api::model::Error::InvalidRepository(repository.to_string())
             }
             Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate(container),
             Error::CriticalContainer(container, status) => {

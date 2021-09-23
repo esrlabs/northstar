@@ -1,9 +1,3 @@
-use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
-use crate::{
-    api,
-    common::container::Container,
-    runtime::{EventTx, ExitStatus},
-};
 use api::model;
 use async_stream::stream;
 use bytes::Bytes;
@@ -27,6 +21,14 @@ use tokio::{
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
+
+use crate::{
+    api,
+    common::container::Container,
+    runtime::{
+        repository::RepositoryId, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx,
+    },
+};
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -268,7 +270,7 @@ where
 
         // Send a Receiver<Bytes> to the runtime and forward n bytes to this channel
         let (tx, rx) = mpsc::channel(10);
-        let request = Request::Install(repository, rx);
+        let request = Request::Install(repository.into(), rx);
         trace!("    {:?} -> event loop", request);
         let event = Event::Console(request, reply_tx);
         event_loop.send(event).map_err(|_| Error::Shutdown).await?;
