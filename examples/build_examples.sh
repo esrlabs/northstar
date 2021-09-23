@@ -15,6 +15,7 @@ CLONES=""
 KEY="./examples/northstar.key"
 EXAMPLES=(
   "./examples/cpueater"
+  "./examples/console"
   "./examples/crashing"
   "./examples/ferris"
   "./examples/hello-ferris"
