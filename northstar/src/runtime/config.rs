@@ -1,23 +1,10 @@
-// Copyright (c) 2019 - 2021 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
-
 use super::{Error, RepositoryId};
 use crate::{common::non_null_string::NonNullString, util::is_rw};
 use serde::Deserialize;
 use std::{collections::HashMap, path::PathBuf};
 use url::Url;
 
+/// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -42,12 +29,16 @@ pub struct Config {
 pub enum RepositoryType {
     /// Directory based
     #[serde(rename = "fs")]
-    Fs { dir: PathBuf },
+    Fs {
+        /// Path to the repository
+        dir: PathBuf,
+    },
     /// Memory based
     #[serde(rename = "mem")]
     Memory,
 }
 
+/// Repository configuration
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
     /// Optional key for this repository
@@ -56,6 +47,7 @@ pub struct Repository {
     pub r#type: RepositoryType,
 }
 
+/// Container debug settings
 #[derive(Clone, Debug, Deserialize)]
 pub struct Debug {
     /// Strace options
@@ -64,10 +56,12 @@ pub struct Debug {
     pub perf: Option<debug::Perf>,
 }
 
+/// Container debug facilities
 pub mod debug {
     use serde::Deserialize;
     use std::path::PathBuf;
 
+    /// strace output configuration
     #[derive(Clone, Debug, Deserialize)]
     #[serde(rename_all(deserialize = "snake_case"))]
     pub enum StraceOutput {

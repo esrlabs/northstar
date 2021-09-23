@@ -1,20 +1,6 @@
-// Copyright (c) 2019 - 2021 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
-
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
-use northstar::npk::npk::{open_zip, Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME, UNSQUASHFS};
+use northstar::npk::npk::{open, Npk};
 use std::{
     fs::File,
     io::{self, BufReader, Read},
@@ -22,7 +8,12 @@ use std::{
     process::Command,
 };
 
-pub fn inspect(npk: &Path, short: bool) -> Result<()> {
+const FS_IMG_NAME: &str = "fs.img";
+const MANIFEST_NAME: &str = "manifest.yaml";
+const SIGNATURE_NAME: &str = "signature.yaml";
+const UNSQUASHFS: &str = "unsquashfs";
+
+pub(crate) fn inspect(npk: &Path, short: bool) -> Result<()> {
     if short {
         inspect_short(npk)
     } else {
@@ -30,7 +21,7 @@ pub fn inspect(npk: &Path, short: bool) -> Result<()> {
     }
 }
 
-pub fn inspect_short(npk: &Path) -> Result<()> {
+pub(crate) fn inspect_short(npk: &Path) -> Result<()> {
     let npk = Npk::<BufReader<File>>::from_path(npk, None)?;
     let manifest = npk.manifest();
     let name = manifest.name.to_string();
@@ -45,8 +36,8 @@ pub fn inspect_short(npk: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn inspect_long(npk: &Path) -> Result<()> {
-    let mut zip = open_zip(npk)?;
+pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
+    let mut zip = open(npk)?;
     let mut print_buf: String = String::new();
     println!(
         "{}",
@@ -113,7 +104,7 @@ fn print_squashfs(fsimg_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::inspect;
-    use northstar::npk::npk::{gen_key, pack};
+    use northstar::npk::npk::{generate_key, pack};
     use std::{
         fs::File,
         io::Write,
@@ -164,7 +155,7 @@ mounts:
     }
 
     fn gen_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
-        gen_key(&TEST_KEY_NAME, &key_dir).expect("Generate key pair");
+        generate_key(&TEST_KEY_NAME, &key_dir).expect("Generate key pair");
         let prv_key = key_dir.join(&TEST_KEY_NAME).with_extension("key");
         let pub_key = key_dir.join(&TEST_KEY_NAME).with_extension("pub");
         assert!(prv_key.exists());

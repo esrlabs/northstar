@@ -1,17 +1,3 @@
-// Copyright (c) 2021 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
-
 use crate::{
     common::non_null_string::NonNullString,
     seccomp::{profiles::default, Profile, SyscallArgRule, SyscallRule},
@@ -77,7 +63,7 @@ pub fn seccomp_filter(
 }
 
 /// Create an AllowList Builder from a list of syscall names
-pub fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builder {
+pub(crate) fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builder {
     let mut builder = Builder::new();
     for (name, call_rule) in rules {
         let arg_rule;
@@ -203,6 +189,7 @@ pub struct AllowList {
 }
 
 impl AllowList {
+    /// Apply this seccomp filter settings to the current thread
     pub fn apply(&self) -> Result<(), Error> {
         #[cfg(target_os = "android")]
         const PR_SET_SECCOMP: nix::libc::c_int = 22;
@@ -255,13 +242,17 @@ impl Builder {
     }
 
     /// Add syscall to allowlist by number
-    pub fn allow_syscall_nr(&mut self, nr: u32, arg_rule: Option<SyscallArgRule>) -> &mut Builder {
+    pub(crate) fn allow_syscall_nr(
+        &mut self,
+        nr: u32,
+        arg_rule: Option<SyscallArgRule>,
+    ) -> &mut Builder {
         self.allowlist.push(NumericSyscallRule { nr, arg_rule });
         self
     }
 
     /// Add syscall to allowlist by name
-    pub fn allow_syscall_name(
+    pub(crate) fn allow_syscall_name(
         &mut self,
         name: &str,
         arg_rule: Option<SyscallArgRule>,
@@ -274,21 +265,21 @@ impl Builder {
 
     /// Log syscall violations instead of aborting the program
     #[allow(unused)]
-    pub fn log_only(&mut self) -> &mut Builder {
+    pub(crate) fn log_only(&mut self) -> &mut Builder {
         self.log_only = true;
         self
     }
 
     /// Extend one builder with another builder.
     /// Note: The 'log_only' property of the extended builder is only set to true if it was true in both original builders.
-    pub fn extend(&mut self, other: Builder) -> &mut Builder {
+    pub(crate) fn extend(&mut self, other: Builder) -> &mut Builder {
         self.allowlist.extend(other.allowlist);
         self.log_only &= other.log_only;
         self
     }
 
     /// Create seccomp filter ready to apply
-    pub fn build(mut self) -> AllowList {
+    pub(crate) fn build(mut self) -> AllowList {
         // sort and dedup syscall numbers to check common syscalls first
         self.allowlist.sort_unstable_by_key(|rule| rule.nr);
         self.allowlist.dedup();

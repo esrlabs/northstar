@@ -1,16 +1,7 @@
-// Copyright (c) 2020 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
+//! Northstar console client
+
+#![deny(clippy::all)]
+#![deny(missing_docs)]
 
 use anyhow::{anyhow, Context, Error, Result};
 use api::{client::Client, model::Message};
@@ -37,7 +28,7 @@ use tokio::{
     time,
 };
 
-pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
+trait N: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
 mod pretty;
@@ -56,7 +47,7 @@ fn about() -> &'static str {
 /// Subcommands
 #[derive(StructOpt, Clone)]
 #[structopt(name = "nstar", author, about = about(), global_setting(AppSettings::ColoredHelp))]
-pub enum Subcommand {
+enum Subcommand {
     /// List available containers
     #[structopt(alias = "ls", alias = "list")]
     Containers,
@@ -130,6 +121,7 @@ pub enum Subcommand {
         #[structopt(short, long)]
         shell: clap::Shell,
     },
+    /// Request container statistics
     ContainerStats {
         /// Container name
         name: String,
@@ -140,7 +132,7 @@ pub enum Subcommand {
 
 /// CLI
 #[derive(StructOpt)]
-pub struct Opt {
+struct Opt {
     /// Northstar address
     #[structopt(short, long, default_value = DEFAULT_HOST)]
     pub url: url::Url,

@@ -1,17 +1,3 @@
-// Copyright (c) 2020 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
-
 use crate::npk::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Bind, Manifest, Mount, MountOption},
@@ -47,20 +33,22 @@ pub const VERSION: Version = semver::Version {
 };
 
 // Binaries
-pub const MKSQUASHFS: &str = "mksquashfs";
-pub const UNSQUASHFS: &str = "unsquashfs";
+const MKSQUASHFS: &str = "mksquashfs";
+const UNSQUASHFS: &str = "unsquashfs";
 
 // File name and directory components
-pub const FS_IMG_NAME: &str = "fs.img";
-pub const MANIFEST_NAME: &str = "manifest.yaml";
-pub const SIGNATURE_NAME: &str = "signature.yaml";
+const FS_IMG_NAME: &str = "fs.img";
+const MANIFEST_NAME: &str = "manifest.yaml";
+const SIGNATURE_NAME: &str = "signature.yaml";
 const FS_IMG_BASE: &str = "fs";
 const FS_IMG_EXT: &str = "img";
 const NPK_EXT: &str = "npk";
 
 type Zip<R> = ZipArchive<R>;
 
+/// NPK loading error
 #[derive(Error, Debug)]
+#[allow(missing_docs)]
 pub enum Error {
     #[error("Manifest error: {0}")]
     Manifest(String),
@@ -112,14 +100,20 @@ impl Error {
 /// NPK archive comment
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
+    /// Version
     pub version: Version,
 }
 
+/// NPK Hashes
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Hashes {
+    /// Hash of the manifest yaml
     pub manifest_hash: String,
+    /// Fs hash
     pub fs_hash: String,
+    /// Verity hash
     pub fs_verity_hash: String,
+    /// Offset of the verity block within the fs image
     pub fs_verity_offset: u64,
 }
 
@@ -161,6 +155,7 @@ impl FromStr for Hashes {
     }
 }
 
+/// Northstar package
 #[derive(Debug)]
 pub struct Npk<R> {
     meta: Meta,
@@ -173,8 +168,9 @@ pub struct Npk<R> {
 }
 
 impl<R: Read + Seek> Npk<R> {
-    pub fn from_reader(r: R, key: Option<&PublicKey>) -> Result<Self, Error> {
-        let mut zip = Zip::new(r).map_err(|error| Error::Zip {
+    /// Read a npk from `reader`
+    pub fn from_reader(reader: R, key: Option<&PublicKey>) -> Result<Self, Error> {
+        let mut zip = Zip::new(reader).map_err(|error| Error::Zip {
             context: "Failed to open NPK".to_string(),
             error,
         })?;
@@ -219,6 +215,7 @@ impl<R: Read + Seek> Npk<R> {
         })
     }
 
+    /// Load manifest from `npk`
     pub fn from_path(
         npk: &Path,
         key: Option<&PublicKey>,
@@ -232,30 +229,37 @@ impl<R: Read + Seek> Npk<R> {
             .and_then(|r| Npk::from_reader(r, key))
     }
 
+    /// Meta information
     pub fn meta(&self) -> &Meta {
         &self.meta
     }
 
+    /// Manifest
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
     }
 
+    /// Version
     pub fn version(&self) -> &Version {
         &self.meta.version
     }
 
+    /// Offset of the fsimage within the npk
     pub fn fsimg_offset(&self) -> u64 {
         self.fs_img_offset
     }
 
+    /// Size of the fsimage
     pub fn fsimg_size(&self) -> u64 {
         self.fs_img_size
     }
 
+    /// Hashes
     pub fn hashes(&self) -> Option<&Hashes> {
         self.hashes.as_ref()
     }
 
+    /// DM verity header
     pub fn verity_header(&self) -> Option<&VerityHeader> {
         self.verity_header.as_ref()
     }
@@ -392,7 +396,9 @@ impl Builder {
     }
 }
 
+/// Squashfs compression algorithm
 #[derive(Clone, Debug)]
+#[allow(missing_docs)]
 pub enum CompressionAlgorithm {
     Gzip,
     Lzma,
@@ -522,7 +528,7 @@ pub fn pack_with(
 
 /// Extract the npk content to `out`
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
-    let mut zip = open_zip(npk)?;
+    let mut zip = open(npk)?;
     zip.extract(&out).map_err(|e| Error::Zip {
         context: format!("Failed to extract NPK to '{}'", &out.display()),
         error: e,
@@ -532,7 +538,7 @@ pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 }
 
 /// Generate a keypair suitable for signing and verifying NPKs
-pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
+pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     fn assume_non_existing(path: &Path) -> Result<(), Error> {
         if path.exists() {
             Err(Error::Io {
@@ -569,14 +575,16 @@ pub fn gen_key(name: &str, out: &Path) -> Result<(), Error> {
 }
 
 fn read_manifest(path: &Path) -> Result<Manifest, Error> {
-    let file = open(path)?;
+    let file = fs::File::open(&path)
+        .map_err(|e| Error::io(format!("Failed to open '{}'", &path.display()), e))?;
     Manifest::from_reader(&file)
         .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
-    open(key_file)?
+    fs::File::open(&key_file)
+        .map_err(|e| Error::io(format!("Failed to open '{}'", &key_file.display()), e))?
         .read_exact(&mut secret_key_bytes)
         .map_err(|e| Error::Io {
             context: format!("Failed to read key data from '{}'", &key_file.display()),
@@ -606,7 +614,8 @@ fn gen_hashes_yaml(
     sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
-    let mut fsimg = open(fsimg)?;
+    let mut fsimg = fs::File::open(&fsimg)
+        .map_err(|e| Error::io(format!("Failed to open '{}'", &fsimg.display()), e))?;
     io::copy(&mut fsimg, &mut sha256).map_err(|e| Error::Io {
         context: "Failed to read fs image".to_string(),
         error: e,
@@ -823,7 +832,8 @@ fn write_npk<W: Write + Seek>(
     fsimg: &Path,
     signature: Option<&str>,
 ) -> Result<(), Error> {
-    let mut fsimg = open(fsimg)?;
+    let mut fsimg = fs::File::open(&fsimg)
+        .map_err(|e| Error::io(format!("Failed to open '{}'", &fsimg.display()), e))?;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string = serde_yaml::to_string(&manifest)
@@ -871,16 +881,12 @@ fn write_npk<W: Write + Seek>(
         .map(drop)
 }
 
-pub fn open_zip(file: &Path) -> Result<Zip<BufReader<fs::File>>, Error> {
-    zip::ZipArchive::new(BufReader::new(open(file)?)).map_err(|error| Error::Zip {
-        context: format!("Failed to parse ZIP format: '{}'", &file.display()),
-        error,
-    })
-}
-
-fn open(path: &Path) -> Result<fs::File, Error> {
-    fs::File::open(&path).map_err(|error| Error::Io {
-        context: format!("Failed to open '{}'", &path.display()),
+/// Open a Zip file
+pub fn open(path: &Path) -> Result<Zip<BufReader<fs::File>>, Error> {
+    let file = fs::File::open(&path)
+        .map_err(|e| Error::io(format!("Failed to open '{}'", &path.display()), e))?;
+    zip::ZipArchive::new(BufReader::new(file)).map_err(|error| Error::Zip {
+        context: format!("Failed to parse ZIP format: '{}'", &path.display()),
         error,
     })
 }
