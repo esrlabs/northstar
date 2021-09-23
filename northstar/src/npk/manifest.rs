@@ -1,17 +1,3 @@
-// Copyright (c) 2019 - 2021 ESRLabs
-//
-//   Licensed under the Apache License, Version 2.0 (the "License");
-//   you may not use this file except in compliance with the License.
-//   You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-//   Unless required by applicable law or agreed to in writing, software
-//   distributed under the License is distributed on an "AS IS" BASIS,
-//   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//   See the License for the specific language governing permissions and
-//   limitations under the License.
-
 use crate::{
     common::{name::Name, non_null_string::NonNullString, version::Version},
     seccomp::{Seccomp, SyscallRule},
@@ -31,9 +17,12 @@ use std::{
 };
 use thiserror::Error;
 
+/// Linux capability
 pub type Capability = caps::Capability;
+/// Mount option set
 pub type MountOptions = HashSet<MountOption>;
 
+/// Northstar package manifest
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -92,12 +81,14 @@ impl Manifest {
         build: vec![],
     };
 
+    /// Read a manifest from `reader`
     pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
         let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::SerdeYaml)?;
         manifest.verify()?;
         Ok(manifest)
     }
 
+    /// Write the manifest to `writer`
     pub fn to_writer<W: io::Write>(&self, writer: W) -> Result<(), Error> {
         serde_yaml::to_writer(writer, self).map_err(Error::SerdeYaml)
     }
@@ -212,7 +203,9 @@ impl ToString for Manifest {
     }
 }
 
+/// Manifest parsing error
 #[derive(Error, Debug)]
+#[allow(missing_docs)]
 pub enum Error {
     #[error("Invalid manifest: {0}")]
     Invalid(String),
@@ -233,7 +226,8 @@ pub enum Autostart {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
-/// Mount options
+#[allow(missing_docs)]
+/// Mount option
 pub enum MountOption {
     /// Bind mount
     #[serde(rename = "rw")]
@@ -253,14 +247,18 @@ pub enum MountOption {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Resource {
+    /// Name of the resource container
     pub name: Name,
+    /// Version of the resource container
     pub version: Version,
+    /// Directory within the resource container
     pub dir: PathBuf,
     #[serde(
         default,
         with = "mount_options",
         skip_serializing_if = "HashSet::is_empty"
     )]
+    /// Mount options
     pub options: MountOptions,
 }
 
@@ -268,18 +266,21 @@ pub struct Resource {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bind {
+    /// Path in the host filesystem
     pub host: PathBuf,
     #[serde(
         default,
         with = "mount_options",
         skip_serializing_if = "HashSet::is_empty"
     )]
+    /// Mount options
     pub options: MountOptions,
 }
 
 /// Tmpfs configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Tmpfs {
+    /// Size in bytes
     #[serde(deserialize_with = "deserialize_tmpfs_size")]
     pub size: u64,
 }
@@ -320,6 +321,7 @@ pub struct Io {
     pub stderr: Option<Output>,
 }
 
+/// Io redirection for stdout/stderr
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Output {
     /// Inherit the runtimes stdout/stderr
@@ -327,7 +329,12 @@ pub enum Output {
     Pipe,
     /// Forward output to the logging system with level and optional tag
     #[serde(rename = "log")]
-    Log { level: log::Level, tag: String },
+    Log {
+        /// Level
+        level: log::Level,
+        /// Tag
+        tag: String,
+    },
 }
 
 /// Resource limits. See setrlimit(2)
@@ -381,6 +388,7 @@ pub enum RLimitResource {
     STACK,
 }
 
+/// Value for a rlimit setting
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct RLimitValue {
     /// Soft limit value for resource. None indicates `unlimited`.

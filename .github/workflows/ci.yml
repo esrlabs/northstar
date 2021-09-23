@@ -87,6 +87,22 @@ jobs:
           command: test
           args: --all-features
 
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Build Documentation
+        run: cargo doc --no-deps -p northstar --all-features
+
   cross:
     name: Cross
     runs-on: ubuntu-latest
