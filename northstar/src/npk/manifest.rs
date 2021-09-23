@@ -42,6 +42,9 @@ pub struct Manifest {
     pub name: Name,
     /// Container version
     pub version: Version,
+    /// Pass a console fd number in NORTHSTAR_CONSOLE
+    #[serde(default)]
+    pub console: bool,
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation

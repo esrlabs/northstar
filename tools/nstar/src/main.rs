@@ -28,13 +28,17 @@ use std::{
     path::PathBuf,
     process,
     str::FromStr,
-    time,
 };
 use structopt::{clap, clap::AppSettings, StructOpt};
 use tokio::{
     fs,
-    io::{copy, AsyncBufReadExt, BufReader},
+    io::{copy, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader},
+    net::{TcpStream, UnixStream},
+    time,
 };
+
+pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
 mod pretty;
 
@@ -139,7 +143,7 @@ pub enum Subcommand {
 pub struct Opt {
     /// Northstar address
     #[structopt(short, long, default_value = DEFAULT_HOST)]
-    pub host: url::Url,
+    pub url: url::Url,
     /// Output json
     #[structopt(short, long)]
     pub json: bool,
@@ -248,7 +252,29 @@ impl TryFrom<Subcommand> for Request {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let host = opt.host.clone();
+    let timeout = time::Duration::from_secs(5);
+
+    let io = match opt.url.scheme() {
+        "tcp" => {
+            let addresses = opt.url.socket_addrs(|| Some(4200))?;
+            let address = addresses
+                .first()
+                .ok_or_else(|| anyhow!("Failed to resolve {}", opt.url))?;
+            let stream = time::timeout(timeout, TcpStream::connect(address))
+                .await
+                .context("Failed to connect")??;
+
+            Box::new(stream) as Box<dyn N>
+        }
+        "unix" => {
+            let stream = time::timeout(timeout, UnixStream::connect(opt.url.path()))
+                .await
+                .context("Failed to connect")??;
+            Box::new(stream) as Box<dyn N>
+        }
+        _ => return Err(anyhow!("Invalid url")),
+    };
+
     match opt.command {
         // Generate shell completions and exit on give subcommand
         Subcommand::Completion { output, shell } => {
@@ -259,9 +285,10 @@ async fn main() -> Result<()> {
         // Subscribe to notifications and print them
         Subcommand::Notifications { number } => {
             if opt.json {
-                let framed = Client::connect(&host, Some(100), opt.timeout)
+                let framed = Client::new(io, Some(100), opt.timeout)
                     .await
-                    .with_context(|| format!("Failed to connect to {}", opt.host))?;
+                    .with_context(|| format!("Failed to connect to {}", opt.url))?
+                    .framed();
 
                 let mut lines = BufReader::new(framed).lines();
                 for _ in 0..number.unwrap_or(usize::MAX) {
@@ -271,9 +298,9 @@ async fn main() -> Result<()> {
                     }
                 }
             } else {
-                let client = Client::new(&opt.host, Some(100), opt.timeout)
+                let client = Client::new(io, Some(100), opt.timeout)
                     .await
-                    .with_context(|| format!("Failed to connect to {}", opt.host))?;
+                    .with_context(|| format!("Failed to connect to {}", opt.url))?;
                 let mut notifications = client.take(number.unwrap_or(usize::MAX));
                 while let Some(notification) = notifications.next().await {
                     let notification = notification.context("Failed to receive notification")?;
@@ -285,9 +312,10 @@ async fn main() -> Result<()> {
         // Request response mode
         command => {
             // Connect
-            let mut framed = Client::connect(&host, None, opt.timeout)
+            let mut framed = Client::new(io, None, opt.timeout)
                 .await
-                .with_context(|| format!("Failed to connect to {}", &host))?;
+                .context("Failed to connect")?
+                .framed();
 
             // Request
             let request = Request::try_from(command.clone())

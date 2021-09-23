@@ -24,6 +24,7 @@ fn main() {
 
     for dir in &[
         "../examples/cpueater",
+        "../examples/console",
         "../examples/crashing",
         "../examples/ferris",
         "../examples/hello-ferris",

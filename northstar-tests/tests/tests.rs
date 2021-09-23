@@ -25,7 +25,6 @@ use std::path::PathBuf;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::UnixStream,
-    time,
 };
 
 // Test a good and bad log assumption
@@ -348,12 +347,9 @@ test!(seccomp_allowed_syscall_with_prohibited_arg, {
 test!(open_many_connections_to_the_runtime_and_shutdown, {
     let runtime = Northstar::launch().await?;
 
-    let console = runtime.config().console.as_ref().unwrap();
-
     let mut clients = Vec::new();
-    for _ in 0..100 {
-        let client =
-            api::client::Client::new(&console, None, time::Duration::from_secs(30)).await?;
+    for _ in 0..500 {
+        let client = runtime.client().await?;
         clients.push(client);
     }
 
@@ -374,8 +370,7 @@ test!(check_api_version_on_connect, {
     trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
     impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
 
-    let console = runtime.config().console.as_ref().unwrap();
-    let mut connection = api::codec::framed(UnixStream::connect(console.path()).await?);
+    let mut connection = api::codec::framed(UnixStream::connect(&runtime.console).await?);
 
     // Send a connect with an version unequal to the one defined in the model
     let mut version = api::model::version();
@@ -411,6 +406,17 @@ mod example {
         runtime.install(&EXAMPLE_CRASHING_NPK).await?;
         runtime.start(EXAMPLE_CRASHING).await?;
         assume("Crashing in", 5).await?;
+        runtime.shutdown().await
+    });
+
+    // Start console example
+    test!(console, {
+        let mut runtime = Northstar::launch().await?;
+        runtime.install(&EXAMPLE_CONSOLE_NPK).await?;
+        runtime.start(EXAMPLE_CONSOLE).await?;
+        // The console example stop itself - so wait for it...
+        assume("Client console:0.0.1 connected", 5).await?;
+        assume("Killing console:0.0.1 with SIGTERM", 5).await?;
         runtime.shutdown().await
     });
 

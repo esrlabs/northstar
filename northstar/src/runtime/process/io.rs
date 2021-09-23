@@ -16,78 +16,27 @@ use super::{
     super::pipe::{pipe, AsyncPipeRead},
     Error,
 };
-use crate::{npk, npk::manifest::Manifest};
+use crate::{
+    npk,
+    npk::manifest::{Manifest, Output},
+    runtime::pipe::PipeWrite,
+};
 use bytes::{Buf, BufMut, BytesMut};
-use futures::FutureExt;
 use log::{debug, error, info, trace, warn, Level};
 use nix::libc;
 use std::{
     collections::HashMap,
     convert::TryInto,
-    os::unix::prelude::{AsRawFd, IntoRawFd, RawFd},
+    os::unix::prelude::{AsRawFd, RawFd},
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::{
     io::{self, AsyncWrite, BufReader},
-    pin, select,
-    task::{self, JoinHandle},
+    task,
 };
-use tokio_util::sync::CancellationToken;
 
-/// Wrap the Rust log into a AsyncWrite
-#[derive(Debug)]
-pub struct Log {
-    pub read_fd: RawFd,
-    token: CancellationToken,
-    task: JoinHandle<()>,
-}
-
-impl Log {
-    pub async fn new(level: Level, tag: &str) -> Result<(Log, RawFd), Error> {
-        let (reader, writer) = pipe().map_err(|e| Error::io("Failed to open pipe", e))?;
-        let read_fd = reader.as_raw_fd();
-        let reader: AsyncPipeRead = reader
-            .try_into()
-            .map_err(|e| Error::io("Failed to get async handler from pipe reader", e))?;
-
-        let mut reader = BufReader::new(reader);
-        let tag = tag.to_string();
-        let token = CancellationToken::new();
-        let token_task = token.clone();
-
-        let task = task::spawn(async move {
-            let mut log_sink = LogSink::new(level, &tag);
-            let copy = io::copy_buf(&mut reader, &mut log_sink).map(drop);
-            pin!(copy);
-            select! {
-                _ = token_task.cancelled() => {
-                    debug!("Stopped log task of {}", tag);
-                },
-                _ = copy => (),
-            }
-        });
-
-        Ok((
-            Log {
-                read_fd,
-                token,
-                task,
-            },
-            writer.into_raw_fd(),
-        ))
-    }
-
-    pub async fn stop(self) -> Result<(), Error> {
-        // Stop the forwarding task started in Log::new
-        self.token.cancel();
-        // Wait for the task to exit
-        self.task
-            .await
-            .map_err(|e| Error::io("Task join error", io::Error::new(io::ErrorKind::Other, e)))
-    }
-}
-
+/// Implement AsyncWrite and forwards lines to Rust log
 struct LogSink {
     buffer: BytesMut,
     level: Level,
@@ -149,6 +98,12 @@ impl AsyncWrite for LogSink {
     }
 }
 
+// Writing ends for stdout/stderr
+pub(super) struct Io {
+    _stdout: Option<PipeWrite>,
+    _stderr: Option<PipeWrite>,
+}
+
 #[derive(Debug)]
 pub(super) enum Fd {
     // Close the fd
@@ -159,66 +114,65 @@ pub(super) enum Fd {
 
 pub(super) async fn from_manifest(
     manifest: &Manifest,
-) -> Result<
-    (
-        Option<(Log, RawFd)>,
-        Option<(Log, RawFd)>,
-        HashMap<RawFd, Fd>,
-    ),
-    Error,
-> {
-    let mut fd_configuration = HashMap::new();
+) -> Result<(Option<Io>, HashMap<RawFd, Fd>), Error> {
+    let mut fds = HashMap::new();
 
     // The default of all fds inherited from the parent is to close it
-    let mut fds = tokio::fs::read_dir("/proc/self/fd")
+    let mut proc_self_fd = tokio::fs::read_dir("/proc/self/fd")
         .await
         .map_err(|e| Error::io("Readdir", e))?;
-    while let Ok(Some(e)) = fds.next_entry().await {
+    while let Ok(Some(e)) = proc_self_fd.next_entry().await {
         let file = e.file_name();
         let fd: i32 = file.to_str().unwrap().parse().unwrap(); // fds are always numeric
-        fd_configuration.insert(fd as RawFd, Fd::Close);
+        fds.insert(fd as RawFd, Fd::Close);
     }
-    drop(fds);
+    drop(proc_self_fd);
+
+    let mut stdout_stderr = |c: Option<&Output>, fd| {
+        match c {
+            Some(npk::manifest::Output::Pipe) => {
+                // Do nothing with the stdout fd - just prevent remove it from the list of fds that
+                // has been gathered above and instructs the init to close those fds.
+                fds.remove(&fd);
+                Result::<_, Error>::Ok(None)
+            }
+            Some(npk::manifest::Output::Log { level, ref tag }) => {
+                // Create a pipe: the writing end is used in the child as stdout/stderr. The reading end is used in a LogSink
+                let (reader, writer) = pipe().map_err(|e| Error::io("Failed to open pipe", e))?;
+                let reader_fd = reader.as_raw_fd();
+                let reader: AsyncPipeRead = reader
+                    .try_into()
+                    .map_err(|e| Error::io("Failed to get async handler from pipe reader", e))?;
+
+                let mut reader = BufReader::new(reader);
+                let tag = tag.to_string();
+                let mut log_sink = LogSink::new(*level, &tag);
+                task::spawn(async move {
+                    drop(io::copy_buf(&mut reader, &mut log_sink).await);
+                });
+
+                // The read fd shall be closed in the child. It's used in the runtime only
+                fds.insert(reader_fd, Fd::Close);
+
+                // Remove fd that is set to be Fd::Close by default. fd is closed by dup2
+                fds.remove(&writer.as_raw_fd());
+                // The writing fd shall be dupped to 2
+                fds.insert(fd, Fd::Dup(writer.as_raw_fd()));
+
+                // Return the writer: Drop (that closes) it in the parent. Forget in the child.
+                Ok(Some(writer))
+            }
+            None => Ok(None),
+        }
+    };
 
     if let Some(io) = manifest.io.as_ref() {
-        let stdout = match io.stdout {
-            Some(npk::manifest::Output::Pipe) => {
-                // Do nothing with the stdout fd
-                fd_configuration.remove(&libc::STDOUT_FILENO);
-                None
-            }
-            Some(npk::manifest::Output::Log { level, ref tag }) => {
-                let (log, fd) = Log::new(level, tag).await?;
-                // The read fd shall be closed in the child
-                fd_configuration.insert(log.read_fd, Fd::Close);
-                // Remove fd that is set to be Fd::Close by default. fd is closed by dup2
-                fd_configuration.remove(&fd);
-                // The writing fd shall be dupped to 1
-                fd_configuration.insert(libc::STDOUT_FILENO, Fd::Dup(fd));
-                Some((log, fd))
-            }
-            None => None,
-        };
-        let stderr = match io.stderr {
-            Some(npk::manifest::Output::Pipe) => {
-                // Do nothing with the stderr fd
-                fd_configuration.remove(&libc::STDERR_FILENO);
-                None
-            }
-            Some(npk::manifest::Output::Log { level, ref tag }) => {
-                let (log, fd) = Log::new(level, tag).await?;
-                // The read fd shall be closed in the child
-                fd_configuration.insert(log.read_fd, Fd::Close);
-                // Remove fd that is set to be Fd::Close by default. fd is closed by dup2
-                fd_configuration.remove(&fd);
-                // The writing fd shall be dupped to 2
-                fd_configuration.insert(libc::STDERR_FILENO, Fd::Dup(fd));
-                Some((log, fd))
-            }
-            None => None,
-        };
-        Ok((stdout, stderr, fd_configuration))
+        let io = Some(Io {
+            _stdout: stdout_stderr(io.stdout.as_ref(), libc::STDOUT_FILENO)?,
+            _stderr: stdout_stderr(io.stdout.as_ref(), libc::STDERR_FILENO)?,
+        });
+        Ok((io, fds))
     } else {
-        Ok((None, None, fd_configuration))
+        Ok((None, fds))
     }
 }

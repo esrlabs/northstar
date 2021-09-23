@@ -63,7 +63,6 @@ api = [
     "npk",
     "serde_json",
     "tokio-util",
-    "url"
 ]
 npk = [
     "base64",

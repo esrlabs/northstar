@@ -24,8 +24,13 @@ use northstar::api::{
 };
 use std::{path::PathBuf, str::FromStr};
 use structopt::StructOpt;
-use tokio::{pin, select, task, time};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::{TcpStream, UnixStream},
+    pin, select, task, time,
+};
 use tokio_util::{either::Either, sync::CancellationToken};
+use url::Url;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Mode {
@@ -59,7 +64,7 @@ impl FromStr for Mode {
 struct Opt {
     /// Runtime address
     #[structopt(short, long, default_value = "tcp://localhost:4200")]
-    address: url::Url,
+    url: url::Url,
 
     /// Duration to run the test for in seconds
     #[structopt(short, long)]
@@ -94,6 +99,33 @@ struct Opt {
     timeout: u64,
 }
 
+pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+
+async fn io(url: &Url) -> Result<Box<dyn N>> {
+    let timeout = time::Duration::from_secs(5);
+    match url.scheme() {
+        "tcp" => {
+            let addresses = url.socket_addrs(|| Some(4200))?;
+            let address = addresses
+                .first()
+                .ok_or_else(|| anyhow!("Failed to resolve {}", url))?;
+            let stream = time::timeout(timeout, TcpStream::connect(address))
+                .await
+                .context("Failed to connect")??;
+
+            Ok(Box::new(stream) as Box<dyn N>)
+        }
+        "unix" => {
+            let stream = time::timeout(timeout, UnixStream::connect(url.path()))
+                .await
+                .context("Failed to connect")??;
+            Ok(Box::new(stream) as Box<dyn N>)
+        }
+        _ => Err(anyhow!("Invalid url")),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
@@ -101,7 +133,7 @@ async fn main() -> Result<()> {
 
     info!("mode: {:?}", opt.mode);
     info!("duration: {:?}", opt.duration);
-    debug!("address: {}", opt.address.to_string());
+    debug!("address: {}", opt.url.to_string());
     debug!("repository: {:?}", opt.repository);
     debug!("npk: {:?}", opt.npk);
     debug!("relaxed: {}", opt.relaxed);
@@ -114,7 +146,8 @@ async fn main() -> Result<()> {
 
     // Get a list of installed applications
     debug!("Getting list of startable containers");
-    let mut client = client::Client::new(&opt.address, None, time::Duration::from_secs(30)).await?;
+    let mut client =
+        client::Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
     let containers = client
         .containers()
         .await?
@@ -151,7 +184,7 @@ async fn main() -> Result<()> {
         let relaxed = opt.relaxed;
         let start = start.clone();
         let token = token.clone();
-        let url = opt.address.clone();
+        let url = opt.url.clone();
         let timeout = opt.timeout;
 
         debug!("Spawning task for {}", container);
@@ -165,8 +198,12 @@ async fn main() -> Result<()> {
             }
 
             let notifications = if relaxed { None } else { Some(100) };
-            let mut client =
-                client::Client::new(&url, notifications, time::Duration::from_secs(30)).await?;
+            let mut client = client::Client::new(
+                io(&url).await?,
+                notifications,
+                time::Duration::from_secs(30),
+            )
+            .await?;
             let mut iterations = 0;
             loop {
                 if mode == Mode::MountStartStopUmount || mode == Mode::MountUmount {
@@ -255,9 +292,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Wait for a `notifcation` for `duration` seconds or timeout
-async fn await_notification(
-    client: &mut Client,
+/// Wait for a `notification` for `duration` seconds or timeout
+async fn await_notification<T: AsyncRead + AsyncWrite + Unpin>(
+    client: &mut Client<T>,
     notification: Notification,
     duration: u64,
 ) -> Result<()> {
@@ -280,7 +317,7 @@ async fn await_notification(
 /// Install and uninstall an npk in a loop
 async fn install_uninstall(opt: &Opt) -> Result<()> {
     let timeout = time::Duration::from_secs(30);
-    let mut client = client::Client::new(&opt.address, Some(10), timeout).await?;
+    let mut client = client::Client::new(io(&opt.url).await?, Some(10), timeout).await?;
 
     let timeout = opt
         .duration

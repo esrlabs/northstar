@@ -12,7 +12,7 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-use super::{ContainerEvent, Event, RepositoryId};
+use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api,
     common::container::Container,
@@ -35,7 +35,7 @@ use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite, BufReader},
     net::{TcpListener, UnixListener},
     pin, select,
-    sync::{self, broadcast, mpsc, oneshot},
+    sync::{broadcast, mpsc, oneshot},
     task::{self},
     time,
 };
@@ -55,10 +55,8 @@ pub(crate) enum Request {
 pub(crate) struct Console {
     /// Tx handle to the main loop
     event_tx: EventTx,
-    /// Listening address/url
-    url: Url,
     /// Broadcast channel passed to connections to forward notifications
-    notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
+    notification_tx: NotificationTx,
     /// Shutdown the console by canceling this token
     stop: CancellationToken,
     /// Listener tasks. Currently there's just one task but when the console
@@ -78,37 +76,35 @@ pub enum Error {
 
 impl Console {
     /// Construct a new console instance
-    pub(super) fn new(url: &Url, event_tx: EventTx) -> Console {
-        let (notification_tx, _notification_rx) = sync::broadcast::channel(100);
-
+    pub(super) fn new(event_tx: EventTx, notification_tx: NotificationTx) -> Console {
         Self {
             event_tx,
-            url: url.clone(),
             notification_tx,
             stop: CancellationToken::new(),
             tasks: Vec::new(),
         }
     }
 
-    /// Open a TCP socket and listen for incoming connections
-    /// spawn a task for each connection
-    pub(super) async fn listen(&mut self) -> Result<(), Error> {
+    /// Spawn a task that listens on `url` for new connections. Spawn a task for
+    /// each client
+    pub(super) async fn listen(&mut self, url: &Url) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
         // Stop token for self *and* the connections
         let stop = self.stop.clone();
 
-        let task = match Listener::new(&self.url)
+        let task = match Listener::new(url)
             .await
             .map_err(|e| Error::Io("Failed start console listener".into(), e))?
         {
             Listener::Tcp(listener) => task::spawn(async move {
-                handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
+                serve(|| listener.accept(), event_tx, notification_tx, stop).await
             }),
             Listener::Unix(listener) => task::spawn(async move {
-                handle_connections(|| listener.accept(), event_tx, notification_tx, stop).await
+                serve(|| listener.accept(), event_tx, notification_tx, stop).await
             }),
         };
+
         self.tasks.push(task);
 
         Ok(())
@@ -121,19 +117,13 @@ impl Console {
         Ok(())
     }
 
-    /// Send a notification to the notification broadcast
-    pub(super) async fn on_event(&self, container: &Container, event: &ContainerEvent) {
-        self.notification_tx
-            .send((container.clone(), event.clone()))
-            .ok();
-    }
-
-    async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
+    pub(super) async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
         stream: T,
-        peer: ClientId,
+        peer: Peer,
         stop: CancellationToken,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
+        timeout: Option<time::Duration>,
     ) -> Result<(), Error> {
         debug!("Client {} connected", peer);
 
@@ -142,7 +132,9 @@ impl Console {
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
-        let connect = time::timeout(time::Duration::from_secs(5), connect);
+        // TODO: This can for sure be done nicer
+        let timeout = timeout.unwrap_or_else(|| time::Duration::from_secs(u64::MAX));
+        let connect = time::timeout(timeout, connect);
         let (protocol_version, notifications) = match connect.await {
             Ok(Some(Ok(m))) => match m {
                 model::Message::Connect(model::Connect::Connect {
@@ -269,7 +261,7 @@ impl Console {
 /// If the event loop is closed due to shutdown, this function will return `Error::EventLoopClosed`.
 ///
 async fn process_request<S>(
-    client_id: &ClientId,
+    client_id: &Peer,
     stream: &mut S,
     stop: &CancellationToken,
     event_loop: &EventTx,
@@ -367,17 +359,16 @@ impl Listener {
 /// these tasks terminate, they are removed from the connections container. Once a stop is issued,
 /// the termination of the remaining connections will be awaited.
 ///
-async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
-    accept: AcceptConnection,
+async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
+    accept: AcceptFun,
     event_tx: EventTx,
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
 ) where
-    AcceptConnection: Fn() -> Connection,
-    Connection: Future<Output = Result<(Stream, Client), E>>,
+    AcceptFun: Fn() -> AcceptFuture,
+    AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
     Stream: AsyncWrite + AsyncRead + Unpin + Send + 'static,
-    Client: Into<ClientId>,
-    E: fmt::Debug,
+    Addr: Into<Peer>,
 {
     let mut connections = FuturesUnordered::new();
     loop {
@@ -395,6 +386,7 @@ async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
                             stop.clone(),
                             event_tx.clone(),
                             notification_tx.subscribe(),
+                            Some(time::Duration::from_secs(10)),
                         )));
                     }
                     Err(e) => {
@@ -415,21 +407,27 @@ async fn handle_connections<AcceptConnection, Connection, Stream, Client, E>(
     debug!("Closed listener");
 }
 
-struct ClientId(String);
+pub struct Peer(String);
 
-impl From<std::net::SocketAddr> for ClientId {
+impl From<&str> for Peer {
+    fn from(s: &str) -> Self {
+        Peer(s.to_string())
+    }
+}
+
+impl From<std::net::SocketAddr> for Peer {
     fn from(socket: std::net::SocketAddr) -> Self {
-        ClientId(socket.to_string())
+        Peer(socket.to_string())
     }
 }
 
-impl From<tokio::net::unix::SocketAddr> for ClientId {
+impl From<tokio::net::unix::SocketAddr> for Peer {
     fn from(socket: tokio::net::unix::SocketAddr) -> Self {
-        ClientId(format!("{:?}", socket))
+        Peer(format!("{:?}", socket))
     }
 }
 
-impl fmt::Display for ClientId {
+impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
