@@ -34,15 +34,10 @@ use std::{
 };
 use thiserror::Error;
 use tokio::{
-    fs, io,
-    net::{TcpStream, UnixStream},
+    fs,
+    io::{self, AsyncRead, AsyncWrite},
     time,
 };
-use tokio_util::either::Either;
-use url::Url;
-
-const SCHEME_TCP: &str = "tcp";
-const SCHEME_UNIX: &str = "unix";
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -94,18 +89,18 @@ impl From<Infallible> for Error {
 /// use northstar::api::client::Client;
 /// use northstar::common::version::Version;
 ///
-/// #[tokio::main]
+/// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
-///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
 ///     client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }
 /// }
 /// ```
-pub struct Client {
+pub struct Client<T> {
     /// Connection to the runtime
-    connection: codec::Framed<Either<TcpStream, UnixStream>>,
+    connection: codec::Framed<T>,
     /// Buffer notifications received during request response communication
     notifications: Option<VecDeque<Notification>>,
     /// Flag if the client is stopped
@@ -113,87 +108,71 @@ pub struct Client {
 }
 
 /// Northstar console connection
-pub type Connection = codec::Framed<Either<TcpStream, UnixStream>>;
+pub type Connection<T> = codec::Framed<T>;
 
-impl<'a> Client {
-    /// Connect and return a raw stream and sink interface. See codec for details
-    pub async fn connect(
-        url: &Url,
-        notifications: Option<usize>,
-        timeout: time::Duration,
-    ) -> Result<Connection, Error> {
-        let mut connection = match url.scheme() {
-            SCHEME_TCP => {
-                let addresses = url.socket_addrs(|| Some(4200))?;
-                let address = addresses
-                    .first()
-                    .ok_or_else(|| Error::InvalidConsoleAddress(url.to_string()))?;
-                let stream = time::timeout(timeout, TcpStream::connect(address))
-                    .await
-                    .map_err(|_| Error::Timeout)??;
-                framed(Either::Left(stream))
-            }
-            SCHEME_UNIX => {
-                let stream = time::timeout(timeout, UnixStream::connect(url.path()))
-                    .await
-                    .map_err(|_| Error::Timeout)??;
-                framed(Either::Right(stream))
-            }
-            _ => return Err(Error::InvalidConsoleAddress(url.to_string())),
-        };
+/// Connect and return a raw stream and sink interface. See codec for details
+pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
+    io: T,
+    notifications: Option<usize>,
+    timeout: time::Duration,
+) -> Result<Connection<T>, Error> {
+    let mut connection = framed(io);
+    // Send connect message
+    let connect = Connect::Connect {
+        version: model::version(),
+        subscribe_notifications: notifications.is_some(),
+    };
+    connection
+        .send(Message::new_connect(connect))
+        .await
+        .map_err(Error::Io)?;
 
-        // Send connect message
-        let connect = Connect::Connect {
-            version: model::version(),
-            subscribe_notifications: notifications.is_some(),
-        };
-        connection
-            .send(Message::new_connect(connect))
-            .await
-            .map_err(Error::Io)?;
-
-        // Wait for conack
-        let connect = time::timeout(timeout, connection.next());
-        match connect.await {
-            Ok(Some(Ok(message))) => match message {
-                Message::Connect(Connect::ConnectAck) => Ok(connection),
-                _ => {
-                    debug!(
-                        "Received invalid message {:?} while waiting for connack",
-                        message
-                    );
-                    Err(Error::Protocol)
-                }
-            },
-            Ok(Some(Err(e))) => Err(Error::Io(e)),
-            Ok(None) => {
-                debug!("Connection closed while waiting for connack");
+    // Wait for conack
+    let connect = time::timeout(timeout, connection.next());
+    match connect.await {
+        Ok(Some(Ok(message))) => match message {
+            Message::Connect(Connect::ConnectAck) => Ok(connection),
+            _ => {
+                debug!(
+                    "Received invalid message {:?} while waiting for connack",
+                    message
+                );
                 Err(Error::Protocol)
             }
-            Err(_) => {
-                debug!("Timeout waiting for connack");
-                Err(Error::Protocol)
-            }
+        },
+        Ok(Some(Err(e))) => Err(Error::Io(e)),
+        Ok(None) => {
+            debug!("Connection closed while waiting for connack");
+            Err(Error::Protocol)
+        }
+        Err(_) => {
+            debug!("Timeout waiting for connack");
+            Err(Error::Protocol)
         }
     }
+}
 
+impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Create a new northstar client and connect to a runtime instance running on `host`.
     pub async fn new(
-        url: &Url,
+        io: T,
         notifications: Option<usize>,
         timeout: time::Duration,
-    ) -> Result<Client, Error> {
-        let connection = time::timeout(timeout, Self::connect(url, notifications, timeout))
+    ) -> Result<Client<T>, Error> {
+        let connection = time::timeout(timeout, connect(io, notifications, timeout))
             .await
             .map_err(|_| Error::Timeout)??;
-
-        debug!("Connected to {}", url);
 
         Ok(Client {
             connection,
             notifications: notifications.map(VecDeque::with_capacity),
             fused: false,
         })
+    }
+
+    /// Convert client into a connection
+    pub fn framed(self) -> Connection<T> {
+        self.connection
     }
 
     /// Perform a request response sequence
@@ -204,9 +183,9 @@ impl<'a> Client {
     /// # use northstar::api::client::Client;
     /// # use northstar::api::model::Request::Containers;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let response = client.request(Containers).await.expect("Failed to request container list");
     /// println!("{:?}", response);
     /// # }
@@ -248,9 +227,9 @@ impl<'a> Client {
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let containers = client.containers().await.expect("Failed to request container list");
     /// println!("{:#?}", containers);
     /// # }
@@ -270,9 +249,9 @@ impl<'a> Client {
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let repositories = client.repositories().await.expect("Failed to request repository list");
     /// println!("{:#?}", repositories);
     /// # }
@@ -292,9 +271,9 @@ impl<'a> Client {
     /// # use std::time::Duration;
     /// # use northstar::api::client::Client;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
@@ -320,9 +299,9 @@ impl<'a> Client {
     /// # use northstar::api::client::Client;
     /// # use std::collections::HashMap;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.start_with_args("hello:0.0.1", ["--foo"]).await.expect("Failed to start \"hello --foor\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
@@ -357,9 +336,9 @@ impl<'a> Client {
     /// # use northstar::api::client::Client;
     /// # use std::collections::HashMap;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let mut env = HashMap::new();
     /// env.insert("FOO", "blah");
     /// client.start_with_args_env("hello:0.0.1", ["--dump", "-v"], env).await.expect("Failed to start \"hello\"");
@@ -412,9 +391,9 @@ impl<'a> Client {
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.kill("hello:0.0.1", 15).await.expect("Failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
@@ -440,9 +419,9 @@ impl<'a> Client {
     /// # use std::time::Duration;
     /// # use std::path::Path;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let npk = Path::new("test.npk");
     /// client.install(&npk, "default").await.expect("Failed to install \"test.npk\" into repository \"default\"");
     /// # }
@@ -500,9 +479,9 @@ impl<'a> Client {
     /// # use northstar::common::version::Version;
     /// # use std::path::Path;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.uninstall("hello:0.0.1").await.expect("Failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
@@ -543,9 +522,9 @@ impl<'a> Client {
     /// # use std::path::Path;
     /// # use std::convert::TryInto;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.mount(vec!("test:0.0.1")).await.expect("Failed to mount");
     /// # }
     /// ```
@@ -581,9 +560,9 @@ impl<'a> Client {
     /// # use northstar::api::client::Client;
     /// # use northstar::common::version::Version;
     /// #
-    /// # #[tokio::main]
+    /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// client.umount("hello:0.0.1").await.expect("Failed to unmount \"hello\"");
     /// # }
     /// ```
@@ -612,7 +591,7 @@ impl<'a> Client {
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// #   let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// println!("{:?}", client.container_stats("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
@@ -668,16 +647,16 @@ impl<'a> Client {
 /// use std::time::Duration;
 /// use northstar::api::client::Client;
 ///
-/// #[tokio::main]
+/// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
-///     let mut client = Client::new(&url::Url::parse("tcp://localhost:4200").unwrap(), Some(10), Duration::from_secs(10)).await.unwrap();
+///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
 ///     client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }
 /// }
 /// ```
-impl Stream for Client {
+impl<T: AsyncRead + AsyncWrite + Unpin> Stream for Client<T> {
     type Item = Result<Notification, io::Error>;
 
     fn poll_next(

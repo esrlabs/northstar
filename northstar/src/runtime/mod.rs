@@ -33,7 +33,7 @@ use std::{
 };
 use sync::mpsc;
 use tokio::{
-    sync::{self, oneshot},
+    sync::{self, broadcast, oneshot},
     task,
 };
 use tokio_util::sync::CancellationToken;
@@ -52,12 +52,15 @@ mod state;
 pub mod stats;
 
 type EventTx = mpsc::Sender<Event>;
+type NotificationTx = broadcast::Sender<(Container, ContainerEvent)>;
 type RepositoryId = String;
 type ExitCode = i32;
 type Pid = u32;
 
 /// Buffer size of the main loop channel
-const MAIN_BUFFER: usize = 1000;
+const EVENT_BUFFER_SIZE: usize = 1000;
+/// Buffer size of the notification channel
+const NOTIFICATION_BUFFER_SIZE: usize = 1000;
 
 /// Environment variable name passed to the container with the containers name
 const ENV_NAME: &str = "NAME";
@@ -221,15 +224,22 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
     cgroups::init(cgroup).await?;
 
     // Northstar runs in a event loop
-    let (event_tx, mut event_rx) = mpsc::channel::<Event>(MAIN_BUFFER);
-    let mut state = State::new(config, event_tx.clone()).await?;
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(EVENT_BUFFER_SIZE);
+    let (notification_tx, _) = sync::broadcast::channel(NOTIFICATION_BUFFER_SIZE);
+    let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
 
     // Initialize the console if configured
-    let console = if let Some(url) = config.console.as_ref() {
-        let mut console = console::Console::new(url, event_tx.clone());
-        console.listen().await.map_err(Error::Console)?;
 
-        Some(console)
+    let console = if let Some(consoles) = config.console.as_ref() {
+        if consoles.is_empty() {
+            None
+        } else {
+            let mut console = console::Console::new(event_tx.clone(), notification_tx);
+            for url in consoles {
+                console.listen(url).await.map_err(Error::Console)?;
+            }
+            Some(console)
+        }
     } else {
         None
     };
@@ -255,12 +265,7 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
                 break state.shutdown().await;
             }
             // Container event
-            Event::Container(container, event) => {
-                if let Some(console) = console.as_ref() {
-                    console.on_event(&container, &event).await;
-                }
-                state.on_event(&container, &event).await
-            }
+            Event::Container(container, event) => state.on_event(&container, &event).await,
         } {
             break Err(e);
         }

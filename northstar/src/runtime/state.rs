@@ -21,7 +21,8 @@ use super::{
     process::Launcher,
     repository::{DirRepository, MemRepository},
     stats::ContainerStats,
-    Container, ContainerEvent, Event, EventTx, ExitStatus, Pid, Repository, RepositoryId,
+    Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, Repository,
+    RepositoryId,
 };
 use crate::{
     api::{self, model::MountResult},
@@ -75,6 +76,7 @@ pub(super) trait Process: Send + Sync + Debug {
 pub(super) struct State<'a> {
     config: &'a Config,
     events_tx: EventTx,
+    notification_tx: NotificationTx,
     repositories: Repositories,
     containers: HashMap<Container, MountedContainer>,
     mount_control: Arc<MountControl>,
@@ -119,10 +121,14 @@ impl ProcessContext {
 
 impl<'a> State<'a> {
     /// Create a new empty State instance
-    pub(super) async fn new(config: &'a Config, events_tx: EventTx) -> Result<State<'a>, Error> {
+    pub(super) async fn new(
+        config: &'a Config,
+        events_tx: EventTx,
+        notification_tx: NotificationTx,
+    ) -> Result<State<'a>, Error> {
         let repositories = Repositories::default();
         let mount_control = Arc::new(MountControl::new().await.map_err(Error::Mount)?);
-        let launcher = Launcher::start(events_tx.clone(), config.clone())
+        let launcher = Launcher::start(events_tx.clone(), config.clone(), notification_tx.clone())
             .await
             .expect("Failed to start launcher");
         let executor = ThreadPoolBuilder::new()
@@ -132,6 +138,7 @@ impl<'a> State<'a> {
 
         let mut state = State {
             events_tx,
+            notification_tx,
             repositories,
             containers: HashMap::new(),
             config,
@@ -477,8 +484,7 @@ impl<'a> State<'a> {
             start.elapsed().as_fractional_secs()
         );
 
-        self.send_container_event(container, ContainerEvent::Started)
-            .await;
+        self.container_event(container, ContainerEvent::Started);
 
         Ok(())
     }
@@ -522,7 +528,6 @@ impl<'a> State<'a> {
         }
 
         for container in &to_umount {
-            info!("Umounting {}", container);
             self.umount(container).await?;
         }
 
@@ -548,8 +553,7 @@ impl<'a> State<'a> {
 
         info!("Successfully installed {}", container);
 
-        self.send_container_event(&container, ContainerEvent::Installed)
-            .await;
+        self.container_event(&container, ContainerEvent::Installed);
 
         Ok(())
     }
@@ -569,8 +573,7 @@ impl<'a> State<'a> {
 
         info!("Successfully uninstalled {}", container);
 
-        self.send_container_event(container, ContainerEvent::Uninstalled)
-            .await;
+        self.container_event(container, ContainerEvent::Uninstalled);
 
         Ok(())
     }
@@ -622,6 +625,8 @@ impl<'a> State<'a> {
                 }
 
                 process.destroy().await;
+
+                self.container_event(container, ContainerEvent::Exit(exit_status.clone()));
 
                 // This is a critical flagged container that exited with a error exit code. That's not good...
                 if !exit_status.success() && critical {
@@ -840,12 +845,11 @@ impl<'a> State<'a> {
         self.repositories.keys().cloned().collect()
     }
 
-    async fn send_container_event(&self, container: &Container, event: ContainerEvent) {
-        if !self.events_tx.is_closed() {
-            self.events_tx
-                .send(Event::Container(container.clone(), event))
-                .await
-                .expect("Internal channel error on main");
+    /// Send a container event to all subriber consoles
+    fn container_event(&self, container: &Container, event: ContainerEvent) {
+        // Do not fill the notification channel if there's nobody subscribed
+        if self.notification_tx.receiver_count() > 0 {
+            self.notification_tx.send((container.clone(), event)).ok();
         }
     }
 

@@ -33,17 +33,23 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 use tempfile::{NamedTempFile, TempDir};
-use tokio::{fs, pin, select, time};
+use tokio::{fs, net::UnixStream, pin, select, time};
 
 pub struct Northstar {
-    config: Config,
-    client: northstar::api::client::Client,
+    /// Runtime configuration
+    pub config: Config,
+    /// Runtime console address (Unix socket)
+    pub console: String,
+    /// Client instance
+    client: northstar::api::client::Client<UnixStream>,
+    /// Runtime instance
     runtime: runtime::Runtime,
+    /// Tmpdir for NPK dumps
     tmpdir: TempDir,
 }
 
 impl std::ops::Deref for Northstar {
-    type Target = Client;
+    type Target = Client<UnixStream>;
 
     fn deref(&self) -> &Self::Target {
         &self.client
@@ -83,14 +89,14 @@ impl Northstar {
         );
 
         let console = format!(
-            "unix://{}/northstar-{}",
+            "{}/northstar-{}",
             tmpdir.path().display(),
             std::process::id()
         );
-        let console_url = url::Url::parse(&console)?;
+        let console_url = url::Url::parse(&format!("unix://{}", console))?;
 
         let config = Config {
-            console: Some(console_url.clone()),
+            console: Some(vec![console_url.clone()]),
             run_dir,
             data_dir: data_dir.clone(),
             log_dir,
@@ -107,16 +113,30 @@ impl Northstar {
         super::logger::assume("Started console on", 5u64).await?;
 
         // Connect to the runtime
-        let client = Client::new(&console_url, Some(1000), time::Duration::from_secs(30)).await?;
+        let io = UnixStream::connect(&console)
+            .await
+            .expect("Failed to connect to console");
+        let client = Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
         // Wait until a successful connection
         logger::assume("Client .* connected", 5u64).await?;
 
         Ok(Northstar {
             config,
+            console,
             client,
             runtime,
             tmpdir,
         })
+    }
+
+    /// Connect a new client instance to the runtime
+    pub async fn client(&self) -> Result<Client<UnixStream>> {
+        let io = UnixStream::connect(&self.console)
+            .await
+            .context("Failed to connect to console")?;
+        Client::new(io, Some(1000), time::Duration::from_secs(30))
+            .await
+            .context("Failed to create client")
     }
 
     /// Launches an instance of Northstar with the test container and
@@ -154,11 +174,6 @@ impl Northstar {
         // Remove the tmpdir
         self.tmpdir.close().expect("Failed to remove tmpdir");
         Ok(())
-    }
-
-    /// Return the runtimes configuration
-    pub fn config(&self) -> &config::Config {
-        &self.config
     }
 
     // Install a npk from a buffer

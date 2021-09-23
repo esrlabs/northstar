@@ -1,4 +1,6 @@
-console = "tcp://localhost:4200"
+console = [
+  "tcp://localhost:4200"
+]
 run_dir = "/data/northstar/run"
 data_dir = "/data/northstar/data"
 log_dir = "/data/northstar/logs"

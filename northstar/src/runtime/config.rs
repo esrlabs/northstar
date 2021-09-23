@@ -22,7 +22,7 @@ use url::Url;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Console address.
-    pub console: Option<Url>,
+    pub console: Option<Vec<Url>>,
     /// Directory with unpacked containers.
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored

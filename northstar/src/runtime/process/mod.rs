@@ -16,11 +16,12 @@ use super::{
     config::Config,
     error::Error,
     pipe::{Condition, ConditionNotify, ConditionWait},
-    ContainerEvent, Event, EventTx, ExitStatus, Pid, ENV_NAME, ENV_VERSION,
+    ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
     common::{container::Container, non_null_string::NonNullString},
     npk::manifest::{Manifest, RLimitResource, RLimitValue},
+    runtime::console::{self, Peer},
     seccomp,
 };
 use async_trait::async_trait;
@@ -34,6 +35,7 @@ use nix::{
     sys::{
         self,
         signal::{sigprocmask, SigSet, SigmaskHow, Signal},
+        socket,
         wait::WaitPidFlag,
     },
     unistd,
@@ -44,11 +46,17 @@ use std::{
     convert::TryFrom,
     ffi::{c_void, CString},
     fmt,
+    mem::forget,
+    os::unix::{
+        net::UnixStream as StdUnixStream,
+        prelude::{AsRawFd, FromRawFd},
+    },
     path::PathBuf,
     ptr::null,
 };
 use sys::wait;
-use tokio::{signal, task, time};
+use tokio::{net::UnixStream, signal, task, time};
+use tokio_util::sync::CancellationToken;
 use Signal::SIGCHLD;
 
 mod clone;
@@ -62,13 +70,13 @@ const SIGNAL_OFFSET: i32 = 128;
 #[derive(Debug)]
 pub(super) struct Launcher {
     tx: EventTx,
+    notification_tx: NotificationTx,
     config: Config,
 }
 
 pub(super) struct Process {
     pid: Pid,
     checkpoint: Option<Checkpoint>,
-    io: (Option<io::Log>, Option<io::Log>),
     exit_status: Option<Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpin>>,
 }
 
@@ -82,8 +90,16 @@ impl fmt::Debug for Process {
 }
 
 impl Launcher {
-    pub async fn start(tx: EventTx, config: Config) -> Result<Self, Error> {
-        Ok(Launcher { tx, config })
+    pub async fn start(
+        tx: EventTx,
+        config: Config,
+        notification_tx: NotificationTx,
+    ) -> Result<Self, Error> {
+        Ok(Launcher {
+            tx,
+            config,
+            notification_tx,
+        })
     }
 
     pub async fn shutdown(self) -> Result<(), Error> {
@@ -98,10 +114,23 @@ impl Launcher {
         args: Option<&Vec<NonNullString>>,
         env: Option<&HashMap<NonNullString, NonNullString>>,
     ) -> Result<impl super::state::Process, Error> {
+        // Token to stop the console task if any. This token is cancelled when
+        // the waitpid of this child process signals that the child is exited. See
+        // `wait`.
+        let stop = CancellationToken::new();
         let mounts = fs::prepare_mounts(&self.config, &root, manifest.clone()).await?;
         let (init, argv) = init_argv(&manifest, args);
-        let env = self::env(&manifest, env);
-        let (stdout, stderr, mut fds) = io::from_manifest(&manifest).await?;
+        let mut env = self::env(&manifest, env);
+        let (io, mut fds) = io::from_manifest(&manifest).await?;
+        let console_fd = console_fd(
+            self.tx.clone(),
+            &manifest,
+            &mut env,
+            &mut fds,
+            stop.clone(),
+            &self.notification_tx,
+        )
+        .await;
         let fds = fds.drain().collect::<Vec<_>>();
         let (checkpoint_runtime, checkpoint_init) = checkpoints();
         let groups = groups(&manifest);
@@ -129,29 +158,25 @@ impl Launcher {
                     // Unblock signals that were block to start init with masked signals
                     signals_unblock();
 
+                    // Close writing ends of log pipes
+                    drop(io);
+                    // Close child console socket if any
+                    drop(console_fd);
+                    // Close child checkpoint pipes
                     drop(checkpoint_init);
 
-                    // Close writing part of log forwards if any
-                    let stdout = stdout.map(|(log, fd)| {
-                        unistd::close(fd).ok();
-                        log
-                    });
-                    let stderr = stderr.map(|(log, fd)| {
-                        unistd::close(fd).ok();
-                        log
-                    });
                     let pid = child.as_raw() as Pid;
-
-                    let exit_status = waitpid(container, pid, self.tx.clone());
+                    // Start a task that listens for SIGCHILD and performs a waitpid on pid on every signal
+                    let exit_status = waitpid(container, pid, self.tx.clone(), stop);
 
                     Ok(Process {
                         pid,
-                        io: (stdout, stderr),
                         checkpoint: Some(checkpoint_runtime),
                         exit_status: Some(Box::new(exit_status)),
                     })
                 }
                 unistd::ForkResult::Child => {
+                    forget(io);
                     drop(checkpoint_runtime);
                     let init = init::Init {
                         manifest,
@@ -234,18 +259,17 @@ impl super::state::Process for Process {
     }
 
     async fn destroy(&mut self) -> Result<(), Error> {
-        if let Some(io) = self.io.0.take() {
-            io.stop().await?;
-        }
-        if let Some(io) = self.io.1.take() {
-            io.stop().await?;
-        }
         Ok(())
     }
 }
 
 /// Spawn a task that waits for the process to exit. Resolves to the exit status of `pid`.
-fn waitpid(container: Container, pid: Pid, tx: EventTx) -> impl Future<Output = ExitStatus> {
+fn waitpid(
+    container: Container,
+    pid: Pid,
+    tx: EventTx,
+    stop: CancellationToken,
+) -> impl Future<Output = ExitStatus> {
     task::spawn(async move {
         let mut sigchld = signal::unix::signal(signal::unix::SignalKind::child())
             .expect("Failed to set up signal handle for SIGCHLD");
@@ -254,6 +278,7 @@ fn waitpid(container: Container, pid: Pid, tx: EventTx) -> impl Future<Output = 
         let exit_status = loop {
             sigchld.recv().await;
             if let Some(exit) = exit_status(pid) {
+                stop.cancel();
                 break exit;
             }
         };
@@ -399,6 +424,57 @@ fn env(manifest: &Manifest, env: Option<&HashMap<NonNullString, NonNullString>>)
     result
 }
 
+/// Open a socket that is passed via env variable to the child. The peer of the
+/// socket is a console connection handling task
+async fn console_fd(
+    event_tx: EventTx,
+    manifest: &Manifest,
+    env: &mut Vec<CString>,
+    fds: &mut HashMap<i32, io::Fd>,
+    stop: CancellationToken,
+    notification_tx: &NotificationTx,
+) -> Option<StdUnixStream> {
+    if manifest.console {
+        let (runtime_socket, client_socket) = socket::socketpair(
+            socket::AddressFamily::Unix,
+            socket::SockType::Stream,
+            None,
+            socket::SockFlag::empty(),
+        )
+        .expect("Failed to create socketpair");
+
+        // Add the fd number to the environment of the application
+        env.push(CString::new(format!("NORTHSTAR_CONSOLE={}", client_socket)).unwrap());
+
+        // Make sure that the server socket is closed in the child before exeve
+        fds.insert(runtime_socket, io::Fd::Close);
+        // Make sure the client socket is not included in the list to close fds
+        fds.remove(&client_socket.as_raw_fd());
+
+        // Convert std raw fd
+        let std = unsafe { StdUnixStream::from_raw_fd(runtime_socket) };
+        std.set_nonblocking(true)
+            .expect("Failed to set socket into nonblocking mode");
+        let io = UnixStream::from_std(std).expect("Failed to convert Unix socket");
+
+        let peer = Peer::from(format!("{}:{}", manifest.name, manifest.version).as_str());
+
+        // Start console
+        task::spawn(console::Console::connection(
+            io,
+            peer,
+            stop,
+            event_tx,
+            notification_tx.subscribe(),
+            None,
+        ));
+
+        Some(unsafe { StdUnixStream::from_raw_fd(client_socket) })
+    } else {
+        None
+    }
+}
+
 /// Generate a list of supplementary gids if the groups info can be retrieved. This
 /// must happen before the init `clone` because the group information cannot be gathered
 /// without `/etc` etc...
@@ -503,7 +579,7 @@ fn rlimits(manifest: &Manifest) -> RLimits {
         .unwrap_or_default()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(super) struct Checkpoint(ConditionWait, ConditionNotify);
 
 fn checkpoints() -> (Checkpoint, Checkpoint) {
@@ -527,5 +603,14 @@ impl Checkpoint {
     fn wait(self) -> ConditionNotify {
         self.0.wait();
         self.1
+    }
+}
+
+impl std::fmt::Debug for Checkpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Checkpoint")
+            .field("wait", &self.0.as_raw_fd())
+            .field("notifiy", &self.1.as_raw_fd())
+            .finish()
     }
 }
