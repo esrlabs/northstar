@@ -433,6 +433,16 @@ mod example {
         runtime.install(&EXAMPLE_HELLO_FERRIS_NPK).await?;
         runtime.start(EXAMPLE_HELLO_FERRIS).await?;
         assume("Hello once more from 0.0.1!", 5).await?;
+        // The hello-ferris example terminates after printing something.
+        // Wait for the notification that it stopped, otherwise the runtime
+        // will try to shutdown the application which is already exited.
+        runtime
+            .assume_notification(
+                |n| matches!(n, Notification::Exit(_, ExitStatus::Exit(0))),
+                15,
+            )
+            .await?;
+
         runtime.shutdown().await
     });
 
