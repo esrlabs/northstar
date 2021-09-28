@@ -283,7 +283,7 @@ fn dmsetup(
         verity_hash,
         hex_salt
     );
-    let table = vec![(0, size / 512, "verity".to_string(), verity_table.clone())];
+    let table = vec![(0, size / 512, "verity".to_string(), verity_table)];
 
     let name = DmName::new(name).unwrap();
     let id = DevId::Name(name);
