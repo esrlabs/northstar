@@ -13,6 +13,7 @@ use std::{
     process,
     str::Utf8Error,
     sync::Arc,
+    thread,
 };
 use thiserror::Error;
 use tokio::{fs, time};
@@ -194,8 +195,7 @@ async fn mount(
                     &dm_name,
                     hashes.fs_verity_hash.as_str(),
                     hashes.fs_verity_offset,
-                )
-                .await?;
+                )?;
                 verity_device
             }
             _ => {
@@ -256,7 +256,7 @@ async fn mount(
     })
 }
 
-async fn dmsetup(
+fn dmsetup(
     dm: Arc<devicemapper::DM>,
     dev: &str,
     verity: &VerityHeader,
@@ -315,7 +315,9 @@ async fn dmsetup(
 
     debug!("Waiting for device {}", dm_dev.display());
     while !dm_dev.exists() {
-        time::sleep(time::Duration::from_millis(1)).await;
+        // Use a std::thread::sleep because this is run on a futures
+        // executor and not a tokio runtime
+        thread::sleep(time::Duration::from_millis(1));
     }
 
     let veritysetup_duration = start.elapsed();
