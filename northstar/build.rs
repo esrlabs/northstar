@@ -1,6 +1,11 @@
 fn main() {
     #[cfg(feature = "seccomp")]
     generate_seccomp();
+
+    #[cfg(feature = "oci")]
+    {
+        build_youki_binary();
+    }
 }
 
 #[cfg(feature = "seccomp")]
@@ -81,4 +86,31 @@ fn generate_seccomp() {
     }
 
     generate().expect("Failed to generate seccomp bindings");
+}
+
+/// Download and build youki
+#[cfg(feature = "oci")]
+fn build_youki_binary() {
+    let out_dir = std::env::var("OUT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap();
+
+    // Clone the repo
+    let url = "https://github.com/containers/youki.git";
+    let local_youki = out_dir.join("youki");
+
+    if !local_youki.exists() {
+        git2::Repository::clone(url, &local_youki).expect("Failed to download youki");
+    }
+
+    let youki = escargot::CargoBuild::new()
+        .bin("youki")
+        .current_release()
+        .current_target()
+        .manifest_path(local_youki.join("Cargo.toml"))
+        .target_dir(out_dir)
+        .run()
+        .unwrap();
+
+    println!("cargo:rustc-env=YOUKI_BIN_PATH={}", youki.path().display());
 }

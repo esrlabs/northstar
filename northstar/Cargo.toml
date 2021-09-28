@@ -115,6 +115,10 @@ seccomp = [
     "memoffset",
     "nix",
 ]
+oci = [
+    "escargot",
+    "git2",
+]
 
 [dev-dependencies]
 anyhow = "1.0.44"
@@ -126,4 +130,6 @@ tokio = { version = "1.12.0", features = ["rt-multi-thread"] }
 [build-dependencies]
 anyhow = { version = "1.0.44", optional = true }
 bindgen = { version = "0.59.1", default-features = false, features = ["runtime"], optional = true }
+escargot = { version = "0.5.2", optional = true }
+git2 = { version = "0.13.23", optional = true }
 nix = { version = "0.23.0", optional = true }

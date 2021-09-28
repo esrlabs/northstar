@@ -50,7 +50,7 @@ type Env<'a> = Option<&'a HashMap<NonNullString, NonNullString>>;
 
 #[async_trait]
 pub(super) trait Process: Send + Sync + Debug {
-    fn pid(&self) -> Pid;
+    async fn pid(&self) -> Pid;
     async fn spawn(&mut self) -> Result<(), Error>;
     async fn kill(&mut self, signal: Signal) -> Result<(), Error>;
     async fn wait(&mut self) -> Result<ExitStatus, Error>;
@@ -84,7 +84,7 @@ pub(super) struct ProcessContext {
     process: Box<dyn Process>,
     started: time::Instant,
     debug: super::debug::Debug,
-    cgroups: cgroups::CGroups,
+    cgroups: Option<cgroups::CGroups>,
 }
 
 impl ProcessContext {
@@ -103,7 +103,9 @@ impl ProcessContext {
             .await
             .expect("Failed to destroy debug utilities");
 
-        self.cgroups.destroy().await;
+        if let Some(cgroups) = self.cgroups {
+            cgroups.destroy().await;
+        }
     }
 }
 
@@ -406,7 +408,7 @@ impl<'a> State<'a> {
         }
 
         // Get a mutable reference to the container state in order to update the process field
-        let container_state = self.containers.get_mut(container).expect("Internal error");
+        let container_state = self.containers.get(container).expect("Internal error");
 
         // Root of container
         let root = container_state
@@ -419,8 +421,7 @@ impl<'a> State<'a> {
         info!("Creating {}", container);
 
         let mut process = match self
-            .launcher
-            .create(&root, container, &manifest, args, env)
+            .launch_process(root, container, &manifest, args, env)
             .await
         {
             Ok(p) => p,
@@ -430,39 +431,49 @@ impl<'a> State<'a> {
             }
         };
 
-        let pid = process.pid();
+        // At this point the pid must exist
+        let pid = process.pid().await;
 
         // Debug
         let debug = super::debug::Debug::new(self.config, &manifest, pid).await?;
 
         // CGroups
-        let cgroups = {
+        let cgroups = if !is_oci_container(&manifest) {
             debug!("Configuring CGroups for {}", container);
             let config = manifest.cgroups.clone().unwrap_or_default();
 
             // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
-            cgroups::CGroups::new(
+            let cgroups = cgroups::CGroups::new(
                 &self.config.cgroup,
                 self.events_tx.clone(),
                 container,
                 &config,
-                process.pid(),
+                process.pid().await,
             )
             .await
-            .expect("Failed to create cgroup")
+            .expect("Failed to create cgroup");
+
+            Some(cgroups)
+        } else {
+            None
         };
 
         // Signal the process to continue starting. This can fail because of the container content
         if let Err(e) = process.spawn().await {
             warn!("Failed to start {} ({}): {}", container, pid, e);
             debug.destroy().await.expect("Failed to destroy debug");
-            cgroups.destroy().await;
+            if let Some(cgroups) = cgroups {
+                cgroups.destroy().await;
+            }
             return Err(e);
         }
 
         // Add process context to process
-        container_state.process = Some(ProcessContext {
-            process: Box::new(process),
+        self.containers
+            .get_mut(container)
+            .expect("Internal error")
+            .process = Some(ProcessContext {
+            process,
             started: time::Instant::now(),
             debug,
             cgroups,
@@ -504,7 +515,7 @@ impl<'a> State<'a> {
 
         for (container, state) in &mut self.containers {
             if let Some(mut context) = state.process.take() {
-                let pid = context.process.pid();
+                let pid = context.process.pid().await;
                 info!("Sending SIGKILL to {} ({})", container, pid);
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), SIGKILL).ok();
 
@@ -608,7 +619,14 @@ impl<'a> State<'a> {
         // Gather stats if the container is running
         if let Some(process) = state.process.as_ref() {
             info!("Collecting stats of {}", container);
-            Ok(process.cgroups.stats())
+
+            match process.cgroups.as_ref() {
+                Some(cgroups) => Ok(cgroups.stats()),
+                None => {
+                    // TODO Handle this case
+                    todo!()
+                }
+            }
         } else {
             Err(Error::ContainerNotStarted(container.clone()))
         }
@@ -689,7 +707,7 @@ impl<'a> State<'a> {
                 if let api::model::Message::Request(ref request) = message {
                     let response = match request {
                         api::model::Request::Containers => {
-                            Response::Containers(self.list_containers())
+                            Response::Containers(self.list_containers().await)
                         }
                         api::model::Request::Install(_, _) => unreachable!(),
                         api::model::Request::Mount(containers) => {
@@ -840,15 +858,19 @@ impl<'a> State<'a> {
         result
     }
 
-    fn list_containers(&self) -> Vec<api::model::ContainerData> {
+    async fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut result = Vec::with_capacity(self.containers.len());
 
         for (container, state) in &self.containers {
             let manifest = self.manifest(container).expect("Internal error").clone();
-            let process = state.process.as_ref().map(|context| api::model::Process {
-                pid: context.process.pid(),
-                uptime: context.started.elapsed().as_nanos() as u64,
-            });
+            let process = if let Some(context) = state.process.as_ref() {
+                Some(api::model::Process {
+                    pid: context.process.pid().await,
+                    uptime: context.started.elapsed().as_nanos() as u64,
+                })
+            } else {
+                None
+            };
             let repository = state.repository.clone();
             let mounted = state.mount_info.is_some();
             let container_data = api::model::ContainerData::new(
@@ -902,4 +924,49 @@ impl<'a> State<'a> {
             .get(repository)
             .ok_or_else(|| Error::InvalidRepository(repository.into()))
     }
+
+    /// Launch the process corresponding to the container
+    async fn launch_process(
+        &self,
+        root: std::path::PathBuf,
+        container: &Container,
+        manifest: &Manifest,
+        args: Option<&Vec<NonNullString>>,
+        env: Option<&HashMap<NonNullString, NonNullString>>,
+    ) -> Result<Box<dyn Process>, Error> {
+        // Check if the container is an OCI, in which case return a OCI process
+        #[cfg(feature = "oci")]
+        {
+            use super::process::oci::OciProcess;
+
+            if is_oci_container(manifest) {
+                // Container's bundle path
+                let bundle = self
+                    .config
+                    .run_dir
+                    .join(container.to_string())
+                    .canonicalize()
+                    .context("Failed to find OCI bundle")?;
+
+                return OciProcess::new(container.clone(), &bundle)
+                    .await
+                    .map(|p| -> Box<dyn Process> { Box::new(p) });
+            }
+        }
+
+        self.launcher
+            .create(&root, container, manifest, args, env)
+            .await
+            .map(|p| -> Box<dyn Process> { Box::new(p) })
+    }
+}
+
+/// Returns true if the container is an OCI container
+fn is_oci_container(manifest: &Manifest) -> bool {
+    // TODO find a proper way to detect OCI containers
+    manifest
+        .init
+        .as_ref()
+        .filter(|p| p.to_str().unwrap_or("") == "trust_me_im_an_oci_container")
+        .is_some()
 }

@@ -622,7 +622,7 @@ mounts:
     options: noexec
 autostart: critical
 seccomp:
-  allow: 
+  allow:
     fork: any
     waitpid: any
 cgroups:
@@ -881,7 +881,7 @@ seccomp:
 capabilities:
   - CAP_NET_ADMIN
 io:
-  stdout: 
+  stdout:
     log:
       level: DEBUG
       tag: test

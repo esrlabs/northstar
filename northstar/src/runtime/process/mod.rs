@@ -41,6 +41,8 @@ use tokio_util::sync::CancellationToken;
 mod fs;
 mod init;
 mod io;
+#[cfg(feature = "oci")]
+pub mod oci;
 mod trampoline;
 
 #[derive(Debug)]
@@ -296,7 +298,7 @@ impl Launcher {
 
 #[async_trait]
 impl super::state::Process for Process {
-    fn pid(&self) -> Pid {
+    async fn pid(&self) -> Pid {
         self.pid
     }
 
@@ -305,7 +307,7 @@ impl super::state::Process for Process {
             .checkpoint
             .take()
             .expect("Attempt to start container twice. This is a bug.");
-        info!("Starting {}", self.pid());
+        info!("Starting {}", self.pid().await);
         let wait = checkpoint.notify();
 
         // If the child process refuses to start - kill it after 5 seconds
@@ -394,7 +396,7 @@ fn init_argv(manifest: &Manifest, args: Option<&Vec<NonNullString>>) -> (CString
 fn env(manifest: &Manifest, env: Option<&HashMap<NonNullString, NonNullString>>) -> Vec<CString> {
     let mut result = Vec::with_capacity(2);
     result.push(
-        CString::new(format!("{}={}", ENV_NAME, manifest.name.to_string()))
+        CString::new(format!("{}={}", ENV_NAME, manifest.name))
             .expect("Invalid container name. This is a bug in the manifest validation"),
     );
     result.push(CString::new(format!("{}={}", ENV_VERSION, manifest.version)).unwrap());
