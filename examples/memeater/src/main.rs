@@ -1,6 +1,6 @@
 use std::{fs, io::Read, thread, time};
 
-const SIZE: u64 = 1000 * 1024;
+const SIZE: u64 = 100 * 1024;
 
 fn main() {
     let mut leaked = 0;
@@ -15,6 +15,6 @@ fn main() {
         leaked += SIZE;
         println!("Leaked {} KiB", leaked / 1024);
 
-        thread::sleep(time::Duration::from_millis(100));
+        thread::sleep(time::Duration::from_millis(10));
     }
 }

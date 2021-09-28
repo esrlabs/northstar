@@ -1,7 +1,7 @@
 use super::{
     config::Config,
     error::Error,
-    pipe::{Condition, ConditionNotify, ConditionWait},
+    pipe::{self, ConditionNotify, ConditionWait},
     ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
@@ -11,22 +11,16 @@ use crate::{
     seccomp,
 };
 use async_trait::async_trait;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use caps::CapsHashSet;
 use futures::{Future, FutureExt};
 use log::{debug, error, info, warn};
 use nix::{
     errno::Errno,
-    libc::c_int,
     sched,
-    sys::{
-        self,
-        signal::{sigprocmask, SigSet, SigmaskHow, Signal},
-        socket,
-        wait::WaitPidFlag,
-    },
+    sys::{self, signal::Signal, socket, wait::WaitPidFlag},
     unistd,
 };
-use sched::CloneFlags;
 use std::{
     collections::HashMap,
     convert::TryFrom,
@@ -38,14 +32,13 @@ use std::{
         prelude::{AsRawFd, FromRawFd},
     },
     path::PathBuf,
+    process::exit,
     ptr::null,
 };
 use sys::wait;
 use tokio::{net::UnixStream, signal, task, time};
 use tokio_util::sync::CancellationToken;
-use Signal::SIGCHLD;
 
-mod clone;
 mod fs;
 mod init;
 mod io;
@@ -81,17 +74,22 @@ impl Launcher {
         config: Config,
         notification_tx: NotificationTx,
     ) -> Result<Self, Error> {
-        Ok(Launcher {
+        set_child_subreaper(true)?;
+
+        let launcher = Launcher {
             tx,
             config,
             notification_tx,
-        })
+        };
+
+        Ok(launcher)
     }
 
     pub async fn shutdown(self) -> Result<(), Error> {
         Ok(())
     }
 
+    /// Create a new container process set
     pub async fn create(
         &self,
         root: PathBuf,
@@ -128,22 +126,27 @@ impl Launcher {
         debug!("{} argv is {:?}", manifest.name, argv);
         debug!("{} env is {:?}", manifest.name, env);
 
-        // Block signals to make sure that a SIGTERM is not sent to init before the child is spawned.
-        // init doesn't have any signals handler and the signal would be lost. The child has default handlers
-        // and unblocks all signal and terminates in pending ones if needed. This termination is then caught
-        // by init...
-        signals_block();
+        let init = init::Init {
+            manifest,
+            root,
+            init,
+            argv,
+            env,
+            mounts,
+            fds,
+            groups,
+            capabilities,
+            rlimits,
+            seccomp,
+        };
+
+        // Pipe for sending the init pid from the intermediate process to the runtime
+        let pid_channel = Channel::new();
 
         // Clone init
-        let flags = CloneFlags::CLONE_NEWPID | CloneFlags::CLONE_NEWNS;
-        match clone::clone(flags, Some(SIGCHLD as c_int)) {
+        match unsafe { unistd::fork() } {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
-                    debug!("Created {} with pid {}", container, child);
-
-                    // Unblock signals that were block to start init with masked signals
-                    signals_unblock();
-
                     // Close writing ends of log pipes
                     drop(io);
                     // Close child console socket if any
@@ -151,8 +154,17 @@ impl Launcher {
                     // Close child checkpoint pipes
                     drop(checkpoint_init);
 
-                    let pid = child.as_raw() as Pid;
-                    // Start a task that listens for SIGCHILD and performs a waitpid on pid on every signal
+                    debug!("Waiting for init pid of {}", container);
+                    let pid = pid_channel.recv().expect("Failed to read pid") as Pid;
+
+                    debug!("Created {} with pid {}", container, pid);
+
+                    // Reap the trampoline process which is (or will be) a zombie
+                    debug!("Waiting for trampoline process {} to exit", child);
+                    wait::waitpid(Some(child), None)
+                        .expect("Failed to wait for trampoline process");
+
+                    // Create a future that resolves upon exit of init
                     let exit_status = waitpid(container, pid, self.tx.clone(), stop);
 
                     Ok(Process {
@@ -162,25 +174,36 @@ impl Launcher {
                     })
                 }
                 unistd::ForkResult::Child => {
+                    // Close io reading ends (if any)
                     forget(io);
+                    // Close runtime checkpoints
                     drop(checkpoint_runtime);
-                    let init = init::Init {
-                        manifest,
-                        root,
-                        init,
-                        argv,
-                        env,
-                        mounts,
-                        fds,
-                        groups,
-                        capabilities,
-                        rlimits,
-                        seccomp,
-                    };
 
-                    // Wait for the runtime to signal that init may start.
-                    let condition_notify = checkpoint_init.wait();
-                    init.run(condition_notify);
+                    // Create PID namespace. Init is the first process that is spawned
+                    // into this pid namespace. The container application itself is spawned
+                    // by init
+                    sched::unshare(sched::CloneFlags::CLONE_NEWPID)
+                        .expect("Failed to unshare NEWPID");
+
+                    match unsafe { unistd::fork() }.expect("Failed to fork init") {
+                        unistd::ForkResult::Child => {
+                            // We're init and do not care how our pid is sent to the runtime
+                            drop(pid_channel);
+
+                            // Wait for the runtime to signal that init may start.
+                            let condition_notify = checkpoint_init.wait();
+
+                            // Dive into init and never return
+                            init.run(condition_notify);
+                        }
+                        unistd::ForkResult::Parent { child } => {
+                            // Send the pid of init to the runtime and exit
+                            pid_channel
+                                .send(child.as_raw() as u32)
+                                .expect("Failed to send init pid");
+                            exit(0);
+                        }
+                    }
                 }
             },
             Err(e) => panic!("Fork error: {}", e),
@@ -497,22 +520,6 @@ fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
     None
 }
 
-/// Block all signals of this process and current thread
-fn signals_block() {
-    SigSet::all()
-        .thread_block()
-        .expect("Failed to set thread signal mask");
-    sigprocmask(SigmaskHow::SIG_BLOCK, Some(&SigSet::all()), None).unwrap();
-}
-
-/// Unblock all signals of this process and current thread
-fn signals_unblock() {
-    SigSet::all()
-        .thread_unblock()
-        .expect("Failed to set thread signal mask");
-    sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(&SigSet::all()), None).unwrap();
-}
-
 /// Capability settings applied in init
 struct Capabilities {
     all: CapsHashSet,
@@ -565,13 +572,27 @@ fn rlimits(manifest: &Manifest) -> RLimits {
         .unwrap_or_default()
 }
 
+// Set the child subreaper flag of the calling thread
+fn set_child_subreaper(value: bool) -> Result<(), Error> {
+    #[cfg(target_os = "android")]
+    const PR_SET_CHILD_SUBREAPER: nix::libc::c_int = 36;
+    #[cfg(not(target_os = "android"))]
+    use nix::libc::PR_SET_CHILD_SUBREAPER;
+
+    let value = if value { 1u64 } else { 0u64 };
+    let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
+    Errno::result(result)
+        .map(drop)
+        .map_err(|e| Error::os("Set child subreaper flag", e))
+}
+
 #[derive(Clone)]
 pub(super) struct Checkpoint(ConditionWait, ConditionNotify);
 
 fn checkpoints() -> (Checkpoint, Checkpoint) {
-    let a = Condition::new().expect("Failed to create condition");
+    let a = pipe::Condition::new().expect("Failed to create condition");
     a.set_cloexec();
-    let b = Condition::new().expect("Failed to create condition");
+    let b = pipe::Condition::new().expect("Failed to create condition");
     b.set_cloexec();
 
     let (aw, an) = a.split();
@@ -598,5 +619,26 @@ impl std::fmt::Debug for Checkpoint {
             .field("wait", &self.0.as_raw_fd())
             .field("notifiy", &self.1.as_raw_fd())
             .finish()
+    }
+}
+
+/// Wrap a pipe for sending the init pid from the trampoline to the runtime
+struct Channel {
+    tx: pipe::PipeWrite,
+    rx: pipe::PipeRead,
+}
+
+impl Channel {
+    fn new() -> Channel {
+        let (rx, tx) = pipe::pipe().expect("Failed to create pipe");
+        Channel { tx, rx }
+    }
+
+    fn send(mut self, v: u32) -> std::io::Result<()> {
+        self.tx.write_u32::<BigEndian>(v)
+    }
+
+    fn recv(mut self) -> std::io::Result<u32> {
+        self.rx.read_u32::<BigEndian>()
     }
 }
