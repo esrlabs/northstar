@@ -6,10 +6,7 @@ use super::{
 use crate::npk::manifest::Manifest;
 use futures::future::OptionFuture;
 use log::{debug, error, info};
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
-};
+use std::{path::Path, process::Stdio};
 use tokio::{
     fs,
     io::{self, AsyncBufReadExt},
@@ -209,7 +206,6 @@ impl Strace {
 
 #[derive(Debug)]
 pub struct Perf {
-    output: PathBuf,
     child: Child,
 }
 
@@ -249,10 +245,7 @@ impl Perf {
             )
             .spawn()
             .map_err(|e| Error::io("Failed to spawn strace", e))?;
-        Ok(Perf {
-            child,
-            output: filename,
-        })
+        Ok(Perf { child })
     }
 
     pub async fn destroy(mut self) -> Result<(), Error> {

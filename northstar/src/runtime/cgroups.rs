@@ -242,7 +242,7 @@ impl MemoryMonitor {
         let task = {
             let stop = token.clone();
             task::spawn(async move {
-                debug!("Listening for oom events of {}", container);
+                debug!("Listening for v1 oom events of {}", container);
                 let mut buffer = [0u8; 16];
 
                 'outer: loop {
@@ -284,15 +284,14 @@ impl MemoryMonitor {
         // This task stops when the main loop receiver closes
         let task = {
             let stop = token.clone();
+            let mut inotify = Inotify::init().expect("Error while initializing inotify instance");
+
+            inotify
+                .add_watch(&path, WatchMask::MODIFY)
+                .expect("Failed to add file watch");
+
             task::spawn(async move {
-                debug!("Listening for oom events of {}", container);
-
-                let mut inotify =
-                    Inotify::init().expect("Error while initializing inotify instance");
-
-                inotify
-                    .add_watch(&path, WatchMask::MODIFY)
-                    .expect("Failed to add file watch");
+                debug!("Listening for v2 oom events of {}", container);
 
                 let mut buffer = [0; 1024];
                 let mut stream = inotify

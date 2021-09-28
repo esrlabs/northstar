@@ -1,19 +1,13 @@
-use super::{clone::clone, fs::Mount, io::Fd, Capabilities, RLimits, SIGNAL_OFFSET};
+use super::{fs::Mount, io::Fd, Capabilities, RLimits, SIGNAL_OFFSET};
 use crate::{npk::manifest::Manifest, runtime::pipe::ConditionNotify, seccomp::AllowList};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
-    sched,
-    sys::{
-        self,
-        signal::{Signal, SIGCHLD, SIGKILL},
-        wait::WaitPidFlag,
-    },
+    sched::unshare,
+    sys::wait::{waitpid, WaitPidFlag, WaitStatus},
     unistd::{self, Uid},
 };
-use sched::CloneFlags;
 use std::{env, ffi::CString, os::unix::prelude::RawFd, path::PathBuf, process::exit};
-use sys::wait::{waitpid, WaitStatus};
 
 pub(super) struct Init {
     pub manifest: Manifest,
@@ -35,14 +29,11 @@ impl Init {
         // from the runtime
         set_process_name();
 
-        // If the runtime dies we want to die as well
-        set_parent_death_signal(SIGKILL);
-
         // Become a session group leader
         unistd::setsid().expect("Failed to call setsid");
 
-        // Become a subreaper for orphans in this namespace
-        set_child_subreaper(true);
+        // Enter mount namespace
+        unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("Failed to unshare NEWNS");
 
         // Perform all mounts passed in mounts
         mount(&self.mounts);
@@ -72,7 +63,7 @@ impl Init {
         self.file_descriptors();
 
         // Clone
-        match clone(CloneFlags::empty(), Some(SIGCHLD as i32)) {
+        match unsafe { unistd::fork() } {
             Ok(result) => match result {
                 unistd::ForkResult::Parent { child } => {
                     // Drop checkpoint. The fds are cloned into the child and are closed upon execve.
@@ -98,14 +89,6 @@ impl Init {
                     }
                 }
                 unistd::ForkResult::Child => {
-                    // If init dies, we want to die as well. This should normally never happen and is a error condition.
-                    set_parent_death_signal(SIGKILL);
-
-                    // Unblock signals. The signal mask has been set in the runtime prior to the clone call. This
-                    // avoids that init receives signals which are unhandled. Reminder: init doesn't have any
-                    // signals handlers because it's init of a PID ns.
-                    super::signals_unblock();
-
                     // Set seccomp filter
                     if let Some(ref filter) = self.seccomp {
                         filter.apply().expect("Failed to apply seccomp filter.");
@@ -159,7 +142,6 @@ impl Init {
 
     fn set_rlimits(&self) {
         for (r, l) in &self.rlimits {
-            println!("{:?}", l);
             r.set(
                 l.soft.unwrap_or(rlimit::INFINITY),
                 l.hard.unwrap_or(rlimit::INFINITY),
@@ -212,31 +194,6 @@ fn mount(mounts: &[Mount]) {
     for mount in mounts {
         mount.mount();
     }
-}
-
-fn set_child_subreaper(value: bool) {
-    #[cfg(target_os = "android")]
-    const PR_SET_CHILD_SUBREAPER: libc::c_int = 36;
-    #[cfg(not(target_os = "android"))]
-    use libc::PR_SET_CHILD_SUBREAPER;
-
-    let value = if value { 1u64 } else { 0u64 };
-    let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
-    Errno::result(result)
-        .map(drop)
-        .expect("Failed to set PR_SET_CHILD_SUBREAPER");
-}
-
-fn set_parent_death_signal(signal: Signal) {
-    #[cfg(target_os = "android")]
-    const PR_SET_PDEATHSIG: libc::c_int = 1;
-    #[cfg(not(target_os = "android"))]
-    use libc::PR_SET_PDEATHSIG;
-
-    let result = unsafe { nix::libc::prctl(PR_SET_PDEATHSIG, signal, 0, 0, 0) };
-    Errno::result(result)
-        .map(drop)
-        .expect("Failed to set PR_SET_PDEATHSIG");
 }
 
 fn set_no_new_privs(value: bool) {
