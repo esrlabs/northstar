@@ -3,7 +3,7 @@
 #![deny(clippy::all)]
 #![deny(missing_docs)]
 
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Context, Result};
 use api::{client::Client, model::Message};
 use futures::{sink::SinkExt, StreamExt};
 use northstar::{
@@ -20,7 +20,12 @@ use std::{
     process,
     str::FromStr,
 };
-use structopt::{clap, clap::AppSettings, StructOpt};
+use structopt::{
+    clap::{
+        AppSettings, {self},
+    },
+    StructOpt,
+};
 use tokio::{
     fs,
     io::{copy, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader},
@@ -59,21 +64,21 @@ enum Subcommand {
         /// Container name
         name: String,
         /// Container version
-        version: Version,
+        version: Option<Version>,
     },
     /// Umount a container
     Umount {
         /// Container name
         name: String,
         /// Container version
-        version: Version,
+        version: Option<Version>,
     },
     /// Start a container
     Start {
         /// Container name
         name: String,
         /// Container version
-        version: Version,
+        version: Option<Version>,
         /// Command line arguments
         #[structopt(short, long)]
         args: Option<Vec<String>>,
@@ -86,7 +91,7 @@ enum Subcommand {
         /// Container name
         name: String,
         /// Container version
-        version: Version,
+        version: Option<Version>,
         /// Signal
         signal: Option<i32>,
     },
@@ -126,7 +131,7 @@ enum Subcommand {
         /// Container name
         name: String,
         /// Container version
-        version: Version,
+        version: Option<Version>,
     },
 }
 
@@ -155,89 +160,121 @@ fn parse_secs(src: &str) -> Result<time::Duration, anyhow::Error> {
         .map_err(Into::into)
 }
 
-impl TryFrom<Subcommand> for Request {
-    type Error = Error;
+/// Return the version passed or query the runtime and return the version of a container
+/// if the name is unique
+async fn or_version<T: AsyncRead + AsyncWrite + Unpin>(
+    name: &str,
+    version: Option<Version>,
+    client: &mut Client<T>,
+) -> Result<Version> {
+    if let Some(version) = version {
+        Ok(version)
+    } else {
+        // If there's only one container matching the name - use the version
+        let containers = client.containers().await?;
+        let containers = containers
+            .iter()
+            .filter(|c| *c.manifest.name == name)
+            .collect::<Vec<_>>();
 
-    fn try_from(command: Subcommand) -> Result<Self, Self::Error> {
-        match command {
-            Subcommand::Containers => Ok(Request::Containers),
-            Subcommand::Repositories => Ok(Request::Repositories),
-            Subcommand::Mount { name, version } => Ok(Request::Mount(vec![Container::new(
-                name.try_into()?,
-                version,
-            )])),
-            Subcommand::Umount { name, version } => {
-                Ok(Request::Umount(Container::new(name.try_into()?, version)))
-            }
-            Subcommand::Start {
-                name,
-                version,
+        if containers.len() == 1 {
+            Ok(containers[0].manifest.version.clone())
+        } else {
+            Err(anyhow!("Version not unique"))
+        }
+    }
+}
+
+async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
+    command: Subcommand,
+    client: &mut Client<T>,
+) -> Result<Request> {
+    match command {
+        Subcommand::Containers => Ok(Request::Containers),
+        Subcommand::Repositories => Ok(Request::Repositories),
+        Subcommand::Mount { name, version } => {
+            let version = or_version(&name, version, client).await?;
+            let name = name.try_into()?;
+            Ok(Request::Mount(vec![Container::new(name, version)]))
+        }
+        Subcommand::Umount { name, version } => {
+            let version = or_version(&name, version, client).await?;
+            let name = name.try_into()?;
+            Ok(Request::Umount(Container::new(name, version)))
+        }
+        Subcommand::Start {
+            name,
+            version,
+            args,
+            env,
+        } => {
+            // Convert args
+            let args = if let Some(args) = args {
+                let mut non_null = Vec::with_capacity(args.len());
+                for arg in args {
+                    non_null.push(NonNullString::try_from(arg.as_str()).context("Invalid arg")?);
+                }
+                Some(non_null)
+            } else {
+                None
+            };
+
+            // Convert env
+            let env = if let Some(env) = env {
+                let mut non_null = HashMap::with_capacity(env.len());
+                for env in env {
+                    let mut split = env.split('=');
+                    let key = split
+                        .next()
+                        .ok_or_else(|| anyhow!("Invalid env"))
+                        .and_then(|s| NonNullString::try_from(s).context("Invalid key"))?;
+                    let value = split
+                        .next()
+                        .ok_or_else(|| anyhow!("Invalid env"))
+                        .and_then(|s| NonNullString::try_from(s).context("Invalid value"))?;
+                    non_null.insert(key, value);
+                }
+                Some(non_null)
+            } else {
+                None
+            };
+
+            let version = or_version(&name, version, client).await?;
+
+            Ok(Request::Start(
+                Container::new(name.try_into()?, version),
                 args,
                 env,
-            } => {
-                // Convert args
-                let args = if let Some(args) = args {
-                    let mut non_null = Vec::with_capacity(args.len());
-                    for arg in args {
-                        non_null
-                            .push(NonNullString::try_from(arg.as_str()).context("Invalid arg")?);
-                    }
-                    Some(non_null)
-                } else {
-                    None
-                };
-
-                // Convert env
-                let env = if let Some(env) = env {
-                    let mut non_null = HashMap::with_capacity(env.len());
-                    for env in env {
-                        let mut split = env.split('=');
-                        let key = split
-                            .next()
-                            .ok_or_else(|| anyhow!("Invalid env"))
-                            .and_then(|s| NonNullString::try_from(s).context("Invalid key"))?;
-                        let value = split
-                            .next()
-                            .ok_or_else(|| anyhow!("Invalid env"))
-                            .and_then(|s| NonNullString::try_from(s).context("Invalid value"))?;
-                        non_null.insert(key, value);
-                    }
-                    Some(non_null)
-                } else {
-                    None
-                };
-
-                Ok(Request::Start(
-                    Container::new(name.try_into()?, version),
-                    args,
-                    env,
-                ))
-            }
-            Subcommand::Kill {
-                name,
-                version,
-                signal,
-            } => Ok(Request::Kill(
-                Container::new(name.try_into()?, version),
-                signal.unwrap_or(15),
-            )),
-            Subcommand::Install {
-                npk,
-                repository: repo_id,
-            } => {
-                let size = npk.metadata().map(|m| m.len())?;
-                Ok(Request::Install(repo_id, size))
-            }
-            Subcommand::Uninstall { name, version } => Ok(Request::Uninstall(Container::new(
-                name.try_into()?,
-                version,
-            ))),
-            Subcommand::Shutdown => Ok(Request::Shutdown),
-            Subcommand::ContainerStats { name, version } => Ok(Request::ContainerStats(
-                Container::new(name.try_into()?, version),
-            )),
-            Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
+            ))
         }
+        Subcommand::Kill {
+            name,
+            version,
+            signal,
+        } => {
+            let version = or_version(&name, version, client).await?;
+            let signal = signal.unwrap_or(15);
+            let name = name.try_into()?;
+            Ok(Request::Kill(Container::new(name, version), signal))
+        }
+        Subcommand::Install {
+            npk,
+            repository: repo_id,
+        } => {
+            let size = npk.metadata().map(|m| m.len())?;
+            Ok(Request::Install(repo_id, size))
+        }
+        Subcommand::Uninstall { name, version } => Ok(Request::Uninstall(Container::new(
+            name.try_into()?,
+            version,
+        ))),
+        Subcommand::Shutdown => Ok(Request::Shutdown),
+        Subcommand::ContainerStats { name, version } => {
+            let version = or_version(&name, version, client).await?;
+            let name = name.try_into()?;
+            Ok(Request::ContainerStats(Container::new(name, version)))
+        }
+        Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }
 }
 
@@ -245,6 +282,13 @@ impl TryFrom<Subcommand> for Request {
 async fn main() -> Result<()> {
     let opt = Opt::from_args();
     let timeout = time::Duration::from_secs(5);
+
+    // Generate shell completions and exit on give subcommand
+    if let Subcommand::Completion { output, shell } = opt.command {
+        println!("Generating {} completions to {}", shell, output.display());
+        Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
+        process::exit(0);
+    }
 
     let io = match opt.url.scheme() {
         "tcp" => {
@@ -268,12 +312,6 @@ async fn main() -> Result<()> {
     };
 
     match opt.command {
-        // Generate shell completions and exit on give subcommand
-        Subcommand::Completion { output, shell } => {
-            println!("Generating {} completions to {}", shell, output.display());
-            Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
-            process::exit(0);
-        }
         // Subscribe to notifications and print them
         Subcommand::Notifications { number } => {
             if opt.json {
@@ -304,14 +342,19 @@ async fn main() -> Result<()> {
         // Request response mode
         command => {
             // Connect
-            let mut framed = Client::new(io, None, opt.timeout)
+            let mut client = Client::new(io, None, opt.timeout)
                 .await
-                .context("Failed to connect")?
-                .framed();
+                .context("Failed to connect")?;
 
-            // Request
-            let request = Request::try_from(command.clone())
+            // Convert the subcommand into a request
+            let request = command_to_request(command.clone(), &mut client)
+                .await
                 .context("Failed to convert command into request")?;
+
+            // If the raw json mode is requested nstar needs to operate on the raw stream instead
+            // of `Client<T>`
+            let mut framed = client.framed();
+
             framed
                 .send(Message::new_request(request))
                 .await
