@@ -12,6 +12,8 @@ io:
 mounts:
   /dev:
     type: dev
+  /proc:
+    type: proc
   /lib:
     type: bind
     host: /lib

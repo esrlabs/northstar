@@ -10,6 +10,8 @@ args:
 mounts:
   /dev:
     type: dev
+  /proc:
+    type: proc
   /bin:
     type: resource
     name: ferris
