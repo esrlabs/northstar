@@ -18,7 +18,7 @@ pub fn init() {
     // run_dir is bind mounted - a leftover from a previous crash - obviously
     // doesn't work. Technically, it is only necessary set the propagation of
     // the parent mount of the run_dir, but this not easy to find and the change
-    // of mount propagation on root is fine for the tests which are developemnt
+    // of mount propagation on root is fine for the tests which are development
     // only.
     mount::mount(
         Some("/"),
