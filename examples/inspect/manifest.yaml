@@ -32,6 +32,6 @@ mounts:
 capabilities: [CAP_KILL]
 rlimits:
   nproc:
-    soft: 1000
-    hard: 2000
+    soft: 10000
+    hard: 20000
 suppl_groups: [src, inet]
