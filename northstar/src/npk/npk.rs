@@ -8,6 +8,7 @@ use ed25519_dalek::{
 };
 use itertools::Itertools;
 use rand::rngs::OsRng;
+use regex::Regex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -34,6 +35,8 @@ pub const VERSION: Version = semver::Version {
 
 // Binaries
 const MKSQUASHFS: &str = "mksquashfs";
+const MKSQUASHFS_MAJOR_VERSION_MINIMUM: u32 = 4;
+const MKSQUASHFS_MINOR_VERSION_MINIMUM: u32 = 1;
 const UNSQUASHFS: &str = "unsquashfs";
 
 // File name and directory components
@@ -774,6 +777,49 @@ fn create_squashfs_img(
             "Root directory '{}' does not exist",
             &root.display()
         )));
+    }
+
+    // Check mksquashfs version
+    let regex = Regex::new(r"([0-9]*\.[0-9]*)").unwrap(); // unwrap(): Creating regex from constant expression will never fail
+    let first_line = String::from_utf8(
+        Command::new(&MKSQUASHFS)
+            .arg("-version")
+            .output()
+            .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS, e)))?
+            .stdout,
+    )
+    .map_err(|e| Error::Squashfs(format!("Failed to parse mksquashfs output: {}", e)))?
+    .lines()
+    .next()
+    .unwrap_or_default()
+    .to_string();
+    if let Some(captures) = regex.captures(&first_line) {
+        if let Some(m) = captures.get(0) {
+            let mut split = m.as_str().split('.');
+            let major = split
+                .next()
+                .unwrap_or_default()
+                .parse::<u32>()
+                .unwrap_or_default();
+            let minor = split
+                .next()
+                .unwrap_or_default()
+                .parse::<u32>()
+                .unwrap_or_default();
+            if (major < MKSQUASHFS_MAJOR_VERSION_MINIMUM)
+                || (major == MKSQUASHFS_MAJOR_VERSION_MINIMUM
+                    && minor < MKSQUASHFS_MINOR_VERSION_MINIMUM)
+            {
+                return Err(Error::Squashfs(format!(
+                    "Detected mksquashfs version {}.{} is too old. The required minimum version is {}.{}.",
+                    major, minor, MKSQUASHFS_MAJOR_VERSION_MINIMUM, MKSQUASHFS_MINOR_VERSION_MINIMUM
+                )));
+            }
+        }
+    } else {
+        return Err(Error::Squashfs(
+            "Failed to determine mksquashfs version".to_string(),
+        ));
     }
 
     let mut cmd = Command::new(&MKSQUASHFS);
