@@ -1,33 +1,32 @@
 use super::{
     error::{Context, Error},
     key::{self, PublicKey},
-    state::Npk,
-    Container, RepositoryId,
+    Container,
 };
-use crate::{npk::npk, runtime::pipe::RawFdExt};
+use crate::{
+    npk::npk::{self},
+    runtime::pipe::RawFdExt,
+};
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
-use futures::{
-    future::{join_all, ready, OptionFuture},
-    FutureExt,
-};
-use log::{debug, info, warn};
+use futures::future::OptionFuture;
+use log::{debug, info};
 use mpsc::Receiver;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     io::{BufReader, SeekFrom},
     os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tokio::{
-    fs,
+    fs::{self},
     io::{AsyncSeekExt, AsyncWriteExt},
     sync::mpsc,
-    task,
     time::Instant,
 };
+
+pub(super) type Npk = crate::npk::npk::Npk<BufReader<std::fs::File>>;
 
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {
@@ -38,34 +37,25 @@ pub(super) trait Repository: fmt::Debug {
     async fn remove(&mut self, container: &Container) -> Result<(), Error>;
 
     /// Return npk matching container if present
-    fn get(&self, container: &Container) -> Option<Arc<Npk>>;
+    fn get(&self, container: &Container) -> Option<&Npk>;
 
     /// Key of this repository
     fn key(&self) -> Option<&PublicKey>;
 
-    /// All containers in this repositoriy
-    fn containers(&self) -> Vec<Arc<Npk>>;
-
-    /// List of all containers
-    fn list(&self) -> Vec<Container>;
+    /// All containers in this repository
+    fn containers(&self) -> Vec<&Npk>;
 }
 
 /// Repository backed by a directory
 #[derive(Debug)]
 pub(super) struct DirRepository {
-    id: RepositoryId,
     dir: PathBuf,
     key: Option<PublicKey>,
-    containers: HashMap<Container, (PathBuf, Arc<Npk>)>,
+    containers: HashMap<Container, (PathBuf, Npk)>,
 }
 
 impl DirRepository {
-    pub async fn new(
-        id: RepositoryId,
-        dir: &Path,
-        key: Option<&Path>,
-        blacklist: &HashSet<Container>,
-    ) -> Result<DirRepository, Error> {
+    pub async fn new(dir: &Path, key: Option<&Path>) -> Result<DirRepository, Error> {
         let mut containers = HashMap::new();
 
         info!("Loading repository {}", dir.display());
@@ -76,50 +66,21 @@ impl DirRepository {
         let mut readir = fs::read_dir(&dir).await.context("Repository read dir")?;
 
         let start = Instant::now();
-        let mut loads = vec![];
-        let blacklist = Arc::new(blacklist.clone());
         while let Ok(Some(entry)) = readir.next_entry().await {
             let file = entry.path();
-            let blacklist = blacklist.clone();
-            let task = task::spawn(async move {
-                debug!(
-                    "Loading {}{}",
-                    file.display(),
-                    if key.is_some() { " [verified]" } else { "" }
-                );
-                let npk = Npk::from_path(&file, key.as_ref())
-                    .map_err(|e| Error::Npk(file.display().to_string(), e))?;
-                let name = npk.manifest().name.clone();
-                let version = npk.manifest().version.clone();
-                let container = Container::new(name, version);
-
-                if blacklist.contains(&container) {
-                    Err(Error::DuplicateContainer(container))
-                } else {
-                    Ok((container, file, npk))
-                }
-            })
-            .then(|r| match r {
-                Ok(r) => ready(r),
-                Err(_) => panic!("Task error"),
-            });
-            loads.push(task);
-        }
-
-        let results = join_all(loads).await;
-        for result in results {
-            match result {
-                Ok((container, file, npk)) => {
-                    // If the container name/version is already in there remove the present
-                    // container and skip the newly parsed one.
-                    if containers.remove(&container).is_some() {
-                        warn!("Skipping duplicate container {}", container);
-                    } else {
-                        containers.insert(container, (file, Arc::new(npk)));
-                    }
-                }
-                Err(e) => warn!("Failed to load: {}", e),
-            }
+            debug!(
+                "Loading {}{}",
+                file.display(),
+                if key.is_some() { " [verified]" } else { "" }
+            );
+            let reader = std::fs::File::open(&file).context("Failed to open npk")?;
+            let reader = std::io::BufReader::new(reader);
+            let npk = crate::npk::npk::Npk::from_reader(reader, key.as_ref())
+                .map_err(|e| Error::Npk(file.display().to_string(), e))?;
+            let name = npk.manifest().name.clone();
+            let version = npk.manifest().version.clone();
+            let container = Container::new(name, version);
+            containers.insert(container, (file, npk));
         }
 
         let duration = start.elapsed();
@@ -132,7 +93,6 @@ impl DirRepository {
         );
 
         Ok(DirRepository {
-            id,
             dir: dir.to_owned(),
             key,
             containers,
@@ -174,16 +134,15 @@ impl<'a> Repository for DirRepository {
                 .context("Remove file from repository")?;
             Err(Error::InstallDuplicate(container.clone()))
         } else {
-            self.containers
-                .insert(container.clone(), (dest.to_owned(), Arc::new(npk)));
-            info!("Loaded {} into {}", container, self.id);
+            self.containers.insert(container.clone(), (dest, npk));
+            info!("Loaded {}", container);
             Ok(container)
         }
     }
 
     async fn remove(&mut self, container: &Container) -> Result<(), Error> {
         if let Some((path, npk)) = self.containers.remove(container) {
-            debug!("Removing {} from {}", path.display(), self.id);
+            debug!("Removing {}", path.display());
             drop(npk);
             fs::remove_file(path)
                 .await
@@ -194,40 +153,31 @@ impl<'a> Repository for DirRepository {
         }
     }
 
-    fn get(&self, container: &Container) -> Option<Arc<Npk>> {
-        self.containers.get(container).map(|(_, npk)| npk.clone())
+    fn get(&self, container: &Container) -> Option<&Npk> {
+        self.containers.get(container).map(|(_, npk)| npk)
     }
 
     fn key(&self) -> Option<&PublicKey> {
         self.key.as_ref()
     }
 
-    fn containers(&self) -> Vec<Arc<Npk>> {
-        self.containers
-            .values()
-            .map(|(_, npk)| npk.clone())
-            .collect()
-    }
-
-    fn list(&self) -> Vec<Container> {
-        self.containers.keys().cloned().collect()
+    fn containers(&self) -> Vec<&Npk> {
+        self.containers.values().map(|(_, npk)| npk).collect()
     }
 }
 
 /// In memory repository
 #[derive(Debug)]
 pub(super) struct MemRepository {
-    id: RepositoryId,
     key: Option<PublicKey>,
-    containers: HashMap<Container, Arc<Npk>>,
+    containers: HashMap<Container, Npk>,
 }
 
 impl MemRepository {
-    pub async fn new(id: RepositoryId, key: Option<&Path>) -> Result<MemRepository, Error> {
+    pub async fn new(key: Option<&Path>) -> Result<MemRepository, Error> {
         let key: OptionFuture<_> = key.map(key::load).into();
         let key = key.await.transpose().map_err(Error::Key)?;
         Ok(MemRepository {
-            id,
             key,
             containers: HashMap::new(),
         })
@@ -277,8 +227,8 @@ impl<'a> Repository for MemRepository {
         if self.containers.contains_key(&container) {
             Err(Error::InstallDuplicate(container))
         } else {
-            self.containers.insert(container.clone(), Arc::new(npk));
-            info!("Loaded {} into {}", container, self.id);
+            self.containers.insert(container.clone(), npk);
+            info!("Loaded {}", container);
             Ok(container)
         }
     }
@@ -288,16 +238,12 @@ impl<'a> Repository for MemRepository {
         Ok(())
     }
 
-    fn get(&self, container: &Container) -> Option<Arc<Npk>> {
-        self.containers.get(container).cloned()
+    fn get(&self, container: &Container) -> Option<&Npk> {
+        self.containers.get(container)
     }
 
-    fn containers(&self) -> Vec<Arc<Npk>> {
-        self.containers.values().cloned().collect()
-    }
-
-    fn list(&self) -> Vec<Container> {
-        self.containers.keys().cloned().collect()
+    fn containers(&self) -> Vec<&Npk> {
+        self.containers.values().collect()
     }
 
     fn key(&self) -> Option<&PublicKey> {

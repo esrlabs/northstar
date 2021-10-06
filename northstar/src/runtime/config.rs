@@ -18,6 +18,8 @@ pub struct Config {
     pub log_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNullString,
+    /// Max number of parallel mounts
+    pub mount_parallel: usize,
     /// Repositories
     pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options
