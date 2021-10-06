@@ -67,7 +67,14 @@ impl Northstar {
 
         let mut repositories = HashMap::new();
         repositories.insert(
-            "test".into(),
+            "test-0".into(),
+            config::Repository {
+                r#type: RepositoryType::Memory,
+                key: Some(example_key.clone()),
+            },
+        );
+        repositories.insert(
+            "test-1".into(),
             config::Repository {
                 r#type: RepositoryType::Memory,
                 key: Some(example_key.clone()),
@@ -86,6 +93,7 @@ impl Northstar {
             run_dir,
             data_dir: data_dir.clone(),
             log_dir,
+            mount_parallel: 10,
             cgroup: NonNullString::try_from(format!("northstar-{}", pid)).unwrap(),
             repositories,
             debug: None,
@@ -163,16 +171,16 @@ impl Northstar {
     }
 
     // Install a npk from a buffer
-    pub async fn install(&mut self, npk: &[u8]) -> Result<()> {
+    pub async fn install(&mut self, npk: &[u8], repository: &str) -> Result<()> {
         let f = NamedTempFile::new_in(self.tmpdir.path())?;
         fs::write(&f, npk).await?;
-        self.client.install(f.path(), "test").await?;
+        self.client.install(f.path(), repository).await?;
         Ok(())
     }
 
     /// Install the test container and wait for the notification
     pub async fn install_test_container(&mut self) -> Result<()> {
-        self.install(TEST_CONTAINER_NPK)
+        self.install(TEST_CONTAINER_NPK, "test-0")
             .await
             .context("Failed to install test container")?;
 
@@ -194,7 +202,7 @@ impl Northstar {
 
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
-        self.install(TEST_RESOURCE_NPK)
+        self.install(TEST_RESOURCE_NPK, "test-0")
             .await
             .context("Failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)

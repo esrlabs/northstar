@@ -5,16 +5,14 @@ use super::{
     error::Error,
     mount::{MountControl, MountInfo},
     process::Launcher,
-    repository::{DirRepository, MemRepository},
+    repository::{DirRepository, MemRepository, Npk},
     stats::ContainerStats,
-    Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, Repository,
-    RepositoryId,
+    Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, RepositoryId,
 };
 use crate::{
     api::{self, model::MountResult},
     common::non_null_string::NonNullString,
-    npk,
-    npk::manifest::{Autostart, Mount, Resource},
+    npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{error::Context, CGroupEvent, ENV_NAME, ENV_VERSION},
 };
 use api::model::Response;
@@ -25,7 +23,7 @@ use futures::{
     executor::{ThreadPool, ThreadPoolBuilder},
     future::{join_all, ready, Either},
     task::SpawnExt,
-    Future,
+    Future, TryFutureExt,
 };
 use log::{debug, error, info, warn};
 use nix::sys::signal::Signal;
@@ -33,10 +31,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
     fmt::Debug,
-    fs::File,
-    io::BufReader,
     iter::FromIterator,
-    path::PathBuf,
     result,
     sync::Arc,
 };
@@ -46,8 +41,12 @@ use tokio::{
 };
 use Signal::SIGKILL;
 
-type Repositories = HashMap<RepositoryId, Box<dyn Repository + Send + Sync>>;
-pub(super) type Npk = npk::npk::Npk<BufReader<File>>;
+/// Repository
+type Repository = Box<dyn super::repository::Repository + Send + Sync>;
+/// Container start arguments aka argv
+type Args<'a> = Option<&'a Vec<NonNullString>>;
+/// Container environment variables set
+type Env<'a> = Option<&'a HashMap<NonNullString, NonNullString>>;
 
 #[async_trait]
 pub(super) trait Process: Send + Sync + Debug {
@@ -63,18 +62,21 @@ pub(super) struct State<'a> {
     config: &'a Config,
     events_tx: EventTx,
     notification_tx: NotificationTx,
-    repositories: Repositories,
-    containers: HashMap<Container, MountedContainer>,
     mount_control: Arc<MountControl>,
     launcher: Launcher,
     executor: ThreadPool,
+    containers: HashMap<Container, ContainerState>,
+    repositories: HashMap<RepositoryId, Repository>,
 }
 
-#[derive(Debug)]
-pub(super) struct MountedContainer {
-    pub(super) root: PathBuf,
-    pub(super) mount_info: MountInfo,
-    pub(super) process: Option<ProcessContext>,
+#[derive(Debug, Default)]
+pub(super) struct ContainerState {
+    /// Reference to the repository where the npk resides
+    pub repository: RepositoryId,
+    /// Meta information about this containers rootfs mount
+    pub mount_info: Option<MountInfo>,
+    /// Process information when started
+    pub process: Option<ProcessContext>,
 }
 
 #[derive(Debug)]
@@ -112,13 +114,20 @@ impl<'a> State<'a> {
         events_tx: EventTx,
         notification_tx: NotificationTx,
     ) -> Result<State<'a>, Error> {
-        let repositories = Repositories::default();
-        let mount_control = Arc::new(MountControl::new().await.map_err(Error::Mount)?);
+        let repositories = HashMap::new();
+        let containers = HashMap::new();
+        let mount_control = Arc::new(
+            MountControl::new()
+                .await
+                .expect("Failed to initialize mount control"),
+        );
         let launcher = Launcher::start(events_tx.clone(), config.clone(), notification_tx.clone())
             .await
             .expect("Failed to start launcher");
         let executor = ThreadPoolBuilder::new()
-            .name_prefix("northstar")
+            .name_prefix("northstar-mount-")
+            .pool_size(config.mount_parallel)
+            .after_start(|n| debug!("Started mount thread #{}", n))
             .create()
             .expect("Failed to start thread pool");
 
@@ -126,13 +135,14 @@ impl<'a> State<'a> {
             events_tx,
             notification_tx,
             repositories,
-            containers: HashMap::new(),
+            containers,
             config,
             launcher,
             mount_control,
             executor,
         };
 
+        // Initialize repositories. This populates self.containers and self.repositories
         state.init_repositories().await?;
 
         // Start containers flagged with autostart
@@ -142,24 +152,36 @@ impl<'a> State<'a> {
     }
 
     async fn init_repositories(&mut self) -> Result<(), Error> {
-        let mut blacklist = HashSet::new();
-
         // Build a map of repositories from the configuration
         for (id, repository) in &self.config.repositories {
-            match &repository.r#type {
+            let repository = match &repository.r#type {
                 RepositoryType::Fs { dir } => {
-                    let repository =
-                        DirRepository::new(id.clone(), dir, repository.key.as_deref(), &blacklist)
-                            .await?;
-                    blacklist.extend(repository.list());
-                    self.repositories.insert(id.clone(), Box::new(repository));
+                    let repository = DirRepository::new(dir, repository.key.as_deref()).await?;
+                    Box::new(repository) as Repository
                 }
                 RepositoryType::Memory => {
-                    let repository =
-                        MemRepository::new(id.clone(), repository.key.as_deref()).await?;
-                    self.repositories.insert(id.clone(), Box::new(repository));
+                    let repository = MemRepository::new(repository.key.as_deref()).await?;
+                    Box::new(repository) as Repository
+                }
+            };
+            for npk in repository.containers() {
+                let name = npk.manifest().name.clone();
+                let version = npk.manifest().version.clone();
+                let container = Container::new(name, version);
+
+                if let Ok(state) = self.state(&container) {
+                    warn!("Skipping duplicate container {} which is already loaded from repository {}", container, state.repository);
+                } else {
+                    self.containers.insert(
+                        container,
+                        ContainerState {
+                            repository: id.clone(),
+                            ..Default::default()
+                        },
+                    );
                 }
             }
+            self.repositories.insert(id.clone(), repository);
         }
 
         Ok(())
@@ -167,146 +189,128 @@ impl<'a> State<'a> {
 
     async fn autostart(&mut self) -> Result<(), Error> {
         // List of containers from all repositories with the autostart flag set
-        let autostart = self
-            .repositories
+        let mut autostarts = Vec::new();
+        for container in self.containers.keys() {
+            if let Some(autostart) = self
+                .manifest(container)
+                .expect("Internal error")
+                .autostart
+                .as_ref()
+            {
+                autostarts.push((container.clone(), autostart.clone()))
+            }
+        }
+
+        // Collect list of mounts to be done before starting the containers
+        let mut to_mount = autostarts
             .iter()
-            .map(|(_, r)| r.containers())
-            .flatten()
-            .filter(|n| n.manifest().autostart.is_some())
-            .map(|n| {
-                (
-                    Container::new(n.manifest().name.clone(), n.manifest().version.clone()),
-                    n.manifest().autostart.as_ref().unwrap().clone(),
-                )
-            })
+            .map(|(c, _)| c.clone())
             .collect::<Vec<_>>();
-
-        // Mount (parallel)
-        let mut mounts = self
-            .mount_all(&autostart.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>())
-            .await;
-
-        for (result, (container, autostart)) in mounts.drain(..).zip(autostart) {
-            match result {
-                Ok(_) => {
-                    info!("Autostarting {} ({:?})", container, autostart);
-                    if let Err(e) = self.start(&container, None, None).await {
-                        match autostart {
-                            Autostart::Relaxed => {
-                                warn!("Failed to autostart relaxed {}: {}", container, e);
-                            }
-                            Autostart::Critical => {
-                                error!("Failed to autostart critical {}: {}", container, e);
-                                return Err(e);
-                            }
-                        }
-                    }
+        // Add resources of containers that have the autostart flag set
+        for (container, _) in &autostarts {
+            let manifest = self.manifest(container)?;
+            for mount in manifest.mounts.values() {
+                if let Mount::Resource(Resource { name, version, .. }) = mount {
+                    let container = Container::new(name.clone(), version.clone());
+                    to_mount.push(container);
                 }
-                Err(e) => match autostart {
+            }
+        }
+
+        // Mount (parallel). Do not care about the result - this normally is fine. If not, the container will not start.
+        self.mount_all(&to_mount).await;
+
+        for (container, autostart) in autostarts {
+            info!("Autostarting {} ({:?})", container, autostart);
+            if let Err(e) = self.start(&container, None, None).await {
+                match autostart {
                     Autostart::Relaxed => {
-                        warn!("Failed to mount relaxed {}: {}", container, e);
+                        warn!("Failed to autostart relaxed {}: {}", container, e);
                     }
                     Autostart::Critical => {
-                        error!("Failed to mount critical {}: {}", container, e);
+                        error!("Failed to autostart critical {}: {}", container, e);
                         return Err(e);
                     }
-                },
+                }
             }
         }
 
         Ok(())
     }
 
-    /// Find the container's NPK
-    fn find_npk(&self, container: &Container) -> Option<Arc<Npk>> {
-        self.repositories.values().find_map(|r| r.get(container))
-    }
-
-    /// Find the repository that has the given container
-    fn find_repository(&self, container: &Container) -> Option<&(dyn Repository + Send + Sync)> {
-        self.repositories
-            .values()
-            .find_map(|r| r.get(container).is_some().then(|| r.as_ref()))
-    }
-
-    /// Mount `container`
-    async fn mount(
-        &self,
-        container: &Container,
-    ) -> Result<impl Future<Output = Result<MountedContainer, Error>>, Error> {
+    /// Create a future that mounts `container`
+    fn mount(&self, container: &Container) -> impl Future<Output = Result<MountInfo, Error>> {
         // Find the repository that has the container
+        let container_state = self.containers.get(container).expect("Internal error");
         let repository = self
-            .find_repository(container)
-            .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
+            .repositories
+            .get(&container_state.repository)
+            .expect("Internal error");
         let key = repository.key().cloned();
-        let npk = repository.get(container).unwrap();
-
-        // Try to mount the npk found. If this fails return with an error - nothing needs to
-        // be cleaned up.
+        let npk = self.npk(container).expect("Internal error");
         let root = self.config.run_dir.join(container.to_string());
         let mount_control = self.mount_control.clone();
-        let mount = async move {
-            let mount_info = mount_control
-                .mount(npk, &root, key.as_ref())
-                .await
-                .map_err(Error::Mount)?;
-
-            Ok(MountedContainer {
-                root,
-                mount_info,
-                process: None,
-            })
-        };
-
-        Ok(mount)
+        mount_control
+            .mount(npk, &root, key.as_ref())
+            .map_err(Error::Mount)
     }
 
     /// Umount a given container
     #[allow(clippy::blocks_in_if_conditions)]
     async fn umount(&mut self, container: &Container) -> Result<(), Error> {
-        let mounted_container = self
-            .containers
-            .get(container)
-            .ok_or_else(|| Error::UmountBusy(container.clone()))?;
+        let container_state = self.state(container)?;
+
         info!("Umounting {}", container);
         // Check if the application is started - if yes it cannot be uninstalled
-        if mounted_container.process.is_some() {
+        if container_state.process.is_some() {
             return Err(Error::UmountBusy(container.clone()));
         }
 
-        let npk = self.find_npk(container).unwrap();
-        let manifest = npk.manifest();
+        let manifest = self.manifest(container).unwrap();
 
-        // If this is a resource check if it can be uninstalled or if it's
-        // used by any (mounted) container. The not mounted containers are
-        // not interesting because the check for all resources is done when
-        // it's mounted/started.
-        if manifest.init.is_none()
-            && self
-                .running_containers()
-                .filter_map(|container| {
-                    self.find_npk(container)
-                        .map(|n| n.manifest().clone().mounts)
-                })
-                .flatten() // A iter of Mounts
-                .map(|(_, mount)| mount)
-                .filter_map(|mount| match mount {
-                    Mount::Resource(Resource { name, version, .. }) => {
-                        Some(Container::new(name, version))
+        // If this container is a resource check all runing containers if they
+        // depend on `container`
+        if manifest.init.is_none() {
+            for (c, state) in &self.containers {
+                // A not started container cannot use `container`
+                if state.process.is_none() {
+                    continue;
+                }
+
+                // Get manifest for container in question
+                let manifest = self.manifest(c).expect("Internal error");
+
+                // Resources cannot have resource dependencies
+                if manifest.init.is_none() {
+                    continue;
+                }
+
+                for mount in &manifest.mounts {
+                    if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
+                        if container.name() == name && container.version() == version {
+                            warn!(
+                                "Failed to umount busy resource container {}. Used by {}",
+                                container, c
+                            );
+                            return Err(Error::UmountBusy(container.clone()));
+                        }
                     }
-                    _ => None,
-                })
-                .any(|c| &c == container)
-        {
-            warn!("Failed to umount busy resource container {}", container);
+                }
+            }
+        }
+
+        if let Some(mount_info) = &container_state.mount_info {
+            self.mount_control
+                .umount(mount_info)
+                .await
+                .map_err(Error::Mount)?;
+        } else {
+            warn!("Container {} is not mounted", container);
             return Err(Error::UmountBusy(container.clone()));
         }
 
-        self.mount_control
-            .umount(&mounted_container.mount_info)
-            .await
-            .expect("Failed to umount");
-        self.containers.remove(container);
+        let container_state = self.state_mut(container).expect("Internal error");
+        container_state.mount_info.take();
         Ok(())
     }
 
@@ -317,17 +321,18 @@ impl<'a> State<'a> {
     pub(super) async fn start(
         &mut self,
         container: &Container,
-        args: Option<&Vec<NonNullString>>,
-        env: Option<&HashMap<NonNullString, NonNullString>>,
+        args: Args<'_>,
+        env: Env<'_>,
     ) -> Result<(), Error> {
         let start = time::Instant::now();
         info!("Trying to start {}", container);
 
-        let mut need_mount = HashSet::new();
-
-        let npk = self
-            .find_npk(container)
-            .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
+        // Check if the container is already running
+        let container_state = self.state(container)?;
+        if container_state.process.is_some() {
+            warn!("Application {} is already running", container);
+            return Err(Error::StartContainerStarted(container.clone()));
+        }
 
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
         if let Some(env) = env {
@@ -342,70 +347,74 @@ impl<'a> State<'a> {
             }
         }
 
+        let manifest = self.manifest(container)?.clone();
+
         // Check if the container is not a resource
-        if npk.manifest().init.is_none() {
+        if manifest.init.is_none() {
             warn!("Container {} is a resource", container);
             return Err(Error::StartContainerResource(container.clone()));
         }
 
+        let mut need_mount = HashSet::new();
+
         // The container to be started
-        if let Some(mounted_container) = self.containers.get(container) {
-            // Check if the container is already started
-            if mounted_container.process.is_some() {
-                warn!("Application {} is already running", container);
-                return Err(Error::StartContainerStarted(container.clone()));
-            }
-        } else if !self.containers.contains_key(container) {
+        if container_state.mount_info.is_none() {
             need_mount.insert(container.clone());
         }
 
-        // Find resources
-        for resource in npk.manifest().mounts.values().filter_map(|m| match m {
-            Mount::Resource(Resource { name, version, .. }) => {
-                Some(Container::new(name.clone(), version.clone()))
-            }
-            _ => None,
-        }) {
-            // Check if the resource is available
-            if self.find_npk(&resource).is_none() {
+        // Collect resources used by container
+        let resources = manifest
+            .mounts
+            .values()
+            .filter_map(|m| match m {
+                Mount::Resource(Resource { name, version, .. }) => {
+                    Some(Container::new(name.clone(), version.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        // Check if all resources are available
+        for resource in &resources {
+            if !self.containers.contains_key(resource) {
                 return Err(Error::StartContainerMissingResource(
                     container.clone(),
-                    resource,
+                    resource.clone(),
                 ));
             }
+        }
 
-            if !self.containers.contains_key(&resource) {
+        // Add resources to the mount vector
+        for resource in resources {
+            let resource_state = self.state(&resource).expect("Internal error");
+            if resource_state.mount_info.is_none() {
                 need_mount.insert(resource.clone());
             }
         }
 
-        info!(
-            "Need to mount {} container before starting {}",
-            need_mount.len(),
-            container
-        );
-
-        for mount in self.mount_all(&Vec::from_iter(need_mount)).await {
-            match mount {
-                Ok(_) => (),
-                Err(e) => {
-                    warn!("Failed to mount: {}", e);
-                    return Err(e);
-                }
+        // Mount containers
+        info!("Mounting {} containers for {}", need_mount.len(), container);
+        let mount_result = self.mount_all(&Vec::from_iter(need_mount)).await;
+        for mount in mount_result {
+            // Abort if at least one container failed to mount
+            if let Err(e) = mount {
+                warn!("Failed to mount: {}", e);
+                return Err(e);
             }
         }
 
-        // This must exist
-        let mounted_container = self.containers.get(container).expect("Internal error");
-        let npk = self.find_npk(container).unwrap();
-        let manifest = npk.manifest();
+        // Get a mutable reference to the container state in order to update the process field
+        let container_state = self.containers.get_mut(container).expect("Internal error");
+
+        // Root of container
+        let root = container_state
+            .mount_info
+            .as_ref()
+            .and_then(|m| m.target.canonicalize().ok())
+            .expect("Failed to canonicalize root");
 
         // Spawn process
         info!("Creating {}", container);
-        let root = mounted_container
-            .root
-            .canonicalize()
-            .expect("Failed to canonicalize root");
 
         let mut process = match self
             .launcher
@@ -415,15 +424,14 @@ impl<'a> State<'a> {
             Ok(p) => p,
             Err(e) => {
                 warn!("Failed to create process for {}", container);
-                // Umount everything mounted so far for this start command
-                warn!("Failed to start {}", container);
                 return Err(e);
             }
         };
+
         let pid = process.pid();
 
         // Debug
-        let debug = super::debug::Debug::new(self.config, manifest, pid).await?;
+        let debug = super::debug::Debug::new(self.config, &manifest, pid).await?;
 
         // CGroups
         let cgroups = {
@@ -436,69 +444,64 @@ impl<'a> State<'a> {
                 self.events_tx.clone(),
                 container,
                 &config,
-                pid,
+                process.pid(),
             )
             .await
             .expect("Failed to create cgroup")
         };
 
         // Signal the process to continue starting. This can fail because of the container content
-        match process.spawn().await {
-            result::Result::Ok(process) => process,
-            result::Result::Err(e) => {
-                warn!("Failed to start {} ({}): {}", container, pid, e);
-                debug.destroy().await.expect("Failed to destroy debug");
-                cgroups.destroy().await;
-                return Err(e);
-            }
-        };
-
-        let mounted_container = self.containers.get_mut(container).unwrap();
+        if let Err(e) = process.spawn().await {
+            warn!("Failed to start {} ({}): {}", container, pid, e);
+            debug.destroy().await.expect("Failed to destroy debug");
+            cgroups.destroy().await;
+            return Err(e);
+        }
 
         // Add process context to process
-        mounted_container.process = Some(ProcessContext {
+        container_state.process = Some(ProcessContext {
             process: Box::new(process),
             started: time::Instant::now(),
             debug,
             cgroups,
         });
 
-        info!(
-            "Started {} ({}) in {:.03}s",
-            container,
-            pid,
-            start.elapsed().as_fractional_secs()
-        );
+        let duration = start.elapsed().as_fractional_secs();
+        info!("Started {} ({}) in {:.03}s", container, pid, duration);
 
+        // Send container started event
         self.container_event(container, ContainerEvent::Started);
 
         Ok(())
     }
 
-    /// Terminate container
+    /// Send signal `signal` to container if running
     pub(super) async fn kill(
         &mut self,
         container: &Container,
         signal: Signal,
     ) -> Result<(), Error> {
-        if let Some(process) = self
-            .containers
-            .get_mut(container)
-            .and_then(|c| c.process.as_mut())
-        {
-            info!("Killing {} with {}", container, signal.as_str());
-            process.kill(signal).await
-        } else {
-            Err(Error::StopContainerNotStarted(container.clone()))
+        let container_state = self.state_mut(container)?;
+
+        match &mut container_state.process {
+            Some(process) => {
+                info!("Killing {} with {}", container, signal.as_str());
+                process.kill(signal).await
+            }
+            None => Err(Error::StopContainerNotStarted(container.clone())),
         }
     }
 
     /// Shutdown the runtime: stop running applications and umount npks
     pub(super) async fn shutdown(mut self) -> Result<(), Error> {
-        let to_umount = self.containers.keys().cloned().collect::<Vec<_>>();
+        let to_umount = self
+            .containers
+            .iter()
+            .filter_map(|(container, state)| state.mount_info.as_ref().map(|_| container.clone()))
+            .collect::<Vec<_>>();
 
-        for (container, mounted) in self.containers.iter_mut() {
-            if let Some(mut context) = mounted.process.take() {
+        for (container, state) in &mut self.containers {
+            if let Some(mut context) = state.process.take() {
                 let pid = context.process.pid();
                 info!("Sending SIGKILL to {} ({})", container, pid);
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), SIGKILL).ok();
@@ -513,8 +516,8 @@ impl<'a> State<'a> {
             }
         }
 
-        for container in &to_umount {
-            self.umount(container).await?;
+        for container in to_umount {
+            self.umount(&container).await?;
         }
 
         self.launcher.shutdown().await?;
@@ -523,25 +526,43 @@ impl<'a> State<'a> {
     }
 
     /// Install an NPK
-    async fn install(
-        &mut self,
-        repository_id: &str,
-        rx: &mut mpsc::Receiver<Bytes>,
-    ) -> Result<(), Error> {
+    async fn install(&mut self, id: &str, rx: &mut mpsc::Receiver<Bytes>) -> Result<(), Error> {
         // Find the repository
         let repository = self
             .repositories
-            .get_mut(repository_id)
-            .ok_or_else(|| Error::InvalidRepository(repository_id.to_string()))?;
+            .get_mut(id)
+            .ok_or_else(|| Error::InvalidRepository(id.to_string()))?;
 
         // Add the npk to the repository
         let container = repository.insert(rx).await?;
 
-        info!("Successfully installed {}", container);
+        // Check if container is already known and remove newly installed one if so
+        if let Ok(state) = self.state(&container) {
+            warn!(
+                "Skipping duplicate container {} which is already in repository {}",
+                container, state.repository
+            );
+            let repository = self
+                .repositories
+                .get_mut(id)
+                .ok_or_else(|| Error::InvalidRepository(id.to_string()))?;
+            repository.remove(&container).await?;
+            Err(Error::InstallDuplicate(container))
+        } else {
+            // Add the container to the state
+            self.containers.insert(
+                container.clone(),
+                ContainerState {
+                    repository: id.into(),
+                    ..Default::default()
+                },
+            );
+            info!("Successfully installed {}", container);
 
-        self.container_event(&container, ContainerEvent::Installed);
+            self.container_event(&container, ContainerEvent::Installed);
 
-        Ok(())
+            Ok(())
+        }
     }
 
     /// Remove and umount a specific app
@@ -549,14 +570,24 @@ impl<'a> State<'a> {
     async fn uninstall(&mut self, container: &Container) -> result::Result<(), Error> {
         info!("Trying to uninstall {}", container);
 
-        if self.containers.contains_key(container) {
+        let state = self.state(container)?;
+        let is_mounted = state.mount_info.is_some();
+        let repository = state.repository.clone();
+
+        // Umount
+        if is_mounted {
             self.umount(container).await?;
         }
 
-        for repository in self.repositories.values_mut() {
-            repository.remove(container).await?;
-        }
+        // Remove from repository
+        debug!("Removing {} from {}", container, repository);
+        self.repositories
+            .get_mut(&repository)
+            .expect("Internal error")
+            .remove(container)
+            .await?;
 
+        self.containers.remove(container);
         info!("Successfully uninstalled {}", container);
 
         self.container_event(container, ContainerEvent::Uninstalled);
@@ -564,49 +595,47 @@ impl<'a> State<'a> {
         Ok(())
     }
 
+    /// Gather statistics for `container`
     async fn container_stats(
         &mut self,
         container: &Container,
     ) -> result::Result<ContainerStats, Error> {
-        if let Some(process) = self
-            .containers
-            .get(container)
-            .and_then(|c| c.process.as_ref())
-        {
+        // Get container state or return if it's unknown
+        let state = self.state(container)?;
+
+        // Gather stats if the container is running
+        if let Some(process) = state.process.as_ref() {
             info!("Collecting stats of {}", container);
-            let stats = process.cgroups.stats();
-            Ok(stats)
+            Ok(process.cgroups.stats())
         } else {
-            Err(Error::StopContainerNotStarted(container.clone()))
+            Err(Error::ContainerNotStarted(container.clone()))
         }
     }
 
-    /// Handle the exit of a container. The restarting of containers is a subject
-    /// to be removed and handled externally
+    /// Handle the exit of a container
     async fn on_exit(
         &mut self,
         container: &Container,
         exit_status: &ExitStatus,
     ) -> Result<(), Error> {
-        let npk = self.find_npk(container).unwrap();
-        let manifest = npk.manifest();
+        let autostart = self
+            .manifest(container)
+            .ok()
+            .and_then(|manfiest| manfiest.autostart.clone());
 
-        if let Some(mounted_container) = self.containers.get_mut(container) {
-            if let Some(process) = mounted_container.process.take() {
-                let critical = manifest.autostart == Some(Autostart::Critical);
-                if critical {
+        if let Ok(state) = self.state_mut(container) {
+            if let Some(process) = state.process.take() {
+                let is_critical = autostart == Some(Autostart::Critical);
+                let duration = process.started.elapsed();
+                if is_critical {
                     error!(
                         "Critical process {} exited after {:?} with status {:?}",
-                        container,
-                        process.started.elapsed(),
-                        exit_status,
+                        container, duration, exit_status,
                     );
                 } else {
                     info!(
                         "Process {} exited after {:?} with status {:?}",
-                        container,
-                        process.started.elapsed(),
-                        exit_status,
+                        container, duration, exit_status,
                     );
                 }
 
@@ -615,7 +644,7 @@ impl<'a> State<'a> {
                 self.container_event(container, ContainerEvent::Exit(exit_status.clone()));
 
                 // This is a critical flagged container that exited with a error exit code. That's not good...
-                if !exit_status.success() && critical {
+                if !exit_status.success() && is_critical {
                     return Err(Error::CriticalContainer(
                         container.clone(),
                         exit_status.clone(),
@@ -658,7 +687,7 @@ impl<'a> State<'a> {
                 if let api::model::Message::Request(ref request) = message {
                     let response = match request {
                         api::model::Request::Containers => {
-                            Response::Containers(self.list_containers().await)
+                            Response::Containers(self.list_containers())
                         }
                         api::model::Request::Install(_, _) => unreachable!(),
                         api::model::Request::Mount(containers) => {
@@ -675,7 +704,8 @@ impl<'a> State<'a> {
                             Response::Mount(result)
                         }
                         api::model::Request::Repositories => {
-                            Response::Repositories(self.list_repositories())
+                            let repositories = self.repositories.keys().cloned().collect();
+                            Response::Repositories(repositories)
                         }
                         api::model::Request::Shutdown => {
                             self.events_tx
@@ -755,20 +785,26 @@ impl<'a> State<'a> {
         Ok(())
     }
 
+    /// Try to mount all containers in `containers` in parallel and return the results. The parallelism
+    /// is archived by a dedicated thread pool that exectures the blocking mount operations on n threads
+    /// as configured in the runtime configuration.
     async fn mount_all(&mut self, containers: &[Container]) -> Vec<Result<Container, Error>> {
+        let start = time::Instant::now();
         let mut mounts = Vec::with_capacity(containers.len());
 
         // Create mount futures
         for c in containers {
             // Containers cannot be mounted twice
-            if self.containers.contains_key(c) {
-                mounts.push(Either::Right(ready(Err(Error::MountBusy(c.clone())))));
+            if self
+                .containers
+                .get(c)
+                .map(|s| s.mount_info.is_some())
+                .unwrap_or(false)
+            {
+                let error = Err(Error::MountBusy(c.clone()));
+                mounts.push(Either::Right(ready(error)));
             } else {
-                let m = match self.mount(c).await {
-                    Ok(m) => Either::Left(m),
-                    Err(e) => Either::Right(ready(Err(e))),
-                };
-                mounts.push(m);
+                mounts.push(Either::Left(self.mount(c)))
             }
         }
 
@@ -777,58 +813,53 @@ impl<'a> State<'a> {
             .drain(..)
             .map(|t| self.executor.spawn_with_handle(t).unwrap());
 
-        // Insert all mounted containers into containers map
-        join_all(mounts)
-            .await
-            .drain(..)
-            .zip(containers)
-            .map(|(r, container)| {
-                match r {
-                    Ok(mounted) => {
-                        // Add mounted container to our internal housekeeping
-                        info!("Mounted {}", container);
-                        self.containers.insert(container.clone(), mounted);
-                        Ok(container.clone())
-                    }
-                    Err(e) => {
-                        warn!("Failed to mount {}: {}", container, e);
-                        Err(e)
-                    }
+        // Process mount results
+        let mut result = Vec::new();
+        for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
+            match mount_result {
+                Ok(mount_info) => {
+                    let container_state = self.state_mut(container).expect("Internal error");
+                    container_state.mount_info = Some(mount_info);
+                    info!("Mounted {}", container);
+                    result.push(Ok(container.clone()));
                 }
-            })
-            .collect()
-    }
-
-    async fn list_containers(&self) -> Vec<api::model::ContainerData> {
-        let mut containers = Vec::new();
-        for (repository_name, repository) in &self.repositories {
-            for npk in repository.containers() {
-                let manifest = npk.manifest();
-                let container = Container::new(manifest.name.clone(), manifest.version.clone());
-                let process = self
-                    .containers
-                    .get(&container)
-                    .and_then(|c| c.process.as_ref())
-                    .map(|f| api::model::Process {
-                        pid: f.process.pid(),
-                        uptime: f.started.elapsed().as_nanos() as u64,
-                    });
-                let mounted = self.containers.contains_key(&container);
-                let c = api::model::ContainerData::new(
-                    container,
-                    repository_name.into(),
-                    manifest.clone(),
-                    process,
-                    mounted,
-                );
-                containers.push(c);
+                Err(e) => {
+                    warn!("Failed to mount {}: {}", container, e);
+                    result.push(Err(e));
+                }
             }
         }
-        containers
+        let duration = start.elapsed().as_fractional_secs();
+        info!(
+            "Mounted {} containers in {:.03}s",
+            containers.len(),
+            duration
+        );
+        result
     }
 
-    fn list_repositories(&self) -> HashSet<RepositoryId> {
-        self.repositories.keys().cloned().collect()
+    fn list_containers(&self) -> Vec<api::model::ContainerData> {
+        let mut result = Vec::with_capacity(self.containers.len());
+
+        for (container, state) in &self.containers {
+            let manifest = self.manifest(container).expect("Internal error").clone();
+            let process = state.process.as_ref().map(|context| api::model::Process {
+                pid: context.process.pid(),
+                uptime: context.started.elapsed().as_nanos() as u64,
+            });
+            let repository = state.repository.clone();
+            let mounted = state.mount_info.is_some();
+            let container_data = api::model::ContainerData::new(
+                container.clone(),
+                repository,
+                manifest,
+                process,
+                mounted,
+            );
+            result.push(container_data);
+        }
+
+        result
     }
 
     /// Send a container event to all subriber consoles
@@ -839,10 +870,34 @@ impl<'a> State<'a> {
         }
     }
 
-    /// Returns an iterator over the containers currently running
-    fn running_containers(&self) -> impl Iterator<Item = &Container> {
+    fn state(&self, container: &Container) -> Result<&ContainerState, Error> {
         self.containers
-            .iter()
-            .filter_map(|(container, state)| state.process.is_some().then(|| container))
+            .get(container)
+            .ok_or_else(|| Error::InvalidContainer(container.clone()))
+    }
+
+    fn state_mut(&mut self, container: &Container) -> Result<&mut ContainerState, Error> {
+        self.containers
+            .get_mut(container)
+            .ok_or_else(|| Error::InvalidContainer(container.clone()))
+    }
+
+    fn npk(&self, container: &Container) -> Result<&Npk, Error> {
+        let state = self.state(container)?;
+        let repository = self.repository(&state.repository)?;
+        repository
+            .get(container)
+            .ok_or_else(|| Error::InvalidContainer(container.clone()))
+    }
+
+    fn manifest(&self, container: &Container) -> Result<&Manifest, Error> {
+        let npk = self.npk(container)?;
+        Ok(npk.manifest())
+    }
+
+    fn repository(&self, repository: &str) -> Result<&Repository, Error> {
+        self.repositories
+            .get(repository)
+            .ok_or_else(|| Error::InvalidRepository(repository.into()))
     }
 }

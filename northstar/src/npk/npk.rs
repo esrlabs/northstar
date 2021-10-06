@@ -322,8 +322,8 @@ fn read_to_string<R: Read + Seek>(zip: &mut Zip<R>, name: &str) -> Result<String
 }
 
 fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
-    #[derive(Debug, Deserialize)]
     #[allow(unused)]
+    #[derive(Debug, Deserialize)]
     struct SerdeSignature {
         key: String,
         signature: String,

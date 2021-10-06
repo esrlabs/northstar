@@ -8,7 +8,6 @@ use nix::{
     libc::{EXIT_FAILURE, EXIT_SUCCESS},
     sys::signal,
 };
-use repository::Repository;
 use state::State;
 use std::{
     fmt::{self},

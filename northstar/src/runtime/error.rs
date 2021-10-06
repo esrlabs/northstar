@@ -22,14 +22,16 @@ pub enum Error {
     UmountBusy(Container),
     #[error("Container {0} failed to start: Already started")]
     StartContainerStarted(Container),
-    #[error("Container {0} failed to start: Resources cannot be started")]
+    #[error("Container {0} failed to start: Resources failed to mount")]
     StartContainerResource(Container),
     #[error("Container {0} failed to start: Resource {1} is missing")]
     StartContainerMissingResource(Container, Container),
     #[error("Container {0} failed to start: {1}")]
     StartContainerFailed(Container, String),
-    #[error("Container {0} failed to stop: Not started")]
+    #[error("Container {0} failed to stop")]
     StopContainerNotStarted(Container),
+    #[error("Container {0} failed is stop: not started")]
+    ContainerNotStarted(Container),
     #[error("Invalid repository {0}")]
     InvalidRepository(RepositoryId),
     #[error("Failed to install {0}: Already installed")]
@@ -90,6 +92,9 @@ impl From<Error> for api::model::Error {
                 api::model::Error::StartContainerFailed(container, reason)
             }
             Error::StopContainerNotStarted(container) => {
+                api::model::Error::StopContainerNotStarted(container)
+            }
+            Error::ContainerNotStarted(container) => {
                 api::model::Error::StopContainerNotStarted(container)
             }
             Error::InvalidRepository(repository) => {

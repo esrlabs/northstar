@@ -1,9 +1,14 @@
-console = [
-  "tcp://localhost:4200"
-]
+# Console adresses
+console = ["tcp://localhost:4200"]
+# Directory where containers are mounted
 run_dir = "target/northstar/run"
+# Directory for `persist` mounts of containers
 data_dir = "target/northstar/data"
+# Log directory for debug logs and traces
 log_dir = "target/northstar/logs"
+# Number of paralllel mounts possible
+mount_parallel = 10
+# Top level cgroup name
 cgroup = "northstar"
 
 # Start a `strace -p PID ...` instance after a container is started.

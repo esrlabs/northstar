@@ -1,5 +1,8 @@
-use super::{key::PublicKey, state::Npk};
-use crate::npk::dm_verity::VerityHeader;
+use super::{key::PublicKey, repository::Npk};
+use crate::{
+    common::{name::Name, version::Version},
+    npk::{dm_verity::VerityHeader, npk::Hashes},
+};
 use devicemapper::{DevId, DmError, DmName, DmUuid};
 use floating_duration::TimeAsFloat;
 use futures::{Future, StreamExt};
@@ -9,7 +12,7 @@ use loopdev::LoopControl;
 pub use nix::mount::MsFlags as MountFlags;
 use std::{
     io,
-    os::unix::io::AsRawFd,
+    os::unix::{io::AsRawFd, prelude::RawFd},
     path::{Path, PathBuf},
     process,
     str::Utf8Error,
@@ -46,9 +49,9 @@ pub enum Error {
 
 #[derive(Debug)]
 pub(super) struct MountInfo {
-    device: PathBuf,
-    target: PathBuf,
-    dm_name: Option<String>,
+    pub device: PathBuf,
+    pub target: PathBuf,
+    pub dm_name: Option<String>,
 }
 
 pub(super) struct MountControl {
@@ -75,29 +78,46 @@ impl MountControl {
     /// Mounts the npk root fs to target and returns the device used to mount (loopback or device mapper)
     pub(super) fn mount(
         &self,
-        npk: Arc<Npk>,
+        npk: &Npk,
         target: &Path,
         key: Option<&PublicKey>,
     ) -> impl Future<Output = Result<MountInfo, Error>> {
-        let key = key.copied();
         let dm = self.dm.clone();
         let lc = self.lc.clone();
+        let key = key.cloned();
         let target = target.to_owned();
+        let fd = npk.as_raw_fd();
+        let fsimg_size = npk.fsimg_size();
+        let fsimg_offset = npk.fsimg_offset();
+        let name = npk.manifest().name.clone();
+        let version = npk.manifest().version.clone();
+        let verity_header = npk.verity_header().cloned();
+        let hashes = npk.hashes().cloned();
 
         async move {
             let start = time::Instant::now();
 
-            debug!(
-                "Mounting {}:{}",
-                npk.manifest().name,
-                npk.manifest().version
-            );
-            let device = mount(dm, lc, &npk, &target, key.is_some()).await?;
+            debug!("Mounting {}:{}", name, version);
+            let device = mount(
+                dm,
+                lc,
+                fd,
+                fsimg_offset,
+                fsimg_size,
+                &name,
+                &version,
+                verity_header,
+                hashes,
+                &target,
+                key.is_some(),
+            )
+            .await?;
+
             let duration = start.elapsed();
             info!(
                 "Mounted {}:{} Mounting: {:.03}s",
-                npk.manifest().name,
-                npk.manifest().version,
+                name,
+                version,
                 duration.as_fractional_secs(),
             );
 
@@ -139,23 +159,21 @@ impl MountControl {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn mount(
     dm: Arc<devicemapper::DM>,
     lc: Arc<LoopControl>,
-    npk: &Arc<Npk>,
+    fd: RawFd,
+    fsimg_offset: u64,
+    fsimg_size: u64,
+    name: &Name,
+    version: &Version,
+    verity_header: Option<VerityHeader>,
+    hashes: Option<Hashes>,
     target: &Path,
     verity: bool,
 ) -> Result<MountInfo, Error> {
-    let verity_header = npk.verity_header().to_owned();
-    let fsimg_offset = npk.fsimg_offset();
-    let fsimg_size = npk.fsimg_size();
-    let manifest = npk.manifest();
-    let dm_name = format!(
-        "northstar_{}_{}_{}",
-        process::id(),
-        manifest.name,
-        manifest.version
-    );
+    let dm_name = format!("northstar_{}_{}_{}", process::id(), name, version);
 
     // Acquire a loop device and attach the backing file. This operation is racy because
     // getting the next free index and attaching is not atomic. Retry the operation in a
@@ -169,7 +187,7 @@ async fn mount(
             .size_limit(fsimg_size)
             .read_only(true)
             .autoclear(true)
-            .attach_fd(npk.as_raw_fd())
+            .attach_fd(fd)
             .map_err(Error::LoopDevice)
             .is_ok()
         {
@@ -184,7 +202,7 @@ async fn mount(
         // We're done. Use the loop device path e.g. /dev/loop4
         loop_device.path().unwrap()
     } else {
-        match (&verity_header, &npk.hashes()) {
+        match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
                 let (major, minor) = (loop_device.major().unwrap(), loop_device.minor().unwrap());
                 let loop_device_id = format!("{}:{}", major, minor);
@@ -204,7 +222,7 @@ async fn mount(
             _ => {
                 warn!(
                     "Cannot mount {}:{} without verity information from a repository with key",
-                    manifest.name, manifest.version
+                    name, version
                 );
                 return Err(Error::Npk("Missing verity information in NPK"));
             }
