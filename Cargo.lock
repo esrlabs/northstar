@@ -1223,7 +1223,6 @@ dependencies = [
  "proc-mounts",
  "proptest",
  "rand 0.7.3",
- "regex",
  "rlimit",
  "semver 0.11.0",
  "serde",

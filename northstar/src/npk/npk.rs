@@ -8,7 +8,6 @@ use ed25519_dalek::{
 };
 use itertools::Itertools;
 use rand::rngs::OsRng;
-use regex::Regex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -35,8 +34,8 @@ pub const VERSION: Version = semver::Version {
 
 // Binaries
 const MKSQUASHFS: &str = "mksquashfs";
-const MKSQUASHFS_MAJOR_VERSION_MINIMUM: u32 = 4;
-const MKSQUASHFS_MINOR_VERSION_MINIMUM: u32 = 1;
+const MKSQUASHFS_MAJOR_VERSION_MIN: u64 = 4;
+const MKSQUASHFS_MINOR_VERSION_MIN: u64 = 1;
 const UNSQUASHFS: &str = "unsquashfs";
 
 // File name and directory components
@@ -287,12 +286,10 @@ fn hashes<R: Read + Seek>(
             let signature_content = read_to_string(&mut zip, SIGNATURE_NAME)?;
             let mut sections = signature_content.split("---");
             let hashes_string = sections.next().unwrap_or_default();
-
             let signature_string = sections.next().unwrap_or_default();
             let signature = decode_signature(signature_string)?;
             k.verify_strict(hashes_string.as_bytes(), &signature)
                 .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))?;
-
             Ok(Some(Hashes::from_str(hashes_string)?))
         }
         None => Ok(None),
@@ -770,6 +767,7 @@ fn create_squashfs_img(
 ) -> Result<(), Error> {
     let pseudo_files = gen_pseudo_files(manifest)?;
 
+    // Locate mksquashfs
     which::which(&MKSQUASHFS)
         .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS)))?;
     if !root.exists() {
@@ -780,7 +778,6 @@ fn create_squashfs_img(
     }
 
     // Check mksquashfs version
-    let regex = Regex::new(r"([0-9]*\.[0-9]*)").unwrap(); // unwrap(): Creating regex from constant expression will never fail
     let stdout = String::from_utf8(
         Command::new(&MKSQUASHFS)
             .arg("-version")
@@ -790,35 +787,36 @@ fn create_squashfs_img(
     )
     .map_err(|e| Error::Squashfs(format!("Failed to parse mksquashfs output: {}", e)))?;
     let first_line = stdout.lines().next().unwrap_or_default();
-    if let Some(captures) = regex.captures(&first_line) {
-        if let Some(m) = captures.get(0) {
-            let mut split = m.as_str().split('.');
-            let major = split
-                .next()
-                .unwrap_or_default()
-                .parse::<u32>()
-                .unwrap_or_default();
-            let minor = split
-                .next()
-                .unwrap_or_default()
-                .parse::<u32>()
-                .unwrap_or_default();
-            if (major < MKSQUASHFS_MAJOR_VERSION_MINIMUM)
-                || (major == MKSQUASHFS_MAJOR_VERSION_MINIMUM
-                    && minor < MKSQUASHFS_MINOR_VERSION_MINIMUM)
-            {
-                return Err(Error::Squashfs(format!(
-                    "Detected mksquashfs version {}.{} is too old. The required minimum version is {}.{}.",
-                    major, minor, MKSQUASHFS_MAJOR_VERSION_MINIMUM, MKSQUASHFS_MINOR_VERSION_MINIMUM
-                )));
-            }
-        }
-    } else {
-        return Err(Error::Squashfs(
-            "Failed to determine mksquashfs version".to_string(),
-        ));
+    let mut major_minor = first_line.split(' ').nth(2).unwrap_or_default().split('.');
+    let major = major_minor
+        .next()
+        .unwrap_or_default()
+        .parse::<u64>()
+        .unwrap_or_default();
+    let minor = major_minor.next().unwrap_or_default();
+    let minor = minor.parse::<u64>().unwrap_or_else(|_| {
+        // remove trailing subversion if present (e.g. 4.4-e0485802)
+        minor
+            .split(|c: char| !c.is_numeric())
+            .next()
+            .unwrap_or_default()
+            .parse::<u64>()
+            .unwrap_or_default()
+    });
+    let actual = Version::new(major, minor, 0);
+    let required = Version::new(
+        MKSQUASHFS_MAJOR_VERSION_MIN,
+        MKSQUASHFS_MINOR_VERSION_MIN,
+        0,
+    );
+    if actual < required {
+        return Err(Error::Squashfs(format!(
+            "Detected mksquashfs version {}.{} is too old. The required minimum version is {}.{}",
+            major, minor, MKSQUASHFS_MAJOR_VERSION_MIN, MKSQUASHFS_MINOR_VERSION_MIN
+        )));
     }
 
+    // Run mksquashfs to create image
     let mut cmd = Command::new(&MKSQUASHFS);
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
