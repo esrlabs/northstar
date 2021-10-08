@@ -782,18 +782,15 @@ fn create_squashfs_img(
 
     // Check mksquashfs version
     let regex = Regex::new(r"([0-9]*\.[0-9]*)").unwrap(); // unwrap(): Creating regex from constant expression will never fail
-    let first_line = String::from_utf8(
+    let stdout = String::from_utf8(
         Command::new(&MKSQUASHFS)
             .arg("-version")
             .output()
             .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS, e)))?
             .stdout,
     )
-    .map_err(|e| Error::Squashfs(format!("Failed to parse mksquashfs output: {}", e)))?
-    .lines()
-    .next()
-    .unwrap_or_default()
-    .to_string();
+    .map_err(|e| Error::Squashfs(format!("Failed to parse mksquashfs output: {}", e)))?;
+    let first_line = stdout.lines().next().unwrap_or_default();
     if let Some(captures) = regex.captures(&first_line) {
         if let Some(m) = captures.get(0) {
             let mut split = m.as_str().split('.');
