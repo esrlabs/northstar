@@ -5,13 +5,13 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0"
-env_logger = "0.8.3"
-futures = "0.3.14"
+anyhow = "1.0.44"
+env_logger = "0.9.0"
+futures = "0.3.17"
 log = "0.4.14"
 northstar = { path = "../../northstar", features = ["api"], default-features = false }
-rand = "0.8.3"
-structopt = "0.3.21"
-tokio = { version = "1.9", features = ["rt-multi-thread", "macros", "net", "time"] }
-tokio-util = "0.6.6"
-url = { version = "2.2", features = ["serde"] }
+rand = "0.8.4"
+structopt = "0.3.25"
+tokio = { version = "1.12.0", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio-util = "0.6.8"
+url = { version = "2.2.2", features = ["serde"] }

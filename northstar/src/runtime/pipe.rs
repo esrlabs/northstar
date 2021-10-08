@@ -138,6 +138,9 @@ impl AsyncRead for AsyncPipeRead {
                     buf.advance(n);
                     return Poll::Ready(Ok(()));
                 }
+                Ok(Err(e)) if e.kind() == io::ErrorKind::WouldBlock => {
+                    return Poll::Pending;
+                }
                 Ok(Err(e)) => {
                     return Poll::Ready(Err(e));
                 }
@@ -230,8 +233,8 @@ impl<T: AsRawFd> RawFdExt for T {
 /// Maps an nix::Error to a io::Error
 fn from_nix(error: nix::Error) -> io::Error {
     match error {
-        nix::Error::Sys(e) => io::Error::from_raw_os_error(e as i32),
-        e => io::Error::new(io::ErrorKind::Other, e),
+        nix::Error::EAGAIN => io::Error::from(io::ErrorKind::WouldBlock),
+        _ => io::Error::new(io::ErrorKind::Other, error),
     }
 }
 
@@ -435,7 +438,7 @@ mod tests {
 
         let write = tokio::spawn(async move {
             for n in 0..=65535u32 {
-                write.write(&n.to_be_bytes()).await.unwrap();
+                write.write_all(&n.to_be_bytes()).await.unwrap();
             }
         });
 

@@ -249,7 +249,7 @@ impl super::state::Process for Process {
         match sys::signal::kill(process_group, sigterm) {
             Ok(_) => {}
             // The process is terminated already. Wait for the waittask to do it's job and resolve exit_status
-            Err(nix::Error::Sys(errno)) if errno == Errno::ESRCH => {
+            Err(nix::Error::ESRCH) => {
                 debug!("Process {} already exited", self.pid);
             }
             Err(e) => {
@@ -352,8 +352,8 @@ fn exit_status(pid: Pid) -> Option<ExitStatus> {
         // This is only returned if WaitPidFlag::WNOHANG was used (otherwise wait() or waitpid() would block until there was something to report).
         Ok(wait::WaitStatus::StillAlive) => None,
         // Retry the waitpid call if waitpid fails with EINTR
-        Err(e) if e == nix::Error::Sys(Errno::EINTR) => None,
-        Err(e) if e == nix::Error::Sys(Errno::ECHILD) => {
+        Err(nix::Error::EINTR) => None,
+        Err(nix::Error::ECHILD) => {
             panic!("Waitpid returned ECHILD. This is bug.");
         }
         Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
