@@ -11,10 +11,12 @@
 #  from E.S.R.Labs.
 
 on post-fs-data
-    mkdir /dev/memcg/northstar
+    mkdir /dev/blkio/northstar
     mkdir /dev/cpuctl/northstar
-    chown system system /dev/memcg/northstar
+    mkdir /dev/memcg/northstar
+    chown system system /dev/blkio/northstar
     chown system system /dev/cpuctl/northstar
+    chown system system /dev/memcg/northstar
 
     chown system system /dev/device-mapper
     chown system system /dev/loop-control
