@@ -5,8 +5,8 @@ authors = ["ESRLabs"]
 edition = "2018"
 
 [dependencies]
-anyhow = "1.0"
-structopt = "0.3.21"
-nix = "0.20.0"
-url = "2.2"
-caps = "0.5.1"
+anyhow = "1.0.44"
+structopt = "0.3.25"
+nix = "0.23.0"
+url = "2.2.2"
+caps = "0.5.3"

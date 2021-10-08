@@ -73,13 +73,7 @@ pub struct Manifest {
 
 impl Manifest {
     /// Manifest version supported by the runtime
-    pub const VERSION: Version = Version {
-        major: 0,
-        minor: 1,
-        patch: 0,
-        pre: vec![],
-        build: vec![],
-    };
+    pub const VERSION: Version = Version::new(0, 1, 0);
 
     /// Read a manifest from `reader`
     pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {

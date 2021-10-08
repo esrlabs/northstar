@@ -7,53 +7,53 @@ build = "build.rs"
 license-file = "LICENSE.md"
 
 [dependencies]
-async-stream = { version = "0.3.0", optional = true }
-async-trait = { version = "0.1.50", optional = true }
+async-stream = { version = "0.3.2", optional = true }
+async-trait = { version = "0.1.51", optional = true }
 base64 = { version = "0.13.0", optional = true }
-bitflags = { version = "1.2", optional = true }
-byteorder = { version = "1.4", optional = true }
-bytes = { version = "1.0", optional = true }
-bytesize = { version = "1.0", optional = true }
-caps = { version = "0.5.1", optional = true }
+bitflags = { version = "1.3.2", optional = true }
+byteorder = { version = "1.4.3", optional = true }
+bytes = { version = "1.1.0", optional = true }
+bytesize = { version = "1.1.0", optional = true }
+caps = { version = "0.5.3", optional = true }
 cgroups-rs = { git = "https://github.com/esrlabs/cgroups-rs.git", branch = "northstar", features = ["serde"], optional = true }
 derive-new = { version = "0.5.9", optional = true }
 devicemapper = { version = "0.30.0", optional = true }
-ed25519-dalek = { version = "1.0", optional = true }
+ed25519-dalek = { version = "1.0.1", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
-futures = { version = "0.3.14", features = ["thread-pool"], optional = true }
+futures = { version = "0.3.17", features = ["thread-pool"], optional = true }
 hex = { version = "0.4.3", optional = true }
 humanize-rs = { version = "0.1.5", optional = true }
-inotify = { version = "0.9.3", features = ["stream"], optional = true }
-itertools = { version = "0.10.0", optional = true }
-lazy_static = { version = "1.4", optional = true }
+inotify = { version = "0.9.5", features = ["stream"], optional = true }
+itertools = { version = "0.10.1", optional = true }
+lazy_static = { version = "1.4.0", optional = true }
 log = { version = "0.4.14", features = [ "serde"] }
 loopdev = { version = "0.4.0", optional = true }
 memfd = { version = "0.4.1", optional = true }
-memoffset = { version = "0.6", optional = true }
-nix = { version = "0.20.0", optional = true }
+memoffset = { version = "0.6.4", optional = true }
+nix = { version = "0.23.0", optional = true }
 proc-mounts = { version = "0.2.4", optional = true }
 rand = { version = "0.7.3", optional = true }
 rlimit = { version = "0.6.2", optional = true }
-semver = { version = "0.11.0", features = ["serde"] }
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = { version = "1.0", optional = true }
-serde_with = { version = "1.9", optional = true }
-serde_yaml = { version = "0.8.17", optional = true }
-sha2 = { version = "0.9.3", optional = true }
-tempfile = { version = "3.2", optional = true }
-thiserror = "1.0"
-tokio = { version = "1.9", features = ["fs", "io-std", "io-util", "macros", "process", "rt", "signal", "sync", "time"] }
+semver = { version = "1.0.4", features = ["serde"] }
+serde = { version = "1.0.130", features = ["derive", "rc"] }
+serde_json = { version = "1.0.68", optional = true }
+serde_with = { version = "1.11.0", optional = true }
+serde_yaml = { version = "0.8.21", optional = true }
+sha2 = { version = "0.9.8", optional = true }
+tempfile = { version = "3.2.0", optional = true }
+thiserror = { version = "1.0.30", optional = true }
+tokio = { version = "1.12.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt", "signal", "sync", "time"] }
 tokio-eventfd = { version = "0.2.0", optional = true }
-tokio-util = { version = "0.6.6", features = ["codec", "io"], optional = true }
-url = { version = "2.2", features = ["serde"], optional = true }
+tokio-util = { version = "0.6.8", features = ["codec", "io"], optional = true }
+url = { version = "2.2.2", features = ["serde"], optional = true }
 uuid = { version = "0.8.2", features = ["v4"], optional = true }
-which = { version = "4.1", optional = true }
+which = { version = "4.2.2", optional = true }
 zip = { version = "0.5.13", features = ["unreserved"], optional = true }
 
 [dev-dependencies]
-anyhow = "1.0"
-nix = "0.20.0"
-proptest = "1.0"
+anyhow = "1.0.44"
+nix = "0.23.0"
+proptest = "1.0.0"
 
 [features]
 api = [
@@ -62,6 +62,7 @@ api = [
     "futures",
     "npk",
     "serde_json",
+    "thiserror",
     "tokio-util",
 ]
 npk = [
@@ -79,6 +80,7 @@ npk = [
     "serde_with",
     "serde_yaml",
     "tempfile",
+    "thiserror",
     "uuid",
     "which",
     "zip"
@@ -105,6 +107,7 @@ runtime = [
     "proc-mounts",
     "rlimit",
     "tempfile",
+    "thiserror",
     "tokio-eventfd",
     "tokio-util",
     "url",
@@ -113,6 +116,6 @@ runtime = [
 seccomp = ["caps", "lazy_static", "memoffset", "nix"]
 
 [build-dependencies]
-anyhow = "1.0"
-bindgen = { version = "0.58.1", default-features = false, features = ["runtime"] }
-nix = "0.20.0"
+anyhow = "1.0.44"
+bindgen = { version = "0.59.1", default-features = false, features = ["runtime"] }
+nix = "0.23.0"

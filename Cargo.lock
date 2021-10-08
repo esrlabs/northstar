@@ -19,9 +19,9 @@ dependencies = [
 
 [[package]]
 name = "android-logd-logger"
-version = "0.1.3"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24f4e9235150783d31e1dd88e2571a2e1dc7bac387ec098f16dffa724283e1de"
+checksum = "53eff4527d2f64c8374a3bbe1d280ce660203e8c83e4a893231037a488639a7b"
 dependencies = [
  "bytes",
  "env_logger 0.8.4",
@@ -29,6 +29,7 @@ dependencies = [
  "libc",
  "log",
  "redox_syscall 0.2.10",
+ "thiserror",
  "time 0.2.27",
  "winapi",
 ]
@@ -152,25 +153,6 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex 0.1.1",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.58.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f8523b410d7187a43085e7e064416ea32ded16bd0a4e6fc025e21616d01258f"
-dependencies = [
- "bitflags",
- "cexpr 0.4.0",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "peeking_take_while",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex 1.1.0",
 ]
 
 [[package]]
@@ -639,11 +621,8 @@ version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a19187fea3ac7e84da7dacf48de0c45d63c6a76f9490dae389aead16c243fce3"
 dependencies = [
- "atty",
- "humantime",
  "log",
  "regex",
- "termcolor",
 ]
 
 [[package]]
@@ -1026,7 +1005,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caps",
- "nix 0.20.0",
+ "nix 0.23.0",
 ]
 
 [[package]]
@@ -1114,9 +1093,9 @@ version = "0.1.0"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "env_logger 0.8.4",
+ "env_logger 0.9.0",
  "log",
- "nix 0.20.0",
+ "nix 0.23.0",
  "northstar",
  "proc-mounts",
  "structopt",
@@ -1192,18 +1171,6 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa9b4819da1bc61c0ea48b63b7bc8604064dd43013e7cc325df098d49cd7c18a"
-dependencies = [
- "bitflags",
- "cc",
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1e25ee6b412c2a1e3fcb6a4499a5c1bfe7f43e014bdce9a6b6666e5aa2d187"
@@ -1258,7 +1225,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "base64",
- "bindgen 0.58.1",
+ "bindgen 0.59.1",
  "bitflags",
  "byteorder",
  "bytes",
@@ -1279,12 +1246,12 @@ dependencies = [
  "loopdev",
  "memfd",
  "memoffset",
- "nix 0.20.0",
+ "nix 0.23.0",
  "proc-mounts",
  "proptest",
  "rand 0.7.3",
  "rlimit",
- "semver 0.11.0",
+ "semver 1.0.4",
  "serde",
  "serde_json",
  "serde_with",
@@ -1306,12 +1273,12 @@ name = "northstar-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "env_logger 0.8.4",
+ "env_logger 0.9.0",
  "escargot",
  "futures",
  "lazy_static",
  "log",
- "nix 0.20.0",
+ "nix 0.23.0",
  "northstar",
  "regex",
  "rusty-fork",
@@ -1405,15 +1372,6 @@ checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
 [[package]]
 name = "persistence"
 version = "0.1.0"
-
-[[package]]
-name = "pest"
-version = "2.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10f4872ae94d7b90ae48754df22fd42ad52ce740b8f370b03da4835417403e53"
-dependencies = [
- "ucd-trie",
-]
 
 [[package]]
 name = "pin-project-lite"
@@ -1800,7 +1758,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "env_logger 0.8.4",
+ "env_logger 0.9.0",
  "itertools",
  "northstar",
  "regex",
@@ -1814,17 +1772,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
 dependencies = [
- "semver-parser 0.7.0",
-]
-
-[[package]]
-name = "semver"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f301af10236f6df4160f7c3f04eec6dbc70ace82d23326abad5edee88801c6b6"
-dependencies = [
- "semver-parser 0.10.2",
- "serde",
+ "semver-parser",
 ]
 
 [[package]]
@@ -1832,21 +1780,15 @@ name = "semver"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "568a8e6258aa33c13358f81fd834adb854c6f7c9468520910a9b1e8fac068012"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "semver-parser"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
-
-[[package]]
-name = "semver-parser"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00b0bef5b7f9e0df16536d3961cfb6e84331c065b4066afb39768d0e319411f7"
-dependencies = [
- "pest",
-]
 
 [[package]]
 name = "serde"
@@ -2057,7 +1999,7 @@ name = "stress"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "env_logger 0.8.4",
+ "env_logger 0.9.0",
  "futures",
  "log",
  "northstar",
@@ -2185,7 +2127,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caps",
- "nix 0.20.0",
+ "nix 0.23.0",
  "structopt",
  "url",
 ]
@@ -2361,12 +2303,6 @@ name = "typenum"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b63708a265f51345575b27fe43f9500ad611579e764c79edbc2037b1121959ec"
-
-[[package]]
-name = "ucd-trie"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56dee185309b50d1f11bfedef0fe6d036842e3fb77413abef29f8f8d1c5d4c1c"
 
 [[package]]
 name = "unicode-bidi"

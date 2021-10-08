@@ -24,13 +24,7 @@ use thiserror::Error;
 use zip::{result::ZipError, ZipArchive};
 
 /// Manifest version supported by the runtime
-pub const VERSION: Version = semver::Version {
-    major: 0,
-    minor: 0,
-    patch: 1,
-    pre: vec![],
-    build: vec![],
-};
+pub const VERSION: Version = semver::Version::new(0, 0, 1);
 
 // Binaries
 const MKSQUASHFS: &str = "mksquashfs";

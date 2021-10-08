@@ -83,7 +83,7 @@ impl Init {
                             Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
                                 continue
                             }
-                            Err(e) if e == nix::Error::Sys(Errno::EINTR) => continue,
+                            Err(nix::Error::EINTR) => continue,
                             e => panic!("Failed to waitpid on {}: {:?}", child, e),
                         }
                     }

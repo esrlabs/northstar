@@ -19,13 +19,7 @@ pub type Signal = u32;
 /// Version
 pub type Version = crate::common::version::Version;
 
-const VERSION: Version = Version {
-    major: 0,
-    minor: 1,
-    patch: 2,
-    pre: vec![],
-    build: vec![],
-};
+const VERSION: Version = Version::new(0, 1, 2);
 
 /// Protocol version
 /// TODO: Do some static initialization of the version struct
