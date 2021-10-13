@@ -278,12 +278,12 @@ fn meta<R: Read + Seek>(zip: &Zip<R>) -> Result<Meta, Error> {
 }
 
 fn hashes<R: Read + Seek>(
-    mut zip: &mut Zip<R>,
+    zip: &mut Zip<R>,
     key: Option<&PublicKey>,
 ) -> Result<Option<Hashes>, Error> {
     match key {
         Some(k) => {
-            let signature_content = read_to_string(&mut zip, SIGNATURE_NAME)?;
+            let signature_content = read_to_string(zip, SIGNATURE_NAME)?;
             let mut sections = signature_content.split("---");
             let hashes_string = sections.next().unwrap_or_default();
             let signature_string = sections.next().unwrap_or_default();
@@ -296,11 +296,8 @@ fn hashes<R: Read + Seek>(
     }
 }
 
-fn manifest<R: Read + Seek>(
-    mut zip: &mut Zip<R>,
-    hashes: Option<&Hashes>,
-) -> Result<Manifest, Error> {
-    let content = read_to_string(&mut zip, MANIFEST_NAME)?;
+fn manifest<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result<Manifest, Error> {
+    let content = read_to_string(zip, MANIFEST_NAME)?;
     if let Some(Hashes { manifest_hash, .. }) = &hashes {
         let expected_hash = hex::decode(manifest_hash)
             .map_err(|e| Error::Manifest(format!("Failed to parse manifest hash {}", e)))?;

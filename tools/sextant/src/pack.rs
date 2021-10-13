@@ -36,14 +36,13 @@ pub(crate) fn pack(
                     .context("Failed to parse name")?;
                 let m = tmp.path().join(n.to_string());
                 fs::write(&m, manifest.to_string()).context("Failed to write manifest")?;
-                pack_with(&m, root, out, key.as_deref(), &squashfs_opts)?;
+                pack_with(&m, root, out, key, &squashfs_opts)?;
             }
         } else {
-            let key = key.as_deref();
             pack_with(manifest_file, root, out, key, &squashfs_opts)?;
         }
     } else {
-        pack_with(manifest, root, out, key.as_deref(), &squashfs_opts)?;
+        pack_with(manifest, root, out, key, &squashfs_opts)?;
     }
 
     Ok(())

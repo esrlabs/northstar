@@ -148,9 +148,7 @@ async fn main() -> Result<()> {
 
     // Check random value that cannot be 0
     if let Some(delay) = opt.random {
-        if delay == 0 {
-            panic!("Invalid random value");
-        }
+        assert!(delay > 0, "Invalid random value");
     }
 
     // Max string len of all containers
