@@ -20,8 +20,6 @@ on post-fs-data
 
     chown system system /dev/device-mapper
     chown system system /dev/loop-control
-    chown system system /dev/memcg/northstar
-    chown system system /dev/cpuctl/northstar
 
     chown system system /dev/block/loop0
     chown system system /dev/block/loop1
@@ -159,6 +157,6 @@ service northstar /system/bin/logwrapper -- /system/bin/northstar --disable-moun
     user system
     group system inet shell
     devmode
-    capabilities CHOWN KILL MKNOD NET_ADMIN NET_RAW SETFCAP SETPCAP SETGID SETUID SYS_ADMIN SYS_BOOT SYS_CHROOT SYS_RESOURCE
+    capabilities CHOWN KILL MKNOD NET_ADMIN NET_RAW SETFCAP SETPCAP SETGID SETUID SYS_ADMIN SYS_CHROOT SYS_RESOURCE
     namespace mnt
     disabled
