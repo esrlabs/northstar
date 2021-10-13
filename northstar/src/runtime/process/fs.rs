@@ -254,6 +254,7 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
             MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
             MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
             MountOption::NoDev => flags |= MsFlags::MS_NODEV,
+            MountOption::Rec => flags |= MsFlags::MS_REC,
         }
     }
     flags

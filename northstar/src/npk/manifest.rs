@@ -146,6 +146,24 @@ impl Manifest {
                 Ok(())
             })?;
 
+        // Check for recursive non bind mounts
+        self.mounts
+            .iter()
+            .map(|(_, m)| m)
+            .try_for_each(|m| match m {
+                // The options field, which must be checked, is available for Mount::Bind and Mount::Resource
+                Mount::Resource(m) => {
+                    if m.options.contains(&MountOption::Rec) {
+                        Err(Error::Invalid(
+                            "Non bind mounts must not be recursive".to_string(),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => Ok(()),
+            })?;
+
         // Check seccomp filter
         const MAX_ARG_INDEX: usize = 5; // Restricted by seccomp_data struct
         const MAX_ARG_VALUES: usize = 50; // BPF jumps cannot exceed 255 and each check needs multiple instructions
@@ -241,6 +259,9 @@ pub enum MountOption {
     // Mount nodev
     #[serde(rename = "nodev")]
     NoDev,
+    // Mount recursive
+    #[serde(rename = "rec")]
+    Rec,
 }
 
 /// Resource mount configuration
@@ -410,6 +431,7 @@ mod mount_options {
                 MountOption::NoExec => "noexec",
                 MountOption::NoSuid => "nosuid",
                 MountOption::NoDev => "nodev",
+                MountOption::Rec => "rec",
             }
             .to_string()
         }
@@ -423,6 +445,7 @@ mod mount_options {
                 "noexec" => Ok(MountOption::NoExec),
                 "nosuid" => Ok(MountOption::NoSuid),
                 "nodev" => Ok(MountOption::NoDev),
+                "rec" => Ok(MountOption::Rec),
                 _ => Err(format!("invalid mount option {}", s)),
             }
         }
