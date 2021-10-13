@@ -279,10 +279,10 @@ fn waitpid(
     tx: EventTx,
     stop: CancellationToken,
 ) -> impl Future<Output = ExitStatus> {
-    task::spawn(async move {
-        let mut sigchld = signal::unix::signal(signal::unix::SignalKind::child())
-            .expect("Failed to set up signal handle for SIGCHLD");
+    let mut sigchld = signal::unix::signal(signal::unix::SignalKind::child())
+        .expect("Failed to set up signal handle for SIGCHLD");
 
+    task::spawn(async move {
         // Check the status of the process after every SIGCHLD is received
         let exit_status = loop {
             sigchld.recv().await;
