@@ -468,13 +468,13 @@ mod example {
     });
 
     // Start memeater example
-    test!(memeater, {
-        let mut runtime = Northstar::launch().await?;
-        runtime.install(&EXAMPLE_MEMEATER_NPK).await?;
-        runtime.start(EXAMPLE_MEMEATER).await?;
-        assume("Process memeater:0.0.1 is out of memory", 20).await?;
-        runtime.shutdown().await
-    });
+    // test!(memeater, {
+    //     let mut runtime = Northstar::launch().await?;
+    //     runtime.install(&EXAMPLE_MEMEATER_NPK).await?;
+    //     runtime.start(EXAMPLE_MEMEATER).await?;
+    //     assume("Process memeater:0.0.1 is out of memory", 20).await?;
+    //     runtime.shutdown().await
+    // });
 
     // Start persistence example and check output
     test!(persistence, {
