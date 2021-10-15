@@ -423,7 +423,7 @@ impl From<ExitStatus> for model::ExitStatus {
     fn from(e: ExitStatus) -> Self {
         match e {
             ExitStatus::Exit(e) => api::model::ExitStatus::Exit(e),
-            ExitStatus::Signaled(s) => api::model::ExitStatus::Signaled(s as u32),
+            ExitStatus::Signalled(s) => api::model::ExitStatus::Signalled(s as u32),
         }
     }
 }

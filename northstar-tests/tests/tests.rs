@@ -194,7 +194,7 @@ test!(container_crash_exit, {
         runtime.start_with_args(TEST_CONTAINER, ["crash"]).await?;
         runtime
             .assume_notification(
-                |n| matches!(n, Notification::Exit(_, ExitStatus::Signaled(6))),
+                |n| matches!(n, Notification::Exit(_, ExitStatus::Signalled(6))),
                 15,
             )
             .await?;
@@ -364,7 +364,28 @@ test!(seccomp_allowed_syscall_with_prohibited_arg, {
     runtime
         .start_with_args(TEST_CONTAINER, ["call-delete-module", "7"])
         .await?;
-    assume(r"exited after .* with status Signaled\(SIGSYS\)", 5).await?;
+
+    let n = |n: &Notification| match n {
+        Notification::Exit(_, ExitStatus::Signalled(s)) if s == &31 => true,
+        _ => false,
+    };
+    runtime.assume_notification(n, 5).await?;
+    runtime.shutdown().await
+});
+
+// Iterate all exit codes in the u8 range
+test!(exitcodes, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    for code in 0..=255 {
+        runtime
+            .start_with_args(TEST_CONTAINER, ["exit".to_string(), code.to_string()])
+            .await?;
+        let n = |n: &Notification| match n {
+            Notification::Exit(_, ExitStatus::Exit(c)) if c == &code => true,
+            _ => false,
+        };
+        runtime.assume_notification(n, 5).await?;
+    }
     runtime.shutdown().await
 });
 
@@ -430,7 +451,12 @@ mod example {
         let mut runtime = Northstar::launch().await?;
         runtime.install(&EXAMPLE_CRASHING_NPK, "test-0").await?;
         runtime.start(EXAMPLE_CRASHING).await?;
-        assume("Crashing in", 5).await?;
+        runtime
+            .assume_notification(
+                |n| matches!(n, Notification::Exit(_, ExitStatus::Signalled(6))),
+                20,
+            )
+            .await?;
         runtime.shutdown().await
     });
 

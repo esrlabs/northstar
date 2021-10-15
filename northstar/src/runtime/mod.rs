@@ -6,10 +6,12 @@ use futures::{future::ready, FutureExt};
 use log::debug;
 use nix::{
     libc::{EXIT_FAILURE, EXIT_SUCCESS},
-    sys::signal,
+    sys,
 };
+use serde::{Deserialize, Serialize};
 use state::State;
 use std::{
+    convert::TryFrom,
     fmt::{self},
     future::Future,
     path::Path,
@@ -116,12 +118,12 @@ struct MemoryEvent {
 }
 
 /// Container exit status
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
     /// Process was terminated by a signal
-    Signaled(signal::Signal),
+    Signalled(u8),
 }
 
 impl ExitStatus {
@@ -133,6 +135,18 @@ impl ExitStatus {
     /// Returns true if the exist status is success
     pub fn success(&self) -> bool {
         matches!(self, ExitStatus::Exit(code) if *code == Self::SUCCESS)
+    }
+}
+
+impl fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExitStatus::Exit(code) => write!(f, "Exit({})", code),
+            ExitStatus::Signalled(signal) => match sys::signal::Signal::try_from(*signal as i32) {
+                Ok(signal) => write!(f, "Signalled({})", signal),
+                Err(_) => write!(f, "Signalled({})", signal),
+            },
+        }
     }
 }
 

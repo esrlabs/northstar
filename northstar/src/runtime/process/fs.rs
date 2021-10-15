@@ -69,13 +69,13 @@ impl Mount {
 pub(super) async fn prepare_mounts(
     config: &Config,
     root: &Path,
-    manifest: Manifest,
+    manifest: &Manifest,
 ) -> Result<Vec<Mount>, Error> {
     let mut mounts = vec![];
     let manifest_mounts = &manifest.mounts;
 
     for (target, mount) in manifest_mounts {
-        match &mount {
+        match mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
                 mounts.extend(bind(root, target, host, options));
             }

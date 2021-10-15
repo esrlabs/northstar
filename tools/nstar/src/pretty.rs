@@ -17,7 +17,7 @@ pub(crate) fn notification(notification: &Notification) {
             container,
             match status {
                 ExitStatus::Exit(code) => format!("exit code {}", code),
-                ExitStatus::Signaled(signal) => format!("signaled {}", signal),
+                ExitStatus::Signalled(signal) => format!("signaled {}", signal),
             }
         ),
         Notification::Install(container) => println!("installed {}", container),
@@ -182,7 +182,7 @@ fn format_err(err: &model::Error) -> String {
                 c,
                 match s {
                     ExitStatus::Exit(c) => format!("exit code {}", c),
-                    ExitStatus::Signaled(s) => format!("signaled {}", s),
+                    ExitStatus::Signalled(s) => format!("signaled {}", s),
                 }
             )
         }
