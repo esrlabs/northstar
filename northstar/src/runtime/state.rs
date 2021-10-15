@@ -218,18 +218,20 @@ impl<'a> State<'a> {
         }
 
         // Mount (parallel). Do not care about the result - this normally is fine. If not, the container will not start.
-        self.mount_all(&to_mount).await;
+        if !to_mount.is_empty() {
+            self.mount_all(&to_mount).await;
 
-        for (container, autostart) in autostarts {
-            info!("Autostarting {} ({:?})", container, autostart);
-            if let Err(e) = self.start(&container, None, None).await {
-                match autostart {
-                    Autostart::Relaxed => {
-                        warn!("Failed to autostart relaxed {}: {}", container, e);
-                    }
-                    Autostart::Critical => {
-                        error!("Failed to autostart critical {}: {}", container, e);
-                        return Err(e);
+            for (container, autostart) in autostarts {
+                info!("Autostarting {} ({:?})", container, autostart);
+                if let Err(e) = self.start(&container, None, None).await {
+                    match autostart {
+                        Autostart::Relaxed => {
+                            warn!("Failed to autostart relaxed {}: {}", container, e);
+                        }
+                        Autostart::Critical => {
+                            error!("Failed to autostart critical {}: {}", container, e);
+                            return Err(e);
+                        }
                     }
                 }
             }
@@ -418,7 +420,7 @@ impl<'a> State<'a> {
 
         let mut process = match self
             .launcher
-            .create(root, container.clone(), manifest.clone(), args, env)
+            .create(&root, container, &manifest, args, env)
             .await
         {
             Ok(p) => p,
@@ -629,12 +631,12 @@ impl<'a> State<'a> {
                 let duration = process.started.elapsed();
                 if is_critical {
                     error!(
-                        "Critical process {} exited after {:?} with status {:?}",
+                        "Critical process {} exited after {:?} with status {}",
                         container, duration, exit_status,
                     );
                 } else {
                     info!(
-                        "Process {} exited after {:?} with status {:?}",
+                        "Process {} exited after {:?} with status {}",
                         container, duration, exit_status,
                     );
                 }

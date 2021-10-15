@@ -28,6 +28,9 @@ enum Command {
     Echo {
         message: Vec<String>,
     },
+    Exit {
+        code: i32,
+    },
     Inspect,
     Touch {
         path: PathBuf,
@@ -49,6 +52,7 @@ fn main() -> Result<()> {
         Command::Cat { path } => cat(&path)?,
         Command::Crash => crash(),
         Command::Echo { message } => echo(&message),
+        Command::Exit { code } => exit(code),
         Command::Inspect => inspect(),
         Command::Touch { path } => touch(&path)?,
         Command::Sleep => (),
@@ -90,6 +94,10 @@ fn crash() {
 
 fn echo(message: &[String]) {
     println!("{}", message.join(" "));
+}
+
+fn exit(code: i32) {
+    std::process::exit(code);
 }
 
 fn write(input: &str, path: &Path) -> Result<()> {

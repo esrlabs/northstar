@@ -19,7 +19,7 @@ pub type Signal = u32;
 /// Version
 pub type Version = crate::common::version::Version;
 
-const VERSION: Version = Version::new(0, 1, 2);
+const VERSION: Version = Version::new(0, 1, 3);
 
 /// Protocol version
 /// TODO: Do some static initialization of the version struct
@@ -33,7 +33,7 @@ pub enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
     /// Process was terminated by a signal
-    Signaled(Signal),
+    Signalled(Signal),
 }
 
 /// Message

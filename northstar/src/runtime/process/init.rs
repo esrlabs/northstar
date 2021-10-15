@@ -1,20 +1,27 @@
-use super::{fs::Mount, io::Fd, Capabilities, RLimits, SIGNAL_OFFSET};
-use crate::{npk::manifest::Manifest, runtime::pipe::ConditionNotify, seccomp::AllowList};
+use super::{fs::Mount, io::Fd, Capabilities, RLimits};
+use crate::{
+    runtime::{
+        pipe::{Channel, ConditionNotify},
+        ExitStatus,
+    },
+    seccomp::AllowList,
+};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
     sched::unshare,
-    sys::wait::{waitpid, WaitPidFlag, WaitStatus},
+    sys::wait::{waitpid, WaitStatus},
     unistd::{self, Uid},
 };
 use std::{env, ffi::CString, os::unix::prelude::RawFd, path::PathBuf, process::exit};
 
 pub(super) struct Init {
-    pub manifest: Manifest,
     pub root: PathBuf,
     pub init: CString,
     pub argv: Vec<CString>,
     pub env: Vec<CString>,
+    pub uid: u16,
+    pub gid: u16,
     pub mounts: Vec<Mount>,
     pub fds: Vec<(RawFd, Fd)>,
     pub groups: Vec<u32>,
@@ -24,7 +31,11 @@ pub(super) struct Init {
 }
 
 impl Init {
-    pub(super) fn run(self, condition_notify: ConditionNotify) -> ! {
+    pub(super) fn run(
+        self,
+        condition_notify: ConditionNotify,
+        mut exit_status_channel: Channel,
+    ) -> ! {
         // Set the process name to init. This process inherited the process name
         // from the runtime
         set_process_name();
@@ -71,14 +82,20 @@ impl Init {
 
                     // Wait for the child to exit
                     loop {
-                        match waitpid(Some(child), Some(WaitPidFlag::__WALL)) {
-                            Ok(WaitStatus::Exited(_pid, status)) => exit(status),
+                        match waitpid(Some(child), None) {
+                            Ok(WaitStatus::Exited(_pid, status)) => {
+                                let exit_status = ExitStatus::Exit(status);
+                                exit_status_channel
+                                    .send(&exit_status)
+                                    .expect("Failed to send exit status");
+                                exit(0);
+                            }
                             Ok(WaitStatus::Signaled(_pid, status, _)) => {
-                                // Encode the signal number in the process exit status. It's not possible to raise a
-                                // a signal in this "init" process that is received by our parent
-                                let code = SIGNAL_OFFSET + status as i32;
-                                //debug!("Exiting with {} (signaled {})", code, status);
-                                exit(code);
+                                let exit_status = ExitStatus::Signalled(status as u8);
+                                exit_status_channel
+                                    .send(&exit_status)
+                                    .expect("Failed to send exit status");
+                                exit(0);
                             }
                             Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
                                 continue
@@ -89,6 +106,8 @@ impl Init {
                     }
                 }
                 unistd::ForkResult::Child => {
+                    drop(exit_status_channel);
+
                     // Set seccomp filter
                     if let Some(ref filter) = self.seccomp {
                         filter.apply().expect("Failed to apply seccomp filter.");
@@ -110,8 +129,8 @@ impl Init {
 
     /// Set uid/gid
     fn set_ids(&self) {
-        let uid = self.manifest.uid;
-        let gid = self.manifest.gid;
+        let uid = self.uid;
+        let gid = self.gid;
 
         let rt_privileged = unistd::geteuid() == Uid::from_raw(0);
 

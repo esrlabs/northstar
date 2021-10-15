@@ -146,7 +146,7 @@ impl Northstar {
         self.client.kill(container, 15).await?;
         let container: Container = container.try_into()?;
         self.assume_notification(
-            |n| n == &Notification::Exit(container.clone(), ExitStatus::Signaled(15)),
+            |n| n == &Notification::Exit(container.clone(), ExitStatus::Signalled(15)),
             timeout,
         )
         .await?;

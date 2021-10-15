@@ -218,7 +218,7 @@ async fn main() -> Result<()> {
                         .context("Failed to stop container")?;
 
                     info!("{:<a$}: waiting for termination", container, a = len);
-                    let stopped = Notification::Exit(container.clone(), ExitStatus::Signaled(15));
+                    let stopped = Notification::Exit(container.clone(), ExitStatus::Signalled(15));
                     await_notification(&mut client, stopped, timeout).await?;
                 }
 
