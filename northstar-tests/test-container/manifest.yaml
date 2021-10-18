@@ -8,6 +8,10 @@ gid: 1000
 #     limit_in_bytes: 10000000
 #     swappiness: 0
 mounts:
+  /host_root:
+    type: bind
+    host: /
+    options: nosuid,nodev,noexec,rec
   /dev:
     type: dev
   /proc:
