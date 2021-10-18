@@ -297,6 +297,17 @@ test!(proc_is_mounted_ro, {
     runtime.shutdown().await
 });
 
+// Check that mount flags nosuid,nodev,noexec are properly set for bind mounts
+// assumtion: mount flags are always listed the same order (according mount.h)
+// note: MS_REC is not explicitely listed an cannot be checked with this test
+test!(mount_flags_are_set_for_bind_mounts, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+    assume("/.* /host_root \\w+ ro,nosuid,nodev,noexec,", 5).await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
+    runtime.shutdown().await
+});
+
 // Call syscall with specifically allowed argument
 test!(seccomp_allowed_syscall_with_allowed_arg, {
     let mut runtime = Northstar::launch_install_test_container().await?;
