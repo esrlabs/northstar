@@ -5,7 +5,7 @@ use crate::{
         manifest,
         manifest::{Manifest, MountOption, MountOptions, Resource, Tmpfs},
     },
-    runtime::config::Config,
+    runtime::{config::Config, error::Context},
     util::PathExt,
 };
 use log::debug;
@@ -158,7 +158,7 @@ async fn persist(
         debug!("Creating {}", source.display());
         fs::create_dir_all(&source)
             .await
-            .map_err(|e| Error::Io(format!("Failed to create {}", source.display()), e))?;
+            .context(format!("Failed to create {}", source.display()))?;
     }
 
     debug!("Chowning {} to {}:{}", source.display(), uid, gid);
@@ -167,12 +167,12 @@ async fn persist(
         Some(unistd::Uid::from_raw(uid.into())),
         Some(unistd::Gid::from_raw(gid.into())),
     )
-    .map_err(|e| {
-        Error::os(
-            format!("Failed to chown {} to {}:{}", source.display(), uid, gid),
-            e,
-        )
-    })?;
+    .context(format!(
+        "Failed to chown {} to {}:{}",
+        source.display(),
+        uid,
+        gid
+    ))?;
 
     debug!("Mounting {} on {}", source.display(), target.display(),);
 

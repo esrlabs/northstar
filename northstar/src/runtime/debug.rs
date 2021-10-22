@@ -3,7 +3,7 @@ use super::{
     error::Error,
     Pid,
 };
-use crate::npk::manifest::Manifest;
+use crate::{npk::manifest::Manifest, runtime::error::Context};
 use futures::future::OptionFuture;
 use log::{debug, error, info};
 use std::{path::Path, process::Stdio};
@@ -101,7 +101,7 @@ impl Strace {
             )
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| Error::io("Failed to spawn strace", e))?;
+            .context("Failed to spawn strace")?;
         debug!("Attached strace to PID {}", &pid.to_string());
 
         let token = CancellationToken::new();
@@ -109,10 +109,7 @@ impl Strace {
 
         // Wait for strace to inform us that it's attached.
         let mut stderr = io::BufReader::new(stderr).lines();
-        stderr
-            .next_line()
-            .await
-            .map_err(|e| Error::io("Reading strace stderr", e))?;
+        stderr.next_line().await.context("Reading strace stderr")?;
 
         let task = {
             let token = token.clone();
@@ -187,18 +184,13 @@ impl Strace {
     pub async fn destroy(mut self) -> Result<(), Error> {
         // Stop the strace output forwarding
         self.token.cancel();
-        self.task
-            .await
-            .map_err(|e| Error::io("Join error", io::Error::new(io::ErrorKind::Other, e)))?;
+        self.task.await.context("Join error")?;
 
         // Stop strace - if not already existed - ignore any error
         let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
         debug!("Joining strace pid {}", pid);
-        self.child
-            .wait()
-            .await
-            .map_err(|e| Error::io("Failed to join strace", e))?;
+        self.child.wait().await.context("Failed to join strace")?;
 
         Ok(())
     }
@@ -244,7 +236,7 @@ impl Perf {
                     .split_whitespace(),
             )
             .spawn()
-            .map_err(|e| Error::io("Failed to spawn strace", e))?;
+            .context("Failed to spawn strace")?;
         Ok(Perf { child })
     }
 
@@ -252,10 +244,7 @@ impl Perf {
         let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
         debug!("Joining perf pid {}", pid);
-        self.child
-            .wait()
-            .await
-            .map_err(|e| Error::io("Failed to join perf", e))?;
+        self.child.wait().await.context("Failed to join perf")?;
 
         Ok(())
     }

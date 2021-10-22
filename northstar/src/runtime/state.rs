@@ -15,7 +15,7 @@ use crate::{
     common::non_null_string::NonNullString,
     npk,
     npk::manifest::{Autostart, Mount, Resource},
-    runtime::{CGroupEvent, ENV_NAME, ENV_VERSION},
+    runtime::{error::Context, CGroupEvent, ENV_NAME, ENV_VERSION},
 };
 use api::model::Response;
 use async_trait::async_trait;
@@ -507,7 +507,7 @@ impl<'a> State<'a> {
                 let exit_status =
                     time::timeout(time::Duration::from_secs(10), context.process.wait())
                         .await
-                        .map_err(|e| Error::other(format!("Killing {}", container), e))?;
+                        .context(format!("Killing {}", container))?;
                 debug!("Container {} terminated with {:?}", container, exit_status);
                 context.destroy().await;
             }
