@@ -1,10 +1,10 @@
-use super::{Container, ExitStatus, RepositoryId};
+use thiserror::Error;
+
 use crate::{
     api::{self},
     npk,
+    runtime::{Container, ExitStatus, RepositoryId},
 };
-use std::io;
-use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -50,26 +50,19 @@ pub enum Error {
     #[error("Key: {0}")]
     Key(super::key::Error),
 
-    #[error("Io: {0}: {1:?}")]
-    Io(String, io::Error),
-    #[error("Os: {0}: {1:?}")]
-    Os(String, nix::Error),
-
-    #[error("{0}: {1:?}")]
-    Other(String, String),
+    #[error("{0}")]
+    Unexpected(String, #[source] Box<dyn std::error::Error + Sync + Send>),
 }
 
-impl Error {
-    pub(crate) fn io<T: ToString>(m: T, e: io::Error) -> Error {
-        Error::Io(m.to_string(), e)
-    }
+/// Similar anyhow's Context trait
+pub(crate) trait Context<T> {
+    /// Adds a contextual message to the result's error
+    fn context<C: ToString>(self, context: C) -> Result<T, Error>;
+}
 
-    pub(crate) fn os<T: ToString>(e: T, err: nix::Error) -> Error {
-        Error::Os(e.to_string(), err)
-    }
-
-    pub(crate) fn other<T: ToString, E: std::fmt::Debug>(e: T, err: E) -> Error {
-        Error::Other(e.to_string(), format!("{:?}", err))
+impl<T, E: std::error::Error + Send + Sync + 'static> Context<T> for Result<T, E> {
+    fn context<C: ToString>(self, context: C) -> Result<T, Error> {
+        self.map_err(|e| Error::Unexpected(context.to_string(), Box::new(e)))
     }
 }
 
@@ -112,9 +105,9 @@ impl From<Error> for api::model::Error {
             Error::Mount(error) => api::model::Error::Mount(error.to_string()),
             Error::Name(error) => api::model::Error::Name(error),
             Error::Key(error) => api::model::Error::Key(error.to_string()),
-            Error::Io(cause, error) => api::model::Error::Io(format!("{}: {}", cause, error)),
-            Error::Os(cause, error) => api::model::Error::Os(format!("{}: {}", cause, error)),
-            Error::Other(cause, error) => api::model::Error::Other(cause, error),
+            Error::Unexpected(context, error) => {
+                api::model::Error::Unexpected(context, error.to_string())
+            }
         }
     }
 }

@@ -1,5 +1,5 @@
 use super::{
-    error::Error,
+    error::{Context, Error},
     key::{self, PublicKey},
     state::Npk,
     Container, RepositoryId,
@@ -16,14 +16,14 @@ use mpsc::Receiver;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    io::{BufReader, ErrorKind, SeekFrom},
+    io::{BufReader, SeekFrom},
     os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
     fs,
-    io::{self, AsyncSeekExt, AsyncWriteExt},
+    io::{AsyncSeekExt, AsyncWriteExt},
     sync::mpsc,
     task,
     time::Instant,
@@ -73,9 +73,7 @@ impl DirRepository {
         let key: OptionFuture<_> = key.map(key::load).into();
         let key = key.await.transpose().map_err(Error::Key)?;
 
-        let mut readir = fs::read_dir(&dir)
-            .await
-            .map_err(|e| Error::Io("Repository read dir".into(), e))?;
+        let mut readir = fs::read_dir(&dir).await.context("Repository read dir")?;
 
         let start = Instant::now();
         let mut loads = vec![];
@@ -148,15 +146,11 @@ impl<'a> Repository for DirRepository {
         let dest = self.dir.join(format!("{}.npk", uuid::Uuid::new_v4()));
         let mut file = fs::File::create(&dest)
             .await
-            .map_err(|e| Error::Io("Failed create npk in repository".into(), e))?;
+            .context("Failed create npk in repository")?;
         while let Some(r) = rx.recv().await {
-            file.write_all(&r)
-                .await
-                .map_err(|e| Error::Io("Failed to write npk".into(), e))?;
+            file.write_all(&r).await.context("Failed to write npk")?;
         }
-        file.flush()
-            .await
-            .map_err(|e| Error::Io("Failed to flush npk".into(), e))?;
+        file.flush().await.context("Failed to flush npk")?;
         drop(file);
 
         debug!("Loading {}", dest.display());
@@ -167,7 +161,7 @@ impl<'a> Repository for DirRepository {
             Err(e) => {
                 fs::remove_file(&dest)
                     .await
-                    .map_err(|e| Error::io("Remove file from repository", e))?;
+                    .context("Remove file from repository")?;
                 Err(e)
             }
         }?;
@@ -177,7 +171,7 @@ impl<'a> Repository for DirRepository {
         if self.containers.contains_key(&container) {
             fs::remove_file(&dest)
                 .await
-                .map_err(|e| Error::io("Remove file from repository", e))?;
+                .context("Remove file from repository")?;
             Err(Error::InstallDuplicate(container.clone()))
         } else {
             self.containers
@@ -193,7 +187,7 @@ impl<'a> Repository for DirRepository {
             drop(npk);
             fs::remove_file(path)
                 .await
-                .map_err(|e| Error::io("Failed to remove npk", e))
+                .context("Failed to remove npk")
                 .map(drop)
         } else {
             Ok(())
@@ -245,35 +239,27 @@ impl<'a> Repository for MemRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);
-        let fd = opts.create(uuid::Uuid::new_v4().to_string()).map_err(|e| {
-            Error::io(
-                "Failed to create memfd",
-                io::Error::new(ErrorKind::Other, e),
-            )
-        })?;
+        let fd = opts
+            .create(uuid::Uuid::new_v4().to_string())
+            .context("Failed to create memfd")?;
 
         // Write buffer to the memfd
         let mut file = unsafe { fs::File::from_raw_fd(fd.as_raw_fd()) };
         file.set_nonblocking();
 
         while let Some(r) = rx.recv().await {
-            file.write_all(&r)
-                .await
-                .map_err(|e| Error::io("Failed copy npk", e))?;
+            file.write_all(&r).await.context("Failed copy npk")?;
         }
 
-        file.seek(SeekFrom::Start(0))
-            .await
-            .map_err(|e| Error::io("Failed seek", e))?;
+        file.seek(SeekFrom::Start(0)).await.context("Failed seek")?;
 
         // Seal the memfd
         let mut seals = memfd::SealsHashSet::new();
         seals.insert(memfd::FileSeal::SealShrink);
         seals.insert(memfd::FileSeal::SealGrow);
         fd.add_seals(&seals)
-            .map_err(|e| Error::io("Failed to add seals", io::Error::new(ErrorKind::Other, e)))?;
-        fd.add_seal(memfd::FileSeal::SealSeal)
-            .map_err(|e| Error::io("Failed to add seals", io::Error::new(ErrorKind::Other, e)))?;
+            .and_then(|_| fd.add_seal(memfd::FileSeal::SealSeal))
+            .context("Failed to add seals")?;
 
         // Forget fd - it's owned by file
         fd.into_raw_fd();

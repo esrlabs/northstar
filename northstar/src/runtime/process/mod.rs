@@ -7,7 +7,10 @@ use super::{
 use crate::{
     common::{container::Container, non_null_string::NonNullString},
     npk::manifest::{Manifest, RLimitResource, RLimitValue},
-    runtime::console::{self, Peer},
+    runtime::{
+        console::{self, Peer},
+        error::Context,
+    },
     seccomp,
 };
 use async_trait::async_trait;
@@ -247,19 +250,16 @@ impl super::state::Process for Process {
         let process_group = unistd::Pid::from_raw(-(self.pid as i32));
         let sigterm = Some(signal);
         match sys::signal::kill(process_group, sigterm) {
-            Ok(_) => {}
             // The process is terminated already. Wait for the waittask to do it's job and resolve exit_status
             Err(nix::Error::Sys(errno)) if errno == Errno::ESRCH => {
                 debug!("Process {} already exited", self.pid);
+                Ok(())
             }
-            Err(e) => {
-                return Err(Error::Os(
-                    format!("Failed to send signal {} {}", signal, process_group),
-                    e,
-                ))
-            }
+            result => result.context(format!(
+                "Failed to send signal {} {}",
+                signal, process_group
+            )),
         }
-        Ok(())
     }
 
     async fn wait(&mut self) -> Result<ExitStatus, Error> {
@@ -583,7 +583,7 @@ fn set_child_subreaper(value: bool) -> Result<(), Error> {
     let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .map_err(|e| Error::os("Set child subreaper flag", e))
+        .context("Set child subreaper flag")
 }
 
 #[derive(Clone)]

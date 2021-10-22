@@ -197,7 +197,5 @@ pub enum Error {
     Name(String),
     Key(String),
 
-    Io(String),
-    Os(String),
-    Other(String, String),
+    Unexpected(String, String),
 }

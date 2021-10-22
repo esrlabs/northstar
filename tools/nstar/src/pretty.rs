@@ -193,9 +193,7 @@ fn format_err(err: &model::Error) -> String {
         model::Error::Mount(e) => format!("mount error: {}", e),
         model::Error::Seccomp(e) => format!("seccomp error: {}", e),
         model::Error::Key(e) => format!("key error: {}", e),
-        model::Error::Io(e) => format!("io error: {}", e),
-        model::Error::Os(e) => format!("os error: {}", e),
         model::Error::Name(e) => format!("name error: {}", e),
-        model::Error::Other(e, c) => format!("{}: {}", e, c),
+        model::Error::Unexpected(c, e) => format!("{}: {}", c, e),
     }
 }

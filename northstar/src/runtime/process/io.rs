@@ -5,7 +5,7 @@ use super::{
 use crate::{
     npk,
     npk::manifest::{Manifest, Output},
-    runtime::pipe::PipeWrite,
+    runtime::{error::Context as ErrorContext, pipe::PipeWrite},
 };
 use bytes::{Buf, BufMut, BytesMut};
 use log::{debug, error, info, trace, warn, Level};
@@ -106,7 +106,7 @@ pub(super) async fn from_manifest(
     // The default of all fds inherited from the parent is to close it
     let mut proc_self_fd = tokio::fs::read_dir("/proc/self/fd")
         .await
-        .map_err(|e| Error::io("Readdir", e))?;
+        .context("Readdir")?;
     while let Ok(Some(e)) = proc_self_fd.next_entry().await {
         let file = e.file_name();
         let fd: i32 = file.to_str().unwrap().parse().unwrap(); // fds are always numeric
@@ -124,11 +124,11 @@ pub(super) async fn from_manifest(
             }
             Some(npk::manifest::Output::Log { level, ref tag }) => {
                 // Create a pipe: the writing end is used in the child as stdout/stderr. The reading end is used in a LogSink
-                let (reader, writer) = pipe().map_err(|e| Error::io("Failed to open pipe", e))?;
+                let (reader, writer) = pipe().context("Failed to open pipe")?;
                 let reader_fd = reader.as_raw_fd();
                 let reader: AsyncPipeRead = reader
                     .try_into()
-                    .map_err(|e| Error::io("Failed to get async handler from pipe reader", e))?;
+                    .context("Failed to get async handler from pipe reader")?;
 
                 let mut reader = BufReader::new(reader);
                 let tag = tag.to_string();
