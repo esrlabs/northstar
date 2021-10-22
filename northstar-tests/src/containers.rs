@@ -1,5 +1,3 @@
-use lazy_static::lazy_static;
-
 pub const EXAMPLE_CPUEATER: &str = "cpueater:0.0.1";
 pub const EXAMPLE_CONSOLE: &str = "console:0.0.1";
 pub const EXAMPLE_CRASHING: &str = "crashing:0.0.1";
@@ -15,33 +13,31 @@ pub const EXAMPLE_SECCOMP: &str = "seccomp:0.0.1";
 pub const TEST_CONTAINER: &str = "test-container:0.0.1";
 pub const TEST_RESOURCE: &str = "test-resource:0.0.1";
 
-lazy_static! {
-    pub static ref EXAMPLE_CRASHING_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/crashing-0.0.1.npk"));
-    pub static ref EXAMPLE_CONSOLE_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/console-0.0.1.npk"));
-    pub static ref EXAMPLE_CPUEATER_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/cpueater-0.0.1.npk"));
-    pub static ref EXAMPLE_FERRIS_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/ferris-0.0.1.npk"));
-    pub static ref EXAMPLE_HELLO_FERRIS_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/hello-ferris-0.0.1.npk"));
-    pub static ref EXAMPLE_HELLO_RESOURCE_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/hello-resource-0.0.1.npk"));
-    pub static ref EXAMPLE_INSPECT_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/inspect-0.0.1.npk"));
-    pub static ref EXAMPLE_MEMEATER_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/memeater-0.0.1.npk"));
-    pub static ref EXAMPLE_MESSAGE_0_0_1_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.1.npk"));
-    pub static ref EXAMPLE_MESSAGE_0_0_2_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.2.npk"));
-    pub static ref EXAMPLE_PERSISTENCE_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/persistence-0.0.1.npk"));
-    pub static ref EXAMPLE_SECCOMP_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/seccomp-0.0.1.npk"));
-    pub static ref TEST_CONTAINER_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/test-container-0.0.1.npk"));
-    pub static ref TEST_RESOURCE_NPK: &'static [u8] =
-        include_bytes!(concat!(env!("OUT_DIR"), "/test-resource-0.0.1.npk"));
-}
+pub static EXAMPLE_CONSOLE_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/console-0.0.1.npk"));
+pub static EXAMPLE_CPUEATER_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/cpueater-0.0.1.npk"));
+pub static EXAMPLE_CRASHING_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/crashing-0.0.1.npk"));
+pub static EXAMPLE_FERRIS_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/ferris-0.0.1.npk"));
+pub static EXAMPLE_HELLO_FERRIS_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/hello-ferris-0.0.1.npk"));
+pub static EXAMPLE_HELLO_RESOURCE_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/hello-resource-0.0.1.npk"));
+pub static EXAMPLE_INSPECT_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/inspect-0.0.1.npk"));
+pub static EXAMPLE_MEMEATER_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/memeater-0.0.1.npk"));
+pub static EXAMPLE_MESSAGE_0_0_1_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.1.npk"));
+pub static EXAMPLE_MESSAGE_0_0_2_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.2.npk"));
+pub static EXAMPLE_PERSISTENCE_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/persistence-0.0.1.npk"));
+pub static EXAMPLE_SECCOMP_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/seccomp-0.0.1.npk"));
+pub static TEST_CONTAINER_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/test-container-0.0.1.npk"));
+pub static TEST_RESOURCE_NPK: &'static [u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/test-resource-0.0.1.npk"));
