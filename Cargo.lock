@@ -306,7 +306,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "cgroups-rs"
 version = "0.2.6"
-source = "git+https://github.com/flxo/cgroups-rs.git?branch=northstar#b57f27905c412d3634f1565f514245b0609977ed"
+source = "git+https://github.com/esrlabs/cgroups-rs.git?branch=northstar#b57f27905c412d3634f1565f514245b0609977ed"
 dependencies = [
  "libc 0.2.102",
  "log",
