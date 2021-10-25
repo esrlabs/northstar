@@ -27,7 +27,7 @@ inotify = { version = "0.9.3", features = ["stream"], optional = true }
 itertools = { version = "0.10.0", optional = true }
 lazy_static = { version = "1.4", optional = true }
 log = { version = "0.4.14", features = [ "serde"] }
-loopdev = { git = "https://github.com/flxo/loopdev", optional = true }
+loopdev = { git = "https://github.com/esrlabs/loopdev", optional = true }
 memfd = { version = "0.4.1", optional = true }
 memoffset = { version = "0.6", optional = true }
 nix = { version = "0.20.0", optional = true }

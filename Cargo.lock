@@ -1065,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "loopdev"
 version = "0.3.0"
-source = "git+https://github.com/flxo/loopdev#5e7cbb310837c8606ac0d5ff33214e92c2e660c0"
+source = "git+https://github.com/esrlabs/loopdev#5e7cbb310837c8606ac0d5ff33214e92c2e660c0"
 dependencies = [
  "bindgen 0.58.1",
  "errno",
