@@ -2,7 +2,7 @@
 name = "northstar"
 version = "0.6.4"
 authors = ["ESRLabs"]
-edition = "2018"
+edition = "2021"
 build = "build.rs"
 license-file = "LICENSE.md"
 
@@ -41,7 +41,7 @@ serde_with = { version = "1.11.0", optional = true }
 serde_yaml = { version = "0.8.21", optional = true }
 sha2 = { version = "0.9.8", optional = true }
 tempfile = { version = "3.2.0", optional = true }
-thiserror = { version = "1.0.30", optional = true }
+thiserror = { version = "1.0.30" }
 tokio = { version = "1.12.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt", "signal", "sync", "time"] }
 tokio-eventfd = { version = "0.2.0", optional = true }
 tokio-util = { version = "0.6.8", features = ["codec", "io"], optional = true }
@@ -62,7 +62,6 @@ api = [
     "futures",
     "npk",
     "serde_json",
-    "thiserror",
     "tokio-util",
 ]
 npk = [
@@ -80,7 +79,6 @@ npk = [
     "serde_with",
     "serde_yaml",
     "tempfile",
-    "thiserror",
     "uuid",
     "which",
     "zip"
@@ -107,7 +105,6 @@ runtime = [
     "proc-mounts",
     "rlimit",
     "tempfile",
-    "thiserror",
     "tokio-eventfd",
     "tokio-util",
     "url",

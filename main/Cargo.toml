@@ -2,7 +2,7 @@
 name = "main"
 version = "0.1.0"
 authors = ["ESRLabs"]
-edition = "2018"
+edition = "2021"
 default-run = "northstar"
 
 [[bin]]
