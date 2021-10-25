@@ -17,7 +17,7 @@ bytesize = { version = "1.0", optional = true }
 caps = { version = "0.5.1", optional = true }
 cgroups-rs = { git = "https://github.com/flxo/cgroups-rs.git", branch = "northstar", features = ["serde"], optional = true }
 derive-new = { version = "0.5.9", optional = true }
-devicemapper = { git = "https://github.com/stratis-storage/devicemapper-rs.git", rev = "dab94dd", optional = true }
+devicemapper = { version = "0.30.0", optional = true }
 ed25519-dalek = { version = "1.0", optional = true }
 floating-duration = { version = "0.1.2", optional = true }
 futures = { version = "0.3.14", features = ["thread-pool"], optional = true }

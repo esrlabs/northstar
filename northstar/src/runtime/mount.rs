@@ -115,7 +115,7 @@ impl MountControl {
             self.dm
                 .device_remove(
                     &DevId::Name(DmName::new(dm_name).unwrap()),
-                    &devicemapper::DmOptions::new(),
+                    devicemapper::DmOptions::default(),
                 )
                 .ok();
 
@@ -240,7 +240,7 @@ async fn mount(
         debug!("Enabling deferred removal on device {}", dm_name);
         dm.device_remove(
             &DevId::Name(DmName::new(&dm_name).unwrap()),
-            devicemapper::DmOptions::new().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
+            devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )
         .map_err(Error::DeviceMapper)?;
 
@@ -295,7 +295,7 @@ fn dmsetup(
         .device_create(
             name,
             Some(uuid),
-            devicemapper::DmOptions::new().set_flags(devicemapper::DmFlags::DM_READONLY),
+            devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
         )
         .map_err(Error::DeviceMapper)?;
     let dm_dev = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
@@ -305,12 +305,12 @@ fn dmsetup(
     dm.table_load(
         &id,
         &table,
-        devicemapper::DmOptions::new().set_flags(devicemapper::DmFlags::DM_READONLY),
+        devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
     )
     .map_err(Error::DeviceMapper)?;
 
     debug!("Resuming device {}", dm_dev.display());
-    dm.device_suspend(&id, &devicemapper::DmOptions::new())
+    dm.device_suspend(&id, devicemapper::DmOptions::default())
         .map_err(Error::DeviceMapper)?;
 
     debug!("Waiting for device {}", dm_dev.display());
