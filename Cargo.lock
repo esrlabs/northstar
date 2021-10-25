@@ -494,19 +494,21 @@ dependencies = [
 [[package]]
 name = "devicemapper"
 version = "0.30.0"
-source = "git+https://github.com/stratis-storage/devicemapper-rs.git?rev=dab94dd#dab94dd0fc52cd5d9eb7420f39a897bf29d9e5e9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0780a49c01a43e1d4b9260c9fc566d2f58b44dd41f11cd0613917394d583c9ee"
 dependencies = [
  "bitflags",
- "devicemapper-rs-sys",
+ "devicemapper-sys",
  "nix 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "semver 1.0.4",
  "serde",
 ]
 
 [[package]]
-name = "devicemapper-rs-sys"
-version = "0.1.0"
-source = "git+https://github.com/stratis-storage/devicemapper-rs.git?rev=dab94dd#dab94dd0fc52cd5d9eb7420f39a897bf29d9e5e9"
+name = "devicemapper-sys"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d54a87e9fbf1ef8ccad900812830bb042eaaed63bd2a8f77f668fd1f40d2250e"
 dependencies = [
  "bindgen 0.57.0",
  "nix 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
