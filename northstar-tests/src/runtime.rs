@@ -172,7 +172,7 @@ impl Northstar {
 
     /// Install the test container and wait for the notification
     pub async fn install_test_container(&mut self) -> Result<()> {
-        self.install(&TEST_CONTAINER_NPK)
+        self.install(TEST_CONTAINER_NPK)
             .await
             .context("Failed to install test container")?;
 
@@ -194,7 +194,7 @@ impl Northstar {
 
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
-        self.install(&TEST_RESOURCE_NPK)
+        self.install(TEST_RESOURCE_NPK)
             .await
             .context("Failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
