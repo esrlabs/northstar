@@ -13,7 +13,6 @@
 //   limitations under the License.
 
 use anyhow::Result;
-use futures::future::pending;
 use northstar::api::client;
 use std::{env, os::unix::prelude::FromRawFd, time::Duration};
 use tokio::net::UnixStream;
@@ -49,6 +48,8 @@ async fn main() -> Result<()> {
     // Send signal 15 to ourself
     client.kill("console:0.0.1", 15).await?;
 
-    // Wait for the signal
-    pending::<Result<()>>().await
+    // Wait for the sigterm
+    tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
+
+    Ok(())
 }
