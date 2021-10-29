@@ -112,9 +112,16 @@ runtime = [
     "url",
     "uuid",
 ]
-seccomp = ["caps", "lazy_static", "memoffset", "nix"]
+seccomp = [
+    "anyhow",
+    "bindgen",
+    "caps",
+    "lazy_static",
+    "memoffset",
+    "nix",
+]
 
 [build-dependencies]
-anyhow = "1.0.44"
-bindgen = { version = "0.59.1", default-features = false, features = ["runtime"] }
-nix = "0.23.0"
+anyhow = { version = "1.0.44", optional = true }
+bindgen = { version = "0.59.1", default-features = false, features = ["runtime"], optional = true }
+nix = { version = "0.23.0", optional = true }
