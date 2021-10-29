@@ -49,11 +49,6 @@ uuid = { version = "0.8.2", features = ["v4"], optional = true }
 which = { version = "4.2.2", optional = true }
 zip = { version = "0.5.13", features = ["unreserved"], optional = true }
 
-[dev-dependencies]
-anyhow = "1.0.44"
-nix = "0.23.0"
-proptest = "1.0.0"
-
 [features]
 api = [
     "bytes",
@@ -118,6 +113,11 @@ seccomp = [
     "memoffset",
     "nix",
 ]
+
+[dev-dependencies]
+anyhow = "1.0.44"
+nix = "0.23.0"
+proptest = "1.0.0"
 
 [build-dependencies]
 anyhow = { version = "1.0.44", optional = true }
