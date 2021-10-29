@@ -1,10 +1,12 @@
-use std::{env, fs, io::Write, path};
-
 fn main() {
+    #[cfg(feature = "seccomp")]
     generate_seccomp();
 }
 
+#[cfg(feature = "seccomp")]
 fn generate_seccomp() {
+    use std::{env, fs, io::Write, path};
+
     fn generate() -> anyhow::Result<()> {
         let lines = bindgen::Builder::default()
             .header_contents("syscall.h", "#include <sys/syscall.h>")
