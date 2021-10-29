@@ -5,6 +5,5 @@ authors = ["ESRLabs"]
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.44"
 caps = "0.5.3"
 nix = "0.23.0"
