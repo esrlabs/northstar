@@ -1002,7 +1002,6 @@ dependencies = [
 name = "inspect"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "caps",
  "nix 0.23.0",
 ]
@@ -1246,7 +1245,6 @@ dependencies = [
  "memfd",
  "memoffset",
  "nix 0.23.0",
- "proc-mounts",
  "proptest",
  "rand 0.7.3",
  "rlimit",
@@ -2128,7 +2126,6 @@ dependencies = [
  "caps",
  "nix 0.23.0",
  "structopt",
- "url",
 ]
 
 [[package]]
