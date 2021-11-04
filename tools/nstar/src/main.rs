@@ -308,11 +308,14 @@ async fn main() -> Result<()> {
                 "Container" => {
                     schemars::schema_for!(northstar::common::container::Container)
                 }
-                "Version" => {
-                    schemars::schema_for!(northstar::common::version::Version)
-                }
                 "Name" => {
                     schemars::schema_for!(northstar::common::name::Name)
+                }
+                "Manifest" => {
+                    schemars::schema_for!(northstar::npk::manifest::Manifest)
+                }
+                "Version" => {
+                    schemars::schema_for!(northstar::common::version::Version)
                 }
                 _ => unimplemented!(),
             };

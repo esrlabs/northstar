@@ -1,12 +1,12 @@
 use crate::{
     common::non_null_string::NonNullString,
+    npk::manifest::Capability,
     seccomp::{profiles::default, Profile, SyscallArgRule, SyscallRule},
 };
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_ALU, BPF_AND, BPF_IMM, BPF_JEQ, BPF_JMP,
     BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM, BPF_NEG, BPF_OR, BPF_RET, BPF_ST, BPF_W, SYSCALL_MAP,
 };
-use caps::Capability;
 use log::trace;
 use nix::errno::Errno;
 use std::{
@@ -160,7 +160,6 @@ fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -
                         Capability::CAP_PERFMON => {}
                         Capability::CAP_BPF => {}
                         Capability::CAP_CHECKPOINT_RESTORE => {}
-                        Capability::__Nonexhaustive => {}
                     };
                 }
                 if !cap_sys_admin {

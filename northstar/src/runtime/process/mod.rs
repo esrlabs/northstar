@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     common::{container::Container, non_null_string::NonNullString},
-    npk::manifest::{Manifest, RLimitResource, RLimitValue},
+    npk::manifest::{Capability, Manifest, RLimitResource, RLimitValue},
     runtime::{
         console::{self, Peer},
         error::Context,
@@ -26,7 +26,7 @@ use nix::{
     unistd,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::{c_void, CString},
     fmt,
     mem::forget,
@@ -527,9 +527,64 @@ fn capabilities(manifest: &Manifest) -> Capabilities {
     let all = caps::all();
     let mut bounded =
         caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
-    let set = manifest.capabilities.clone().unwrap_or_default();
+    // Convert the set from the manifest to a set of caps::Capbility
+    let set = manifest
+        .capabilities
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(Into::into)
+        .collect::<HashSet<caps::Capability>>();
     bounded.retain(|c| !set.contains(c));
     Capabilities { all, bounded, set }
+}
+
+impl From<Capability> for caps::Capability {
+    fn from(cap: Capability) -> Self {
+        match cap {
+            Capability::CAP_CHOWN => caps::Capability::CAP_CHOWN,
+            Capability::CAP_DAC_OVERRIDE => caps::Capability::CAP_DAC_OVERRIDE,
+            Capability::CAP_DAC_READ_SEARCH => caps::Capability::CAP_DAC_READ_SEARCH,
+            Capability::CAP_FOWNER => caps::Capability::CAP_FOWNER,
+            Capability::CAP_FSETID => caps::Capability::CAP_FSETID,
+            Capability::CAP_KILL => caps::Capability::CAP_KILL,
+            Capability::CAP_SETGID => caps::Capability::CAP_SETGID,
+            Capability::CAP_SETUID => caps::Capability::CAP_SETUID,
+            Capability::CAP_SETPCAP => caps::Capability::CAP_SETPCAP,
+            Capability::CAP_LINUX_IMMUTABLE => caps::Capability::CAP_LINUX_IMMUTABLE,
+            Capability::CAP_NET_BIND_SERVICE => caps::Capability::CAP_NET_BIND_SERVICE,
+            Capability::CAP_NET_BROADCAST => caps::Capability::CAP_NET_BROADCAST,
+            Capability::CAP_NET_ADMIN => caps::Capability::CAP_NET_ADMIN,
+            Capability::CAP_NET_RAW => caps::Capability::CAP_NET_RAW,
+            Capability::CAP_IPC_LOCK => caps::Capability::CAP_IPC_LOCK,
+            Capability::CAP_IPC_OWNER => caps::Capability::CAP_IPC_OWNER,
+            Capability::CAP_SYS_MODULE => caps::Capability::CAP_SYS_MODULE,
+            Capability::CAP_SYS_RAWIO => caps::Capability::CAP_SYS_RAWIO,
+            Capability::CAP_SYS_CHROOT => caps::Capability::CAP_SYS_CHROOT,
+            Capability::CAP_SYS_PTRACE => caps::Capability::CAP_SYS_PTRACE,
+            Capability::CAP_SYS_PACCT => caps::Capability::CAP_SYS_PACCT,
+            Capability::CAP_SYS_ADMIN => caps::Capability::CAP_SYS_ADMIN,
+            Capability::CAP_SYS_BOOT => caps::Capability::CAP_SYS_BOOT,
+            Capability::CAP_SYS_NICE => caps::Capability::CAP_SYS_NICE,
+            Capability::CAP_SYS_RESOURCE => caps::Capability::CAP_SYS_RESOURCE,
+            Capability::CAP_SYS_TIME => caps::Capability::CAP_SYS_TIME,
+            Capability::CAP_SYS_TTY_CONFIG => caps::Capability::CAP_SYS_TTY_CONFIG,
+            Capability::CAP_MKNOD => caps::Capability::CAP_MKNOD,
+            Capability::CAP_LEASE => caps::Capability::CAP_LEASE,
+            Capability::CAP_AUDIT_WRITE => caps::Capability::CAP_AUDIT_WRITE,
+            Capability::CAP_AUDIT_CONTROL => caps::Capability::CAP_AUDIT_CONTROL,
+            Capability::CAP_SETFCAP => caps::Capability::CAP_SETFCAP,
+            Capability::CAP_MAC_OVERRIDE => caps::Capability::CAP_MAC_OVERRIDE,
+            Capability::CAP_MAC_ADMIN => caps::Capability::CAP_MAC_ADMIN,
+            Capability::CAP_SYSLOG => caps::Capability::CAP_SYSLOG,
+            Capability::CAP_WAKE_ALARM => caps::Capability::CAP_WAKE_ALARM,
+            Capability::CAP_BLOCK_SUSPEND => caps::Capability::CAP_BLOCK_SUSPEND,
+            Capability::CAP_AUDIT_READ => caps::Capability::CAP_AUDIT_READ,
+            Capability::CAP_PERFMON => caps::Capability::CAP_PERFMON,
+            Capability::CAP_BPF => caps::Capability::CAP_BPF,
+            Capability::CAP_CHECKPOINT_RESTORE => caps::Capability::CAP_CHECKPOINT_RESTORE,
+        }
+    }
 }
 
 type RLimits = HashMap<rlimit::Resource, RLimitValue>;

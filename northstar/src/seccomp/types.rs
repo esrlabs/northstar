@@ -1,9 +1,10 @@
 use crate::common::non_null_string::NonNullString;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Predefined seccomp profile
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum Profile {
     /// Default seccomp filter similar to docker's default profile
     #[serde(rename = "default")]
@@ -11,7 +12,7 @@ pub enum Profile {
 }
 
 /// Seccomp configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Seccomp {
     /// Pre-defined seccomp profile
@@ -23,7 +24,7 @@ pub struct Seccomp {
 }
 
 /// Syscall rule
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum SyscallRule {
     /// Any syscall argument is allowed
     #[serde(rename = "any")]
@@ -34,7 +35,7 @@ pub enum SyscallRule {
 }
 
 /// Syscall argument rule
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SyscallArgRule {
     /// Index of syscall argument

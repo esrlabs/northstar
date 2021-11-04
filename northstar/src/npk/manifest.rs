@@ -2,13 +2,15 @@ use crate::{
     common::{name::Name, non_null_string::NonNullString, version::Version},
     seccomp::{Seccomp, SyscallRule},
 };
+use derive_more::Deref;
 use itertools::Itertools;
+use schemars::JsonSchema;
 use serde::{
     de::{Deserializer, Visitor},
-    Deserialize, Serialize,
+    Deserialize, Serialize, Serializer,
 };
-use serde_with::skip_serializing_none;
-use serde_yaml::Value;
+use serde_json::Value;
+use serde_with::{rust::maps_duplicate_key_is_error, skip_serializing_none};
 use std::{
     collections::{HashMap, HashSet},
     fmt, io,
@@ -17,14 +19,9 @@ use std::{
 };
 use thiserror::Error;
 
-/// Linux capability
-pub type Capability = caps::Capability;
-/// Mount option set
-pub type MountOptions = HashSet<MountOption>;
-
 /// Northstar package manifest
 #[skip_serializing_none]
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     /// Name of container
@@ -42,6 +39,10 @@ pub struct Manifest {
     pub uid: u16,
     /// GID
     pub gid: u16,
+    /// List of bind mounts and resources
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(deserialize_with = "maps_duplicate_key_is_error::deserialize")]
+    pub mounts: HashMap<PathBuf, Mount>,
     /// Environment passed to container
     pub env: Option<HashMap<NonNullString, NonNullString>>,
     /// Autostart this container upon northstar startup
@@ -50,16 +51,7 @@ pub struct Manifest {
     pub cgroups: Option<cgroups::CGroups>,
     /// Seccomp configuration
     pub seccomp: Option<Seccomp>,
-    /// List of bind mounts and resources
-    #[serde(
-        default,
-        skip_serializing_if = "HashMap::is_empty",
-        with = "::serde_with::rust::maps_duplicate_key_is_error"
-    )]
-    pub mounts: HashMap<PathBuf, Mount>,
-    /// String containing capability names to give to
-    /// new container
-    #[serde(default, with = "serde_caps")]
+    /// Capabilities
     pub capabilities: Option<HashSet<Capability>>,
     /// String containing group names to give to new container
     pub suppl_groups: Option<Vec<NonNullString>>,
@@ -226,7 +218,7 @@ pub enum Error {
 }
 
 /// Autostart options
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 pub enum Autostart {
     /// Ignore errors when starting this container. Ignore the containers termination result
     #[serde(rename = "relaxed")]
@@ -237,7 +229,7 @@ pub enum Autostart {
     Critical,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 /// Mount option
 pub enum MountOption {
@@ -258,8 +250,94 @@ pub enum MountOption {
     Rec,
 }
 
+impl ToString for MountOption {
+    fn to_string(&self) -> String {
+        match self {
+            MountOption::Rw => "rw",
+            MountOption::NoExec => "noexec",
+            MountOption::NoSuid => "nosuid",
+            MountOption::NoDev => "nodev",
+            MountOption::Rec => "rec",
+        }
+        .to_string()
+    }
+}
+
+impl FromStr for MountOption {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "rw" => Ok(MountOption::Rw),
+            "noexec" => Ok(MountOption::NoExec),
+            "nosuid" => Ok(MountOption::NoSuid),
+            "nodev" => Ok(MountOption::NoDev),
+            "rec" => Ok(MountOption::Rec),
+            _ => Err(format!("invalid mount option {}", s)),
+        }
+    }
+}
+
+/// Mount option set
+#[derive(Default, Clone, Eq, PartialEq, Debug, Deref, JsonSchema)]
+pub struct MountOptions(HashSet<MountOption>);
+
+impl MountOptions {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Serialize for MountOptions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.iter().map(ToString::to_string).join(","))
+    }
+}
+
+impl FromIterator<MountOption> for MountOptions {
+    fn from_iter<I: IntoIterator<Item = MountOption>>(iter: I) -> Self {
+        MountOptions(iter.into_iter().collect())
+    }
+}
+
+impl<'de> Deserialize<'de> for MountOptions {
+    fn deserialize<D>(deserializer: D) -> Result<MountOptions, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct MountOptionsVisitor;
+        impl<'de> Visitor<'de> for MountOptionsVisitor {
+            type Value = MountOptions;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
+                formatter.write_str("comma seperated mount options")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<MountOptions, E> {
+                let options = str_data.trim();
+                if !options.is_empty() {
+                    let iter = options.split(',');
+                    let mut result = HashSet::with_capacity(iter.size_hint().0);
+                    for opt in iter {
+                        result.insert(
+                            MountOption::from_str(opt.trim()).map_err(serde::de::Error::custom)?,
+                        );
+                    }
+                    Ok(MountOptions(result))
+                } else {
+                    Ok(MountOptions::default())
+                }
+            }
+        }
+
+        deserializer.deserialize_str(MountOptionsVisitor)
+    }
+}
+
 /// Resource mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Resource {
     /// Name of the resource container
@@ -268,32 +346,24 @@ pub struct Resource {
     pub version: Version,
     /// Directory within the resource container
     pub dir: PathBuf,
-    #[serde(
-        default,
-        with = "mount_options",
-        skip_serializing_if = "HashSet::is_empty"
-    )]
     /// Mount options
+    #[serde(default, skip_serializing_if = "MountOptions::is_empty")]
     pub options: MountOptions,
 }
 
 /// Bind mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Bind {
     /// Path in the host filesystem
     pub host: PathBuf,
-    #[serde(
-        default,
-        with = "mount_options",
-        skip_serializing_if = "HashSet::is_empty"
-    )]
     /// Mount options
+    #[serde(default, skip_serializing_if = "MountOptions::is_empty")]
     pub options: MountOptions,
 }
 
 /// Tmpfs configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Tmpfs {
     /// Size in bytes
     #[serde(deserialize_with = "deserialize_tmpfs_size")]
@@ -301,7 +371,7 @@ pub struct Tmpfs {
 }
 
 /// Mounts
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum Mount {
     /// Bind mount of a host dir with options
@@ -325,7 +395,7 @@ pub enum Mount {
 }
 
 /// IO configuration for stdin, stdout, stderr
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Io {
     /// stdout configuration
@@ -337,7 +407,7 @@ pub struct Io {
 }
 
 /// Io redirection for stdout/stderr
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum Output {
     /// Inherit the runtimes stdout/stderr
     #[serde(rename = "pipe")]
@@ -346,14 +416,43 @@ pub enum Output {
     #[serde(rename = "log")]
     Log {
         /// Level
-        level: log::Level,
+        level: Level,
         /// Tag
         tag: String,
     },
 }
 
+/// Log level
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Level {
+    /// The "error" level.
+    #[serde(alias = "ERROR")]
+    Error = 1,
+    /// The "warn" level.
+    ///
+    /// Designates hazardous situations.
+    #[serde(alias = "WARN")]
+    Warn,
+    /// The "info" level.
+    ///
+    /// Designates useful information.
+    #[serde(alias = "INFOY")]
+    Info,
+    /// The "debug" level.
+    ///
+    /// Designates lower priority information.
+    #[serde(alias = "DEBUG")]
+    Debug,
+    /// The "trace" level.
+    ///
+    /// Designates very low priority, often extremely verbose, information.
+    #[serde(alias = "TRACE")]
+    Trace,
+}
+
 /// Resource limits. See setrlimit(2)
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all(serialize = "lowercase", deserialize = "lowercase"))]
 pub enum RLimitResource {
     /// Address space
@@ -404,7 +503,7 @@ pub enum RLimitResource {
 }
 
 /// Value for a rlimit setting
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RLimitValue {
     /// Soft limit value for resource. None indicates `unlimited`.
     pub soft: Option<u64>,
@@ -412,77 +511,92 @@ pub struct RLimitValue {
     pub hard: Option<u64>,
 }
 
-mod mount_options {
-    use super::{MountOption, MountOptions};
-    use itertools::Itertools;
-    use serde::{de::Visitor, Deserializer, Serializer};
-    use std::str::FromStr;
-
-    impl ToString for MountOption {
-        fn to_string(&self) -> String {
-            match self {
-                MountOption::Rw => "rw",
-                MountOption::NoExec => "noexec",
-                MountOption::NoSuid => "nosuid",
-                MountOption::NoDev => "nodev",
-                MountOption::Rec => "rec",
-            }
-            .to_string()
-        }
-    }
-
-    impl FromStr for MountOption {
-        type Err = String;
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match s {
-                "rw" => Ok(MountOption::Rw),
-                "noexec" => Ok(MountOption::NoExec),
-                "nosuid" => Ok(MountOption::NoSuid),
-                "nodev" => Ok(MountOption::NoDev),
-                "rec" => Ok(MountOption::Rec),
-                _ => Err(format!("invalid mount option {}", s)),
-            }
-        }
-    }
-
-    pub(super) fn serialize<S: Serializer>(
-        options: &MountOptions,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&options.iter().map(ToString::to_string).join(","))
-    }
-
-    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<MountOptions, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct MountOptionsVisitor;
-        impl<'de> Visitor<'de> for MountOptionsVisitor {
-            type Value = MountOptions;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
-                formatter.write_str("comma seperated mount options")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<MountOptions, E> {
-                let options = str_data.trim();
-                if !options.is_empty() {
-                    let iter = options.split(',');
-                    let mut result = MountOptions::with_capacity(iter.size_hint().0);
-                    for opt in iter {
-                        result.insert(
-                            MountOption::from_str(opt.trim()).map_err(serde::de::Error::custom)?,
-                        );
-                    }
-                    Ok(result)
-                } else {
-                    Ok(MountOptions::default())
-                }
-            }
-        }
-
-        deserializer.deserialize_str(MountOptionsVisitor)
-    }
+/// Linux capability
+#[derive(Clone, Eq, Hash, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[allow(non_camel_case_types)]
+pub enum Capability {
+    /// `CAP_CHOWN` (from POSIX)
+    CAP_CHOWN,
+    /// `CAP_DAC_OVERRIDE` (from POSIX)
+    CAP_DAC_OVERRIDE,
+    /// `CAP_DAC_READ_SEARCH` (from POSIX)
+    CAP_DAC_READ_SEARCH,
+    /// `CAP_FOWNER` (from POSIX)
+    CAP_FOWNER,
+    /// `CAP_FSETID` (from POSIX)
+    CAP_FSETID,
+    /// `CAP_KILL` (from POSIX)
+    CAP_KILL,
+    /// `CAP_SETGID` (from POSIX)
+    CAP_SETGID,
+    /// `CAP_SETUID` (from POSIX)
+    CAP_SETUID,
+    /// `CAP_SETPCAP` (from Linux)
+    CAP_SETPCAP,
+    /// `CAP_LINUX_IMMUTABLE` (from Linux)
+    CAP_LINUX_IMMUTABLE,
+    /// `CAP_NET_BIND_SERVICE` (from Linux)
+    CAP_NET_BIND_SERVICE,
+    /// `CAP_NET_BROADCAST` (from Linux)
+    CAP_NET_BROADCAST,
+    /// `CAP_NET_ADMIN` (from Linux)
+    CAP_NET_ADMIN,
+    /// `CAP_NET_RAW` (from Linux)
+    CAP_NET_RAW,
+    /// `CAP_IPC_LOCK` (from Linux)
+    CAP_IPC_LOCK,
+    /// `CAP_IPC_OWNER` (from Linux)
+    CAP_IPC_OWNER,
+    /// `CAP_SYS_MODULE` (from Linux)
+    CAP_SYS_MODULE,
+    /// `CAP_SYS_RAWIO` (from Linux)
+    CAP_SYS_RAWIO,
+    /// `CAP_SYS_CHROOT` (from Linux)
+    CAP_SYS_CHROOT,
+    /// `CAP_SYS_PTRACE` (from Linux)
+    CAP_SYS_PTRACE,
+    /// `CAP_SYS_PACCT` (from Linux)
+    CAP_SYS_PACCT,
+    /// `CAP_SYS_ADMIN` (from Linux)
+    CAP_SYS_ADMIN,
+    /// `CAP_SYS_BOOT` (from Linux)
+    CAP_SYS_BOOT,
+    /// `CAP_SYS_NICE` (from Linux)
+    CAP_SYS_NICE,
+    /// `CAP_SYS_RESOURCE` (from Linux)
+    CAP_SYS_RESOURCE,
+    /// `CAP_SYS_TIME` (from Linux)
+    CAP_SYS_TIME,
+    /// `CAP_SYS_TTY_CONFIG` (from Linux)
+    CAP_SYS_TTY_CONFIG,
+    /// `CAP_SYS_MKNOD` (from Linux, >= 2.4)
+    CAP_MKNOD,
+    /// `CAP_LEASE` (from Linux, >= 2.4)
+    CAP_LEASE,
+    /// `CAP_AUDIT_WRITE`
+    CAP_AUDIT_WRITE,
+    /// `CAP_AUDIT_CONTROL` (from Linux, >= 2.6.11)
+    CAP_AUDIT_CONTROL,
+    /// `CAP_SETFCAP`
+    CAP_SETFCAP,
+    /// `CAP_MAC_OVERRIDE`
+    CAP_MAC_OVERRIDE,
+    /// `CAP_MAC_ADMIN`
+    CAP_MAC_ADMIN,
+    /// `CAP_SYSLOG` (from Linux, >= 2.6.37)
+    CAP_SYSLOG,
+    /// `CAP_WAKE_ALARM` (from Linux, >= 3.0)
+    CAP_WAKE_ALARM,
+    /// `CAP_BLOCK_SUSPEND`
+    CAP_BLOCK_SUSPEND,
+    /// `CAP_AUDIT_READ` (from Linux, >= 3.16).
+    CAP_AUDIT_READ,
+    /// `CAP_PERFMON` (from Linux, >= 5.8).
+    CAP_PERFMON,
+    /// `CAP_BPF` (from Linux, >= 5.8).
+    CAP_BPF,
+    /// `CAP_CHECKPOINT_RESTORE` (from Linux, >= 5.9).
+    CAP_CHECKPOINT_RESTORE,
 }
 
 fn deserialize_tmpfs_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
@@ -509,64 +623,32 @@ fn deserialize_tmpfs_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<
     deserializer.deserialize_any(SizeVisitor)
 }
 
-mod serde_caps {
-    use super::Capability;
-    use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serializer};
-    use std::{collections::HashSet, str::FromStr};
-
-    pub(super) fn serialize<S: Serializer>(
-        caps: &Option<HashSet<Capability>>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        if let Some(caps) = caps {
-            let mut seq = serializer.serialize_seq(Some(caps.len()))?;
-            for cap in caps {
-                seq.serialize_element(&cap.to_string())?;
-            }
-            seq.end()
-        } else {
-            serializer.serialize_none()
-        }
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<HashSet<Capability>>, D::Error> {
-        let s: Option<HashSet<String>> = Option::deserialize(deserializer)?;
-        if let Some(s) = s {
-            if s.is_empty() {
-                Ok(None)
-            } else {
-                let mut result = HashSet::with_capacity(s.len());
-                for cap in s {
-                    let cap = Capability::from_str(&cap).map_err(serde::de::Error::custom)?;
-                    result.insert(cap);
-                }
-                Ok(Some(result))
-            }
-        } else {
-            Ok(None)
-        }
-    }
-}
-
 /// CGroups
 pub mod cgroups {
+    use schemars::{gen::SchemaGenerator, schema::Schema, JsonSchema};
     use serde::{Deserialize, Serialize};
 
     /// CGroups configuration
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
     pub struct CGroups {
         /// BlkIo controller
+        #[schemars(schema_with = "schema")]
         pub blkio: Option<BlkIo>,
         /// Cpu controller
+        #[schemars(schema_with = "schema")]
         pub cpu: Option<Cpu>,
         /// Memory controller
+        #[schemars(schema_with = "schema")]
         pub memory: Option<Memory>,
     }
 
     // Reuse the huge and well documented structs from cgroups-rs
     pub use cgroups_rs::{BlkIoResources as BlkIo, CpuResources as Cpu, MemoryResources as Memory};
+
+    // TODO
+    fn schema(gen: &mut SchemaGenerator) -> Schema {
+        <String>::json_schema(gen)
+    }
 }
 
 #[cfg(test)]
@@ -697,9 +779,9 @@ cgroups:
             manifest.capabilities,
             Some(HashSet::from_iter(
                 vec!(
-                    caps::Capability::CAP_NET_RAW,
-                    caps::Capability::CAP_MKNOD,
-                    caps::Capability::CAP_SYS_TIME,
+                    Capability::CAP_NET_RAW,
+                    Capability::CAP_MKNOD,
+                    Capability::CAP_SYS_TIME,
                 )
                 .drain(..)
             ))
@@ -740,7 +822,7 @@ mounts:
   /lib/non_overlapping2:
     type: bind
     host: /lib
-  /lib/overlapping:
+  /lib/overlapping/foo:
     type: bind
     host: /lib
 ";
@@ -948,5 +1030,10 @@ custom:
     fn invalid_non_null_string() -> Result<()> {
         assert!(NonNullString::try_from("test_null\0.string").is_err());
         Ok(())
+    }
+
+    #[test]
+    fn schema() {
+        schemars::schema_for!(Manifest);
     }
 }
