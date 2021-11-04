@@ -226,6 +226,10 @@ type = { fs = { dir = "target/northstar/repository" }}
 
 TODO: Describe what a repository is and what are the attributes: with/without key/verity, etc...
 
+## Console
+
+TODO: describe the console and link json model documentation
+
 ## Integration tests
 
 Integrations tests start a runtime instance and assert on log output of
