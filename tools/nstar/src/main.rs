@@ -16,6 +16,7 @@ use northstar::{
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
+    fs::write,
     path::PathBuf,
     process,
     str::FromStr,
@@ -132,6 +133,14 @@ enum Subcommand {
         name: String,
         /// Container version
         version: Option<Version>,
+    },
+    /// Generate json schema
+    Schema {
+        /// Type to generate schema for
+        r#type: String,
+        /// Output file
+        #[structopt(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -274,7 +283,11 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let name = name.try_into()?;
             Ok(Request::ContainerStats(Container::new(name, version)))
         }
-        Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
+        Subcommand::Notifications { .. }
+        | Subcommand::Completion { .. }
+        | Subcommand::Schema { .. } => {
+            unreachable!()
+        }
     }
 }
 
@@ -283,11 +296,36 @@ async fn main() -> Result<()> {
     let opt = Opt::from_args();
     let timeout = time::Duration::from_secs(5);
 
-    // Generate shell completions and exit on give subcommand
-    if let Subcommand::Completion { output, shell } = opt.command {
-        println!("Generating {} completions to {}", shell, output.display());
-        Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
-        process::exit(0);
+    match opt.command {
+        // Generate shell completions and exit on give subcommand
+        Subcommand::Completion { output, shell } => {
+            println!("Generating {} completions to {}", shell, output.display());
+            Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
+            process::exit(0);
+        }
+        Subcommand::Schema { r#type, output } => {
+            let schema = match r#type.as_str() {
+                "Container" => {
+                    schemars::schema_for!(northstar::common::container::Container)
+                }
+                "Version" => {
+                    schemars::schema_for!(northstar::common::version::Version)
+                }
+                "Name" => {
+                    schemars::schema_for!(northstar::common::name::Name)
+                }
+                _ => unimplemented!(),
+            };
+            let schema = serde_json::to_string_pretty(&schema)?;
+            match output {
+                Some(path) => {
+                    write(path, schema.as_bytes())?;
+                }
+                None => println!("{}", schema),
+            }
+            process::exit(0);
+        }
+        _ => (),
     }
 
     let io = match opt.url.scheme() {

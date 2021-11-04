@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -7,7 +8,7 @@ use std::{
 use thiserror::Error;
 
 /// String that does not contain null bytes
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(try_from = "String")]
 pub struct NonNullString(String);
 
