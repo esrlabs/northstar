@@ -1,4 +1,5 @@
 use derive_new::new;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -28,7 +29,7 @@ pub fn version() -> Version {
 }
 
 /// Container exit status
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),
@@ -37,7 +38,7 @@ pub enum ExitStatus {
 }
 
 /// Message
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum Message {
     Connect(Connect),
@@ -47,7 +48,7 @@ pub enum Message {
 }
 
 /// Notification / Event
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum Notification {
     Started(Container),
@@ -59,14 +60,14 @@ pub enum Notification {
 }
 
 /// Cgroup event
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum CgroupNotification {
     Memory(MemoryNotification),
 }
 
 /// CGroup memory event data
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub struct MemoryNotification {
     pub low: Option<u64>,
@@ -77,7 +78,7 @@ pub struct MemoryNotification {
 }
 
 /// Connect meta information
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum Connect {
     Connect {
@@ -90,14 +91,14 @@ pub enum Connect {
 }
 
 /// Connection nack
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum ConnectNack {
     InvalidProtocolVersion(Version),
 }
 
 /// Request
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum Request {
     Containers,
@@ -117,7 +118,7 @@ pub enum Request {
 }
 
 /// Container information
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ContainerData {
     /// Container name and version
     pub container: Container,
@@ -132,7 +133,7 @@ pub struct ContainerData {
 }
 
 /// Process information
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Process {
     /// Process id
     pub pid: Pid,
@@ -141,7 +142,7 @@ pub struct Process {
 }
 
 /// Result of a mount operation
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum MountResult {
     Ok(Container),
@@ -149,7 +150,7 @@ pub enum MountResult {
 }
 
 /// Response
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum Response {
     Ok(()),
@@ -164,7 +165,7 @@ pub enum Response {
 pub type ContainerStats = HashMap<String, serde_json::Value>;
 
 /// API error
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]
 pub enum Error {
     Configuration(String),
