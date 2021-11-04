@@ -2,6 +2,7 @@ use crate::common::{
     name::{InvalidNameChar, Name},
     version::Version,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -11,7 +12,7 @@ use std::{
 use thiserror::Error;
 
 /// Container identification
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct Container {
     #[serde(flatten)]
     inner: Arc<Inner>,
@@ -97,7 +98,7 @@ impl<E: Into<Error>, N: TryInto<Name, Error = E>, V: ToString> TryFrom<(N, V)> f
     }
 }
 
-#[derive(Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[derive(Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 struct Inner {
     name: Name,
     version: Version,
@@ -109,4 +110,9 @@ fn try_from() {
         Container::new("test".try_into().unwrap(), Version::parse("0.0.1").unwrap()),
         "test:0.0.1".try_into().unwrap()
     );
+}
+
+#[test]
+fn schema() {
+    schemars::schema_for!(Container);
 }
