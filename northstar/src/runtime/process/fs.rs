@@ -248,7 +248,7 @@ fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
 
 fn options_to_flags(opt: &MountOptions) -> MsFlags {
     let mut flags = MsFlags::empty();
-    for opt in opt {
+    for opt in &**opt {
         match opt {
             MountOption::Rw => {}
             MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,

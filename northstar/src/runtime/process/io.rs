@@ -4,11 +4,11 @@ use super::{
 };
 use crate::{
     npk,
-    npk::manifest::{Manifest, Output},
+    npk::manifest::{Level, Manifest, Output},
     runtime::{error::Context as ErrorContext, ipc::pipe::PipeWrite},
 };
 use bytes::{Buf, BufMut, BytesMut};
-use log::{debug, error, info, trace, warn, Level};
+use log::{debug, error, info, trace, warn};
 use nix::libc;
 use std::{
     collections::HashMap,
@@ -132,7 +132,7 @@ pub(super) async fn from_manifest(
 
                 let mut reader = BufReader::new(reader);
                 let tag = tag.to_string();
-                let mut log_sink = LogSink::new(*level, &tag);
+                let mut log_sink = LogSink::new(level.clone(), &tag);
                 task::spawn(async move {
                     drop(io::copy_buf(&mut reader, &mut log_sink).await);
                 });
