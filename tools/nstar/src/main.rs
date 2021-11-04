@@ -136,8 +136,6 @@ enum Subcommand {
     },
     /// Generate json schema
     Schema {
-        /// Type to generate schema for
-        r#type: String,
         /// Output file
         #[structopt(short, long)]
         output: Option<PathBuf>,
@@ -303,22 +301,10 @@ async fn main() -> Result<()> {
             Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
             process::exit(0);
         }
-        Subcommand::Schema { r#type, output } => {
-            let schema = match r#type.as_str() {
-                "Container" => {
-                    schemars::schema_for!(northstar::common::container::Container)
-                }
-                "Name" => {
-                    schemars::schema_for!(northstar::common::name::Name)
-                }
-                "Manifest" => {
-                    schemars::schema_for!(northstar::npk::manifest::Manifest)
-                }
-                "Version" => {
-                    schemars::schema_for!(northstar::common::version::Version)
-                }
-                _ => unimplemented!(),
-            };
+        Subcommand::Schema { output } => {
+            let settings = schemars::gen::SchemaSettings::openapi3();
+            let gen = settings.into_generator();
+            let schema = gen.into_root_schema_for::<northstar::api::model::Message>();
             let schema = serde_json::to_string_pretty(&schema)?;
             match output {
                 Some(path) => {
