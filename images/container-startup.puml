@@ -1,50 +1,33 @@
 @startuml container_startup
 
-client -> runtime: start(container)
-activate client 
-activate runtime
-runtime -> runtime: mount container NPK
-runtime -> runtime: block signals
-
-create init
-runtime -> init: clone init
-activate init
-init -> init: wait for start (pipe)
-deactivate init
-
-runtime -> runtime: unblock signals
-runtime -> runtime: configure cgroups
-runtime -> runtime: configure debug stuff
-runtime -> init: start (close pipe)
-
-activate init
-runtime -> runtime: wait for execve (pipe closed)
-deactivate runtime
-init -> init: setup environment
-create container
-init -> container: clone container
-activate container
-init -> init: waitpid(container)
-deactivate init
-
-container -> container: set parent death signal
-container -> container: unblock signals
-container -> container: apply seccomp
-container -> : execve
-container -> runtime: closed pipe
-activate runtime
-runtime -> client: started
-deactivate runtime
-
-...
-
-container -> init: exit
-activate init
-destroy container
-destroy init
-init -> runtime: signal SIGCHLD
-activate runtime
-runtime -> runtime: waitpid (WNOHANG) -> exitstatus
-runtime -> client: notification exit(exitstatus)
+activate Runtime
+Runtime -> Runtime: Check and Mount container
+create Trampoline
+Runtime -> Trampoline: Fork
+activate Trampoline
+create Init
+Trampoline -> Init: Fork
+activate Init
+Trampoline -> Runtime: Init PID
+destroy Trampoline
+Runtime -> Runtime: Wait for Trampoline exit (waitpid)
+Init -> Init: Wait for run signal (Condition::wait)
+Runtime -> Runtime: Configure cgroups
+Runtime -> Init: Signal run (Condition::notify)
+Runtime -> Runtime: Wait for execve (Condition::wait)
+Init -> Init: Mount, Chroot, UID / GID,\ndrop privileges, file descriptors
+create Container
+Init -> Container: Fork
+activate Container
+Init -> Init: Wait for container to exit (waitpid)
+Container -> Container: Set seccomp filter
+Container -> : Execve(..)
+Runtime -> Runtime: Condition pipe closed: Container is started
+note left: Condition pipe is CLOEXEC
+Container -> Init: Exit
+destroy Container
+Init -> Runtime: Exit
+Runtime -> Runtime: Read exit status from pipe or waitpid on pid of init
+destroy Init
 
 @enduml
