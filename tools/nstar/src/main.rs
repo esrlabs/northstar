@@ -16,7 +16,6 @@ use northstar::{
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
-    fs::write,
     path::PathBuf,
     process,
     str::FromStr,
@@ -133,12 +132,6 @@ enum Subcommand {
         name: String,
         /// Container version
         version: Option<Version>,
-    },
-    /// Generate json schema
-    Schema {
-        /// Output file
-        #[structopt(short, long)]
-        output: Option<PathBuf>,
     },
 }
 
@@ -281,11 +274,7 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let name = name.try_into()?;
             Ok(Request::ContainerStats(Container::new(name, version)))
         }
-        Subcommand::Notifications { .. }
-        | Subcommand::Completion { .. }
-        | Subcommand::Schema { .. } => {
-            unreachable!()
-        }
+        Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }
 }
 
@@ -294,27 +283,11 @@ async fn main() -> Result<()> {
     let opt = Opt::from_args();
     let timeout = time::Duration::from_secs(5);
 
-    match opt.command {
-        // Generate shell completions and exit on give subcommand
-        Subcommand::Completion { output, shell } => {
-            println!("Generating {} completions to {}", shell, output.display());
-            Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
-            process::exit(0);
-        }
-        Subcommand::Schema { output } => {
-            let settings = schemars::gen::SchemaSettings::openapi3();
-            let gen = settings.into_generator();
-            let schema = gen.into_root_schema_for::<northstar::api::model::Message>();
-            let schema = serde_json::to_string_pretty(&schema)?;
-            match output {
-                Some(path) => {
-                    write(path, schema.as_bytes())?;
-                }
-                None => println!("{}", schema),
-            }
-            process::exit(0);
-        }
-        _ => (),
+    // Generate shell completions and exit on give subcommand
+    if let Subcommand::Completion { output, shell } = opt.command {
+        println!("Generating {} completions to {}", shell, output.display());
+        Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
+        process::exit(0);
     }
 
     let io = match opt.url.scheme() {

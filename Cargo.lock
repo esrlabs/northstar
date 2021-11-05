@@ -1802,6 +1802,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 
 [[package]]
+name = "schema"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "northstar",
+ "schemars",
+ "serde_json",
+ "structopt",
+]
+
+[[package]]
 name = "schemars"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
