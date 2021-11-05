@@ -74,6 +74,7 @@ npk = [
     "rand",
     "sha2",
     "seccomp",
+    "serde_json",
     "serde_with",
     "serde_yaml",
     "tempfile",
@@ -116,6 +117,7 @@ seccomp = [
     "lazy_static",
     "memoffset",
     "nix",
+    "npk",
 ]
 
 [dev-dependencies]
