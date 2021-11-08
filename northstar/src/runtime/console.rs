@@ -123,10 +123,13 @@ impl Console {
         let connect = time::timeout(timeout, connect);
         let (protocol_version, notifications) = match connect.await {
             Ok(Some(Ok(m))) => match m {
-                model::Message::Connect(model::Connect::Connect {
-                    version,
-                    subscribe_notifications,
-                }) => (version, subscribe_notifications),
+                model::Message::Connect {
+                    connect:
+                        model::Connect::Connect {
+                            version,
+                            subscribe_notifications,
+                        },
+                } => (version, subscribe_notifications),
                 _ => {
                     warn!("{}: Received {:?} instead of Connect", peer, m);
                     return Ok(());
@@ -153,15 +156,17 @@ impl Console {
                 peer, protocol_version
             );
             // Send a ConnectNack and return -> closes the connection
-            let connack = model::ConnectNack::InvalidProtocolVersion(model::version());
-            let connack = model::Connect::ConnectNack(connack);
-            let message = model::Message::Connect(connack);
+            let error = model::ConnectNack::InvalidProtocolVersion {
+                version: model::version(),
+            };
+            let connect = model::Connect::Nack { error };
+            let message = model::Message::Connect { connect };
             network_stream.send(message).await.ok();
             return Ok(());
         } else {
             // Send ConnectAck
-            let conack = model::Connect::ConnectAck;
-            let message = model::Message::Connect(conack);
+            let conack = model::Connect::Ack;
+            let message = model::Message::Connect { connect: conack };
 
             if let Err(e) = network_stream.send(message).await {
                 warn!("{}: Connection error: {}", peer, e);
@@ -257,7 +262,10 @@ where
     S: AsyncRead + Unpin,
 {
     let (reply_tx, reply_rx) = oneshot::channel();
-    if let model::Message::Request(model::Request::Install(repository, size)) = message {
+    if let model::Message::Request {
+        request: model::Request::Install { repository, size },
+    } = message
+    {
         debug!(
             "{}: Received installation request with size {}",
             client_id,
@@ -295,7 +303,7 @@ where
         trace!("    {:?} <- event loop", response);
         response
     })
-    .map(model::Message::Response)
+    .map(|response| model::Message::Response { response })
 }
 
 /// Types of listeners for console connections
@@ -422,8 +430,10 @@ impl fmt::Display for Peer {
 impl From<ExitStatus> for model::ExitStatus {
     fn from(e: ExitStatus) -> Self {
         match e {
-            ExitStatus::Exit(e) => api::model::ExitStatus::Exit(e),
-            ExitStatus::Signalled(s) => api::model::ExitStatus::Signalled(s as u32),
+            ExitStatus::Exit(code) => api::model::ExitStatus::Exit { code },
+            ExitStatus::Signalled(signal) => api::model::ExitStatus::Signalled {
+                signal: signal as u32,
+            },
         }
     }
 }
@@ -432,23 +442,26 @@ impl From<(Container, ContainerEvent)> for model::Notification {
     fn from(p: (Container, ContainerEvent)) -> model::Notification {
         let container = p.0.clone();
         match p.1 {
-            ContainerEvent::Started => api::model::Notification::Started(container),
-            ContainerEvent::Exit(status) => {
-                api::model::Notification::Exit(container, status.into())
-            }
-            ContainerEvent::Installed => api::model::Notification::Install(container),
-            ContainerEvent::Uninstalled => api::model::Notification::Uninstall(container),
+            ContainerEvent::Started => api::model::Notification::Started { container },
+            ContainerEvent::Exit(status) => api::model::Notification::Exit {
+                container,
+                status: status.into(),
+            },
+            ContainerEvent::Installed => api::model::Notification::Install { container },
+            ContainerEvent::Uninstalled => api::model::Notification::Uninstall { container },
             ContainerEvent::CGroup(event) => match event {
-                super::CGroupEvent::Memory(memory) => api::model::Notification::CGroup(
+                super::CGroupEvent::Memory(memory) => api::model::Notification::CGroup {
                     container,
-                    api::model::CgroupNotification::Memory(api::model::MemoryNotification {
-                        low: memory.low,
-                        high: memory.high,
-                        max: memory.max,
-                        oom: memory.oom,
-                        oom_kill: memory.oom_kill,
-                    }),
-                ),
+                    notification: api::model::CgroupNotification::Memory(
+                        api::model::MemoryNotification {
+                            low: memory.low,
+                            high: memory.high,
+                            max: memory.max,
+                            oom: memory.oom,
+                            oom_kill: memory.oom_kill,
+                        },
+                    ),
+                },
             },
         }
     }

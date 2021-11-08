@@ -10,12 +10,11 @@ use super::{
     Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, RepositoryId,
 };
 use crate::{
-    api::{self, model::MountResult},
+    api::{self, model},
     common::non_null_string::NonNullString,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{error::Context, CGroupEvent, ENV_NAME, ENV_VERSION},
 };
-use api::model::Response;
 use async_trait::async_trait;
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;
@@ -686,81 +685,87 @@ impl<'a> State<'a> {
     ) -> Result<(), Error> {
         match request {
             Request::Message(message) => {
-                if let api::model::Message::Request(ref request) = message {
+                if let api::model::Message::Request { ref request } = message {
                     let response = match request {
-                        api::model::Request::Containers => {
-                            Response::Containers(self.list_containers())
-                        }
-                        api::model::Request::Install(_, _) => unreachable!(),
-                        api::model::Request::Mount(containers) => {
+                        api::model::Request::Containers => model::Response::Containers {
+                            containers: self.list_containers(),
+                        },
+                        api::model::Request::Install { .. } => unreachable!(),
+                        api::model::Request::Mount { containers } => {
                             let result = self
                                 .mount_all(containers)
                                 .await
                                 .drain(..)
                                 .zip(containers)
                                 .map(|(r, c)| match r {
-                                    Ok(r) => MountResult::Ok(r),
-                                    Err(e) => MountResult::Err((c.clone(), e.into())),
+                                    Ok(r) => model::MountResult::Ok { container: r },
+                                    Err(e) => model::MountResult::Error {
+                                        container: c.clone(),
+                                        error: e.into(),
+                                    },
                                 })
                                 .collect();
-                            Response::Mount(result)
+                            model::Response::Mount { result }
                         }
                         api::model::Request::Repositories => {
                             let repositories = self.repositories.keys().cloned().collect();
-                            Response::Repositories(repositories)
+                            model::Response::Repositories { repositories }
                         }
                         api::model::Request::Shutdown => {
                             self.events_tx
                                 .send(Event::Shutdown)
                                 .await
                                 .expect("Internal channel error on main");
-                            Response::Ok(())
+                            model::Response::Ok
                         }
-                        api::model::Request::Start(container, args, env) => {
-                            match self.start(container, args.as_ref(), env.as_ref()).await {
-                                Ok(_) => Response::Ok(()),
-                                Err(e) => {
-                                    warn!("Failed to start {}: {}", container, e);
-                                    Response::Err(e.into())
-                                }
+                        api::model::Request::Start {
+                            container,
+                            args,
+                            env,
+                        } => match self.start(container, args.as_ref(), env.as_ref()).await {
+                            Ok(_) => model::Response::Ok,
+                            Err(e) => {
+                                warn!("Failed to start {}: {}", container, e);
+                                model::Response::Error { error: e.into() }
                             }
-                        }
-                        api::model::Request::Kill(container, signal) => {
+                        },
+                        api::model::Request::Kill { container, signal } => {
                             let signal = Signal::try_from(*signal).unwrap();
                             match self.kill(container, signal).await {
-                                Ok(_) => Response::Ok(()),
+                                Ok(_) => model::Response::Ok,
                                 Err(e) => {
                                     error!("Failed to kill {} with {}: {}", container, signal, e);
-                                    Response::Err(e.into())
+                                    model::Response::Error { error: e.into() }
                                 }
                             }
                         }
-                        api::model::Request::Umount(container) => {
+                        api::model::Request::Umount { container } => {
                             match self.umount(container).await {
-                                Ok(_) => api::model::Response::Ok(()),
+                                Ok(_) => api::model::Response::Ok,
                                 Err(e) => {
                                     warn!("Failed to unmount{}: {}", container, e);
-                                    api::model::Response::Err(e.into())
+                                    model::Response::Error { error: e.into() }
                                 }
                             }
                         }
-                        api::model::Request::Uninstall(container) => {
+                        api::model::Request::Uninstall { container } => {
                             match self.uninstall(container).await {
-                                Ok(_) => api::model::Response::Ok(()),
+                                Ok(_) => api::model::Response::Ok,
                                 Err(e) => {
                                     warn!("Failed to uninstall {}: {}", container, e);
-                                    api::model::Response::Err(e.into())
+                                    model::Response::Error { error: e.into() }
                                 }
                             }
                         }
-                        api::model::Request::ContainerStats(container) => {
+                        api::model::Request::ContainerStats { container } => {
                             match self.container_stats(container).await {
-                                Ok(stats) => {
-                                    api::model::Response::ContainerStats(container.clone(), stats)
-                                }
+                                Ok(stats) => api::model::Response::ContainerStats {
+                                    container: container.clone(),
+                                    stats,
+                                },
                                 Err(e) => {
                                     warn!("Failed to gather stats for {}: {}", container, e);
-                                    api::model::Response::Err(e.into())
+                                    model::Response::Error { error: e.into() }
                                 }
                             }
                         }
@@ -775,8 +780,8 @@ impl<'a> State<'a> {
             }
             Request::Install(repository, ref mut rx) => {
                 let payload = match self.install(repository, rx).await {
-                    Ok(_) => api::model::Response::Ok(()),
-                    Err(e) => api::model::Response::Err(e.into()),
+                    Ok(_) => model::Response::Ok,
+                    Err(e) => model::Response::Error { error: e.into() },
                 };
 
                 // A error on the response_tx means that the connection

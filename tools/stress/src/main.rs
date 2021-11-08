@@ -199,7 +199,9 @@ async fn main() -> Result<()> {
                     info!("{:<a$}: start", container, a = len);
                     client.start(&container).await?;
                     if !relaxed {
-                        let started = Notification::Started(container.clone());
+                        let started = Notification::Started {
+                            container: container.clone(),
+                        };
                         await_notification(&mut client, started, timeout).await?;
                     }
                 }
@@ -218,7 +220,10 @@ async fn main() -> Result<()> {
                         .context("Failed to stop container")?;
 
                     info!("{:<a$}: waiting for termination", container, a = len);
-                    let stopped = Notification::Exit(container.clone(), ExitStatus::Signalled(15));
+                    let stopped = Notification::Exit {
+                        container: container.clone(),
+                        status: ExitStatus::Signalled { signal: 15 },
+                    };
                     await_notification(&mut client, stopped, timeout).await?;
                 }
 
@@ -326,10 +331,10 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
             _ = &mut timeout => break Ok(()),
             n = client.next() => {
                 match n {
-                    Some(Ok(model::Notification::Install(container))) => {
+                    Some(Ok(model::Notification::Install { container })) => {
                         client.uninstall(container).await?;
                     }
-                    Some(Ok(model::Notification::Uninstall(_))) => {
+                    Some(Ok(model::Notification::Uninstall{ .. })) => {
                         client.install(npk, repository).await?;
                     }
                     Some(Ok(_)) => continue,

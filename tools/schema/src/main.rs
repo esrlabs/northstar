@@ -3,10 +3,11 @@
 #![deny(clippy::all)]
 #![deny(missing_docs)]
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use northstar::api;
-use schemars::gen::SchemaSettings;
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use okapi::openapi3::{Components, Contact, Info};
+use schemars::{gen::SchemaSettings, JsonSchema};
+use std::{fs::write, path::PathBuf, str::FromStr};
 use structopt::{clap::AppSettings, StructOpt};
 
 /// About string for CLI
@@ -17,62 +18,87 @@ fn about() -> &'static str {
     )))
 }
 
-/// JsonSchema version
-#[derive(Clone)]
-enum Format {
-    OpenApi3,
-    Draft07,
-    Draft2019_09,
+#[derive(JsonSchema)]
+struct Message(northstar::api::model::Message);
+
+#[derive(JsonSchema)]
+struct Manifest(northstar::npk::manifest::Manifest);
+
+enum Model {
+    Api,
+    Manifest,
 }
 
-impl FromStr for Format {
+impl FromStr for Model {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
         match s {
-            "openapi3" => Ok(Format::OpenApi3),
-            "draft07" => Ok(Format::Draft07),
-            "draft2019-09" => Ok(Format::Draft2019_09),
-            _ => Err(anyhow!("Invalid format: {}", s)),
-        }
-    }
-}
-
-impl Display for Format {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Format::OpenApi3 => write!(f, "openapi3"),
-            Format::Draft07 => write!(f, "draft07"),
-            Format::Draft2019_09 => write!(f, "draft2019-09"),
+            "api" => Ok(Model::Api),
+            "manifest" => Ok(Model::Manifest),
+            _ => Err(anyhow::anyhow!("Invalid model: {}", s)),
         }
     }
 }
 
 /// CLI
-#[derive(StructOpt, Clone)]
+#[derive(StructOpt)]
 #[structopt(name = "schema", author, about = about(), global_setting(AppSettings::ColoredHelp))]
 struct Opt {
     /// Output destination. Defaults to stdout
     #[structopt(short, long)]
     output: Option<PathBuf>,
-    /// Format
-    #[structopt(short, long, default_value = "openapi3")]
-    format: Format,
+
+    /// Model to generate
+    #[structopt(short, long)]
+    model: Model,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let settings = match opt.format {
-        Format::OpenApi3 => SchemaSettings::openapi3(),
-        Format::Draft07 => SchemaSettings::draft07(),
-        Format::Draft2019_09 => SchemaSettings::draft2019_09(),
+    let settings = SchemaSettings::openapi3();
+    let mut gen = settings.into_generator();
+
+    match opt.model {
+        Model::Api => {
+            gen.root_schema_for::<Message>();
+        }
+        Model::Manifest => {
+            gen.root_schema_for::<Manifest>();
+        }
+    }
+
+    let schemas = gen
+        .definitions()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone().into_object()))
+        .collect();
+
+    let spec = okapi::openapi3::OpenApi {
+        openapi: "3.0.0".into(),
+        info: Info {
+            title: "Northstar".into(),
+            version: northstar::api::model::version().to_string(),
+            description: Some("Northstar API".into()),
+            contact: Some(Contact {
+                name: Some("ESRLabs".into()),
+                url: Some("http://www.esrlabs.com".into()),
+                email: Some("info@esrlabs.com".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        components: Some(Components {
+            schemas,
+            ..Default::default()
+        }),
+        ..Default::default()
     };
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<northstar::api::model::Message>();
-    let schema = serde_json::to_string_pretty(&schema)?;
+
+    let schema = serde_json::to_string_pretty(&spec)?;
     match opt.output {
         Some(path) => {
-            std::fs::write(path, schema.as_bytes()).context("Failed to write")?;
+            write(path, schema.as_bytes()).context("Failed to write")?;
         }
         None => println!("{}", schema),
     }

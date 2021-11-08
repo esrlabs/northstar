@@ -146,7 +146,12 @@ impl Northstar {
         self.client.kill(container, 15).await?;
         let container: Container = container.try_into()?;
         self.assume_notification(
-            |n| n == &Notification::Exit(container.clone(), ExitStatus::Signalled(15)),
+            |n| {
+                n == &Notification::Exit {
+                    container: container.clone(),
+                    status: ExitStatus::Signalled { signal: 15 },
+                }
+            },
             timeout,
         )
         .await?;
@@ -184,7 +189,7 @@ impl Northstar {
             .await
             .context("Failed to install test container")?;
 
-        self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
+        self.assume_notification(|n| matches!(n, Notification::Install { .. }), 15)
             .await
             .context("Failed to wait for test container install notification")
     }
@@ -195,7 +200,7 @@ impl Northstar {
             .uninstall("test-container:0.0.1")
             .await
             .context("Failed to uninstall test container")?;
-        self.assume_notification(|n| matches!(n, Notification::Uninstall(_)), 15)
+        self.assume_notification(|n| matches!(n, Notification::Uninstall { .. }), 15)
             .await
             .context("Failed to wait for test container uninstall notification")
     }
@@ -205,7 +210,7 @@ impl Northstar {
         self.install(TEST_RESOURCE_NPK, "test-0")
             .await
             .context("Failed to install test resource")?;
-        self.assume_notification(|n| matches!(n, Notification::Install(_)), 15)
+        self.assume_notification(|n| matches!(n, Notification::Install { .. }), 15)
             .await
             .context("Failed to wait for test resource install notification")
     }
@@ -216,7 +221,7 @@ impl Northstar {
             .uninstall("test-resource:0.0.1")
             .await
             .context("Failed to uninstall test resource")?;
-        self.assume_notification(|n| matches!(n, Notification::Uninstall(_)), 15)
+        self.assume_notification(|n| matches!(n, Notification::Uninstall { .. }), 15)
             .await
             .context("Failed to wait for test resource uninstall notification")
     }

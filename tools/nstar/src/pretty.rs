@@ -9,20 +9,23 @@ use tokio::time;
 
 pub(crate) fn notification(notification: &Notification) {
     match notification {
-        Notification::CGroup(container, event) => {
-            println!("container {} memory event {:?}", container, event)
+        Notification::CGroup {
+            container,
+            notification,
+        } => {
+            println!("container {} memory event {:?}", container, notification)
         }
-        Notification::Exit(container, status) => println!(
+        Notification::Exit { container, status } => println!(
             "container {} exited with status {}",
             container,
             match status {
-                ExitStatus::Exit(code) => format!("exit code {}", code),
-                ExitStatus::Signalled(signal) => format!("signaled {}", signal),
+                ExitStatus::Exit { code } => format!("exit code {}", code),
+                ExitStatus::Signalled { signal } => format!("signaled {}", signal),
             }
         ),
-        Notification::Install(container) => println!("installed {}", container),
-        Notification::Uninstall(container) => println!("uninstalled {}", container),
-        Notification::Started(container) => println!("started {}", container),
+        Notification::Install { container } => println!("installed {}", container),
+        Notification::Uninstall { container } => println!("uninstalled {}", container),
+        Notification::Started { container } => println!("started {}", container),
         Notification::Shutdown => println!("shutting down"),
     }
 }
@@ -98,16 +101,16 @@ pub fn mounts(mounts: &[MountResult]) {
     ]));
     for result in mounts {
         let row = match result {
-            MountResult::Ok(c) => {
+            MountResult::Ok { container } => {
                 vec![
-                    Cell::new(&c.to_string()).with_style(Attr::Bold),
+                    Cell::new(&container.to_string()).with_style(Attr::Bold),
                     Cell::new("ok"),
                 ]
             }
-            MountResult::Err((c, e)) => {
+            MountResult::Error { container, error } => {
                 vec![
-                    Cell::new(&c.to_string()).with_style(Attr::Bold),
-                    Cell::new(&format_err(e)),
+                    Cell::new(&container.to_string()).with_style(Attr::Bold),
+                    Cell::new(&format_err(error)),
                 ]
             }
         };
@@ -119,29 +122,29 @@ pub fn mounts(mounts: &[MountResult]) {
 
 pub fn response(response: &Response) -> i32 {
     match response {
-        Response::Containers(cs) => {
-            containers(cs);
+        Response::Containers { containers: c } => {
+            containers(c);
             0
         }
-        Response::Repositories(rs) => {
-            repositories(rs);
+        Response::Repositories { repositories: r } => {
+            repositories(r);
             0
         }
-        Response::Mount(results) => {
-            mounts(results);
+        Response::Mount { result } => {
+            mounts(result);
             0
         }
-        Response::Ok(()) => {
+        Response::Ok => {
             println!("ok");
             0
         }
-        Response::ContainerStats(container, stats) => {
+        Response::ContainerStats { container, stats } => {
             println!("{}:", container);
             println!("{}", serde_json::to_string_pretty(&stats).unwrap());
             0
         }
-        Response::Err(e) => {
-            eprintln!("{}", format_err(e));
+        Response::Error { error } => {
+            eprintln!("{}", format_err(error));
             1
         }
     }
@@ -149,51 +152,51 @@ pub fn response(response: &Response) -> i32 {
 
 fn format_err(err: &model::Error) -> String {
     match err {
-        model::Error::Configuration(cause) => format!("invalid configuration: {}", cause),
-        model::Error::DuplicateContainer(container) => {
+        model::Error::Configuration { context } => format!("invalid configuration: {}", context),
+        model::Error::DuplicateContainer { container } => {
             format!("duplicate container name and version {}", container)
         }
-        model::Error::InvalidContainer(c) => format!("invalid container {}", c),
-        model::Error::InvalidArguments(c) => format!("invalid arguments {}", c),
-        model::Error::MountBusy(c) => format!("failed to mount {}: busy", c),
-        model::Error::UmountBusy(c) => format!("failed to umount {}: busy", c),
-        model::Error::StartContainerStarted(c) => {
-            format!("failed to start container {}: already started", c)
+        model::Error::InvalidContainer { container } => format!("invalid container {}", container),
+        model::Error::InvalidArguments { cause } => format!("invalid arguments {}", cause),
+        model::Error::MountBusy { container } => format!("container busy: {}", container),
+        model::Error::UmountBusy { container } => format!("container busy: {}", container),
+        model::Error::StartContainerStarted { container } => {
+            format!("failed to start container {}: already started", container)
         }
-        model::Error::StartContainerResource(c) => {
-            format!("failed to start container {}: resource", c)
+        model::Error::StartContainerResource { container } => {
+            format!("failed to start container {}: resource", container)
         }
-        model::Error::StartContainerMissingResource(c, r) => {
-            format!("failed to start container {}: missing resource {}", c, r)
+        model::Error::StartContainerMissingResource {
+            container,
+            resource,
+        } => {
+            format!(
+                "failed to start container {}: missing resource {}",
+                container, resource
+            )
         }
-        model::Error::StartContainerFailed(c, r) => {
-            format!("failed to start container {}: {}", c, r)
+        model::Error::StartContainerFailed { container, error } => {
+            format!("failed to start container {}: {}", container, error)
         }
-        model::Error::StopContainerNotStarted(c) => {
-            format!("failed to stop container {}: not started", c)
+        model::Error::StopContainerNotStarted { container } => {
+            format!("failed to stop container {}: not started", container)
         }
-        model::Error::InvalidRepository(r) => format!("invalid repository {}", r),
-        model::Error::InstallDuplicate(c) => {
-            format!("failed to install {}: installed", c)
+        model::Error::InvalidRepository { repository } => {
+            format!("invalid repository {}", repository)
         }
-        model::Error::CriticalContainer(c, s) => {
+        model::Error::InstallDuplicate { container } => {
+            format!("failed to install {}: installed", container)
+        }
+        model::Error::CriticalContainer { container, status } => {
             format!(
                 "critical container {} exited with: {}",
-                c,
-                match s {
-                    ExitStatus::Exit(c) => format!("exit code {}", c),
-                    ExitStatus::Signalled(s) => format!("signaled {}", s),
+                container,
+                match status {
+                    ExitStatus::Exit { code } => format!("exit code {}", code),
+                    ExitStatus::Signalled { signal } => format!("signaled {}", signal),
                 }
             )
         }
-        model::Error::Npk(npk, e) => format!("npk error: {}: {}", npk, e),
-        model::Error::Process(e) => format!("process error: {}", e),
-        model::Error::Console(e) => format!("console error: {}", e),
-        model::Error::Cgroups(e) => format!("cgroups error: {}", e),
-        model::Error::Mount(e) => format!("mount error: {}", e),
-        model::Error::Seccomp(e) => format!("seccomp error: {}", e),
-        model::Error::Key(e) => format!("key error: {}", e),
-        model::Error::Name(e) => format!("name error: {}", e),
-        model::Error::Unexpected(c, e) => format!("{}: {}", c, e),
+        model::Error::Unexpected { module, error } => format!("{}: {}", module, error),
     }
 }
