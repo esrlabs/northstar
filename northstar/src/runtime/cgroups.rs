@@ -6,7 +6,10 @@ use crate::{
     npk::manifest,
     runtime::{CGroupEvent, ContainerEvent, Event, MemoryEvent},
 };
-use cgroups_rs::{memory::MemController, Controller, Hierarchy};
+use cgroups_rs::{
+    memory::MemController, BlkIoDeviceResource, BlkIoDeviceThrottleResource, BlkIoResources,
+    Controller, CpuResources, Hierarchy, MemoryResources,
+};
 use futures::stream::StreamExt;
 use inotify::{Inotify, WatchMask};
 use log::{debug, info, warn};
@@ -129,13 +132,13 @@ impl CGroups {
         );
 
         let resources = cgroups_rs::Resources {
-            memory: config.memory.clone().unwrap_or_default(),
+            memory: config.memory.clone().map(Into::into).unwrap_or_default(),
             pid: cgroups_rs::PidResources::default(),
-            cpu: config.cpu.clone().unwrap_or_default(),
+            cpu: config.cpu.clone().map(Into::into).unwrap_or_default(),
             devices: cgroups_rs::DeviceResources::default(),
             network: cgroups_rs::NetworkResources::default(),
             hugepages: cgroups_rs::HugePageResources::default(),
-            blkio: cgroups_rs::BlkIoResources::default(),
+            blkio: config.blkio.clone().map(Into::into).unwrap_or_default(),
         };
 
         cgroup
@@ -349,4 +352,84 @@ fn parse_cgroups_event(s: &str) -> CGroupEvent {
         }
     }
     CGroupEvent::Memory(event)
+}
+
+impl From<manifest::cgroups::CpuResources> for CpuResources {
+    fn from(v: manifest::cgroups::CpuResources) -> Self {
+        CpuResources {
+            cpus: v.cpus,
+            mems: v.mems,
+            shares: v.shares,
+            quota: v.quota,
+            period: v.period,
+            realtime_runtime: v.realtime_runtime,
+            realtime_period: v.realtime_period,
+            attrs: v.attrs,
+        }
+    }
+}
+
+impl From<manifest::cgroups::MemoryResources> for MemoryResources {
+    fn from(v: manifest::cgroups::MemoryResources) -> Self {
+        MemoryResources {
+            kernel_memory_limit: v.kernel_memory_limit,
+            memory_hard_limit: v.memory_hard_limit,
+            memory_soft_limit: v.memory_soft_limit,
+            kernel_tcp_memory_limit: v.kernel_tcp_memory_limit,
+            memory_swap_limit: v.memory_swap_limit,
+            swappiness: v.swappiness,
+            attrs: v.attrs,
+        }
+    }
+}
+
+impl From<manifest::cgroups::BlkIoResources> for BlkIoResources {
+    fn from(v: manifest::cgroups::BlkIoResources) -> Self {
+        BlkIoResources {
+            weight: v.weight,
+            leaf_weight: v.leaf_weight,
+            weight_device: v.weight_device.into_iter().map(Into::into).collect(),
+            throttle_read_bps_device: v
+                .throttle_read_bps_device
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            throttle_read_iops_device: v
+                .throttle_read_iops_device
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            throttle_write_bps_device: v
+                .throttle_write_bps_device
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            throttle_write_iops_device: v
+                .throttle_write_iops_device
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<manifest::cgroups::BlkIoDeviceResource> for BlkIoDeviceResource {
+    fn from(v: manifest::cgroups::BlkIoDeviceResource) -> Self {
+        BlkIoDeviceResource {
+            major: v.major,
+            minor: v.minor,
+            weight: v.weight,
+            leaf_weight: v.leaf_weight,
+        }
+    }
+}
+
+impl From<manifest::cgroups::BlkIoDeviceThrottleResource> for BlkIoDeviceThrottleResource {
+    fn from(v: manifest::cgroups::BlkIoDeviceThrottleResource) -> Self {
+        BlkIoDeviceThrottleResource {
+            major: v.major,
+            minor: v.minor,
+            rate: v.rate,
+        }
+    }
 }
