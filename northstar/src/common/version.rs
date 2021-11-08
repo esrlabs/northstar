@@ -1,5 +1,9 @@
 use derive_more::Display;
-use schemars::JsonSchema;
+use schemars::{
+    gen::SchemaGenerator,
+    schema::{InstanceType, SchemaObject, StringValidation},
+    JsonSchema,
+};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use thiserror::Error;
@@ -12,7 +16,7 @@ pub struct ParseError {
 }
 
 /// Container version
-#[derive(Clone, Eq, PartialEq, Hash, Debug, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Version {
     /// Major
     pub major: u64,
@@ -102,6 +106,25 @@ impl PartialOrd for Version {
         } else {
             Some(std::cmp::Ordering::Equal)
         }
+    }
+}
+
+impl JsonSchema for Version {
+    fn schema_name() -> String {
+        "Version".to_string()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            string: Some(Box::new(StringValidation {
+                min_length: Some(5),
+                max_length: None,
+                pattern: Some("[0-9]+\\.[0-9]+\\.[0-9]+".into()),
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
