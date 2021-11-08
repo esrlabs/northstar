@@ -62,7 +62,7 @@ jobs:
         uses: Swatinem/rust-cache@v1
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Test
+      - name: Check
         uses: actions-rs/cargo@v1
         with:
           command: check
@@ -141,7 +141,7 @@ jobs:
           command: build
           args: --target=${{ matrix.target }} --all-features
 
-  utils:
+  tools:
     name: Tools
     runs-on: ubuntu-latest
     steps:
@@ -165,3 +165,31 @@ jobs:
         run: cargo install --path tools/stress
       - name: Install seccomp-util
         run: cargo install --path tools/seccomp-util
+
+  openapi:
+    name: OpenApi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install OpenApi Generator
+        run: |
+          curl https://raw.githubusercontent.com/OpenAPITools/openapi-generator/master/bin/utils/openapi-generator-cli.sh > openapi-generator-cli
+          chmod u+x openapi-generator-cli
+          ./openapi-generator-cli version
+      - name: Generate manifest jsonschema/html
+        run: |
+          cargo run --bin schema -- -m manifest -o manifest.json
+          ./openapi-generator-cli generate -i manifest.json -g html -o manifest.html
+      - name: Generate api jsonschema/html
+        run: |
+          cargo run --bin schema -- -m api -o api.json
+          ./openapi-generator-cli generate -i api.json -g html -o api.html

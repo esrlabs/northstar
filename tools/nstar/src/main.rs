@@ -195,12 +195,14 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
         Subcommand::Mount { name, version } => {
             let version = or_version(&name, version, client).await?;
             let name = name.try_into()?;
-            Ok(Request::Mount(vec![Container::new(name, version)]))
+            let containers = vec![Container::new(name, version)];
+            Ok(Request::Mount { containers })
         }
         Subcommand::Umount { name, version } => {
             let version = or_version(&name, version, client).await?;
             let name = name.try_into()?;
-            Ok(Request::Umount(Container::new(name, version)))
+            let container = Container::new(name, version);
+            Ok(Request::Umount { container })
         }
         Subcommand::Start {
             name,
@@ -241,11 +243,11 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
 
             let version = or_version(&name, version, client).await?;
 
-            Ok(Request::Start(
-                Container::new(name.try_into()?, version),
+            Ok(Request::Start {
+                container: Container::new(name.try_into()?, version),
                 args,
                 env,
-            ))
+            })
         }
         Subcommand::Kill {
             name,
@@ -255,24 +257,25 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let version = or_version(&name, version, client).await?;
             let signal = signal.unwrap_or(15);
             let name = name.try_into()?;
-            Ok(Request::Kill(Container::new(name, version), signal))
+            Ok(Request::Kill {
+                container: Container::new(name, version),
+                signal,
+            })
         }
-        Subcommand::Install {
-            npk,
-            repository: repo_id,
-        } => {
+        Subcommand::Install { npk, repository } => {
             let size = npk.metadata().map(|m| m.len())?;
-            Ok(Request::Install(repo_id, size))
+            Ok(Request::Install { repository, size })
         }
-        Subcommand::Uninstall { name, version } => Ok(Request::Uninstall(Container::new(
-            name.try_into()?,
-            version,
-        ))),
+        Subcommand::Uninstall { name, version } => Ok(Request::Uninstall {
+            container: Container::new(name.try_into()?, version),
+        }),
         Subcommand::Shutdown => Ok(Request::Shutdown),
         Subcommand::ContainerStats { name, version } => {
             let version = or_version(&name, version, client).await?;
             let name = name.try_into()?;
-            Ok(Request::ContainerStats(Container::new(name, version)))
+            Ok(Request::ContainerStats {
+                container: Container::new(name, version),
+            })
         }
         Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }
@@ -386,7 +389,7 @@ async fn main() -> Result<()> {
                     .await
                     .ok_or_else(|| anyhow!("Failed to receive response"))??
                 {
-                    api::model::Message::Response(response) => pretty::response(&response),
+                    api::model::Message::Response { response } => pretty::response(&response),
                     _ => unreachable!(),
                 };
                 process::exit(exit);

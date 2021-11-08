@@ -170,21 +170,33 @@ mod tests {
 
     fn mk_message() -> impl Strategy<Value = Message> {
         prop_oneof![
-            Just(Message::Request(Request::Containers)),
-            Just(Message::Request(Request::Shutdown)),
-            Just(Message::Request(Request::Mount(vec!()))),
-            Just(Message::Response(Response::Ok(()))),
-            Just(Message::Notification(Notification::Shutdown)),
-            Just(Message::Notification(Notification::CGroup(
-                "test:0.0.1".try_into().unwrap(),
-                CgroupNotification::Memory(MemoryNotification {
-                    low: None,
-                    high: Some(10),
-                    max: Some(12),
-                    oom: None,
-                    oom_kill: Some(99),
-                })
-            ))),
+            Just(Message::Request {
+                request: Request::Containers
+            }),
+            Just(Message::Request {
+                request: Request::Shutdown
+            }),
+            Just(Message::Request {
+                request: Request::Mount { containers: vec!() }
+            }),
+            Just(Message::Response {
+                response: Response::Ok
+            }),
+            Just(Message::Notification {
+                notification: Notification::Shutdown
+            }),
+            Just(Message::Notification {
+                notification: Notification::CGroup {
+                    container: "test:0.0.1".try_into().unwrap(),
+                    notification: CgroupNotification::Memory(MemoryNotification {
+                        low: None,
+                        high: Some(10),
+                        max: Some(12),
+                        oom: None,
+                        oom_kill: Some(99),
+                    })
+                }
+            }),
         ]
     }
 }

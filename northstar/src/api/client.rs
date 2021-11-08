@@ -119,7 +119,9 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     let connect = time::timeout(timeout, connection.next());
     match connect.await {
         Ok(Some(Ok(message))) => match message {
-            Message::Connect(Connect::ConnectAck) => Ok(connection),
+            Message::Connect {
+                connect: Connect::Ack,
+            } => Ok(connection),
             _ => {
                 debug!(
                     "Received invalid message {:?} while waiting for connack",
@@ -189,8 +191,10 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         loop {
             match self.connection.next().await {
                 Some(Ok(message)) => match message {
-                    Message::Response(r) => break Ok(r),
-                    Message::Notification(notification) => self.queue_notification(notification)?,
+                    Message::Response { response } => break Ok(response),
+                    Message::Notification { notification } => {
+                        self.queue_notification(notification)?
+                    }
                     _ => {
                         self.fuse();
                         break Err(Error::Protocol);
@@ -224,8 +228,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```
     pub async fn containers(&mut self) -> Result<Vec<ContainerData>, Error> {
         match self.request(Request::Containers).await? {
-            Response::Containers(containers) => Ok(containers),
-            Response::Err(e) => Err(Error::Api(e)),
+            Response::Containers { containers } => Ok(containers),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => Err(Error::Protocol),
         }
     }
@@ -246,8 +250,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```
     pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, Error> {
         match self.request(Request::Repositories).await? {
-            Response::Err(e) => Err(Error::Api(e)),
-            Response::Repositories(repositories) => Ok(repositories),
+            Response::Error { error } => Err(Error::Api(error)),
+            Response::Repositories { repositories } => Ok(repositories),
             _ => Err(Error::Protocol),
         }
     }
@@ -272,9 +276,16 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Start(container, None, None)).await? {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+        match self
+            .request(Request::Start {
+                container,
+                args: None,
+                env: None,
+            })
+            .await?
+        {
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => Err(Error::Protocol),
         }
     }
@@ -307,11 +318,15 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         }
 
         match self
-            .request(Request::Start(container, Some(args_converted), None))
+            .request(Request::Start {
+                container,
+                args: Some(args_converted),
+                env: None,
+            })
             .await?
         {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => Err(Error::Protocol),
         }
     }
@@ -359,15 +374,15 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         }
 
         match self
-            .request(Request::Start(
+            .request(Request::Start {
                 container,
-                Some(args_converted),
-                Some(env_converted),
-            ))
+                args: Some(args_converted),
+                env: Some(env_converted),
+            })
             .await?
         {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => Err(Error::Protocol),
         }
     }
@@ -393,9 +408,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         signal: i32,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Kill(container, signal)).await? {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+        match self.request(Request::Kill { container, signal }).await? {
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => Err(Error::Protocol),
         }
     }
@@ -418,7 +433,10 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         self.fused()?;
         let mut file = fs::File::open(npk).await.map_err(Error::Io)?;
         let size = file.metadata().await.unwrap().len();
-        let request = Request::Install(repository.into(), size);
+        let request = Request::Install {
+            repository: repository.into(),
+            size,
+        };
         let message = Message::new_request(request);
         self.connection.send(message).await.map_err(|_| {
             self.fuse();
@@ -435,15 +453,17 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         loop {
             match self.connection.next().await {
                 Some(Ok(message)) => match message {
-                    Message::Response(r) => match r {
-                        Response::Ok(_) => break Ok(()),
-                        Response::Err(e) => break Err(Error::Api(e)),
+                    Message::Response { response } => match response {
+                        Response::Ok => break Ok(()),
+                        Response::Error { error } => break Err(Error::Api(error)),
                         _ => {
                             self.fuse();
                             break Err(Error::Protocol);
                         }
                     },
-                    Message::Notification(notification) => self.queue_notification(notification)?,
+                    Message::Notification { notification } => {
+                        self.queue_notification(notification)?
+                    }
                     _ => break Err(Error::Protocol),
                 },
                 Some(Err(e)) => {
@@ -480,9 +500,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Uninstall(container)).await? {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+        match self.request(Request::Uninstall { container }).await? {
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => {
                 self.fuse();
                 Err(Error::Protocol)
@@ -493,8 +513,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Stop the runtime
     pub async fn shutdown(&mut self) -> Result<(), Error> {
         match self.request(Request::Shutdown).await? {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => {
                 self.fuse();
                 Err(Error::Protocol)
@@ -530,9 +550,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             result.push(container);
         }
 
-        match self.request(Request::Mount(result)).await? {
-            Response::Mount(mounts) => Ok(mounts),
-            Response::Err(e) => Err(Error::Api(e)),
+        match self.request(Request::Mount { containers: result }).await? {
+            Response::Mount { result } => Ok(result),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => {
                 self.fuse();
                 Err(Error::Protocol)
@@ -559,9 +579,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Umount(container)).await? {
-            Response::Ok(()) => Ok(()),
-            Response::Err(e) => Err(Error::Api(e)),
+        match self.request(Request::Umount { container }).await? {
+            Response::Ok => Ok(()),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => {
                 self.fuse();
                 Err(Error::Protocol)
@@ -588,9 +608,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<ContainerStats, Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::ContainerStats(container)).await? {
-            Response::ContainerStats(_, stats) => Ok(stats),
-            Response::Err(e) => Err(Error::Api(e)),
+        match self.request(Request::ContainerStats { container }).await? {
+            Response::ContainerStats { stats, .. } => Ok(stats),
+            Response::Error { error } => Err(Error::Api(error)),
             _ => {
                 self.fuse();
                 Err(Error::Protocol)
@@ -661,7 +681,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for Client<T> {
             match self.connection.poll_next_unpin(cx) {
                 Poll::Ready(r) => match r {
                     Some(Ok(message)) => match message {
-                        Message::Notification(n) => Poll::Ready(Some(Ok(n))),
+                        Message::Notification { notification } => {
+                            Poll::Ready(Some(Ok(notification)))
+                        }
                         _ => unreachable!(),
                     },
                     Some(Err(e)) => Poll::Ready(Some(Err(e))),

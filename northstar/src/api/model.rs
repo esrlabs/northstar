@@ -19,48 +19,56 @@ pub type RepositoryId = String;
 pub type Signal = u32;
 /// Version
 pub type Version = crate::common::version::Version;
+/// Container statistics
+pub type ContainerStats = HashMap<String, serde_json::Value>;
 
-const VERSION: Version = Version::new(0, 1, 3);
+/// API version
+const VERSION: Version = Version::new(0, 2, 1);
 
-/// Protocol version
-/// TODO: Do some static initialization of the version struct
-pub fn version() -> Version {
+/// API version
+pub const fn version() -> Version {
     VERSION
-}
-
-/// Container exit status
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-pub enum ExitStatus {
-    /// Process exited with exit code
-    Exit(ExitCode),
-    /// Process was terminated by a signal
-    Signalled(Signal),
 }
 
 /// Message
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Message {
-    Connect(Connect),
-    Request(Request),
-    Response(Response),
-    Notification(Notification),
+    Connect { connect: Connect },
+    Request { request: Request },
+    Response { response: Response },
+    Notification { notification: Notification },
 }
 
 /// Notification / Event
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Notification {
-    Started(Container),
-    Exit(Container, ExitStatus),
-    Install(Container),
-    Uninstall(Container),
-    CGroup(Container, CgroupNotification),
+    Started {
+        container: Container,
+    },
+    Exit {
+        container: Container,
+        status: ExitStatus,
+    },
+    Install {
+        container: Container,
+    },
+    Uninstall {
+        container: Container,
+    },
+    CGroup {
+        container: Container,
+        notification: CgroupNotification,
+    },
     Shutdown,
 }
 
 /// Cgroup event
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum CgroupNotification {
     Memory(MemoryNotification),
@@ -68,6 +76,7 @@ pub enum CgroupNotification {
 
 /// CGroup memory event data
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub struct MemoryNotification {
     pub low: Option<u64>,
@@ -79,46 +88,77 @@ pub struct MemoryNotification {
 
 /// Connect meta information
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Connect {
     Connect {
+        /// API version
         version: Version,
         /// Subscribe this connection to notifications
         subscribe_notifications: bool,
     },
-    ConnectAck,
-    ConnectNack(ConnectNack),
+    /// Ack
+    Ack,
+    /// Nack
+    Nack {
+        /// Nack reason
+        error: ConnectNack,
+    },
 }
 
 /// Connection nack
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum ConnectNack {
-    InvalidProtocolVersion(Version),
+    InvalidProtocolVersion { version: Version },
 }
 
 /// Request
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Request {
-    Containers,
-    Install(RepositoryId, u64),
-    Mount(Vec<Container>),
-    Repositories,
+    /// Runtime shutdown
     Shutdown,
-    Start(
-        Container,
-        Option<Vec<NonNullString>>, // Optional command line arguments
-        Option<HashMap<NonNullString, NonNullString>>, // Optional env variables
-    ),
-    Kill(Container, i32),
-    Umount(Container),
-    Uninstall(Container),
-    ContainerStats(Container),
+    /// Container list
+    Containers,
+    /// Repository list
+    Repositories,
+    /// Start a contianer
+    Start {
+        /// Container
+        container: Container,
+        /// Optional command line arguments
+        args: Option<Vec<NonNullString>>,
+        /// Env variables
+        env: Option<HashMap<NonNullString, NonNullString>>,
+    },
+    Kill {
+        container: Container,
+        signal: i32,
+    },
+    Install {
+        repository: RepositoryId,
+        size: u64,
+    },
+    Mount {
+        containers: Vec<Container>,
+    },
+    Umount {
+        container: Container,
+    },
+    Uninstall {
+        container: Container,
+    },
+    ContainerStats {
+        container: Container,
+    },
 }
 
 /// Container information
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct ContainerData {
     /// Container name and version
     pub container: Container,
@@ -134,6 +174,7 @@ pub struct ContainerData {
 
 /// Process information
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct Process {
     /// Process id
     pub pid: Pid,
@@ -143,54 +184,106 @@ pub struct Process {
 
 /// Result of a mount operation
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum MountResult {
-    Ok(Container),
-    Err((Container, Error)),
+    Ok { container: Container },
+    Error { container: Container, error: Error },
 }
 
 /// Response
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Response {
-    Ok(()),
-    Containers(Vec<ContainerData>),
-    Repositories(HashSet<RepositoryId>),
-    Mount(Vec<MountResult>),
-    ContainerStats(Container, ContainerStats),
-    Err(Error),
+    Ok,
+    Containers {
+        containers: Vec<ContainerData>,
+    },
+    Repositories {
+        repositories: HashSet<RepositoryId>,
+    },
+    Mount {
+        result: Vec<MountResult>,
+    },
+    ContainerStats {
+        container: Container,
+        stats: ContainerStats,
+    },
+    Error {
+        error: Error,
+    },
 }
 
-/// Container statistics
-pub type ContainerStats = HashMap<String, serde_json::Value>;
+/// Container exit status
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExitStatus {
+    /// Process exited with exit code
+    Exit {
+        /// Exit code
+        code: ExitCode,
+    },
+    /// Process was terminated by a signal
+    Signalled {
+        /// Signal
+        signal: Signal,
+    },
+}
 
 /// API error
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
+//#[serde(tag = "error", content = "context")]
 pub enum Error {
-    Configuration(String),
-    DuplicateContainer(Container),
-    InvalidContainer(Container),
-    InvalidArguments(String),
-    MountBusy(Container),
-    UmountBusy(Container),
-    StartContainerStarted(Container),
-    StartContainerResource(Container),
-    StartContainerMissingResource(Container, Container),
-    StartContainerFailed(Container, String),
-    StopContainerNotStarted(Container),
-    InvalidRepository(RepositoryId),
-    InstallDuplicate(Container),
-    CriticalContainer(Container, ExitStatus),
-
-    Npk(String, String),
-    Process(String),
-    Console(String),
-    Cgroups(String),
-    Mount(String),
-    Seccomp(String),
-    Name(String),
-    Key(String),
-
-    Unexpected(String, String),
+    Configuration {
+        context: String,
+    },
+    DuplicateContainer {
+        container: Container,
+    },
+    InvalidContainer {
+        container: Container,
+    },
+    InvalidArguments {
+        cause: String,
+    },
+    MountBusy {
+        container: Container,
+    },
+    UmountBusy {
+        container: Container,
+    },
+    StartContainerStarted {
+        container: Container,
+    },
+    StartContainerResource {
+        container: Container,
+    },
+    StartContainerMissingResource {
+        container: Container,
+        resource: Container,
+    },
+    StartContainerFailed {
+        container: Container,
+        error: String,
+    },
+    StopContainerNotStarted {
+        container: Container,
+    },
+    InvalidRepository {
+        repository: RepositoryId,
+    },
+    InstallDuplicate {
+        container: Container,
+    },
+    CriticalContainer {
+        container: Container,
+        status: ExitStatus,
+    },
+    Unexpected {
+        module: String,
+        error: String,
+    },
 }

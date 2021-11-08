@@ -194,7 +194,15 @@ test!(container_crash_exit, {
         runtime.start_with_args(TEST_CONTAINER, ["crash"]).await?;
         runtime
             .assume_notification(
-                |n| matches!(n, Notification::Exit(_, ExitStatus::Signalled(6))),
+                |n| {
+                    matches!(
+                        n,
+                        Notification::Exit {
+                            status: ExitStatus::Signalled { signal: 6 },
+                            ..
+                        }
+                    )
+                },
                 15,
             )
             .await?;
@@ -366,7 +374,10 @@ test!(seccomp_allowed_syscall_with_prohibited_arg, {
         .await?;
 
     let n = |n: &Notification| match n {
-        Notification::Exit(_, ExitStatus::Signalled(s)) if s == &31 => true,
+        Notification::Exit {
+            status: ExitStatus::Signalled { signal },
+            ..
+        } if signal == &31 => true,
         _ => false,
     };
     runtime.assume_notification(n, 5).await?;
@@ -376,12 +387,15 @@ test!(seccomp_allowed_syscall_with_prohibited_arg, {
 // Iterate all exit codes in the u8 range
 test!(exitcodes, {
     let mut runtime = Northstar::launch_install_test_container().await?;
-    for code in 0..=255 {
+    for c in 0..=255 {
         runtime
-            .start_with_args(TEST_CONTAINER, ["exit".to_string(), code.to_string()])
+            .start_with_args(TEST_CONTAINER, ["exit".to_string(), c.to_string()])
             .await?;
         let n = |n: &Notification| match n {
-            Notification::Exit(_, ExitStatus::Exit(c)) if c == &code => true,
+            Notification::Exit {
+                status: ExitStatus::Exit { code },
+                ..
+            } if code == &c => true,
             _ => false,
         };
         runtime.assume_notification(n, 5).await?;
@@ -434,9 +448,10 @@ test!(check_api_version_on_connect, {
 
     drop(connection);
 
-    let expected_message = model::Message::new_connect(model::Connect::ConnectNack(
-        ConnectNack::InvalidProtocolVersion(model::version()),
-    ));
+    let error = ConnectNack::InvalidProtocolVersion {
+        version: model::version(),
+    };
+    let expected_message = model::Message::new_connect(model::Connect::Nack { error });
 
     assert_eq!(connack, expected_message);
 
@@ -453,7 +468,15 @@ mod example {
         runtime.start(EXAMPLE_CRASHING).await?;
         runtime
             .assume_notification(
-                |n| matches!(n, Notification::Exit(_, ExitStatus::Signalled(6))),
+                |n| {
+                    matches!(
+                        n,
+                        Notification::Exit {
+                            status: ExitStatus::Signalled { signal: 6 },
+                            ..
+                        }
+                    )
+                },
                 20,
             )
             .await?;
@@ -497,7 +520,15 @@ mod example {
         // will try to shutdown the application which is already exited.
         runtime
             .assume_notification(
-                |n| matches!(n, Notification::Exit(_, ExitStatus::Exit(0))),
+                |n| {
+                    matches!(
+                        n,
+                        Notification::Exit {
+                            status: ExitStatus::Exit { code: 0 },
+                            ..
+                        }
+                    )
+                },
                 15,
             )
             .await?;

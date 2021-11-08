@@ -71,48 +71,71 @@ impl<T, E: std::error::Error + Send + Sync + 'static> Context<T> for Result<T, E
 impl From<Error> for api::model::Error {
     fn from(error: Error) -> api::model::Error {
         match error {
-            Error::Configuration(cause) => api::model::Error::Configuration(cause),
+            Error::Configuration(context) => api::model::Error::Configuration { context },
             Error::DuplicateContainer(container) => {
-                api::model::Error::DuplicateContainer(container)
+                api::model::Error::DuplicateContainer { container }
             }
-            Error::InvalidContainer(container) => api::model::Error::InvalidContainer(container),
-            Error::InvalidArguments(cause) => api::model::Error::InvalidArguments(cause),
-            Error::MountBusy(container) => api::model::Error::MountBusy(container),
-            Error::UmountBusy(container) => api::model::Error::UmountBusy(container),
+            Error::InvalidContainer(container) => api::model::Error::InvalidContainer { container },
+            Error::InvalidArguments(cause) => api::model::Error::InvalidArguments { cause },
+            Error::MountBusy(container) => api::model::Error::MountBusy { container },
+            Error::UmountBusy(container) => api::model::Error::UmountBusy { container },
             Error::StartContainerStarted(container) => {
-                api::model::Error::StartContainerStarted(container)
+                api::model::Error::StartContainerStarted { container }
             }
             Error::StartContainerResource(container) => {
-                api::model::Error::StartContainerResource(container)
+                api::model::Error::StartContainerResource { container }
             }
             Error::StartContainerMissingResource(container, resource) => {
-                api::model::Error::StartContainerMissingResource(container, resource)
+                api::model::Error::StartContainerMissingResource {
+                    container,
+                    resource,
+                }
             }
-            Error::StartContainerFailed(container, reason) => {
-                api::model::Error::StartContainerFailed(container, reason)
+            Error::StartContainerFailed(container, error) => {
+                api::model::Error::StartContainerFailed { container, error }
             }
             Error::StopContainerNotStarted(container) => {
-                api::model::Error::StopContainerNotStarted(container)
+                api::model::Error::StopContainerNotStarted { container }
             }
             Error::ContainerNotStarted(container) => {
-                api::model::Error::StopContainerNotStarted(container)
+                api::model::Error::StopContainerNotStarted { container }
             }
             Error::InvalidRepository(repository) => {
-                api::model::Error::InvalidRepository(repository)
+                api::model::Error::InvalidRepository { repository }
             }
-            Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate(container),
-            Error::CriticalContainer(container, status) => {
-                api::model::Error::CriticalContainer(container, status.into())
-            }
-            Error::Npk(cause, error) => api::model::Error::Npk(cause, error.to_string()),
-            Error::Console(error) => api::model::Error::Console(error.to_string()),
-            Error::Cgroups(error) => api::model::Error::Cgroups(error.to_string()),
-            Error::Mount(error) => api::model::Error::Mount(error.to_string()),
-            Error::Name(error) => api::model::Error::Name(error),
-            Error::Key(error) => api::model::Error::Key(error.to_string()),
-            Error::Unexpected(context, error) => {
-                api::model::Error::Unexpected(context, error.to_string())
-            }
+            Error::InstallDuplicate(container) => api::model::Error::InstallDuplicate { container },
+            Error::CriticalContainer(container, status) => api::model::Error::CriticalContainer {
+                container,
+                status: status.into(),
+            },
+            Error::Npk(cause, error) => api::model::Error::Unexpected {
+                module: "Npk".into(),
+                error: format!("{}: {}", cause, error),
+            },
+            Error::Console(error) => api::model::Error::Unexpected {
+                module: "Console".into(),
+                error: error.to_string(),
+            },
+            Error::Cgroups(error) => api::model::Error::Unexpected {
+                module: "CGroups".into(),
+                error: error.to_string(),
+            },
+            Error::Mount(error) => api::model::Error::Unexpected {
+                module: "Mount".into(),
+                error: error.to_string(),
+            },
+            Error::Name(error) => api::model::Error::Unexpected {
+                module: "Name".into(),
+                error,
+            },
+            Error::Key(error) => api::model::Error::Unexpected {
+                module: "Key".into(),
+                error: error.to_string(),
+            },
+            Error::Unexpected(module, error) => api::model::Error::Unexpected {
+                module,
+                error: error.to_string(),
+            },
         }
     }
 }
