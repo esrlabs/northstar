@@ -103,6 +103,17 @@ jobs:
       - name: Build Documentation
         run: cargo doc --no-deps -p northstar --all-features
 
+  md:
+    name: Lint markdown files
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+    - name: Lint markdown
+      uses: docker://avtodev/markdown-lint:v1
+      with:
+        args: './README.md tools/sextant/README.md' 
+
   cross:
     name: Cross
     runs-on: ubuntu-latest

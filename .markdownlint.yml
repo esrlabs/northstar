@@ -1,0 +1,2 @@
+MD041: false # First line in a file should be a top-level
+MD033: false # Allow inline html

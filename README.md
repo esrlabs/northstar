@@ -56,7 +56,6 @@
   </ol>
 </details>
 
-
 ## About
 
 Northstar is an open source embedded container runtime optimized for speed and
@@ -67,7 +66,7 @@ container handling and process spawning. To build the most efficient and robust
 solution, Northstar is completely developed in Rust, a language designed to
 afford the performance of C/C++ without their footguns.
 
-#### Containers
+### Containers
 
 Northstar containers are called `NPK`. The NPK format is heavily inspired by the
 [Android APEX](https://source.android.com/devices/tech/ota/apex) technology. A
@@ -80,7 +79,7 @@ Northstar container contains:
 Northstar containers can be created with the Northstar utility
 [sextant](tools/sextant/README.md).
 
-#### Processes
+### Processes
 
 Started Northstar contains are Linux processes. The attributes and environment
 for a spawned container is described in a container manifest which is included
@@ -101,10 +100,8 @@ subsystems and features:
 
 ### Comparison
 
-**TODO**
-
 * Northstar containers are not portable and are tailored to a known system (uid/gid/mounts...)
-* ...
+* **TODO**
 
 ## Quickstart
 
@@ -130,13 +127,14 @@ The `squashfs-tools` are required in version **4.6** or higher.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
-corresponding NPKs is done via 
+corresponding NPKs is done via:
 
 ```sh
 ./examples/build_examples.sh
 ```
 
-Building and starting the [example runtime main](./main/src/main.rs) is triggered by a 
+Building and starting the [example runtime main](./main/src/main.rs) is
+triggered by a
 
 ```sh
 cargo run --bin northstar
@@ -214,7 +212,8 @@ type = { fs = { dir = "target/northstar/repository" }}
 
 ### Repositories
 
-**TODO**: Describe what a repository is and what are the attributes: with/without key/verity, etc...
+**TODO**: Describe what a repository is and what are the attributes:
+*with/without key/verity, etc...
 
 ## Console
 
@@ -258,14 +257,14 @@ Kernel features are available, either run the
 [check_conf](./tools/check_conf.sh) script or manually compare the targets
 kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
-**TODO**: List required `CONFIG_` items here. The check_confi script runs on Android only
+**TODO**: List required `CONFIG_` items here. The check_confi script runs on
+*Android only
 
 ## Internals
 
 ### Container launch sequence
 
 **TODO**: <br/><img src="images/container-startup.png" class="inline" width=600/>
-
 
 ### Manifest Format
 
@@ -300,7 +299,7 @@ Project Link: [https://github.com/esrlabs/northstar](https://github.com/esrlabs/
 
 * [The Rust Community](https://users.rust-lang.org) for providing
   [crates](./northstar/Cargo.toml) that form the foundation of Northstar
-* [The Android Open Source Project](https://source.android.com) for the APEX inspiration 
+* [The Android Open Source Project](https://source.android.com) for the APEX inspiration
 * [youki](https://github.com/containers/youki) for solving similar problems
 * [The manpage project](https://man7.org/linux/man-pages/dir_section_2.html)
   for documenting the weird world of system calls
