@@ -226,8 +226,9 @@ can be used for a simpler client implementation using **Rust**. Northstar
 interacts with clients through a `TCP` socket bound to each address configured
 in `runtime::config::Config::console`.
 
-**TODO**: Move client guide part to a README-console.md etc
-**TODO**: Update guide/src/client/connect with the connect sequence.
+* **TODO**: Move client guide part to a README-console.md etc
+* **TODO**: Update guide/src/client/connect with the connect sequence.
+* **TODO**: [Client API docs](https://esrlabs.github.io/northstar/northstar/index.html)
 
 ## Integration tests
 
