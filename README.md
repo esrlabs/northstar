@@ -164,54 +164,42 @@ The example executable `northstar` reads a configuration file that represents
 `northstar::runtime::config::Config`.
 
 ```toml
-# Console URI
-console = "tcp://localhost:4200"
-# Directory where the runtime mounts images and keeps runtime data
+# Console adresses
+console = ["tcp://localhost:4200"]
+# Directory where containers are mounted
 run_dir = "target/northstar/run"
-# Directory where the runtime creates the `persist` directories
+# Directory for `persist` mounts of containers
 data_dir = "target/northstar/data"
-# Runtime log directory for `strace` and `perf`
+# Log directory for debug logs and traces
 log_dir = "target/northstar/logs"
-
-# Cgroups v1 configuration
-[cgroups]
-# Name of the memory top level group the runtime shall use. If the groups
-# does not exist it is created.
-memory = "northstar"
-# Name of the memory top level group the runtime shall use. If the groups
-# does not exist it is created.
-cpu = "northstar"
-
-# Undocumented because this section is removed soon
-[devices]
-loop_control = "/dev/loop-control"
-loop_dev = "/dev/loop"
-device_mapper = "/dev/mapper/control"
-device_mapper_dev = "/dev/dm-"
+# Number of paralllel mounts possible
+mount_parallel = 10
+# Top level cgroup name
+cgroup = "northstar"
 
 # Start a `strace -p PID ...` instance after a container is started.
 # The execution of the application is deferred until strace is attached.
-[debug.strace]
+# [debug.strace]
 # Configure the output of the strace instance attached to a started
 # application. "file" for a file named strace-<PID>-name.log or "log"
 # to forward the strace output to the runtimes log.
-output = "log"
+# output = "log"
 # Optional additional flags passed to `strace`
-flags = "-f -s 256"
+# flags = "-f -s 256"
 # Optional path to the strace binary
-path = "/bin/strace"
+# path = /bin/strace
 # Include the runtime system calls prior to exeve
-include_runtime = true
+# include_runtime = true
 
 # Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
 # after a container is started.
-[debug.perf]
+# [debug.perf]
 # Optional path to the perf binary
-path = "/bin/perf"
+# path = "/bin/perf"
 # Optional additional flags passed to `perf`
-flags = ""
+# flags = ""
 
-# NPK Repository `memory` configuration. This is a  not persistent in memory repository
+# NPK Repository `memory` configuration. This is a not persistent in memory repository
 [repositories.memory]
 key = "examples/northstar.pub"
 type = "mem"
