@@ -221,10 +221,11 @@ type = { fs = { dir = "target/northstar/repository" }}
 Northstar uses **JSON** to encode the messages shared with clients. The messages
 are newline delimited. This is a common approach that facilitates clients being
 implemented in any programming language.  However, Northstar as a library,
-provides a convenient `api::client::Client` (**TODO**: Add rustdoc link) type that
-can be used for a simpler client implementation using **Rust**. Northstar
-interacts with clients through a `TCP` socket bound to each address configured
-in `runtime::config::Config::console`.
+provides a convenient
+[Client](https://esrlabs.github.io/northstar/northstar/api/client/struct.Client.html)
+type that can be used for a simpler client implementation using **Rust**.
+Northstar interacts with clients through a `TCP` socket bound to each address
+configured in `runtime::config::Config::console`.
 
 * **TODO**: Move client guide part to a README-console.md etc
 * **TODO**: Update guide/src/client/connect with the connect sequence.
