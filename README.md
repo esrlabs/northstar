@@ -1,4 +1,4 @@
-![GitHub Workflow Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
+![CI Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
 ![License](https://img.shields.io/github/license/esrlabs/northstar)
 ![Issues](https://img.shields.io/github/issues/esrlabs/northstar)
 ![Top Language](https://img.shields.io/github/languages/top/esrlabs/northstar)
@@ -75,17 +75,17 @@ Northstar container contains:
 
 * Root filesystem in a [Squashfs](https://github.com/plougher/squashfs-tools)
   file system image (optionally compressed) Northstar manifest with container
-* spawning configuration Signature and DM verity hash for manifest and file
-* system integrity checks
+* Northstar manifest with process configuration and container meta information
 
-Container are created with the Northstar utility [sextant](tools/sextant/README.md).
+Northstar containers can be created with the Northstar utility
+[sextant](tools/sextant/README.md).
 
 #### Processes
 
 Started Northstar contains are Linux processes. The attributes and environment
 for a spawned container is described in a container manifest which is included
 in a NPK. The container manifest allows to configure the following Linux
-subsystems:
+subsystems and features:
 
 * Arguments passed to the containers init
 * Environment variables set in the container context
@@ -101,7 +101,7 @@ subsystems:
 
 ### Comparison
 
-*TODO*
+**TODO**
 
 * Northstar containers are not portable and are tailored to a known system (uid/gid/mounts...)
 * ...
@@ -109,14 +109,14 @@ subsystems:
 ## Quickstart
 
 Northstar is written in [Rust](https://www.rust-lang.org). The minimum supported
-Rust version (MRSV) is *1.51*. Rust is best installed and managed by the rustup
+Rust version (MRSV) is *1.56*. Rust is best installed and managed by the rustup
 tool. Rust has a 6-week rapid release process and supports a great number of
 platforms, so there are many builds of Rust available at any time. rustup
 manages these builds in a consistent way on every platform that Rust supports,
 enabling installation of Rust from the beta and nightly release channels as well
 as support for additional cross-compilation targets.
 
-Building Northstar is limited to Linux systems and runs on Linux systems *only*!
+Building Northstar is limited to Linux systems and runs on Linux systems **only**!
 The Northstar build generates bindings for various system libraries and uses the
 `mksquashfs` command line tool for NPK creation.
 
@@ -125,6 +125,8 @@ Install build dependencies on Debian based distributions by running
 ```sh
 sudo apt-get install build-essential libclang1 squashfs-tools
 ```
+
+The `squashfs-tools` are required in version **4.6** or higher.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
@@ -152,9 +154,9 @@ cargo build --release --bin nstar
 ...
 ./target/release/nstar --help 
 ...
-> ./target/release/nstar -j start hello-world 0.0.1
+> ./target/release/nstar -j start hello-world
 {"Response":{"Err":{"StartContainerStarted":{"name":"hello-world","version":"0.0.1"}}}}
-> ./target/release/nstar -j kill hello-world 0.0.1
+> ./target/release/nstar -j kill hello-world
 {"Response":{"Ok":null}}
 ```
 
@@ -179,25 +181,25 @@ cgroup = "northstar"
 
 # Start a `strace -p PID ...` instance after a container is started.
 # The execution of the application is deferred until strace is attached.
-# [debug.strace]
+[debug.strace]
 # Configure the output of the strace instance attached to a started
 # application. "file" for a file named strace-<PID>-name.log or "log"
 # to forward the strace output to the runtimes log.
-# output = "log"
+output = "log"
 # Optional additional flags passed to `strace`
-# flags = "-f -s 256"
+flags = "-f -s 256"
 # Optional path to the strace binary
-# path = /bin/strace
+path = /bin/strace
 # Include the runtime system calls prior to exeve
-# include_runtime = true
+include_runtime = true
 
 # Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
 # after a container is started.
-# [debug.perf]
+[debug.perf]
 # Optional path to the perf binary
-# path = "/bin/perf"
+path = "/bin/perf"
 # Optional additional flags passed to `perf`
-# flags = ""
+flags = ""
 
 # NPK Repository `memory` configuration. This is a not persistent in memory repository
 [repositories.memory]
@@ -212,11 +214,20 @@ type = { fs = { dir = "target/northstar/repository" }}
 
 ### Repositories
 
-TODO: Describe what a repository is and what are the attributes: with/without key/verity, etc...
+**TODO**: Describe what a repository is and what are the attributes: with/without key/verity, etc...
 
 ## Console
 
-TODO: describe the console and link json model documentation
+Northstar uses **JSON** to encode the messages shared with clients. The messages
+are newline delimited. This is a common approach that facilitates clients being
+implemented in any programming language.  However, Northstar as a library,
+provides a convenient `api::client::Client` (**TODO**: Add rustdoc link) type that
+can be used for a simpler client implementation using **Rust**. Northstar
+interacts with clients through a `TCP` socket bound to each address configured
+in `runtime::config::Config::console`.
+
+**TODO**: Move client guide part to a README-console.md etc
+**TODO**: Update guide/src/client/connect with the connect sequence.
 
 ## Integration tests
 
@@ -245,15 +256,18 @@ Kernel features are available, either run the
 [check_conf](./tools/check_conf.sh) script or manually compare the targets
 kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
+**TODO**: List required `CONFIG_` items here. The check_confi script runs on Android only
+
 ## Internals
 
 ### Container launch sequence
 
-TODO: <br/><img src="images/container-startup.png" class="inline" width=600/>
+**TODO**: <br/><img src="images/container-startup.png" class="inline" width=600/>
+
 
 ### Manifest Format
 
-TODO
+**TODO**: Link to rustdoc. Link to jsonschema.
 
 ## Roadmap
 
