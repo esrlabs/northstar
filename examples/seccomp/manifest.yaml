@@ -18,10 +18,8 @@ mounts:
     type: bind
     host: /system
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: seccomp
+  stdout: pipe
+  stderr: pipe
 seccomp:
   profile:
     default

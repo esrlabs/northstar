@@ -1,33 +1,69 @@
 @startuml container_startup
 
+create Client
+activate Client
+
+create Runtime
 activate Runtime
-Runtime -> Runtime: Check and Mount container
+
+create Forker
+Runtime -> Forker: Fork
+activate Forker
+
+Client -> Runtime: Connect: Hello
+Client <- Runtime: ConnectAck
+Client -> Runtime: Start container
+Runtime -> Runtime: Check and mount container(s)
+Runtime -> Runtime: Open PTY
+
+Runtime -> Forker: Create container
+
 create Trampoline
-Runtime -> Trampoline: Fork
+Forker -> Trampoline: Fork
 activate Trampoline
+Trampoline -> Trampoline: Create PID namespace
+
 create Init
 Trampoline -> Init: Fork
 activate Init
-Trampoline -> Runtime: Init PID
-destroy Trampoline
-Runtime -> Runtime: Wait for Trampoline exit (waitpid)
-Init -> Init: Wait for run signal (Condition::wait)
-Runtime -> Runtime: Configure cgroups
-Runtime -> Init: Signal run (Condition::notify)
-Runtime -> Runtime: Wait for execve (Condition::wait)
 Init -> Init: Mount, Chroot, UID / GID,\ndrop privileges, file descriptors
+
+Trampoline -> Forker: Forked init with PID
+destroy Trampoline
+
+Forker -> Forker: reap Trampoline
+
+Forker -> Runtime: Created init with PID
+
+Runtime -> Runtime: Configure cgroups
+Runtime -> Runtime: Configure debug
+Runtime -> Runtime: Configure PTY forward
+
+Runtime -> Forker: Exec container
+Forker -> Init: Exec Container
 create Container
 Init -> Container: Fork
 activate Container
+Forker <- Init: Exec
+Runtime <- Forker: Exec
+Client <- Runtime: Started
+Client <- Runtime: Notification: Started
+
 Init -> Init: Wait for container to exit (waitpid)
+Container -> Container: Setup PTY
 Container -> Container: Set seccomp filter
 Container -> : Execve(..)
-Runtime -> Runtime: Condition pipe closed: Container is started
-note left: Condition pipe is CLOEXEC
-Container -> Init: Exit
+...
+Container -> Init: SIGCHLD
 destroy Container
-Init -> Runtime: Exit
-Runtime -> Runtime: Read exit status from pipe or waitpid on pid of init
+
+Init -> Init: waitpid: Exit status of container
+Init -> Forker: Container exit status
 destroy Init
+
+Forker -> Runtime: Container exit status
+Runtime -> Runtime: Stop PTY thread
+Runtime -> Runtime: Destroy cgroups
+Client <- Runtime: Notification: Exit
 
 @enduml

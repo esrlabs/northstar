@@ -5,10 +5,8 @@ console: true
 uid: 1000
 gid: 1000
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: console
+  stdout: pipe
+  stderr: pipe
 mounts:
   /dev:
     type: dev

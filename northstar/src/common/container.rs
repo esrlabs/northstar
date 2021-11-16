@@ -12,9 +12,8 @@ use std::{
 use thiserror::Error;
 
 /// Container identification
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash, JsonSchema)]
 pub struct Container {
-    #[serde(flatten)]
     inner: Arc<Inner>,
 }
 
@@ -98,7 +97,26 @@ impl<E: Into<Error>, N: TryInto<Name, Error = E>, V: ToString> TryFrom<(N, V)> f
     }
 }
 
-#[derive(Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
+impl Serialize for Container {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&format!("{}:{}", self.inner.name, self.inner.version))
+    }
+}
+
+impl<'de> Deserialize<'de> for Container {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Container::try_from(value.as_str()).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Hash, Serialize, Deserialize, JsonSchema)]
 struct Inner {
     name: Name,
     version: Version,

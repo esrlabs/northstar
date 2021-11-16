@@ -1,6 +1,6 @@
 use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
-    api,
+    api::{self, codec::Framed},
     common::container::Container,
     runtime::{EventTx, ExitStatus},
 };
@@ -18,7 +18,7 @@ use std::{fmt, path::PathBuf, unreachable};
 use thiserror::Error;
 use tokio::{
     fs,
-    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, BufReader},
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
     net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
@@ -27,6 +27,8 @@ use tokio::{
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
+
+const BUFFER_SIZE: usize = 1024 * 1024;
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -114,7 +116,7 @@ impl Console {
         debug!("Client {} connected", peer);
 
         // Get a framed stream and sink interface.
-        let mut network_stream = api::codec::framed(stream);
+        let mut network_stream = api::codec::Framed::with_capacity(stream, BUFFER_SIZE);
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
@@ -253,7 +255,7 @@ impl Console {
 ///
 async fn process_request<S>(
     client_id: &Peer,
-    stream: &mut S,
+    stream: &mut Framed<S>,
     stop: &CancellationToken,
     event_loop: &EventTx,
     message: model::Message,
@@ -263,7 +265,10 @@ where
 {
     let (reply_tx, reply_rx) = oneshot::channel();
     if let model::Message::Request {
-        request: model::Request::Install { repository, size },
+        request: model::Request::Install {
+            repository,
+            mut size,
+        },
     } = message
     {
         debug!(
@@ -281,8 +286,21 @@ where
         let event = Event::Console(request, reply_tx);
         event_loop.send(event).map_err(|_| Error::Shutdown).await?;
 
+        // The codec might have pulled bytes in the the read buffer of the connection.
+        if !stream.read_buffer().is_empty() {
+            let read_buffer = stream.read_buffer_mut().split();
+
+            // TODO: handle this case. The connected entity pushed the install file
+            // and a subsequenc request. If the codec pullen in the *full* install blob
+            // and some bytes from the following command the logic is screwed up.
+            assert!(read_buffer.len() as u64 <= size);
+
+            size -= read_buffer.len() as u64;
+            tx.send(read_buffer.freeze()).await.ok();
+        }
+
         // If the connections breaks: just break. If the receiver is dropped: just break.
-        let mut take = ReaderStream::new(BufReader::new(stream.take(size)));
+        let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
         while let Some(Ok(buf)) = take.next().await {
             if tx.send(buf).await.is_err() {
                 break;
@@ -406,6 +424,12 @@ pub struct Peer(String);
 impl From<&str> for Peer {
     fn from(s: &str) -> Self {
         Peer(s.to_string())
+    }
+}
+
+impl From<String> for Peer {
+    fn from(s: String) -> Self {
+        Peer(s)
     }
 }
 

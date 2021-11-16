@@ -29,7 +29,7 @@ pub(crate) fn pack(
         if manifest.init.is_some() {
             let tmp = tempdir().context("Failed to create temporary directory")?;
             let name = manifest.name.clone();
-            let num = clones.to_string().chars().count() - 1;
+            let num = clones.to_string().chars().count();
             for n in 0..clones {
                 manifest.name = format!("{}-{:0m$}", name, n, m = num)
                     .try_into()

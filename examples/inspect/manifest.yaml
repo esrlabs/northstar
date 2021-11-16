@@ -1,17 +1,11 @@
-name: inspect 
+name: inspect
 version: 0.0.1
 init: /inspect
 uid: 1000
 gid: 1000
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: inspect
-  stderr:
-    log:
-      level: WARN
-      tag: inspect
+  stdout: pipe
+  stderr: discard
 mounts:
   /dev:
     type: dev

@@ -22,7 +22,3 @@ pub mod runtime;
 #[cfg(feature = "seccomp")]
 /// Support for seccomp syscall filtering
 pub mod seccomp;
-
-/// Northstar internal utilities
-#[cfg(feature = "runtime")]
-mod util;

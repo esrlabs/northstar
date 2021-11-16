@@ -116,6 +116,7 @@ impl Hierarchy for RuntimeHierarchy {
 
 #[derive(Debug)]
 pub struct CGroups {
+    container: Container,
     cgroup: cgroups_rs::Cgroup,
     memory_monitor: MemoryMonitor,
 }
@@ -166,14 +167,18 @@ impl CGroups {
         };
 
         Ok(CGroups {
+            container: container.clone(),
             cgroup,
             memory_monitor,
         })
     }
 
     pub async fn destroy(self) {
+        debug!("Stopping oom monitor of {}", self.container);
         self.memory_monitor.stop().await;
-        info!("Destroying cgroup");
+
+        info!("Destroying cgroup of {}", self.container);
+        assert!(self.cgroup.tasks().is_empty());
         self.cgroup.delete().expect("Failed to remove cgroups");
     }
 
@@ -253,10 +258,7 @@ impl MemoryMonitor {
 
                 'outer: loop {
                     select! {
-                        _ = stop.cancelled() => {
-                            debug!("Stopping oom monitor of {}", container);
-                            break 'outer;
-                        }
+                        _ = stop.cancelled() => break 'outer,
                         _ = tx.closed() => break 'outer,
                         _ = event_fd.read(&mut buffer) => {
                             'inner: loop {
@@ -274,6 +276,9 @@ impl MemoryMonitor {
                         }
                     }
                 }
+                drop(event_control);
+                drop(oom_control);
+                drop(event_fd);
             })
         };
 
@@ -306,10 +311,7 @@ impl MemoryMonitor {
 
                 'outer: loop {
                     select! {
-                        _ = stop.cancelled() => {
-                            debug!("Stopping oom monitor of {}", container);
-                            break 'outer;
-                        }
+                        _ = stop.cancelled() => break 'outer,
                         _ = tx.closed() => break 'outer,
                         _ = stream.next() => {
                             let events = fs::read_to_string(&path).await.expect("Failed to read memory events");

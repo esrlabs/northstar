@@ -24,7 +24,5 @@ mounts:
     type: bind
     host: /system
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: cpueater
+  stdout: pipe
+  stderr: pipe

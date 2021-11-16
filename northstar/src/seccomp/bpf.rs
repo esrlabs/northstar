@@ -9,7 +9,7 @@ use bindings::{
 };
 use log::trace;
 use nix::errno::Errno;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
@@ -177,12 +177,38 @@ fn check_platform_requirements() {
     compile_error!("Seccomp is not supported on Big Endian architectures");
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SockFilter {
     pub code: u16,
     pub jt: u8,
     pub jf: u8,
     pub k: u32,
+}
+
+impl Serialize for SockFilter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let a = (self.code as u32) << 16 | (self.jt as u32) << 8 | self.jf as u32;
+        let value = (a as u64) << 32 | self.k as u64;
+        serializer.serialize_u64(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for SockFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        let a = (value >> 32) as u32;
+        let code = ((a & 0xFFFF0000) >> 16) as u16;
+        let jt = ((a & 0xFF00) >> 8) as u8;
+        let jf = (a & 0xFF) as u8;
+        let k = (value & 0xFFFFFFFF) as u32;
+        Ok(SockFilter { code, jt, jf, k })
+    }
 }
 
 impl From<&SockFilter> for sock_filter {
@@ -653,5 +679,26 @@ fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> SockFilter {
         k,
         jt,
         jf,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::SockFilter;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn sock_filter_serialize_deserialize(a in 0..100, b in 0i32..10) {
+            let filter = SockFilter {
+                code: (a + b) as u16,
+                jt: a as u8,
+                jf: b as u8,
+                k: (a * b) as u32,
+            };
+            let serialized = serde_json::to_string(&filter).unwrap();
+            let deserialized: SockFilter = serde_json::from_str(&serialized).unwrap();
+            prop_assert_eq!(filter, deserialized);
+        }
     }
 }

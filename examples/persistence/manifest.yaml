@@ -20,7 +20,5 @@ mounts:
     type: bind
     host: /system
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: persistence
+  stdout: pipe
+  stderr: pipe

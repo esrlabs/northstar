@@ -1,5 +1,5 @@
 use crate::{
-    common::{name::Name, non_null_string::NonNullString, version::Version},
+    common::{container::Container, name::Name, non_null_string::NonNullString, version::Version},
     seccomp::{Seccomp, Selinux, SyscallRule},
 };
 use derive_more::Deref;
@@ -60,7 +60,8 @@ pub struct Manifest {
     /// Resource limits
     pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
     /// IO configuration
-    pub io: Option<Io>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub io: Io,
     /// Optional custom data. The runtime doesnt use this.
     pub custom: Option<Value>,
 }
@@ -68,6 +69,11 @@ pub struct Manifest {
 impl Manifest {
     /// Manifest version supported by the runtime
     pub const VERSION: Version = Version::new(0, 1, 0);
+
+    /// Container that is specified in the manifest
+    pub fn container(&self) -> Container {
+        Container::new(self.name.clone(), self.version.clone())
+    }
 
     /// Read a manifest from `reader`
     pub fn from_reader<R: io::Read>(reader: R) -> Result<Self, Error> {
@@ -83,19 +89,24 @@ impl Manifest {
 
     fn verify(&self) -> Result<(), Error> {
         // Most optionals in the manifest are not valid for a resource container
-        if self.init.is_none()
-            && (self.args.is_some()
-                || self.env.is_some()
-                || self.autostart.is_some()
-                || self.cgroups.is_some()
-                || self.seccomp.is_some()
-                || self.capabilities.is_some()
-                || self.suppl_groups.is_some()
-                || self.io.is_some())
+
+        if let Some(init) = &self.init {
+            if NonNullString::try_from(init.display().to_string()).is_err() {
+                return Err(Error::Invalid(
+                    "Init path must be a string without zero bytes".to_string(),
+                ));
+            }
+        } else if self.args.is_some()
+            || self.env.is_some()
+            || self.autostart.is_some()
+            || self.cgroups.is_some()
+            || self.seccomp.is_some()
+            || self.capabilities.is_some()
+            || self.suppl_groups.is_some()
         {
             return Err(Error::Invalid(
                 "Resource containers must not define any of the following manifest entries:\
-                args, env, autostart, cgroups, seccomp, capabilities, suppl_groups, io"
+                    args, env, autostart, cgroups, seccomp, capabilities, suppl_groups, io"
                     .to_string(),
             ));
         }
@@ -106,6 +117,18 @@ impl Manifest {
         }
         if self.gid == 0 {
             return Err(Error::Invalid("Invalid gid of 0".to_string()));
+        }
+
+        // Check for reserved env variable names
+        if let Some(env) = &self.env {
+            for name in ["NAME", "VERSION", "NORTHSTAR_CONSOLE"] {
+                if env.keys().any(|k| name == k.as_str()) {
+                    return Err(Error::Invalid(format!(
+                        "Invalid env: resevered variable {}",
+                        name
+                    )));
+                }
+            }
         }
 
         // Check for relative and overlapping bind mounts
@@ -426,31 +449,30 @@ pub enum Mount {
 }
 
 /// IO configuration for stdin, stdout, stderr
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Io {
     /// stdout configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stdout: Option<Output>,
+    pub stdout: Output,
     /// stderr configuration
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stderr: Option<Output>,
+    pub stderr: Output,
 }
 
 /// Io redirection for stdout/stderr
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum Output {
-    /// Inherit the runtimes stdout/stderr
+    /// Discard output
+    #[serde(rename = "discard")]
+    Discard,
+    /// Forward output to the logging system with level and optional tag
     #[serde(rename = "pipe")]
     Pipe,
-    /// Forward output to the logging system with level and optional tag
-    #[serde(rename = "log")]
-    Log {
-        /// Level
-        level: Level,
-        /// Tag
-        tag: String,
-    },
+}
+
+impl Default for Output {
+    fn default() -> Output {
+        Output::Discard
+    }
 }
 
 /// Log level
@@ -822,7 +844,7 @@ mounts:
     options: noexec
 autostart: critical
 seccomp:
-  allow: 
+  allow:
     fork: any
     waitpid: any
 cgroups:
@@ -1081,10 +1103,7 @@ seccomp:
 capabilities:
   - CAP_NET_ADMIN
 io:
-  stdout: 
-    log:
-      level: DEBUG
-      tag: test
+  stdout: pipe
   stderr: pipe
 cgroups:
     memory:

@@ -3,17 +3,16 @@ use super::{
     key::{self, PublicKey},
     Container,
 };
-use crate::{
-    npk::npk::{self},
-    runtime::ipc::raw_fd_ext::RawFdExt,
-};
+use crate::{npk::npk::Npk as NpkNpk, runtime::ipc::RawFdExt};
 use bytes::Bytes;
+use futures::{future::try_join_all, FutureExt};
 use log::{debug, info};
 use mpsc::Receiver;
 use nanoid::nanoid;
 use std::{
     collections::HashMap,
     fmt,
+    future::ready,
     io::{BufReader, SeekFrom},
     os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
     path::{Path, PathBuf},
@@ -22,10 +21,11 @@ use tokio::{
     fs::{self},
     io::{AsyncSeekExt, AsyncWriteExt},
     sync::mpsc,
+    task,
     time::Instant,
 };
 
-pub(super) type Npk = crate::npk::npk::Npk<BufReader<std::fs::File>>;
+pub(super) type Npk = NpkNpk<BufReader<std::fs::File>>;
 
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {
@@ -73,30 +73,40 @@ impl DirRepository {
         let mut readir = fs::read_dir(&dir).await.context("Repository read dir")?;
 
         let start = Instant::now();
+        let mut tasks = Vec::new();
         while let Ok(Some(entry)) = readir.next_entry().await {
             let file = entry.path();
-            debug!(
-                "Loading {}{}",
-                file.display(),
-                if key.is_some() { " [verified]" } else { "" }
-            );
-            let reader = std::fs::File::open(&file).context("Failed to open npk")?;
-            let reader = std::io::BufReader::new(reader);
-            let npk = crate::npk::npk::Npk::from_reader(reader, key.as_ref())
-                .map_err(|e| Error::Npk(file.display().to_string(), e))?;
-            let name = npk.manifest().name.clone();
-            let version = npk.manifest().version.clone();
-            let container = Container::new(name, version);
+            let load_task = task::spawn_blocking(move || {
+                debug!(
+                    "Loading {}{}",
+                    file.display(),
+                    if key.is_some() { " [verified]" } else { "" }
+                );
+                let reader = std::fs::File::open(&file).context("Failed to open npk")?;
+                let reader = std::io::BufReader::new(reader);
+                let npk = NpkNpk::from_reader(reader, key.as_ref())
+                    .map_err(|e| Error::Npk(file.display().to_string(), e))?;
+                let name = npk.manifest().name.clone();
+                let version = npk.manifest().version.clone();
+                let container = Container::new(name, version);
+                Result::<_, Error>::Ok((container, (file, npk)))
+            })
+            .then(|r| ready(r.expect("Task error")));
+
+            tasks.push(load_task);
+        }
+
+        for result in try_join_all(tasks).await? {
+            let (container, (file, npk)) = result;
             containers.insert(container, (file, npk));
         }
 
         let duration = start.elapsed();
         info!(
-            "Loaded {} containers from {} in {:.03}s (avg: {:.05}s)",
+            "Loaded {} containers from {} in {:.03}s",
             containers.len(),
             dir.display(),
             duration.as_secs_f32(),
-            duration.as_secs_f32() / containers.len() as f32
         );
 
         Ok(DirRepository {
@@ -206,7 +216,8 @@ impl<'a> Repository for MemRepository {
 
         // Write buffer to the memfd
         let mut file = unsafe { fs::File::from_raw_fd(fd.as_raw_fd()) };
-        file.set_nonblocking();
+        file.set_nonblocking(true)
+            .context("Failed to set nonblocking")?;
 
         while let Some(r) = rx.recv().await {
             file.write_all(&r).await.context("Failed stream npk")?;
@@ -225,12 +236,13 @@ impl<'a> Repository for MemRepository {
         // Forget fd - it's owned by file
         fd.into_raw_fd();
 
-        file.set_blocking();
+        file.set_nonblocking(false)
+            .context("Failed to set blocking")?;
         let file = BufReader::new(file.into_std().await);
 
         // Load npk
         debug!("Loading memfd as npk");
-        let npk = npk::Npk::from_reader(file, self.key.as_ref())
+        let npk = NpkNpk::from_reader(file, self.key.as_ref())
             .map_err(|e| Error::Npk("Memory".into(), e))?;
         let manifest = npk.manifest();
         let container = Container::new(manifest.name.clone(), manifest.version.clone());

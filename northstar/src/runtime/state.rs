@@ -3,8 +3,9 @@ use super::{
     config::{Config, RepositoryType},
     console::Request,
     error::Error,
+    fork::Forker,
+    io,
     mount::MountControl,
-    process::Launcher,
     repository::{DirRepository, MemRepository, Npk},
     stats::ContainerStats,
     Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, RepositoryId,
@@ -13,32 +14,41 @@ use crate::{
     api::{self, model},
     common::non_null_string::NonNullString,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
-    runtime::{error::Context, CGroupEvent, ENV_NAME, ENV_VERSION},
+    runtime::{
+        console::{Console, Peer},
+        io::ContainerIo,
+        ipc::owned_fd::OwnedFd,
+        CGroupEvent, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
+    },
 };
-use async_trait::async_trait;
 use bytes::Bytes;
+use derive_new::new;
 use futures::{
-    executor::{ThreadPool, ThreadPoolBuilder},
     future::{join_all, ready, Either},
-    task::SpawnExt,
-    Future, FutureExt, TryFutureExt,
+    Future, FutureExt, Stream, StreamExt, TryFutureExt,
 };
+use humantime::format_duration;
+use itertools::Itertools;
 use log::{debug, error, info, warn};
 use nix::sys::signal::Signal;
 use std::{
     collections::{HashMap, HashSet},
     convert::TryFrom,
     fmt::Debug,
-    iter::FromIterator,
+    iter::{once, FromIterator},
+    os::unix::net::UnixStream as StdUnixStream,
     path::PathBuf,
     result,
     sync::Arc,
 };
 use tokio::{
+    net::UnixStream,
+    pin,
     sync::{mpsc, oneshot},
+    task::{self, JoinHandle},
     time,
 };
-use Signal::SIGKILL;
+use tokio_util::sync::CancellationToken;
 
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
@@ -47,23 +57,13 @@ type Args<'a> = Option<&'a Vec<NonNullString>>;
 /// Container environment variables set
 type Env<'a> = Option<&'a HashMap<NonNullString, NonNullString>>;
 
-#[async_trait]
-pub(super) trait Process: Send + Sync + Debug {
-    fn pid(&self) -> Pid;
-    async fn spawn(&mut self) -> Result<(), Error>;
-    async fn kill(&mut self, signal: Signal) -> Result<(), Error>;
-    async fn wait(&mut self) -> Result<ExitStatus, Error>;
-    async fn destroy(&mut self) -> Result<(), Error>;
-}
-
 #[derive(Debug)]
-pub(super) struct State<'a> {
-    config: &'a Config,
+pub(super) struct State {
+    config: Config,
     events_tx: EventTx,
     notification_tx: NotificationTx,
     mount_control: Arc<MountControl>,
-    launcher: Launcher,
-    executor: ThreadPool,
+    launcher: Forker,
     containers: HashMap<Container, ContainerState>,
     repositories: HashMap<RepositoryId, Repository>,
 }
@@ -75,7 +75,7 @@ pub(super) struct ContainerState {
     /// Mount point of the root fs
     pub root: Option<PathBuf>,
     /// Process information when started
-    pub process: Option<ProcessContext>,
+    pub process: Option<ContainerContext>,
 }
 
 impl ContainerState {
@@ -84,24 +84,25 @@ impl ContainerState {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct ProcessContext {
-    process: Box<dyn Process>,
+#[derive(new, Debug)]
+pub(super) struct ContainerContext {
+    pid: Pid,
     started: time::Instant,
     debug: super::debug::Debug,
     cgroups: cgroups::CGroups,
+    stop: CancellationToken,
+    log_task: Option<JoinHandle<std::io::Result<()>>>,
 }
 
-impl ProcessContext {
-    async fn kill(&mut self, signal: Signal) -> Result<(), Error> {
-        self.process.kill(signal).await
-    }
-
+impl ContainerContext {
     async fn destroy(mut self) {
-        self.process
-            .destroy()
-            .await
-            .expect("Failed to destroy process");
+        // Stop console if there's any any
+        self.stop.cancel();
+
+        if let Some(log_task) = self.log_task.take() {
+            // Wait for the pty to finish
+            drop(log_task.await);
+        }
 
         self.debug
             .destroy()
@@ -112,13 +113,14 @@ impl ProcessContext {
     }
 }
 
-impl<'a> State<'a> {
+impl State {
     /// Create a new empty State instance
     pub(super) async fn new(
-        config: &'a Config,
+        config: Config,
         events_tx: EventTx,
         notification_tx: NotificationTx,
-    ) -> Result<State<'a>, Error> {
+        forker: Forker,
+    ) -> Result<State, Error> {
         let repositories = HashMap::new();
         let containers = HashMap::new();
         let mount_control = Arc::new(
@@ -126,16 +128,6 @@ impl<'a> State<'a> {
                 .await
                 .expect("Failed to initialize mount control"),
         );
-        let launcher = Launcher::start(events_tx.clone(), config.clone(), notification_tx.clone())
-            .await
-            .expect("Failed to start launcher");
-
-        debug!("Initializing mount thread pool");
-        let executor = ThreadPoolBuilder::new()
-            .name_prefix("northstar-mount-")
-            .pool_size(config.mount_parallel)
-            .create()
-            .expect("Failed to start mount thread pool");
 
         let mut state = State {
             events_tx,
@@ -143,9 +135,8 @@ impl<'a> State<'a> {
             repositories,
             containers,
             config,
-            launcher,
+            launcher: forker,
             mount_control,
-            executor,
         };
 
         // Initialize repositories. This populates self.containers and self.repositories
@@ -326,13 +317,13 @@ impl<'a> State<'a> {
 
     /// Start a container
     /// `container`: Container to start
-    /// `args`: Optional command line arguments that overwrite the values from the manifest
-    /// `env`: Optional env variables that overwrite the values from the manifest
+    /// `args_extra`: Optional command line arguments that overwrite the values from the manifest
+    /// `env_extra`: Optional env variables that overwrite the values from the manifest
     pub(super) async fn start(
         &mut self,
         container: &Container,
-        args: Args<'_>,
-        env: Env<'_>,
+        args_extra: Args<'_>,
+        env_extra: Env<'_>,
     ) -> Result<(), Error> {
         let start = time::Instant::now();
         info!("Trying to start {}", container);
@@ -345,11 +336,12 @@ impl<'a> State<'a> {
         }
 
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
-        if let Some(env) = env {
-            if env
-                .keys()
-                .any(|k| k.as_str() == ENV_NAME || k.as_str() == ENV_VERSION)
-            {
+        if let Some(env) = env_extra {
+            if env.keys().any(|k| {
+                k.as_str() == ENV_NAME
+                    || k.as_str() == ENV_VERSION
+                    || k.as_str() == "NORTHSTAR_CONSOLE"
+            }) {
                 return Err(Error::InvalidArguments(format!(
                     "env contains reserved key {} or {}",
                     ENV_NAME, ENV_VERSION
@@ -421,65 +413,110 @@ impl<'a> State<'a> {
         // Get a mutable reference to the container state in order to update the process field
         let container_state = self.containers.get_mut(container).expect("Internal error");
 
-        // Root of container
-        let root = container_state
-            .root
-            .as_ref()
-            .map(|root| root.canonicalize().expect("Failed to canonicalize root"))
-            .unwrap();
-
         // Spawn process
         info!("Creating {}", container);
 
-        let mut process = match self
-            .launcher
-            .create(&root, container, &manifest, args, env)
-            .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                warn!("Failed to create process for {}", container);
-                return Err(e);
-            }
+        // Create a toke to stop tasks spawned related to this container
+        let stop = CancellationToken::new();
+
+        // We send the fd to the forker so that it can pass it to the init
+        let console_fd = if manifest.console {
+            let peer = Peer::from(container.to_string());
+            let (runtime, container) = StdUnixStream::pair().expect("Failed to create socketpair");
+            let container: OwnedFd = container.into();
+
+            let runtime = runtime
+                .set_nonblocking(true)
+                .and_then(|_| UnixStream::from_std(runtime))
+                .expect("Failed to set socket into nonblocking mode");
+
+            let notifications = self.notification_tx.subscribe();
+            let events_tx = self.events_tx.clone();
+            let connection =
+                Console::connection(runtime, peer, stop.clone(), events_tx, notifications, None);
+
+            // Start console task
+            task::spawn(connection);
+
+            Some(container)
+        } else {
+            None
         };
 
-        let pid = process.pid();
+        // Create container
+        let config = &self.config;
+        let pid = self.launcher.create(config, &manifest, console_fd).await?;
 
         // Debug
-        let debug = super::debug::Debug::new(self.config, &manifest, pid).await?;
+        let debug = super::debug::Debug::new(&self.config, &manifest, pid).await?;
 
         // CGroups
         let cgroups = {
             debug!("Configuring CGroups for {}", container);
             let config = manifest.cgroups.clone().unwrap_or_default();
+            let events_tx = self.events_tx.clone();
 
             // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
-            cgroups::CGroups::new(
-                &self.config.cgroup,
-                self.events_tx.clone(),
-                container,
-                &config,
-                process.pid(),
-            )
-            .await
-            .expect("Failed to create cgroup")
+            cgroups::CGroups::new(&self.config.cgroup, events_tx, container, &config, pid)
+                .await
+                .expect("Failed to create cgroup")
         };
 
+        // Open a file handle for stdin, stdout and stderr according to the manifest
+        let ContainerIo { io, log_task } = io::open(container, &manifest.io)
+            .await
+            .expect("IO setup error");
+
         // Signal the process to continue starting. This can fail because of the container content
-        if let Err(e) = process.spawn().await {
-            warn!("Failed to start {} ({}): {}", container, pid, e);
+
+        let path = manifest.init.unwrap();
+        let mut args = vec![path.display().to_string()];
+        if let Some(extra_args) = args_extra {
+            args.extend(extra_args.iter().map(ToString::to_string));
+        } else if let Some(manifest_args) = manifest.args {
+            args.extend(manifest_args.iter().map(ToString::to_string));
+        };
+
+        // Prepare the environment for the container according to the manifest
+        let env = match (env_extra, &manifest.env) {
+            (Some(env), _) => env.clone(),
+            (None, Some(env_manifest)) => env_manifest.clone(),
+            (None, None) => HashMap::with_capacity(3),
+        };
+        let env = env
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .chain(once(format!("{}={}", ENV_CONTAINER, container)))
+            .chain(once(format!("{}={}", ENV_NAME, container.name())))
+            .chain(once(format!("{}={}", ENV_VERSION, container.version())))
+            .collect::<Vec<_>>();
+
+        debug!("Container {} init is {:?}", container, path.display());
+        debug!("Container {} argv is {}", container, args.iter().join(" "));
+        debug!("Container {} env is {}", container, env.iter().join(", "));
+
+        // Send exec request to launcher
+        if let Err(e) = self
+            .launcher
+            .exec(container.clone(), path, args, env, io)
+            .await
+        {
+            warn!("Failed to exec {} ({}): {}", container, pid, e);
+
+            stop.cancel();
+
+            if let Some(log_task) = log_task {
+                drop(log_task.await);
+            }
             debug.destroy().await.expect("Failed to destroy debug");
             cgroups.destroy().await;
             return Err(e);
         }
 
         // Add process context to process
-        container_state.process = Some(ProcessContext {
-            process: Box::new(process),
-            started: time::Instant::now(),
-            debug,
-            cgroups,
-        });
+        let started = time::Instant::now();
+        let context = ContainerContext::new(pid, started, debug, cgroups, stop, log_task);
+        container_state.process = Some(context);
 
         let duration = start.elapsed().as_secs_f32();
         info!("Started {} ({}) in {:.03}s", container, pid, duration);
@@ -499,16 +536,28 @@ impl<'a> State<'a> {
         let container_state = self.state_mut(container)?;
 
         match &mut container_state.process {
-            Some(process) => {
+            Some(context) => {
                 info!("Killing {} with {}", container, signal.as_str());
-                process.kill(signal).await
+                let pid = context.pid;
+                let process_group = nix::unistd::Pid::from_raw(-(pid as i32));
+                match nix::sys::signal::kill(process_group, Some(signal)) {
+                    Ok(_) => Ok(()),
+                    Err(nix::Error::ESRCH) => {
+                        debug!("Process {} already exited", pid);
+                        Ok(())
+                    }
+                    Err(e) => unimplemented!("Kill error {}", e),
+                }
             }
             None => Err(Error::StopContainerNotStarted(container.clone())),
         }
     }
 
     /// Shutdown the runtime: stop running applications and umount npks
-    pub(super) async fn shutdown(mut self) -> Result<(), Error> {
+    pub(super) async fn shutdown(
+        mut self,
+        event_rx: impl Stream<Item = Event>,
+    ) -> Result<(), Error> {
         let to_umount = self
             .containers
             .iter()
@@ -516,27 +565,45 @@ impl<'a> State<'a> {
             .map(|(container, _)| container.clone())
             .collect::<Vec<_>>();
 
-        for (container, state) in &mut self.containers {
-            if let Some(mut context) = state.process.take() {
-                let pid = context.process.pid();
-                info!("Sending SIGKILL to {} ({})", container, pid);
-                nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), SIGKILL).ok();
+        let to_kill = self
+            .containers
+            .iter()
+            .filter_map(|(container, state)| state.process.as_ref().map(|_| container.clone()))
+            .collect::<Vec<_>>();
 
-                info!("Waiting for {} to exit", container);
-                let exit_status =
-                    time::timeout(time::Duration::from_secs(10), context.process.wait())
-                        .await
-                        .context(format!("Killing {}", container))?;
-                debug!("Container {} terminated with {:?}", container, exit_status);
-                context.destroy().await;
+        for container in &to_kill {
+            self.kill(container, Signal::SIGKILL).await?;
+        }
+
+        // Wait until all processes are dead
+        if self
+            .containers
+            .values()
+            .any(|state| state.process.is_some())
+        {
+            pin!(event_rx);
+
+            loop {
+                if let Some(Event::Container(container, event)) = event_rx.next().await {
+                    self.on_event(&container, &event, true).await?;
+
+                    // Check if all containers exited if this is a exit event
+                    if let ContainerEvent::Exit(_) = event {
+                        if self
+                            .containers
+                            .values()
+                            .all(|state| state.process.is_none())
+                        {
+                            break;
+                        }
+                    }
+                }
             }
         }
 
         for container in to_umount {
             self.umount(&container).await?;
         }
-
-        self.launcher.shutdown().await?;
 
         Ok(())
     }
@@ -553,32 +620,38 @@ impl<'a> State<'a> {
         let container = repository.insert(rx).await?;
 
         // Check if container is already known and remove newly installed one if so
-        if let Ok(state) = self.state(&container) {
+        let already_installed = self
+            .state(&container)
+            .ok()
+            .map(|state| state.repository.clone());
+
+        if let Some(current_repository) = already_installed {
             warn!(
                 "Skipping duplicate container {} which is already in repository {}",
-                container, state.repository
+                container, current_repository
             );
+
             let repository = self
                 .repositories
                 .get_mut(id)
                 .ok_or_else(|| Error::InvalidRepository(id.to_string()))?;
             repository.remove(&container).await?;
-            Err(Error::InstallDuplicate(container))
-        } else {
-            // Add the container to the state
-            self.containers.insert(
-                container.clone(),
-                ContainerState {
-                    repository: id.into(),
-                    ..Default::default()
-                },
-            );
-            info!("Successfully installed {}", container);
-
-            self.container_event(&container, ContainerEvent::Installed);
-
-            Ok(())
+            return Err(Error::InstallDuplicate(container));
         }
+
+        // Add the container to the state
+        self.containers.insert(
+            container.clone(),
+            ContainerState {
+                repository: id.into(),
+                ..Default::default()
+            },
+        );
+        info!("Successfully installed {}", container);
+
+        self.container_event(&container, ContainerEvent::Installed);
+
+        Ok(())
     }
 
     /// Remove and umount a specific app
@@ -632,6 +705,7 @@ impl<'a> State<'a> {
         &mut self,
         container: &Container,
         exit_status: &ExitStatus,
+        is_shutdown: bool,
     ) -> Result<(), Error> {
         let autostart = self
             .manifest(container)
@@ -641,22 +715,29 @@ impl<'a> State<'a> {
         if let Ok(state) = self.state_mut(container) {
             if let Some(process) = state.process.take() {
                 let is_critical = autostart == Some(Autostart::Critical);
+                let is_critical = is_critical && !is_shutdown;
                 let duration = process.started.elapsed();
                 if is_critical {
                     error!(
-                        "Critical process {} exited after {:?} with status {}",
-                        container, duration, exit_status,
+                        "Critical process {} exited after {} with status {}",
+                        container,
+                        format_duration(duration),
+                        exit_status,
                     );
                 } else {
                     info!(
-                        "Process {} exited after {:?} with status {}",
-                        container, duration, exit_status,
+                        "Process {} exited after {} with status {}",
+                        container,
+                        format_duration(duration),
+                        exit_status,
                     );
                 }
 
                 process.destroy().await;
 
                 self.container_event(container, ContainerEvent::Exit(exit_status.clone()));
+
+                info!("Container {} exited with status {}", container, exit_status);
 
                 // This is a critical flagged container that exited with a error exit code. That's not good...
                 if !exit_status.success() && is_critical {
@@ -675,11 +756,12 @@ impl<'a> State<'a> {
         &mut self,
         container: &Container,
         event: &ContainerEvent,
+        is_shutdown: bool,
     ) -> Result<(), Error> {
         match event {
             ContainerEvent::Started => (),
             ContainerEvent::Exit(exit_status) => {
-                self.on_exit(container, exit_status).await?;
+                self.on_exit(container, exit_status, is_shutdown).await?;
             }
             ContainerEvent::Installed => (),
             ContainerEvent::Uninstalled => (),
@@ -695,7 +777,7 @@ impl<'a> State<'a> {
     pub(super) async fn on_request(
         &mut self,
         request: &mut Request,
-        response_tx: oneshot::Sender<api::model::Response>,
+        repsponse: oneshot::Sender<api::model::Response>,
     ) -> Result<(), Error> {
         match request {
             Request::Message(message) => {
@@ -787,7 +869,7 @@ impl<'a> State<'a> {
 
                     // A error on the response_tx means that the connection
                     // was closed in the meantime. Ignore it.
-                    response_tx.send(response).ok();
+                    repsponse.send(response).ok();
                 } else {
                     warn!("Received message is not a request");
                 }
@@ -800,7 +882,7 @@ impl<'a> State<'a> {
 
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                response_tx.send(payload).ok();
+                repsponse.send(payload).ok();
             }
         }
         Ok(())
@@ -829,11 +911,6 @@ impl<'a> State<'a> {
             }
         }
 
-        // Spawn mount tasks onto the executor
-        let mounts = mounts
-            .drain(..)
-            .map(|t| self.executor.spawn_with_handle(t).unwrap());
-
         // Process mount results
         let mut result = Vec::new();
         for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
@@ -855,7 +932,7 @@ impl<'a> State<'a> {
             warn!("Mount operation failed after {:.03}s", duration);
         } else {
             info!(
-                "Successfully {} container(s) in {:.03}s",
+                "Successfully mounted {} container(s) in {:.03}s",
                 result.len(),
                 duration
             );
@@ -869,7 +946,7 @@ impl<'a> State<'a> {
         for (container, state) in &self.containers {
             let manifest = self.manifest(container).expect("Internal error").clone();
             let process = state.process.as_ref().map(|context| api::model::Process {
-                pid: context.process.pid(),
+                pid: context.pid,
                 uptime: context.started.elapsed().as_nanos() as u64,
             });
             let repository = state.repository.clone();

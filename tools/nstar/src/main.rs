@@ -23,7 +23,7 @@ use std::{
 };
 use tokio::{
     fs,
-    io::{copy, AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader},
+    io::{copy, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpStream, UnixStream},
     time,
 };
@@ -286,8 +286,8 @@ async fn main() -> Result<()> {
 
         clap_complete::generate(
             shell,
-            &mut Opt::into_app(),
-            Opt::into_app().get_name().to_string(),
+            &mut Opt::command(),
+            Opt::command().get_name().to_string(),
             &mut output,
         );
 
@@ -319,12 +319,12 @@ async fn main() -> Result<()> {
         // Subscribe to notifications and print them
         Subcommand::Notifications { number } => {
             if opt.json {
-                let framed = Client::new(io, Some(100), opt.timeout)
+                let mut framed = Client::new(io, Some(100), opt.timeout)
                     .await
                     .with_context(|| format!("Failed to connect to {}", opt.url))?
                     .framed();
 
-                let mut lines = BufReader::new(framed).lines();
+                let mut lines = BufReader::new(framed.get_mut()).lines();
                 for _ in 0..number.unwrap_or(usize::MAX) {
                     match lines.next_line().await.context("Failed to read stream")? {
                         Some(line) => println!("{}", line),
@@ -366,16 +366,21 @@ async fn main() -> Result<()> {
 
             // Extra file transfer for install hack
             if let Subcommand::Install { npk, .. } = command {
+                framed.flush().await.context("Failed to flush")?;
+                framed.get_mut().flush().await.context("Failed to flush")?;
+
                 copy(
                     &mut fs::File::open(npk).await.context("Failed to open npk")?,
-                    &mut framed,
+                    &mut framed.get_mut(),
                 )
                 .await
                 .context("Failed to stream npk")?;
             }
 
+            framed.get_mut().flush().await.context("Failed to flush")?;
+
             if opt.json {
-                let response = BufReader::new(framed)
+                let response = BufReader::new(framed.get_mut())
                     .lines()
                     .next_line()
                     .await

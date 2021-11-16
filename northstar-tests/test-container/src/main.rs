@@ -18,6 +18,22 @@ struct Opt {
     command: Option<Command>,
 }
 
+#[derive(Debug)]
+enum Io {
+    Stdout,
+    Stderr,
+}
+
+impl From<&str> for Io {
+    fn from(s: &str) -> Io {
+        match s {
+            "stdout" => Io::Stdout,
+            "stderr" => Io::Stderr,
+            _ => panic!("Invalid io: {}", s),
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 enum Command {
     Cat {
@@ -25,13 +41,15 @@ enum Command {
         path: PathBuf,
     },
     Crash,
-    Echo {
-        message: Vec<String>,
-    },
     Exit {
         code: i32,
     },
     Inspect,
+    Print {
+        message: String,
+        #[structopt(short, long, parse(from_str), default_value = "stdout")]
+        io: Io,
+    },
     Touch {
         path: PathBuf,
     },
@@ -49,15 +67,15 @@ fn main() -> Result<()> {
     let command = Opt::parse().command.unwrap_or(Command::Sleep);
     println!("Executing \"{:?}\"", command);
     match command {
+        Command::CallDeleteModule { flags } => call_delete_module(flags)?,
         Command::Cat { path } => cat(&path)?,
         Command::Crash => crash(),
-        Command::Echo { message } => echo(&message),
         Command::Exit { code } => exit(code),
         Command::Inspect => inspect(),
-        Command::Touch { path } => touch(&path)?,
+        Command::Print { message, io } => print(&message, &io),
         Command::Sleep => (),
+        Command::Touch { path } => touch(&path)?,
         Command::Write { message, path } => write(&message, path.as_path())?,
-        Command::CallDeleteModule { flags } => call_delete_module(flags)?,
     };
 
     sleep();
@@ -92,8 +110,11 @@ fn crash() {
     panic!("witness me!");
 }
 
-fn echo(message: &[String]) {
-    println!("{}", message.join(" "));
+fn print(message: &str, io: &Io) {
+    match io {
+        Io::Stdout => println!("{}", message),
+        Io::Stderr => eprintln!("{}", message),
+    }
 }
 
 fn exit(code: i32) {

@@ -8,7 +8,9 @@ use std::{
 use thiserror::Error;
 
 /// Name of a container
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(try_from = "String")]
 pub struct Name(String);
 

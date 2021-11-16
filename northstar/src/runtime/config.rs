@@ -1,7 +1,13 @@
 use super::{Error, RepositoryId};
-use crate::{common::non_null_string::NonNullString, util::is_rw};
+use crate::common::non_null_string::NonNullString;
+use nix::{sys::stat, unistd};
 use serde::Deserialize;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    os::unix::prelude::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+};
+use tokio::fs;
 use url::Url;
 
 /// Runtime configuration
@@ -139,5 +145,26 @@ impl Config {
         }
 
         Ok(())
+    }
+}
+
+/// Return true if path is read and writeable
+async fn is_rw(path: &Path) -> bool {
+    match fs::metadata(path).await {
+        Ok(stat) => {
+            let same_uid = stat.uid() == unistd::getuid().as_raw();
+            let same_gid = stat.gid() == unistd::getgid().as_raw();
+            let mode = stat::Mode::from_bits_truncate(stat.permissions().mode());
+
+            let is_readable = (same_uid && mode.contains(stat::Mode::S_IRUSR))
+                || (same_gid && mode.contains(stat::Mode::S_IRGRP))
+                || mode.contains(stat::Mode::S_IROTH);
+            let is_writable = (same_uid && mode.contains(stat::Mode::S_IWUSR))
+                || (same_gid && mode.contains(stat::Mode::S_IWGRP))
+                || mode.contains(stat::Mode::S_IWOTH);
+
+            is_readable && is_writable
+        }
+        Err(_) => false,
     }
 }

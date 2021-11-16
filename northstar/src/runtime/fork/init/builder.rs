@@ -1,74 +1,95 @@
-use super::Error;
+use super::{Init, Mount};
 use crate::{
     common::container::Container,
     npk::{
         manifest,
         manifest::{Manifest, MountOption, MountOptions, Resource, Tmpfs},
     },
-    runtime::{config::Config, error::Context},
-    util::PathExt,
+    runtime::{
+        config::Config,
+        error::{Context, Error},
+    },
+    seccomp,
 };
-use log::debug;
 use nix::{mount::MsFlags, unistd};
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::{c_void, CString},
+    path::{Path, PathBuf},
+    ptr::null,
+};
 use tokio::fs;
 
-/// Instructions for mount system call done in init
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct Mount {
-    pub source: Option<PathBuf>,
-    pub target: PathBuf,
-    pub fstype: Option<String>,
-    pub flags: u64,
-    pub data: Option<String>,
-    pub error_msg: String,
+trait PathExt {
+    fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf;
 }
 
-impl Mount {
-    pub fn new(
-        source: Option<PathBuf>,
-        target: PathBuf,
-        fstype: Option<&'static str>,
-        flags: MsFlags,
-        data: Option<String>,
-    ) -> Mount {
-        let error_msg = format!(
-            "Failed to mount '{}' of type '{}' on '{}' with flags '{:?}' and data '{}'",
-            source.clone().unwrap_or_default().display(),
-            fstype.unwrap_or_default(),
-            target.display(),
-            flags,
-            data.clone().unwrap_or_default()
-        );
-        Mount {
-            source,
-            target,
-            fstype: fstype.map(|s| s.to_string()),
-            flags: flags.bits(),
-            data,
-            error_msg,
-        }
-    }
+pub async fn build(config: &Config, manifest: &Manifest) -> Result<Init, Error> {
+    let container = manifest.container();
+    let root = config.run_dir.join(container.to_string());
 
-    /// Execute this mount call
-    pub(super) fn mount(&self) {
-        nix::mount::mount(
-            self.source.as_ref(),
-            &self.target,
-            self.fstype.as_deref(),
-            // Safe because flags is private and only set in Mount::new via MsFlags::bits
-            unsafe { MsFlags::from_bits_unchecked(self.flags) },
-            self.data.as_deref(),
-        )
-        .expect(&self.error_msg);
+    let capabilities = manifest.capabilities.clone();
+    let console = manifest.console;
+    let gid = manifest.gid;
+    let groups = groups(manifest);
+    let mounts = prepare_mounts(config, &root, manifest).await?;
+    let rlimits = manifest.rlimits.clone();
+    let seccomp = seccomp_filter(manifest);
+    let uid = manifest.uid;
+
+    Ok(Init {
+        container,
+        root,
+        uid,
+        gid,
+        mounts,
+        groups,
+        capabilities,
+        rlimits,
+        seccomp,
+        console,
+    })
+}
+
+/// Generate a list of supplementary gids if the groups info can be retrieved. This
+/// must happen before the init `clone` because the group information cannot be gathered
+/// without `/etc` etc...
+fn groups(manifest: &Manifest) -> Vec<u32> {
+    if let Some(groups) = manifest.suppl_groups.as_ref() {
+        let mut result = Vec::with_capacity(groups.len());
+        for group in groups {
+            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+            let group_info =
+                unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
+            if group_info == (null::<c_void>() as *mut nix::libc::group) {
+                log::warn!("Skipping invalid supplementary group {}", group);
+            } else {
+                let gid = unsafe { (*group_info).gr_gid };
+                // TODO: Are there gids cannot use?
+                result.push(gid)
+            }
+        }
+        result
+    } else {
+        Vec::with_capacity(0)
     }
+}
+
+/// Generate seccomp filter applied in init
+fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
+    if let Some(seccomp) = manifest.seccomp.as_ref() {
+        return Some(seccomp::seccomp_filter(
+            seccomp.profile.as_ref(),
+            seccomp.allow.as_ref(),
+            manifest.capabilities.as_ref(),
+        ));
+    }
+    None
 }
 
 /// Iterate the mounts of a container and assemble a list of `mount` calls to be
 /// performed by init. Prepare an options persist dir. This fn fails if a resource
 /// is referenced that does not exist.
-pub(super) async fn prepare_mounts(
+async fn prepare_mounts(
     config: &Config,
     root: &Path,
     manifest: &Manifest,
@@ -103,7 +124,7 @@ pub(super) async fn prepare_mounts(
 }
 
 fn proc(root: &Path, target: &Path) -> Mount {
-    debug!("Mounting proc on {}", target.display());
+    log::debug!("Mounting proc on {}", target.display());
     let source = PathBuf::from("proc");
     let target = root.join_strip(target);
     let fstype = "proc";
@@ -115,7 +136,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
     if host.exists() {
         let rw = options.contains(&MountOption::Rw);
         let mut mounts = Vec::with_capacity(if rw { 2 } else { 1 });
-        debug!(
+        log::debug!(
             "Mounting {} on {} with flags {}",
             host.display(),
             target.display(),
@@ -140,7 +161,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
         }
         mounts
     } else {
-        debug!(
+        log::debug!(
             "Skipping bind mount of nonexistent source {} to {}",
             host.display(),
             target.display()
@@ -157,13 +178,13 @@ async fn persist(
     gid: u16,
 ) -> Result<Mount, Error> {
     if !source.exists() {
-        debug!("Creating {}", source.display());
+        log::debug!("Creating {}", source.display());
         fs::create_dir_all(&source)
             .await
             .context(format!("Failed to create {}", source.display()))?;
     }
 
-    debug!("Chowning {} to {}:{}", source.display(), uid, gid);
+    log::debug!("Chowning {} to {}:{}", source.display(), uid, gid);
     unistd::chown(
         source.as_os_str(),
         Some(unistd::Uid::from_raw(uid.into())),
@@ -176,7 +197,7 @@ async fn persist(
         gid
     ))?;
 
-    debug!("Mounting {} on {}", source.display(), target.display(),);
+    log::debug!("Mounting {} on {}", source.display(), target.display(),);
 
     let target = root.join_strip(target);
     let flags = MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
@@ -217,7 +238,7 @@ fn resource(
         dir
     };
 
-    debug!(
+    log::debug!(
         "Mounting {} on {} with {}",
         src.display(),
         target.display(),
@@ -236,7 +257,7 @@ fn resource(
 }
 
 fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
-    debug!(
+    log::debug!(
         "Mounting tmpfs with size {} on {}",
         bytesize::ByteSize::b(size),
         target.display()
@@ -260,4 +281,13 @@ fn options_to_flags(opt: &MountOptions) -> MsFlags {
         }
     }
     flags
+}
+
+impl PathExt for Path {
+    fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf {
+        self.join(match w.as_ref().strip_prefix("/") {
+            Ok(stripped) => stripped,
+            Err(_) => w.as_ref(),
+        })
+    }
 }

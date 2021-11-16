@@ -264,7 +264,7 @@ kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
 ### Container launch sequence
 
-**TODO**: <br/><img src="images/container-startup.png" class="inline" width=600/>
+<br/><img src="images/container-startup.png" class="inline" width=600/>
 
 ### Manifest Format
 
