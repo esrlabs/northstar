@@ -437,7 +437,7 @@ pub enum Level {
     /// The "info" level.
     ///
     /// Designates useful information.
-    #[serde(alias = "INFOY")]
+    #[serde(alias = "INFO")]
     Info,
     /// The "debug" level.
     ///
