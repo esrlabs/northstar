@@ -3,10 +3,8 @@ use std::{
     os::unix::prelude::{AsRawFd, IntoRawFd, RawFd},
 };
 
-use tokio::io::AsyncReadExt;
-
 use super::{
-    pipe::{pipe, AsyncPipeRead, PipeRead, PipeWrite},
+    pipe::{pipe, PipeRead, PipeWrite},
     raw_fd_ext::RawFdExt,
 };
 
@@ -67,17 +65,6 @@ impl ConditionWait {
         use std::io::Read;
         loop {
             match self.read.read(&mut [0u8; 1]) {
-                Ok(n) if n == 0 => break,
-                Ok(_) => continue,
-                Err(_) => break,
-            }
-        }
-    }
-
-    pub async fn async_wait(self) {
-        let mut read: AsyncPipeRead = self.read.try_into().unwrap();
-        loop {
-            match read.read(&mut [0u8; 1]).await {
                 Ok(n) if n == 0 => break,
                 Ok(_) => continue,
                 Err(_) => break,

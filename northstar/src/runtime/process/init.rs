@@ -1,12 +1,10 @@
 use super::{fs::Mount, io::Fd};
 use crate::{
     npk::manifest::{Capability, RLimitResource, RLimitValue},
-    runtime::{
-        ipc::{channel::Channel, condition::ConditionNotify},
-        ExitStatus,
-    },
+    runtime::{ipc::channel, process::fork::fork, ExitStatus},
     seccomp::AllowList,
 };
+
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
@@ -19,17 +17,15 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::CString,
-    os::unix::prelude::RawFd,
+    os::unix::prelude::{AsRawFd, RawFd},
     path::PathBuf,
     process::exit,
+    sync::mpsc,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Init {
     pub root: PathBuf,
-    pub init: CString,
-    pub argv: Vec<CString>,
-    pub env: Vec<CString>,
     pub uid: u16,
     pub gid: u16,
     pub mounts: Vec<Mount>,
@@ -40,11 +36,127 @@ pub(super) struct Init {
     pub seccomp: Option<AllowList>,
 }
 
+/// This is the type used to communicate with the init process from the runtime.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum InitMessage {
+    Forked { pid: i32 },
+    Exit { pid: i32, exit_status: ExitStatus },
+}
+
+/// Command execution request
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Exec {
+    pub path: CString,
+    pub args: Vec<CString>,
+    pub env: Vec<CString>,
+}
+
+/// Init process main function
+fn init_main(
+    mut rt_tx: channel::Sender<InitMessage>,
+    mut rt_rx: channel::Receiver<Exec>,
+    seccomp: Option<AllowList>,
+) -> ! {
+    enum Event {
+        Exit { pid: i32, exit_status: ExitStatus },
+        Command(Exec),
+    }
+    let (tx, rx) = mpsc::channel();
+
+    // This thread forwards the commands coming from the runtime
+    let command_tx = tx.clone();
+    std::thread::spawn(move || loop {
+        let command = rt_rx
+            .recv()
+            .expect("Failed to receive init command from runtime");
+        command_tx.send(Event::Command(command)).unwrap();
+    });
+
+    // This thread sends the exit status of the child processes
+    let exit_status_tx = tx;
+    let reaper_thread = std::thread::spawn(move || {
+        loop {
+            match waitpid(None, None) {
+                Ok(WaitStatus::Exited(pid, status)) => {
+                    exit_status_tx
+                        .send(Event::Exit {
+                            pid: pid.as_raw(),
+                            exit_status: ExitStatus::Exit(status),
+                        })
+                        .unwrap();
+                }
+                Ok(WaitStatus::Signaled(pid, status, _)) => {
+                    exit_status_tx
+                        .send(Event::Exit {
+                            pid: pid.as_raw() as i32,
+                            exit_status: ExitStatus::Signalled(status as u8),
+                        })
+                        .unwrap();
+                }
+                Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => continue,
+                Err(Errno::ECHILD) => {
+                    // wait till a child process is spawned
+                    // unparked by the consumer thread after a Exec is received
+                    std::thread::park();
+                }
+                e => panic!("Failed to waitpid: {:?}", e),
+            }
+        }
+    });
+
+    // Consume messages from threads
+    loop {
+        match rx.recv() {
+            Ok(Event::Exit { pid, exit_status }) => {
+                rt_tx
+                    .send(InitMessage::Exit { pid, exit_status })
+                    .expect("Failed to send exit status");
+
+                // Note:
+                // Currently the init process exists after the first child
+                // process exits.
+                exit(0);
+            }
+            Ok(Event::Command(Exec { path, args, env })) => {
+                // Start new process inside the container
+                let child_pid = fork(|| {
+                    // Set seccomp filter
+                    if let Some(ref filter) = seccomp {
+                        filter.apply().expect("Failed to apply seccomp filter.");
+                    }
+
+                    // Checkpoint fds are FD_CLOEXEC and act as a signal for the launcher that this child
+                    // is started. Therefore no explicit drop (close) of _checkpoint_notify is needed here.
+                    panic!(
+                        "Execve: {:?} {:?}: {:?}",
+                        &path,
+                        &args,
+                        unistd::execve(&path, &args, &env)
+                    )
+                })
+                .expect("Failed to spawn child process");
+
+                rt_tx
+                    .send(InitMessage::Forked {
+                        pid: child_pid.as_raw(),
+                    })
+                    .expect("Failed to send exit status");
+
+                // wake up the reaper thread
+                reaper_thread.thread().unpark();
+            }
+            Err(e) => {
+                panic!("Failed to receive message: {}", e);
+            }
+        }
+    }
+}
+
 impl Init {
     pub(super) fn run(
         self,
-        condition_notify: ConditionNotify,
-        mut exit_status_channel: Channel,
+        rt_tx: channel::Sender<InitMessage>,
+        rt_rx: channel::Receiver<Exec>,
     ) -> ! {
         // Set the process name to init. This process inherited the process name
         // from the runtime
@@ -81,60 +193,11 @@ impl Init {
         self.drop_privileges();
 
         // Close and dup fds
-        self.file_descriptors();
+        // Avoid clossing accidentally the channel file descriptors
+        self.file_descriptors(&[rt_tx.as_raw_fd(), rt_rx.as_raw_fd()]);
 
-        // Clone
-        match unsafe { unistd::fork() } {
-            Ok(result) => match result {
-                unistd::ForkResult::Parent { child } => {
-                    // Drop checkpoint. The fds are cloned into the child and are closed upon execve.
-                    drop(condition_notify);
-
-                    // Wait for the child to exit
-                    loop {
-                        match waitpid(Some(child), None) {
-                            Ok(WaitStatus::Exited(_pid, status)) => {
-                                let exit_status = ExitStatus::Exit(status);
-                                exit_status_channel
-                                    .send(&exit_status)
-                                    .expect("Failed to send exit status");
-                                exit(0);
-                            }
-                            Ok(WaitStatus::Signaled(_pid, status, _)) => {
-                                let exit_status = ExitStatus::Signalled(status as u8);
-                                exit_status_channel
-                                    .send(&exit_status)
-                                    .expect("Failed to send exit status");
-                                exit(0);
-                            }
-                            Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
-                                continue
-                            }
-                            Err(nix::Error::EINTR) => continue,
-                            e => panic!("Failed to waitpid on {}: {:?}", child, e),
-                        }
-                    }
-                }
-                unistd::ForkResult::Child => {
-                    drop(exit_status_channel);
-
-                    // Set seccomp filter
-                    if let Some(ref filter) = self.seccomp {
-                        filter.apply().expect("Failed to apply seccomp filter.");
-                    }
-
-                    // Checkpoint fds are FD_CLOEXEC and act as a signal for the launcher that this child is started.
-                    // Therefore no explicit drop (close) of _checkpoint_notify is needed here.
-                    panic!(
-                        "Execve: {:?} {:?}: {:?}",
-                        &self.init,
-                        &self.argv,
-                        unistd::execve(&self.init, &self.argv, &self.env)
-                    )
-                }
-            },
-            Err(e) => panic!("Clone error: {}", e),
-        }
+        // We need to clone from the reference to be able to "move" the channel into the thread
+        init_main(rt_tx, rt_rx, self.seccomp)
     }
 
     /// Set uid/gid
@@ -232,8 +295,14 @@ impl Init {
     }
 
     /// Apply file descriptor configuration
-    fn file_descriptors(&self) {
+    fn file_descriptors(&self, skip: &[RawFd]) {
+        let skip: HashSet<&RawFd> = skip.iter().collect();
+
         for (fd, value) in &self.fds {
+            if skip.contains(&fd) {
+                continue;
+            }
+
             match value {
                 Fd::Close => {
                     // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.

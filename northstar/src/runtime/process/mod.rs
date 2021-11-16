@@ -1,29 +1,3 @@
-use super::{
-    config::Config,
-    error::Error,
-    ipc::{
-        channel,
-        condition::{self, ConditionNotify, ConditionWait},
-    },
-    ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, ENV_NAME, ENV_VERSION,
-};
-use crate::{
-    common::{container::Container, non_null_string::NonNullString},
-    npk::manifest::Manifest,
-    runtime::{
-        console::{self, Peer},
-        error::Context,
-    },
-    seccomp,
-};
-use async_trait::async_trait;
-use futures::{future::ready, Future, FutureExt};
-use log::{debug, error, info, warn};
-use nix::{
-    errno::Errno,
-    sys::{self, signal::Signal, socket},
-    unistd,
-};
 use std::{
     collections::HashMap,
     ffi::{c_void, CString},
@@ -31,19 +5,44 @@ use std::{
     mem::forget,
     os::unix::{
         net::UnixStream as StdUnixStream,
-        prelude::{AsRawFd, FromRawFd, RawFd},
+        prelude::{AsRawFd, FromRawFd},
     },
     path::Path,
     ptr::null,
+};
+
+use async_trait::async_trait;
+use futures::{Future, TryFutureExt};
+use log::{debug, error, warn};
+use nix::{
+    errno::Errno,
+    sys::{self, signal::Signal, socket},
+    unistd,
 };
 use sys::wait;
 use tokio::{net::UnixStream, task, time};
 use tokio_util::sync::CancellationToken;
 
+use crate::{
+    common::{container::Container, non_null_string::NonNullString},
+    npk::manifest::Manifest,
+    runtime::{
+        config::Config,
+        console::{self, Peer},
+        error::{Context, Error},
+        ipc::channel,
+        process::{fork::fork, init::InitMessage},
+        ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, ENV_NAME, ENV_VERSION,
+    },
+    seccomp,
+};
+
+use self::init::Exec;
+
+mod fork;
 mod fs;
 mod init;
 mod io;
-mod trampoline;
 
 #[derive(Debug)]
 pub(super) struct Launcher {
@@ -53,16 +52,26 @@ pub(super) struct Launcher {
 }
 
 pub(super) struct Process {
-    pid: Pid,
-    checkpoint: Option<Checkpoint>,
+    init_tx: channel::AsyncSender<Exec>,
+    init_rx: Option<channel::AsyncReceiver<InitMessage>>,
+    console_stop: Option<CancellationToken>,
+    container: Container,
     exit_status: Option<Box<dyn Future<Output = ExitStatus> + Send + Sync + Unpin>>,
+    pid: Pid,
+    tx: EventTx,
+    path: CString,
+    args: Vec<CString>,
+    env: Vec<CString>,
 }
 
 impl fmt::Debug for Process {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Process")
             .field("pid", &self.pid)
-            .field("checkpoint", &self.checkpoint)
+            .field("container", &self.container)
+            .field("path", &self.path)
+            .field("args", &self.args)
+            .field("env", &self.env)
             .finish()
     }
 }
@@ -101,28 +110,15 @@ impl Launcher {
         // the waitpid of this child process signals that the child is exited. See
         // `wait`.
         let stop = CancellationToken::new();
-        let (init, argv) = init_argv(manifest, args);
+        let (cmd, argv) = init_argv(manifest, args);
         let mut env = self::env(manifest, env);
 
         // Setup io and collect fd setup set
         let (io, mut fds) = io::from_manifest(manifest).await?;
 
-        // Pipe for sending the init pid from the intermediate process to the runtime
-        // and the exit status from init to the runtime
-        //
-        // Ensure the fds of the channel are *not* in the fds set. The list of fds that are
-        // closed by init is gathered above. Between the assembly of the list and the new pipes
-        // for the child pid and the condition variables a io task that forwards logs from containers
-        // can end. Those io tasks use pipes as well. If such a task ends it closes its fds. Those numbers
-        // can be in the list of to be closed fds but are reused when the pipe are created.
-        let channel = channel::Channel::new();
-        fds.remove(&channel.as_raw_fd().0);
-        fds.remove(&channel.as_raw_fd().1);
-
-        // Ensure that the checkpoint fds are not in the fds set and untouched
-        let (checkpoint_runtime, checkpoint_init) = checkpoints();
-        fds.remove(&checkpoint_runtime.as_raw_fd().0);
-        fds.remove(&checkpoint_runtime.as_raw_fd().1);
+        // Two-way communication channels with the init process.
+        let mut pipe_to_init = channel::Channel::<Exec>::new();
+        let mut pipe_from_init = channel::Channel::<InitMessage>::new();
 
         // Setup console if configured
         let console_fd = console_fd(
@@ -145,15 +141,12 @@ impl Launcher {
         let root = root.to_owned();
         let seccomp = seccomp_filter(manifest);
 
-        debug!("{} init is {:?}", container, init);
+        debug!("{} init is {:?}", container, cmd);
         debug!("{} argv is {:?}", container, argv);
         debug!("{} env is {:?}", container, env);
 
         let init = init::Init {
             root,
-            init,
-            argv,
-            env,
             uid,
             gid,
             mounts,
@@ -164,136 +157,121 @@ impl Launcher {
             seccomp,
         };
 
-        // Fork trampoline process
-        match unsafe { unistd::fork() } {
-            Ok(result) => match result {
-                unistd::ForkResult::Parent { child } => {
-                    let trampoline_pid = child;
-                    // Close writing ends of log pipes (if any)
-                    drop(io);
-                    // Close child console socket (if any)
-                    drop(console_fd);
-                    // Close child checkpoint pipes
-                    drop(checkpoint_init);
+        // Channel just for receiving the init pid from the intermediate process
+        let mut init_pid_channel = channel::Channel::<u32>::new();
 
-                    // Receive the pid of the init process from the trampoline process
-                    debug!("Waiting for the pid of init of {}", container);
-                    let mut channel = channel.into_async_read();
-                    let pid = channel.recv::<i32>().await.expect("Failed to read pid") as Pid;
-                    debug!("Created {} with pid {}", container, pid);
+        let trampoline_pid = fork(|| {
+            // FIXME After this point the tokio runtime is in a kind of undefined state :(
 
-                    // We're done reading the pid. The next information transferred via the
-                    // channel is the exit status of the container process.
+            // Forget writing ends of io which are stdout, stderr. The `forget`
+            // ensures that the file descriptors are not closed
+            forget(io);
 
-                    // Reap the trampoline process which is (or will be) a zombie otherwise
-                    debug!("Waiting for trampoline process {} to exit", trampoline_pid);
-                    wait::waitpid(Some(trampoline_pid), None)
-                        .expect("Failed to wait for trampoline process");
+            let mut init_pid_tx = init_pid_channel.write_end();
 
-                    // Start a task that waits for the exit of the init process
-                    let exit_status_fut = self.container_exit_status(container, channel, pid, stop);
+            // Keep init's relevant ends from each channel
+            let init_rx = pipe_to_init.read_end();
+            let init_tx = pipe_from_init.write_end();
 
-                    Ok(Process {
-                        pid,
-                        checkpoint: Some(checkpoint_runtime),
-                        exit_status: Some(Box::new(exit_status_fut)),
-                    })
+            // Create pid namespace
+            nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWPID)
+                .expect("Failed to create pid namespace");
+
+            // Fork the init process
+            let init_pid = fork(|| {
+                // Dive into init and never return
+                init.run(init_tx, init_rx);
+            })
+            .expect("Failed to fork init");
+
+            init_pid_tx
+                .send(init_pid.as_raw() as u32)
+                .expect("Failed to send init pid");
+
+            Ok(())
+        })
+        .context("Failed to fork trampoline process")?;
+
+        // Close child console socket (if any)
+        drop(console_fd);
+
+        // Keep runtime's relevant ends from each channel
+        let init_tx = pipe_to_init.write_end();
+        let init_rx = pipe_from_init.read_end();
+
+        // Pipe that receives the init PID from the trampoline process
+        let mut init_pid_rx: channel::AsyncReceiver<u32> = init_pid_channel.read_end().into();
+
+        debug!("Waiting for init pid of container {}", container);
+        let pid = init_pid_rx
+            .recv()
+            .await
+            .expect("Failed to receive init pid");
+        debug!("Created container {} with pid {}", container, pid);
+
+        // Reap the trampoline process which is (or will be) a zombie otherwise
+        debug!("Waiting for trampoline process {} to exit", trampoline_pid);
+        wait::waitpid(Some(trampoline_pid), None).expect("Failed to wait for trampoline process");
+
+        Ok(Process {
+            init_tx: init_tx.into(),
+            init_rx: Some(init_rx.into()),
+            console_stop: Some(stop),
+            container: container.to_owned(),
+            exit_status: None,
+            pid,
+            tx: self.tx.clone(),
+            path: cmd,
+            args: argv,
+            env,
+        })
+    }
+}
+
+/// Wait for the spawned process to exit and return its exit status.
+async fn wait_exit_status(
+    init_pid: u32,
+    mut init_rx: channel::AsyncReceiver<InitMessage>,
+) -> ExitStatus {
+    // Note that at this point, the next message from the init process must be the exit status from
+    // the spawned process or an error due to an unexpected close of the channel (e.g. init died).
+    let exec_exit = init_rx.recv().await;
+
+    // Independently of the previous result, we have to reap the init process
+    let init_exit = {
+        let init_pid = unistd::Pid::from_raw(init_pid as i32);
+        loop {
+            match wait::waitpid(Some(init_pid), None) {
+                Ok(wait::WaitStatus::Exited(_pid, code)) => {
+                    break ExitStatus::Exit(code);
                 }
-                unistd::ForkResult::Child => {
-                    // Forget writing ends of io which are stdout, stderr. The `forget`
-                    // ensures that the file descriptors are not closed
-                    forget(io);
-
-                    // Close checkpoint ends of the runtime
-                    drop(checkpoint_runtime);
-
-                    trampoline::trampoline(init, channel, checkpoint_init)
+                Ok(wait::WaitStatus::Signaled(_pid, signal, _dump)) => {
+                    break ExitStatus::Signalled(signal as u8);
                 }
-            },
-            Err(e) => panic!("Fork error: {}", e),
+                // Interrupted by a signal
+                Err(nix::Error::EINTR) => continue,
+                Ok(r) => panic!("Unexpected wait status of init: {:?}", r),
+                Err(e) => panic!("Failed to waitpid on {}: {}", init_pid, e),
+            }
         }
-    }
+    };
+    debug!("Init {} exit status: {}", init_pid, init_exit);
 
-    /// Spawn a task that waits for the containers exit status. If the receive operation
-    /// fails take the exit status of the init process `pid`.
-    fn container_exit_status(
-        &self,
-        container: &Container,
-        mut channel: channel::AsyncChannelRead,
-        pid: Pid,
-        stop: CancellationToken,
-    ) -> impl Future<Output = ExitStatus> {
-        let container = container.clone();
-        let tx = self.tx.clone();
+    let exit_status = match exec_exit {
+        Ok(InitMessage::Exit { pid, exit_status }) => {
+            debug!("Process {} exit status: {}", pid, exit_status);
+            exit_status
+        }
+        Err(e) => {
+            error!("Failed to receive exit status from init: {}", e);
+            // The channel was closed before the exit status was sent. We take the exit status of
+            // the init process instead.
+            init_exit
+        }
+        Ok(msg) => panic!("Unexpected init message: {:?}", msg),
+    };
 
-        // This task lives as long as the child process and doesn't need to be
-        // cancelled explicitly.
-        task::spawn(async move {
-            // Wait for an event on the channel
-            let status = match channel.recv::<ExitStatus>().await {
-                // Init sent something
-                Ok(exit_status) => {
-                    debug!(
-                        "Received exit status of {} ({}) via channel: {}",
-                        container, pid, exit_status
-                    );
-
-                    // Wait for init to exit. This is needed to ensure the init process
-                    // exited before the runtime starts to cleanup e.g remove cgroups
-                    if let Err(e) = wait::waitpid(Some(unistd::Pid::from_raw(pid as i32)), None) {
-                        panic!("Failed to wait for init process {}: {}", pid, e);
-                    }
-
-                    exit_status
-                }
-                // The channel is closed before init sent something
-                Err(e) => {
-                    // This is not an error. If for example the child process exited because
-                    // of a SIGKILL the pipe is just closed and the init process cannot send
-                    // anything there. In such a situation take the exit status of the init
-                    // process as the exit status of the container process.
-                    debug!(
-                        "Failed to receive exit status of {} ({}) via channel: {}",
-                        container, pid, e
-                    );
-
-                    let pid = unistd::Pid::from_raw(pid as i32);
-                    let exit_status = loop {
-                        match wait::waitpid(Some(pid), None) {
-                            Ok(wait::WaitStatus::Exited(pid, code)) => {
-                                debug!("Process {} exit code is {}", pid, code);
-                                break ExitStatus::Exit(code);
-                            }
-                            Ok(wait::WaitStatus::Signaled(pid, signal, _dump)) => {
-                                debug!("Process {} exit status is signal {}", pid, signal);
-                                break ExitStatus::Signalled(signal as u8);
-                            }
-                            Ok(r) => unreachable!("Unexpected wait status of init: {:?}", r),
-                            Err(nix::Error::EINTR) => continue,
-                            Err(e) => panic!("Failed to waitpid on {}: {}", pid, e),
-                        }
-                    };
-                    debug!("Exit status of {} ({}): {}", container, pid, exit_status);
-                    exit_status
-                }
-            };
-
-            // Stop console connection if any
-            stop.cancel();
-
-            // Send container exit event to the runtime main loop
-            let event = ContainerEvent::Exit(status.clone());
-            tx.send(Event::Container(container, event))
-                .await
-                .expect("Failed to send container event");
-
-            status
-        })
-        .then(|r| match r {
-            Ok(r) => ready(r),
-            Err(_) => panic!("Task error"),
-        })
-    }
+    exit_status
 }
 
 #[async_trait]
@@ -303,16 +281,26 @@ impl super::state::Process for Process {
     }
 
     async fn spawn(&mut self) -> Result<(), Error> {
-        let checkpoint = self
-            .checkpoint
-            .take()
-            .expect("Attempt to start container twice. This is a bug.");
-        info!("Starting {}", self.pid());
-        let wait = checkpoint.notify();
+        // Tell init to start the container application
+        let mut init_rx = self.init_rx.take().unwrap();
+
+        self.init_tx
+            .send(Exec {
+                path: self.path.clone(),
+                args: self.args.clone(),
+                env: self.env.clone(),
+            })
+            .await
+            .context("Failed to send exec to init")?;
 
         // If the child process refuses to start - kill it after 5 seconds
-        match time::timeout(time::Duration::from_secs(5), wait.async_wait()).await {
-            Ok(_) => (),
+        match time::timeout(std::time::Duration::from_secs(5), init_rx.recv()).await {
+            Ok(Ok(InitMessage::Forked { pid })) => {
+                debug!("Spawned {} with pid {}", self.container, pid);
+            }
+            Ok(msg) => {
+                panic!("Unexpected init message: {:?}", msg);
+            }
             Err(_) => {
                 error!(
                     "Timeout while waiting for {} to start. Sending SIGKILL to {}",
@@ -321,8 +309,30 @@ impl super::state::Process for Process {
                 let process_group = unistd::Pid::from_raw(-(self.pid as i32));
                 let sigkill = Some(sys::signal::SIGKILL);
                 sys::signal::kill(process_group, sigkill).ok();
+                return Ok(());
             }
-        }
+        };
+
+        // spawn a task that waits for the process exit status
+        let tx = self.tx.clone();
+        let init_pid = self.pid;
+        let container = self.container.clone();
+        let stop = self.console_stop.take().unwrap();
+        self.exit_status = Some(Box::new(
+            task::spawn(async move {
+                let exit_status = wait_exit_status(init_pid, init_rx).await;
+
+                stop.cancel();
+
+                let event = ContainerEvent::Exit(exit_status.clone());
+                tx.send(Event::Container(container, event))
+                    .await
+                    .expect("Failed to send exit status");
+
+                exit_status
+            })
+            .unwrap_or_else(|e| panic!("Task error: {}", e)),
+        ));
 
         Ok(())
     }
@@ -526,44 +536,4 @@ fn set_child_subreaper(value: bool) -> Result<(), Error> {
     Errno::result(result)
         .map(drop)
         .context("Set child subreaper flag")
-}
-
-pub(super) struct Checkpoint(ConditionWait, ConditionNotify);
-
-fn checkpoints() -> (Checkpoint, Checkpoint) {
-    let a = condition::Condition::new().expect("Failed to create condition");
-    a.set_cloexec();
-    let b = condition::Condition::new().expect("Failed to create condition");
-    b.set_cloexec();
-
-    let (aw, an) = a.split();
-    let (bw, bn) = b.split();
-
-    (Checkpoint(aw, bn), Checkpoint(bw, an))
-}
-
-impl Checkpoint {
-    fn notify(self) -> ConditionWait {
-        self.1.notify();
-        self.0
-    }
-
-    fn wait(self) -> ConditionNotify {
-        self.0.wait();
-        self.1
-    }
-
-    /// Raw file descriptor number of the rx and tx pipe
-    fn as_raw_fd(&self) -> (RawFd, RawFd) {
-        (self.0.as_raw_fd(), self.1.as_raw_fd())
-    }
-}
-
-impl std::fmt::Debug for Checkpoint {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Checkpoint")
-            .field("wait", &self.0.as_raw_fd())
-            .field("notifiy", &self.1.as_raw_fd())
-            .finish()
-    }
 }

@@ -1,5 +1,5 @@
 use futures::ready;
-use nix::unistd;
+use nix::{fcntl::OFlag, unistd};
 use std::{
     convert::TryFrom,
     io,
@@ -32,14 +32,11 @@ impl From<RawFd> for Inner {
 
 /// Opens a pipe(2) with both ends blocking
 pub fn pipe() -> Result<(PipeRead, PipeWrite)> {
-    unistd::pipe().map_err(from_nix).map(|(read, write)| {
-        (
-            PipeRead { inner: read.into() },
-            PipeWrite {
-                inner: write.into(),
-            },
-        )
-    })
+    let (rx, tx) = unistd::pipe2(OFlag::O_CLOEXEC).map_err(from_nix)?;
+    Ok((
+        PipeRead { inner: rx.into() },
+        PipeWrite { inner: tx.into() },
+    ))
 }
 
 /// Read end of a pipe(2). Last dropped clone closes the pipe
