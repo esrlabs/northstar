@@ -1,7 +1,7 @@
 use std::env::var;
 
 fn main() {
-    let version = var("VERSION").expect("Failed to read VERSION");
+    let version = var("NORTHSTAR_VERSION").expect("Failed to read NORTHSTAR_VERSION");
     let threads = var("THREADS")
         .expect("Failed to read THREADS")
         .parse::<i32>()

@@ -1,68 +1,101 @@
-use super::{fs::Mount, io::Fd};
 use crate::{
+    common::container::Container,
+    debug, info,
     npk::manifest::{Capability, RLimitResource, RLimitValue},
     runtime::{
-        ipc::{channel::Channel, condition::ConditionNotify},
-        ExitStatus,
+        fork::util::{self, fork, set_child_subreaper, set_log_target, set_process_name},
+        ipc::{owned_fd::OwnedFd, Message as IpcMessage},
+        ExitStatus, Pid,
     },
     seccomp::AllowList,
 };
+pub use builder::build;
+use derive_new::new;
+use itertools::Itertools;
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
+    mount::MsFlags,
     sched::unshare,
-    sys::wait::{waitpid, WaitStatus},
-    unistd::{self, Uid},
+    sys::{
+        signal::Signal,
+        wait::{waitpid, WaitStatus},
+    },
+    unistd,
+    unistd::Uid,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::CString,
-    os::unix::prelude::RawFd,
+    os::unix::{
+        net::UnixStream,
+        prelude::{AsRawFd, RawFd},
+    },
     path::PathBuf,
     process::exit,
 };
 
+mod builder;
+
+// Message from the forker to init and response
+#[derive(new, Debug, Serialize, Deserialize)]
+pub enum Message {
+    /// The init process forked a new child with `pid`
+    Forked { pid: Pid },
+    /// A child of init exited with `exit_status`
+    Exit { pid: Pid, exit_status: ExitStatus },
+    /// Exec a new process
+    Exec {
+        path: PathBuf,
+        args: Vec<String>,
+        env: Vec<String>,
+    },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(super) struct Init {
+pub struct Init {
+    pub container: Container,
     pub root: PathBuf,
-    pub init: CString,
-    pub argv: Vec<CString>,
-    pub env: Vec<CString>,
     pub uid: u16,
     pub gid: u16,
     pub mounts: Vec<Mount>,
-    pub fds: Vec<(RawFd, Fd)>,
     pub groups: Vec<u32>,
     pub capabilities: Option<HashSet<Capability>>,
     pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
     pub seccomp: Option<AllowList>,
+    pub console: bool,
 }
 
 impl Init {
-    pub(super) fn run(
-        self,
-        condition_notify: ConditionNotify,
-        mut exit_status_channel: Channel,
-    ) -> ! {
+    pub fn run(self, mut stream: IpcMessage<UnixStream>, console: Option<OwnedFd>) -> ! {
+        set_log_target(format!("northstar::init::{}", self.container));
+
+        // Become a subreaper
+        set_child_subreaper(true);
+
         // Set the process name to init. This process inherited the process name
         // from the runtime
-        set_process_name();
+        set_process_name(&format!("init-{}", self.container));
 
         // Become a session group leader
+        debug!("Setting session id");
         unistd::setsid().expect("Failed to call setsid");
 
         // Enter mount namespace
+        debug!("Entering mount namespace");
         unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("Failed to unshare NEWNS");
 
         // Perform all mounts passed in mounts
-        mount(&self.mounts);
+        self.mount();
 
         // Set the chroot to the containers root mount point
+        debug!("Chrooting to {}", self.root.display());
         unistd::chroot(&self.root).expect("Failed to chroot");
 
         // Set current working directory to root
+        debug!("Setting cwd to /");
         env::set_current_dir("/").expect("Failed to set cwd to /");
 
         // UID / GID
@@ -75,65 +108,129 @@ impl Init {
         self.set_rlimits();
 
         // No new privileges
-        set_no_new_privs(true);
+        Self::set_no_new_privs(true);
 
         // Capabilities
         self.drop_privileges();
 
-        // Close and dup fds
-        self.file_descriptors();
+        loop {
+            match stream.recv() {
+                Ok(Some(Message::Exec {
+                    path,
+                    args,
+                    mut env,
+                })) => {
+                    debug!("Execing {} {}", path.display(), args.iter().join(" "));
 
-        // Clone
-        match unsafe { unistd::fork() } {
-            Ok(result) => match result {
-                unistd::ForkResult::Parent { child } => {
-                    // Drop checkpoint. The fds are cloned into the child and are closed upon execve.
-                    drop(condition_notify);
+                    // The init process got adopted by the forker after the trampoline exited. It is
+                    // safe to set the parent death signal now.
+                    util::set_parent_death_signal(Signal::SIGKILL);
+
+                    if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
+                        // Add the fd number to the environment of the application
+                        env.push(format!("NORTHSTAR_CONSOLE={}", fd));
+                    }
+
+                    let io = stream.recv_fds::<RawFd, 3>().expect("Failed to receive io");
+                    debug_assert!(io.len() == 3);
+                    let stdin = io[0];
+                    let stdout = io[1];
+                    let stderr = io[2];
+
+                    // Start new process inside the container
+                    let pid = fork(|| {
+                        set_log_target(format!("northstar::{}", self.container));
+                        util::set_parent_death_signal(Signal::SIGKILL);
+
+                        unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("Failed to dup2");
+                        unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("Failed to dup2");
+                        unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("Failed to dup2");
+
+                        unistd::close(stdin).expect("Failed to close stdout after dup2");
+                        unistd::close(stdout).expect("Failed to close stdout after dup2");
+                        unistd::close(stderr).expect("Failed to close stderr after dup2");
+
+                        // Set seccomp filter
+                        if let Some(ref filter) = self.seccomp {
+                            filter.apply().expect("Failed to apply seccomp filter.");
+                        }
+
+                        let path = CString::new(path.to_str().unwrap()).unwrap();
+                        let args = args
+                            .iter()
+                            .map(|s| CString::new(s.as_str()).unwrap())
+                            .collect::<Vec<_>>();
+                        let env = env
+                            .iter()
+                            .map(|s| CString::new(s.as_str()).unwrap())
+                            .collect::<Vec<_>>();
+
+                        panic!(
+                            "Execve: {:?} {:?}: {:?}",
+                            &path,
+                            &args,
+                            unistd::execve(&path, &args, &env)
+                        )
+                    })
+                    .expect("Failed to spawn child process");
+
+                    // close fds
+                    drop(console);
+                    unistd::close(stdin).expect("Failed to close stdout");
+                    unistd::close(stdout).expect("Failed to close stdout");
+                    unistd::close(stderr).expect("Failed to close stderr");
+
+                    let message = Message::Forked { pid };
+                    stream.send(&message).expect("Failed to send fork result");
 
                     // Wait for the child to exit
                     loop {
-                        match waitpid(Some(child), None) {
+                        debug!("Waiting for child process {} to exit", pid);
+                        match waitpid(Some(unistd::Pid::from_raw(pid as i32)), None) {
                             Ok(WaitStatus::Exited(_pid, status)) => {
+                                debug!("Child process {} exited with status code {}", pid, status);
                                 let exit_status = ExitStatus::Exit(status);
-                                exit_status_channel
-                                    .send(&exit_status)
-                                    .expect("Failed to send exit status");
+                                stream
+                                    .send(Message::Exit { pid, exit_status })
+                                    .expect("Channel error");
+
+                                assert_eq!(
+                                    waitpid(Some(unistd::Pid::from_raw(pid as i32)), None),
+                                    Err(nix::Error::ECHILD)
+                                );
+
                                 exit(0);
                             }
                             Ok(WaitStatus::Signaled(_pid, status, _)) => {
+                                debug!("Child process {} exited with signal {}", pid, status);
                                 let exit_status = ExitStatus::Signalled(status as u8);
-                                exit_status_channel
-                                    .send(&exit_status)
-                                    .expect("Failed to send exit status");
+                                stream
+                                    .send(Message::Exit { pid, exit_status })
+                                    .expect("Channel error");
+
+                                assert_eq!(
+                                    waitpid(Some(unistd::Pid::from_raw(pid as i32)), None),
+                                    Err(nix::Error::ECHILD)
+                                );
+
                                 exit(0);
                             }
                             Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
-                                continue
+                                log::error!("Child process continued or stopped");
+                                continue;
                             }
                             Err(nix::Error::EINTR) => continue,
-                            e => panic!("Failed to waitpid on {}: {:?}", child, e),
+                            e => panic!("Failed to waitpid on {}: {:?}", pid, e),
                         }
                     }
                 }
-                unistd::ForkResult::Child => {
-                    drop(exit_status_channel);
-
-                    // Set seccomp filter
-                    if let Some(ref filter) = self.seccomp {
-                        filter.apply().expect("Failed to apply seccomp filter.");
-                    }
-
-                    // Checkpoint fds are FD_CLOEXEC and act as a signal for the launcher that this child is started.
-                    // Therefore no explicit drop (close) of _checkpoint_notify is needed here.
-                    panic!(
-                        "Execve: {:?} {:?}: {:?}",
-                        &self.init,
-                        &self.argv,
-                        unistd::execve(&self.init, &self.argv, &self.env)
-                    )
+                Ok(None) => {
+                    info!("Channel closed. Exiting...");
+                    std::process::exit(0);
                 }
-            },
-            Err(e) => panic!("Clone error: {}", e),
+                Ok(_) => unimplemented!("Unimplemented message"),
+                Err(e) => panic!("Failed to receive message: {}", e),
+            }
         }
     }
 
@@ -149,10 +246,12 @@ impl Init {
             caps::securebits::set_keepcaps(true).expect("Failed to set keep caps");
         }
 
+        debug!("Setting resgid {}", gid);
         let gid = unistd::Gid::from_raw(gid.into());
         unistd::setresgid(gid, gid, gid).expect("Failed to set resgid");
 
         let uid = unistd::Uid::from_raw(uid.into());
+        debug!("Setting resuid {}", uid);
         unistd::setresuid(uid, uid, uid).expect("Failed to set resuid");
 
         if rt_privileged {
@@ -162,6 +261,7 @@ impl Init {
     }
 
     fn set_groups(&self) {
+        debug!("Setting groups {:?}", self.groups);
         let result = unsafe { nix::libc::setgroups(self.groups.len(), self.groups.as_ptr()) };
 
         Errno::result(result)
@@ -171,6 +271,7 @@ impl Init {
 
     fn set_rlimits(&self) {
         if let Some(limits) = self.rlimits.as_ref() {
+            debug!("Applying rlimits");
             for (resource, limit) in limits {
                 let resource = match resource {
                     RLimitResource::AS => rlimit::Resource::AS,
@@ -203,6 +304,7 @@ impl Init {
 
     /// Drop capabilities
     fn drop_privileges(&self) {
+        debug!("Dropping priviledges");
         let mut bounded =
             caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
         // Convert the set from the manifest to a set of caps::Capability
@@ -231,54 +333,26 @@ impl Init {
         caps::set(None, caps::CapSet::Effective, &all).expect("Failed to reset effective caps");
     }
 
-    /// Apply file descriptor configuration
-    fn file_descriptors(&self) {
-        for (fd, value) in &self.fds {
-            match value {
-                Fd::Close => {
-                    // Ignore close errors because the fd list contains the ReadDir fd and fds from other tasks.
-                    unistd::close(*fd).ok();
-                }
-                Fd::Dup(n) => {
-                    unistd::dup2(*n, *fd).expect("Failed to dup2");
-                    unistd::close(*n).expect("Failed to close");
-                }
-            }
+    /// Execute list of mount calls
+    fn mount(&self) {
+        for mount in &self.mounts {
+            debug!("Mounting {:?} on {}", mount.source, mount.target.display());
+            mount.mount();
         }
     }
-}
 
-/// Execute list of mount calls
-fn mount(mounts: &[Mount]) {
-    for mount in mounts {
-        mount.mount();
+    fn set_no_new_privs(value: bool) {
+        #[cfg(target_os = "android")]
+        pub const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
+        #[cfg(not(target_os = "android"))]
+        use libc::PR_SET_NO_NEW_PRIVS;
+
+        debug!("Setting no new privs");
+        let result = unsafe { nix::libc::prctl(PR_SET_NO_NEW_PRIVS, value as c_ulong, 0, 0, 0) };
+        Errno::result(result)
+            .map(drop)
+            .expect("Failed to set PR_SET_NO_NEW_PRIVS")
     }
-}
-
-fn set_no_new_privs(value: bool) {
-    #[cfg(target_os = "android")]
-    pub const PR_SET_NO_NEW_PRIVS: libc::c_int = 38;
-    #[cfg(not(target_os = "android"))]
-    use libc::PR_SET_NO_NEW_PRIVS;
-
-    let result = unsafe { nix::libc::prctl(PR_SET_NO_NEW_PRIVS, value as c_ulong, 0, 0, 0) };
-    Errno::result(result)
-        .map(drop)
-        .expect("Failed to set PR_SET_NO_NEW_PRIVS")
-}
-
-#[cfg(target_os = "android")]
-pub const PR_SET_NAME: libc::c_int = 15;
-#[cfg(not(target_os = "android"))]
-use libc::PR_SET_NAME;
-
-/// Set the name of the current process to "init"
-fn set_process_name() {
-    let cname = "init\0";
-    let result = unsafe { libc::prctl(PR_SET_NAME, cname.as_ptr() as c_ulong, 0, 0, 0) };
-    Errno::result(result)
-        .map(drop)
-        .expect("Failed to set PR_SET_NAME");
 }
 
 impl From<Capability> for caps::Capability {
@@ -326,5 +400,56 @@ impl From<Capability> for caps::Capability {
             Capability::CAP_BPF => caps::Capability::CAP_BPF,
             Capability::CAP_CHECKPOINT_RESTORE => caps::Capability::CAP_CHECKPOINT_RESTORE,
         }
+    }
+}
+
+/// Instructions for mount system call done in init
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Mount {
+    pub source: Option<PathBuf>,
+    pub target: PathBuf,
+    pub fstype: Option<String>,
+    pub flags: u64,
+    pub data: Option<String>,
+    pub error_msg: String,
+}
+
+impl Mount {
+    pub fn new(
+        source: Option<PathBuf>,
+        target: PathBuf,
+        fstype: Option<&'static str>,
+        flags: MsFlags,
+        data: Option<String>,
+    ) -> Mount {
+        let error_msg = format!(
+            "Failed to mount '{}' of type '{}' on '{}' with flags '{:?}' and data '{}'",
+            source.clone().unwrap_or_default().display(),
+            fstype.unwrap_or_default(),
+            target.display(),
+            flags,
+            data.clone().unwrap_or_default()
+        );
+        Mount {
+            source,
+            target,
+            fstype: fstype.map(|s| s.to_string()),
+            flags: flags.bits(),
+            data,
+            error_msg,
+        }
+    }
+
+    /// Execute this mount call
+    pub(super) fn mount(&self) {
+        nix::mount::mount(
+            self.source.as_ref(),
+            &self.target,
+            self.fstype.as_deref(),
+            // Safe because flags is private and only set in Mount::new via MsFlags::bits
+            unsafe { MsFlags::from_bits_unchecked(self.flags) },
+            self.data.as_deref(),
+        )
+        .expect(&self.error_msg);
     }
 }

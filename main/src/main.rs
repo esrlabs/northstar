@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use log::{debug, info, warn};
 use nix::mount::MsFlags;
-use northstar::runtime;
+use northstar::{runtime, runtime::Runtime as Northstar};
 use runtime::config::Config;
 use std::{
     fs::{self, read_to_string},
@@ -32,15 +32,30 @@ struct Opt {
     pub disable_mount_namespace: bool,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Error> {
+fn main() -> Result<(), Error> {
+    // Initialize logging
+    logger::init();
+
+    // Parse command line arguments and prepare the environment
+    let config = init()?;
+
+    // Create the runtime launcher. This must be done *before* spawning the tokio threadpool.
+    let northstar = Northstar::new(config)?;
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("northstar")
+        .build()
+        .context("Failed to create runtime")?
+        .block_on(run(northstar))
+}
+
+fn init() -> Result<Config, Error> {
     let opt = Opt::parse();
     let config = read_to_string(&opt.config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
     let config: Config = toml::from_str(&config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
-
-    logger::init();
 
     fs::create_dir_all(&config.run_dir).context("Failed to create run_dir")?;
     fs::create_dir_all(&config.data_dir).context("Failed to create data_dir")?;
@@ -64,9 +79,15 @@ async fn main() -> Result<(), Error> {
         debug!("Mount namespace is disabled");
     }
 
-    let mut runtime = runtime::Runtime::start(config)
+    Ok(config)
+}
+
+async fn run(northstar: Northstar) -> Result<(), Error> {
+    let mut runtime = northstar
+        .start()
         .await
-        .context("Failed to start runtime")?;
+        .context("Failed to start Northstar")?;
+
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())
         .context("Failed to install sigint handler")?;
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
@@ -87,7 +108,7 @@ async fn main() -> Result<(), Error> {
             info!("Received SIGHUP. Stopping Northstar runtime");
             runtime.shutdown().await
         }
-        status = &mut runtime => status,
+        status = runtime.stopped() => status,
     };
 
     match status {

@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
+    ffi::CString,
     fmt::{Display, Formatter},
     ops::Deref,
 };
@@ -37,6 +38,12 @@ impl Deref for NonNullString {
     }
 }
 
+impl From<NonNullString> for CString {
+    fn from(s: NonNullString) -> Self {
+        CString::new(s.0.as_bytes()).unwrap()
+    }
+}
+
 impl TryFrom<String> for NonNullString {
     type Error = InvalidNullChar;
 
@@ -69,4 +76,11 @@ impl InvalidNullChar {
     pub fn nul_position(&self) -> usize {
         self.0
     }
+}
+
+#[test]
+fn try_from() {
+    assert!(NonNullString::try_from("hel\0lo").is_err());
+    assert!(NonNullString::try_from("hello").is_ok());
+    assert!(NonNullString::try_from("hello\0").is_err());
 }

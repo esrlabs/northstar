@@ -37,7 +37,5 @@ mounts:
     dir: /
     options: noexec,nodev,nosuid
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: ferris
+  stdout: pipe
+  stderr: pipe

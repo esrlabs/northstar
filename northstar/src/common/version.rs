@@ -122,6 +122,12 @@ impl PartialOrd for Version {
     }
 }
 
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
 impl JsonSchema for Version {
     fn schema_name() -> String {
         "Version".to_string()

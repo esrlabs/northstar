@@ -1,5 +1,5 @@
 use super::{
-    codec::{self, framed},
+    codec,
     model::{
         self, Connect, Container, ContainerData, ContainerStats, Message, MountResult,
         Notification, RepositoryId, Request, Response,
@@ -21,9 +21,12 @@ use std::{
 use thiserror::Error;
 use tokio::{
     fs,
-    io::{self, AsyncRead, AsyncWrite},
+    io::{self, AsyncRead, AsyncWrite, BufWriter},
     time,
 };
+
+/// Default buffer size for installation transfers
+const BUFFER_SIZE: usize = 1024 * 1024;
 
 /// API error
 #[allow(missing_docs)]
@@ -104,7 +107,7 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     notifications: Option<usize>,
     timeout: time::Duration,
 ) -> Result<Connection<T>, Error> {
-    let mut connection = framed(io);
+    let mut connection = codec::Framed::with_capacity(io, BUFFER_SIZE);
     // Send connect message
     let connect = Connect::Connect {
         version: model::version(),
@@ -431,7 +434,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```
     pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<(), Error> {
         self.fused()?;
-        let mut file = fs::File::open(npk).await.map_err(Error::Io)?;
+        let file = fs::File::open(npk).await.map_err(Error::Io)?;
         let size = file.metadata().await.unwrap().len();
         let request = Request::Install {
             repository: repository.into(),
@@ -443,12 +446,15 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             Error::Stopped
         })?;
 
-        io::copy(&mut file, &mut self.connection)
-            .await
-            .map_err(|e| {
-                self.fuse();
-                Error::Io(e)
-            })?;
+        self.connection.flush().await?;
+        debug_assert!(self.connection.write_buffer().is_empty());
+
+        let mut reader = io::BufReader::with_capacity(BUFFER_SIZE, file);
+        let mut writer = BufWriter::with_capacity(BUFFER_SIZE, self.connection.get_mut());
+        io::copy_buf(&mut reader, &mut writer).await.map_err(|e| {
+            self.fuse();
+            Error::Io(e)
+        })?;
 
         loop {
             match self.connection.next().await {

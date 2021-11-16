@@ -422,9 +422,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfcae03edb34f947e64acdb1c33ec169824e20657e9ecb61cef6c8c74dcb8120"
+checksum = "b5e5bed1f1c269533fa816a0a5492b3545209a205ca1a54842be180eb63a16a6"
 dependencies = [
  "cfg-if",
  "lazy_static",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "northstar"
-version = "0.6.4"
+version = "0.7.0-dev"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1246,6 +1246,7 @@ dependencies = [
  "futures",
  "hex",
  "humanize-rs",
+ "humantime",
  "inotify",
  "itertools",
  "lazy_static",
@@ -1287,6 +1288,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "log",
+ "nanoid",
  "nix 0.23.1",
  "northstar",
  "regex",
@@ -2083,6 +2085,8 @@ dependencies = [
  "clap",
  "env_logger 0.9.0",
  "futures",
+ "humantime",
+ "itertools",
  "log",
  "northstar",
  "rand 0.8.5",

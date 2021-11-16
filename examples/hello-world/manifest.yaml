@@ -6,10 +6,8 @@ gid: 1000
 env:
   HELLO: northstar
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: hello
+  stdout: pipe
+  stderr: pipe
 mounts:
   /dev:
     type: dev

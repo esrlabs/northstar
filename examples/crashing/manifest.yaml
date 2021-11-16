@@ -5,6 +5,9 @@ uid: 1000
 gid: 1000
 env:
   RUST_BACKTRACE: 1
+io:
+  stdout: pipe
+  stderr: discard
 mounts:
   /dev:
     type: dev
@@ -19,8 +22,3 @@ mounts:
   /system:
     type: bind
     host: /system
-io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: crashing

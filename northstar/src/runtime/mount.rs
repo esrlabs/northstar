@@ -4,7 +4,7 @@ use crate::{
     npk::{dm_verity::VerityHeader, npk::Hashes},
 };
 use devicemapper::{DevId, DmError, DmName, DmOptions};
-use futures::Future;
+use futures::{Future, FutureExt};
 use log::{debug, info, warn};
 use loopdev::LoopControl;
 use std::{
@@ -13,10 +13,9 @@ use std::{
     path::{Path, PathBuf},
     str::Utf8Error,
     sync::Arc,
-    thread,
 };
 use thiserror::Error;
-use tokio::{fs, time};
+use tokio::{fs, task, time};
 
 use crate::seccomp::Selinux;
 pub use nix::mount::MsFlags as MountFlags;
@@ -102,7 +101,7 @@ impl MountControl {
         let selinux = npk.manifest().selinux.clone();
         let hashes = npk.hashes().cloned();
 
-        async move {
+        task::spawn_blocking(move || {
             let start = time::Instant::now();
 
             debug!("Mounting {}:{}", name, version);
@@ -118,8 +117,7 @@ impl MountControl {
                 hashes,
                 &target,
                 key.is_some(),
-            )
-            .await?;
+            )?;
 
             let duration = start.elapsed();
             info!(
@@ -130,7 +128,11 @@ impl MountControl {
             );
 
             Ok(device)
-        }
+        })
+        .map(|r| match r {
+            Ok(r) => r,
+            Err(e) => panic!("Task error: {}", e),
+        })
     }
 
     pub(super) async fn umount(&self, target: &Path) -> Result<(), Error> {
@@ -149,7 +151,7 @@ impl MountControl {
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn mount(
+fn mount(
     dm: Arc<devicemapper::DM>,
     lc: Arc<LoopControl>,
     fd: RawFd,
@@ -338,9 +340,8 @@ fn dmsetup(
 
         debug!("Waiting for verity device {}", device.display(),);
         while !device.exists() {
-            // Use a std::thread::sleep because this is run on a futures
-            // executor and not a tokio runtime
-            thread::sleep(time::Duration::from_millis(1));
+            // This code runs on a dedicated blocking thread
+            std::thread::sleep(time::Duration::from_millis(1));
 
             if start.elapsed() > DM_DEVICE_TIMEOUT {
                 return Err(Error::Timeout(format!(

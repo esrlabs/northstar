@@ -3,6 +3,9 @@ version: 0.0.1
 init: /test-container
 uid: 1000
 gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
 # cgroups:
 #   memory:
 #     limit_in_bytes: 10000000
@@ -35,15 +38,6 @@ mounts:
     version: 0.0.1
     dir: test
     options: nosuid,nodev,noexec
-io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: test-container
-  stderr:
-    log:
-      level: DEBUG
-      tag: test-container
 rlimits:
   nproc:
     soft: 10000

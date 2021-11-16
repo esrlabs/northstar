@@ -1,12 +1,21 @@
-use crate::{api, api::model::Container};
+use crate::{api, api::model::Container, runtime::ipc::AsyncMessage};
+use async_stream::stream;
 use config::Config;
 use error::Error;
 use fmt::Debug;
-use futures::{future::ready, FutureExt};
-use log::debug;
+use futures::{
+    future::{ready, Either},
+    FutureExt, StreamExt,
+};
+use log::{debug, info};
 use nix::{
     libc::{EXIT_FAILURE, EXIT_SUCCESS},
-    sys,
+    sys::{
+        self,
+        signal::Signal,
+        wait::{waitpid, WaitStatus},
+    },
+    unistd,
 };
 use serde::{Deserialize, Serialize};
 use state::State;
@@ -15,29 +24,32 @@ use std::{
     fmt::{self},
     future::Future,
     path::Path,
-    pin::Pin,
-    task::{Context, Poll},
 };
 use sync::mpsc;
 use tokio::{
+    pin, select,
     sync::{self, broadcast, oneshot},
-    task,
+    task::{self, JoinHandle},
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
+
+use self::fork::ForkerChannels;
 
 mod cgroups;
-/// Runtime configuration
-pub mod config;
 mod console;
 mod debug;
 mod error;
+mod fork;
+mod io;
 mod ipc;
 mod key;
 mod mount;
-pub(crate) mod process;
 mod repository;
 mod state;
 pub(crate) mod stats;
+
+/// Runtime configuration
+pub mod config;
 
 type EventTx = mpsc::Sender<Event>;
 type NotificationTx = broadcast::Sender<(Container, ContainerEvent)>;
@@ -51,9 +63,11 @@ const EVENT_BUFFER_SIZE: usize = 1000;
 const NOTIFICATION_BUFFER_SIZE: usize = 1000;
 
 /// Environment variable name passed to the container with the containers name
-const ENV_NAME: &str = "NAME";
+const ENV_NAME: &str = "NORTHSTAR_NAME";
 /// Environment variable name passed to the container with the containers version
-const ENV_VERSION: &str = "VERSION";
+const ENV_VERSION: &str = "NORTHSTAR_VERSION";
+/// Environment variable name passed to the container with the containers id
+const ENV_CONTAINER: &str = "NORTHSTAR_CONTAINER";
 
 #[derive(Debug)]
 enum Event {
@@ -126,6 +140,18 @@ pub enum ExitStatus {
     Signalled(u8),
 }
 
+impl From<Signal> for ExitStatus {
+    fn from(signal: Signal) -> Self {
+        ExitStatus::Signalled(signal as u8)
+    }
+}
+
+impl From<ExitCode> for ExitStatus {
+    fn from(code: ExitCode) -> Self {
+        ExitStatus::Exit(code)
+    }
+}
+
 impl ExitStatus {
     /// Exit success
     pub const SUCCESS: ExitCode = EXIT_SUCCESS;
@@ -150,94 +176,128 @@ impl fmt::Display for ExitStatus {
     }
 }
 
-/// Result of a Runtime action
-pub type RuntimeResult = Result<(), Error>;
-
-/// Handle to the Northstar runtime
-pub struct Runtime {
-    /// Channel receive a stop signal for the runtime
-    /// Drop the tx part to gracefully shutdown the mail loop.
-    stop: CancellationToken,
-    // Channel to signal the runtime exit status to the caller of `start`
-    // When the runtime is shut down the result of shutdown is sent to this
-    // channel. If a error happens during normal operation the error is also
-    // sent to this channel.
-    stopped: oneshot::Receiver<RuntimeResult>,
-    // Runtime task
-    task: task::JoinHandle<()>,
+/// Runtime handle
+#[allow(clippy::large_enum_variant)]
+pub enum Runtime {
+    /// The runtime is created but not yet started.
+    Created {
+        /// Runtime configuration
+        config: Config,
+        /// Forker pid
+        forker_pid: Pid,
+        /// Forker channles
+        forker_channels: ForkerChannels,
+    },
+    /// The runtime is started.
+    Running {
+        /// Drop guard to stop the runtime
+        guard: DropGuard,
+        /// Runtime task
+        task: JoinHandle<Result<(), Error>>,
+    },
 }
 
 impl Runtime {
+    /// Create new runtime instance
+    pub fn new(config: Config) -> Result<Runtime, Error> {
+        let (forker_pid, forker_channels) = fork::start()?;
+        Ok(Runtime::Created {
+            config,
+            forker_pid,
+            forker_channels,
+        })
+    }
+
     /// Start runtime with configuration `config`
-    pub async fn start(config: Config) -> Result<Runtime, Error> {
+    pub async fn start(self) -> Result<Runtime, Error> {
+        let (config, forker_pid, forker_channels) = if let Runtime::Created {
+            config,
+            forker_pid,
+            forker_channels,
+        } = self
+        {
+            (config, forker_pid, forker_channels)
+        } else {
+            panic!("Runtime::start called on a running runtime");
+        };
+
         config.check().await?;
 
-        let stop = CancellationToken::new();
-        let (stopped_tx, stopped) = oneshot::channel();
+        let token = CancellationToken::new();
+        let guard = token.clone().drop_guard();
 
         // Start a task that drives the main loop and wait for shutdown results
-        let stop_task = stop.clone();
-        let task = task::spawn(async move {
-            match runtime_task(&config, stop_task).await {
-                Err(e) => {
-                    log::error!("Runtime error: {}", e);
-                    stopped_tx.send(Err(e)).ok();
-                }
-                Ok(_) => drop(stopped_tx.send(Ok(()))),
-            };
-        });
+        let task = task::spawn(run(config, token, forker_pid, forker_channels));
 
-        Ok(Runtime {
-            stop,
-            stopped,
-            task,
-        })
+        Ok(Runtime::Running { guard, task })
     }
 
     /// Stop the runtime and wait for the termination
-    pub fn shutdown(self) -> impl Future<Output = RuntimeResult> {
-        self.stop.cancel();
-        let stopped = self.stopped;
-        self.task.then(|_| {
-            stopped.then(|n| match n {
-                Ok(n) => ready(n),
-                Err(_) => ready(Ok(())),
+    pub fn shutdown(self) -> impl Future<Output = Result<(), Error>> {
+        if let Runtime::Running { guard, task } = self {
+            drop(guard);
+            Either::Left({
+                task.then(|n| match n {
+                    Ok(n) => ready(n),
+                    Err(_) => ready(Ok(())),
+                })
             })
-        })
+        } else {
+            Either::Right(futures::future::ready(Ok(())))
+        }
     }
-}
 
-impl Future for Runtime {
-    type Output = RuntimeResult;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut self.stopped).poll(cx) {
-            Poll::Ready(r) => match r {
-                Ok(r) => Poll::Ready(r),
-                // Channel error -> tx side dropped
-                Err(_) => Poll::Ready(Ok(())),
+    /// Wait for the runtime to stop
+    pub async fn stopped(&mut self) -> Result<(), Error> {
+        match self {
+            Runtime::Running { ref mut task, .. } => match task.await {
+                Ok(r) => r,
+                Err(_) => Ok(()),
             },
-            Poll::Pending => Poll::Pending,
+            Runtime::Created { .. } => panic!("Stopped called on a stopped runtime"),
         }
     }
 }
 
-async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(), Error> {
-    let cgroup = Path::new(&*config.cgroup.as_str());
-    cgroups::init(cgroup).await?;
+/// Main loop
+async fn run(
+    config: Config,
+    token: CancellationToken,
+    forker_pid: Pid,
+    forker_channels: ForkerChannels,
+) -> Result<(), Error> {
+    // Setup root cgroup(s)
+    let cgroup = Path::new(config.cgroup.as_str()).to_owned();
+    cgroups::init(&cgroup).await?;
+
+    // Join forker
+    let mut join_forker = task::spawn_blocking(move || {
+        let pid = unistd::Pid::from_raw(forker_pid as i32);
+        loop {
+            match waitpid(Some(pid), None) {
+                Ok(WaitStatus::Exited(_pid, status)) => {
+                    break ExitStatus::Exit(status);
+                }
+                Ok(WaitStatus::Signaled(_pid, status, _)) => {
+                    break ExitStatus::Signalled(status as u8);
+                }
+                Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => (),
+                Err(nix::Error::EINTR) => (),
+                e => panic!("Failed to waitpid on {}: {:?}", pid, e),
+            }
+        }
+    });
 
     // Northstar runs in a event loop
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(EVENT_BUFFER_SIZE);
     let (notification_tx, _) = sync::broadcast::channel(NOTIFICATION_BUFFER_SIZE);
-    let mut state = State::new(config, event_tx.clone(), notification_tx.clone()).await?;
 
     // Initialize the console if configured
-
     let console = if let Some(consoles) = config.console.as_ref() {
         if consoles.is_empty() {
             None
         } else {
-            let mut console = console::Console::new(event_tx.clone(), notification_tx);
+            let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
             for url in consoles {
                 console.listen(url).await.map_err(Error::Console)?;
             }
@@ -247,34 +307,75 @@ async fn runtime_task(config: &'_ Config, stop: CancellationToken) -> Result<(),
         None
     };
 
-    // Wait for a external shutdown request
-    task::spawn(async move {
-        stop.cancelled().await;
-        event_tx.send(Event::Shutdown).await.ok();
-    });
+    // Convert stream and stream_fd into Tokio UnixStream
+    let (forker, mut exit_notifications) = {
+        let ForkerChannels {
+            stream,
+            notifications,
+        } = forker_channels;
+
+        let forker = fork::Forker::new(stream);
+        let exit_notifications: AsyncMessage<_> = notifications
+            .try_into()
+            .expect("Failed to convert exit notification handle");
+        (forker, exit_notifications)
+    };
+
+    // Merge the exit notification from the forker process with other events into the main loop channel
+    let event_rx = stream! {
+        loop {
+            select! {
+                Some(event) = event_rx.recv() => yield event,
+                Ok(Some(fork::Notification::Exit { container, exit_status })) = exit_notifications.recv() => {
+                    let event = ContainerEvent::Exit(exit_status);
+                    yield Event::Container(container, event);
+                }
+                else => unimplemented!(),
+            }
+        }
+    };
+    pin!(event_rx);
+
+    let mut state = State::new(config, event_tx.clone(), notification_tx, forker).await?;
+
+    info!("Runtime up and running");
 
     // Enter main loop
     loop {
-        if let Err(e) = match event_rx.recv().await.unwrap() {
-            // Process console events enqueued by console::Console
-            Event::Console(mut msg, txr) => state.on_request(&mut msg, txr).await,
-            // The runtime os commanded to shut down and exit.
-            Event::Shutdown => {
-                debug!("Shutting down Northstar runtime");
-                if let Some(console) = console {
-                    debug!("Shutting down console");
-                    console.shutdown().await.map_err(Error::Console)?;
+        tokio::select! {
+            // External shutdown event via the token
+            _ = token.cancelled() => event_tx.send(Event::Shutdown).await.expect("Failed to send shutdown event"),
+            // Process events
+            event = event_rx.next() => {
+                if let Err(e) = match event.unwrap() {
+                    // Process console events enqueued by console::Console
+                    Event::Console(mut msg, response) => state.on_request(&mut msg, response).await,
+                    // The runtime os commanded to shut down and exit.
+                    Event::Shutdown => {
+                        debug!("Shutting down Northstar runtime");
+                        if let Some(console) = console {
+                            debug!("Shutting down console");
+                            console.shutdown().await.map_err(Error::Console)?;
+                        }
+                        break state.shutdown(event_rx).await;
+                    }
+                    // Container event
+                    Event::Container(container, event) => state.on_event(&container, &event, false).await,
+                } {
+                    break Err(e);
                 }
-                break state.shutdown().await;
             }
-            // Container event
-            Event::Container(container, event) => state.on_event(&container, &event).await,
-        } {
-            break Err(e);
+            exit_status = &mut join_forker => panic!("Forker exited with {:?}", exit_status),
         }
     }?;
 
-    cgroups::shutdown(cgroup).await?;
+    // Terminate forker process
+    debug!("Joining forker with pid {}", forker_pid);
+    // signal::kill(forker_pid, Some(SIGTERM)).ok();
+    join_forker.await.expect("Failed to join forker");
+
+    // Shutdown cgroups
+    cgroups::shutdown(&cgroup).await?;
 
     debug!("Shutdown complete");
 

@@ -23,7 +23,5 @@ mounts:
     type: bind
     host: /system
 io:
-  stdout:
-    log:
-      level: DEBUG
-      tag: memeater
+  stdout: pipe
+  stderr: pipe
