@@ -1,7 +1,10 @@
 use super::{
     config::Config,
     error::Error,
-    pipe::{self, ConditionNotify, ConditionWait},
+    ipc::{
+        channel,
+        condition::{self, ConditionNotify, ConditionWait},
+    },
     ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, ENV_NAME, ENV_VERSION,
 };
 use crate::{
@@ -113,7 +116,7 @@ impl Launcher {
         // for the child pid and the condition variables a io task that forwards logs from containers
         // can end. Those io tasks use pipes as well. If such a task ends it closes its fds. Those numbers
         // can be in the list of to be closed fds but are reused when the pipe are created.
-        let channel = pipe::Channel::new();
+        let channel = channel::Channel::new();
         fds.remove(&channel.as_raw_fd().0);
         fds.remove(&channel.as_raw_fd().1);
 
@@ -217,7 +220,7 @@ impl Launcher {
     fn container_exit_status(
         &self,
         container: &Container,
-        mut channel: pipe::AsyncChannelRead,
+        mut channel: channel::AsyncChannelRead,
         pid: Pid,
         stop: CancellationToken,
     ) -> impl Future<Output = ExitStatus> {
@@ -394,7 +397,7 @@ fn init_argv(manifest: &Manifest, args: Option<&Vec<NonNullString>>) -> (CString
 fn env(manifest: &Manifest, env: Option<&HashMap<NonNullString, NonNullString>>) -> Vec<CString> {
     let mut result = Vec::with_capacity(2);
     result.push(
-        CString::new(format!("{}={}", ENV_NAME, manifest.name.to_string()))
+        CString::new(format!("{}={}", ENV_NAME, manifest.name))
             .expect("Invalid container name. This is a bug in the manifest validation"),
     );
     result.push(CString::new(format!("{}={}", ENV_VERSION, manifest.version)).unwrap());
@@ -578,13 +581,12 @@ fn set_child_subreaper(value: bool) -> Result<(), Error> {
         .context("Set child subreaper flag")
 }
 
-#[derive(Clone)]
 pub(super) struct Checkpoint(ConditionWait, ConditionNotify);
 
 fn checkpoints() -> (Checkpoint, Checkpoint) {
-    let a = pipe::Condition::new().expect("Failed to create condition");
+    let a = condition::Condition::new().expect("Failed to create condition");
     a.set_cloexec();
-    let b = pipe::Condition::new().expect("Failed to create condition");
+    let b = condition::Condition::new().expect("Failed to create condition");
     b.set_cloexec();
 
     let (aw, an) = a.split();

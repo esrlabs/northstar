@@ -1,5 +1,5 @@
 use super::{init::Init, Checkpoint};
-use crate::runtime::pipe::Channel;
+use crate::runtime::ipc::channel::Channel;
 use nix::{sched, unistd};
 use std::process::exit;
 

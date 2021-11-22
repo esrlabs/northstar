@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     npk::npk::{self},
-    runtime::pipe::RawFdExt,
+    runtime::ipc::raw_fd_ext::RawFdExt,
 };
 use bytes::Bytes;
 use floating_duration::TimeAsFloat;

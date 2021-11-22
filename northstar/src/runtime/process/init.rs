@@ -1,7 +1,7 @@
 use super::{fs::Mount, io::Fd, Capabilities, RLimits};
 use crate::{
     runtime::{
-        pipe::{Channel, ConditionNotify},
+        ipc::{channel::Channel, condition::ConditionNotify},
         ExitStatus,
     },
     seccomp::AllowList,
