@@ -1,11 +1,11 @@
 use super::{
-    super::pipe::{pipe, AsyncPipeRead},
+    super::ipc::pipe::{pipe, AsyncPipeRead},
     Error,
 };
 use crate::{
     npk,
     npk::manifest::{Manifest, Output},
-    runtime::{error::Context as ErrorContext, pipe::PipeWrite},
+    runtime::{error::Context as ErrorContext, ipc::pipe::PipeWrite},
 };
 use bytes::{Buf, BufMut, BytesMut};
 use log::{debug, error, info, trace, warn, Level};
