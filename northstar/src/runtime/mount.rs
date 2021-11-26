@@ -359,10 +359,16 @@ async fn wait_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), E
         Ok(_) => (),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => {
-            return Err(Error::Io(
-                format!("Inotify watch path: {}", path.display()),
-                e,
-            ));
+            for _ in 0..100 {
+                loop {
+                    if !path.exists() {
+                        return Ok(());
+                    }
+                    std::thread::sleep(time::Duration::from_millis(1));
+                }
+            }
+            warn!("Ignoring inotify watch error: {}", e);
+            return Ok(());
         }
     };
 
