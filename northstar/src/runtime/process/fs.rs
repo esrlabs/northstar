@@ -114,10 +114,10 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
         let rw = options.contains(&MountOption::Rw);
         let mut mounts = Vec::with_capacity(if rw { 2 } else { 1 });
         debug!(
-            "Mounting {} on {} with {:?}",
+            "Mounting {} on {} with flags {}",
             host.display(),
             target.display(),
-            options.iter().collect::<Vec<_>>(),
+            options
         );
         let source = host.to_owned();
         let target = root.join_strip(target);
@@ -216,7 +216,7 @@ fn resource(
     };
 
     debug!(
-        "Mounting {} on {} with {:?}",
+        "Mounting {} on {} with {}",
         src.display(),
         target.display(),
         resource.options

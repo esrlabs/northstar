@@ -1,9 +1,10 @@
 use nix::{sys::stat, unistd};
 use std::{
+    borrow::Borrow,
     os::unix::prelude::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
-use tokio::fs;
+use tokio::{fs, time};
 
 /// Return true if path is read and writeable
 pub(crate) async fn is_rw(path: &Path) -> bool {
@@ -36,5 +37,34 @@ impl PathExt for Path {
             Ok(stripped) => stripped,
             Err(_) => w.as_ref(),
         })
+    }
+}
+
+pub trait TimeAsFloat {
+    /// Returns the duration in seconds.
+    fn as_fractional_secs(&self) -> f64;
+    /// Returns the duration in milliseconds.
+    fn as_fractional_millis(&self) -> f64;
+    /// Returns the duration in microseconds.
+    fn as_fractional_micros(&self) -> f64;
+}
+
+impl<T: Borrow<time::Duration>> TimeAsFloat for T {
+    fn as_fractional_secs(&self) -> f64 {
+        let dur: &time::Duration = self.borrow();
+
+        dur.as_secs() as f64 + dur.subsec_nanos() as f64 / 1_000_000_000.0
+    }
+
+    fn as_fractional_millis(&self) -> f64 {
+        let dur: &time::Duration = self.borrow();
+
+        dur.as_secs() as f64 * 1_000.0 + dur.subsec_nanos() as f64 / 1_000_000.0
+    }
+
+    fn as_fractional_micros(&self) -> f64 {
+        let dur: &time::Duration = self.borrow();
+
+        dur.as_secs() as f64 * 1_000_000.0 + dur.subsec_nanos() as f64 / 1_000.0
     }
 }

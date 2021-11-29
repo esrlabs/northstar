@@ -60,6 +60,19 @@ impl From<semver::Version> for Version {
     }
 }
 
+impl<T> From<(T, T, T)> for Version
+where
+    T: Into<u64>,
+{
+    fn from((major, minor, patch): (T, T, T)) -> Self {
+        Self {
+            major: major.into(),
+            minor: minor.into(),
+            patch: patch.into(),
+        }
+    }
+}
+
 impl FromStr for Version {
     type Err = ParseError;
 

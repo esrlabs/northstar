@@ -250,19 +250,6 @@ pub enum MountOption {
     Rec,
 }
 
-impl ToString for MountOption {
-    fn to_string(&self) -> String {
-        match self {
-            MountOption::Rw => "rw",
-            MountOption::NoExec => "noexec",
-            MountOption::NoSuid => "nosuid",
-            MountOption::NoDev => "nodev",
-            MountOption::Rec => "rec",
-        }
-        .to_string()
-    }
-}
-
 impl FromStr for MountOption {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -277,6 +264,18 @@ impl FromStr for MountOption {
     }
 }
 
+impl fmt::Display for MountOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MountOption::Rw => write!(f, "rw"),
+            MountOption::NoExec => write!(f, "noexec"),
+            MountOption::NoSuid => write!(f, "nosuid"),
+            MountOption::NoDev => write!(f, "nodev"),
+            MountOption::Rec => write!(f, "rec"),
+        }
+    }
+}
+
 /// Mount option set
 #[derive(Default, Clone, Eq, PartialEq, Debug, Deref, JsonSchema)]
 pub struct MountOptions(HashSet<MountOption>);
@@ -284,6 +283,12 @@ pub struct MountOptions(HashSet<MountOption>);
 impl MountOptions {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl fmt::Display for MountOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.iter().join(","))
     }
 }
 
@@ -311,7 +316,7 @@ impl<'de> Deserialize<'de> for MountOptions {
         impl<'de> Visitor<'de> for MountOptionsVisitor {
             type Value = MountOptions;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> ::std::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> ::std::fmt::Result {
                 formatter.write_str("comma seperated mount options")
             }
 

@@ -6,10 +6,9 @@ use super::{
 use crate::{
     npk::npk::{self},
     runtime::ipc::raw_fd_ext::RawFdExt,
+    util::TimeAsFloat,
 };
 use bytes::Bytes;
-use floating_duration::TimeAsFloat;
-use futures::future::OptionFuture;
 use log::{debug, info};
 use mpsc::Receiver;
 use std::{
@@ -58,10 +57,18 @@ impl DirRepository {
     pub async fn new(dir: &Path, key: Option<&Path>) -> Result<DirRepository, Error> {
         let mut containers = HashMap::new();
 
-        info!("Loading repository {}", dir.display());
-
-        let key: OptionFuture<_> = key.map(key::load).into();
-        let key = key.await.transpose().map_err(Error::Key)?;
+        // Load key
+        let key = if let Some(key) = key {
+            info!(
+                "Loading repository {} with key {}",
+                dir.display(),
+                dir.display()
+            );
+            Some(key::load(key).await.map_err(Error::Key)?)
+        } else {
+            info!("Loading repository {} (unverified)", dir.display());
+            None
+        };
 
         let mut readir = fs::read_dir(&dir).await.context("Repository read dir")?;
 
@@ -175,8 +182,14 @@ pub(super) struct MemRepository {
 
 impl MemRepository {
     pub async fn new(key: Option<&Path>) -> Result<MemRepository, Error> {
-        let key: OptionFuture<_> = key.map(key::load).into();
-        let key = key.await.transpose().map_err(Error::Key)?;
+        let key = if let Some(key) = key {
+            info!("Loading memory repository with key {}", key.display());
+            Some(key::load(key).await.map_err(Error::Key)?)
+        } else {
+            info!("Loading repository (unverified)");
+            None
+        };
+
         Ok(MemRepository {
             key,
             containers: HashMap::new(),
@@ -198,7 +211,7 @@ impl<'a> Repository for MemRepository {
         file.set_nonblocking();
 
         while let Some(r) = rx.recv().await {
-            file.write_all(&r).await.context("Failed copy npk")?;
+            file.write_all(&r).await.context("Failed stream npk")?;
         }
 
         file.seek(SeekFrom::Start(0)).await.context("Failed seek")?;
@@ -209,7 +222,7 @@ impl<'a> Repository for MemRepository {
         seals.insert(memfd::FileSeal::SealGrow);
         fd.add_seals(&seals)
             .and_then(|_| fd.add_seal(memfd::FileSeal::SealSeal))
-            .context("Failed to add seals")?;
+            .context("Failed to add memfd seals")?;
 
         // Forget fd - it's owned by file
         fd.into_raw_fd();
@@ -218,7 +231,7 @@ impl<'a> Repository for MemRepository {
         let file = BufReader::new(file.into_std().await);
 
         // Load npk
-        debug!("Loading buffer");
+        debug!("Loading memfd as npk");
         let npk = npk::Npk::from_reader(file, self.key.as_ref())
             .map_err(|e| Error::Npk("Memory".into(), e))?;
         let manifest = npk.manifest();
