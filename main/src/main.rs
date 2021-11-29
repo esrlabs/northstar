@@ -5,11 +5,10 @@
 
 use anyhow::{anyhow, Context, Error};
 use log::{debug, info, warn};
+use nix::mount::MsFlags;
 use northstar::runtime;
-use proc_mounts::MountIter;
 use runtime::config::Config;
 use std::{
-    collections::HashSet,
     fs::{self, read_to_string},
     path::{Path, PathBuf},
     process::exit,
@@ -47,46 +46,22 @@ async fn main() -> Result<(), Error> {
     fs::create_dir_all(&config.data_dir).context("Failed to create data_dir")?;
     fs::create_dir_all(&config.log_dir).context("Failed to create log dir")?;
 
-    let mut run_dir_mount = None;
     // Skip mount namespace setup in case it's disabled for debugging purposes
     if !opt.disable_mount_namespace {
         // Enter a mount namespace. This needs to be done before spawning the tokio threadpool.
         info!("Entering mount namespace");
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
 
-        if !is_mount_point(&config.run_dir)? {
-            debug!("Bind mounting {}", config.run_dir.display());
-            nix::mount::mount(
-                Some(&config.run_dir),
-                config.run_dir.as_os_str(),
-                Option::<&str>::None,
-                nix::mount::MsFlags::MS_BIND,
-                Option::<&'static [u8]>::None,
-            )
-            .map_err(|_| anyhow!("Failed to bind mount run_dir"))?;
-            run_dir_mount = Some(config.run_dir.clone());
-        } else {
-            debug!(
-                "Using existing run_dir mountpoint {}",
-                config.run_dir.display()
-            );
-        }
-
-        debug!(
-            "Setting mount propagation to MS_PRIVATE on {}",
-            config.run_dir.display()
-        );
-
-        nix::mount::mount(
-            Some(&config.run_dir),
-            config.run_dir.as_os_str(),
-            Option::<&str>::None,
-            nix::mount::MsFlags::MS_PRIVATE | nix::mount::MsFlags::MS_REC,
-            Option::<&'static [u8]>::None,
-        )
-        .map_err(|_| anyhow!("Failed to remount run_dir"))?;
+        // The mount propagation can be set to the root dir because this is done in the mount namespace
+        // that is created above and does not affect the rest of the host system.
+        debug!("Setting mount propagation to MS_PRIVATE on /");
+        let flags = MsFlags::MS_PRIVATE | MsFlags::MS_REC;
+        let root = Path::new("/");
+        let none = Option::<&str>::None;
+        nix::mount::mount(Some(root), root, none, flags, none)
+            .map_err(|_| anyhow!("Failed to remount root"))?;
     } else {
-        warn!("Mount namespace is disabled");
+        debug!("Mount namespace is disabled");
     }
 
     let mut runtime = runtime::Runtime::start(config)
@@ -115,10 +90,6 @@ async fn main() -> Result<(), Error> {
         status = &mut runtime => status,
     };
 
-    if let Some(run_dir) = run_dir_mount {
-        nix::mount::umount(&run_dir).map_err(|_| anyhow!("Failed to umount run_dir"))?;
-    }
-
     match status {
         Ok(_) => exit(0),
         Err(e) => {
@@ -126,15 +97,4 @@ async fn main() -> Result<(), Error> {
             exit(1);
         }
     }
-}
-
-/// Returns true if `dir` is a mountpoint listed in /proc/self/mounts
-fn is_mount_point(dir: &Path) -> Result<bool, Error> {
-    let mounts = MountIter::new().map_err(|_| anyhow!("Failed to read mounts"))?;
-    let mountpoints = mounts
-        .filter_map(Result::ok)
-        .map(|m| m.dest)
-        .collect::<HashSet<_>>();
-    let run_dir = std::fs::canonicalize(&dir).map_err(|_| anyhow!("Canonicalize path"))?;
-    Ok(mountpoints.contains(&run_dir))
 }
