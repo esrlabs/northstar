@@ -694,9 +694,9 @@ dependencies = [
 
 [[package]]
 name = "escargot"
-version = "0.5.2"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44bb3f795fe1b9d34f089c7fab034c2b757998d65361d95ef008045b57665262"
+checksum = "9ead7d8a70259beb627c1ffdd19b0372381f247f88e46a3bd52bb797182690b3"
 dependencies = [
  "log",
  "once_cell",
@@ -742,12 +742,6 @@ dependencies = [
  "libc",
  "miniz_oxide",
 ]
-
-[[package]]
-name = "floating-duration"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2c60b71d9dbcd810a3be879dc9aafac6cec5c50dc2346e245f61f54a61fdf22"
 
 [[package]]
 name = "fnv"
@@ -1255,7 +1249,6 @@ dependencies = [
  "derive_more",
  "devicemapper",
  "ed25519-dalek",
- "floating-duration",
  "futures",
  "hex",
  "humanize-rs",

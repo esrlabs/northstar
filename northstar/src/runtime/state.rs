@@ -14,10 +14,10 @@ use crate::{
     common::non_null_string::NonNullString,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{error::Context, CGroupEvent, ENV_NAME, ENV_VERSION},
+    util::TimeAsFloat,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
-use floating_duration::TimeAsFloat;
 use futures::{
     executor::{ThreadPool, ThreadPoolBuilder},
     future::{join_all, ready, Either},
@@ -123,12 +123,13 @@ impl<'a> State<'a> {
         let launcher = Launcher::start(events_tx.clone(), config.clone(), notification_tx.clone())
             .await
             .expect("Failed to start launcher");
+
+        debug!("Initializing mount thread pool");
         let executor = ThreadPoolBuilder::new()
             .name_prefix("northstar-mount-")
             .pool_size(config.mount_parallel)
-            .after_start(|n| debug!("Started mount thread #{}", n))
             .create()
-            .expect("Failed to start thread pool");
+            .expect("Failed to start mount thread pool");
 
         let mut state = State {
             events_tx,
@@ -142,7 +143,7 @@ impl<'a> State<'a> {
         };
 
         // Initialize repositories. This populates self.containers and self.repositories
-        state.init_repositories().await?;
+        state.initialize_repositories().await?;
 
         // Start containers flagged with autostart
         state.autostart().await?;
@@ -150,7 +151,8 @@ impl<'a> State<'a> {
         Ok(state)
     }
 
-    async fn init_repositories(&mut self) -> Result<(), Error> {
+    /// Iterate the list of repositories and initialize them
+    async fn initialize_repositories(&mut self) -> Result<(), Error> {
         // Build a map of repositories from the configuration
         for (id, repository) in &self.config.repositories {
             let repository = match &repository.r#type {
@@ -394,13 +396,18 @@ impl<'a> State<'a> {
         }
 
         // Mount containers
-        info!("Mounting {} containers for {}", need_mount.len(), container);
-        let mount_result = self.mount_all(&Vec::from_iter(need_mount)).await;
-        for mount in mount_result {
-            // Abort if at least one container failed to mount
-            if let Err(e) = mount {
-                warn!("Failed to mount: {}", e);
-                return Err(e);
+        if !need_mount.is_empty() {
+            info!(
+                "Mounting {} container(s) for the start of {}",
+                need_mount.len(),
+                container
+            );
+            for mount in self.mount_all(&Vec::from_iter(need_mount)).await {
+                // Abort if at least one container failed to mount
+                if let Err(e) = mount {
+                    warn!("Failed to mount: {}", e);
+                    return Err(e);
+                }
             }
         }
 
@@ -831,17 +838,21 @@ impl<'a> State<'a> {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("Failed to mount {}: {}", container, e);
+                    warn!("Failed to mount {}: {:#?}", container, e);
                     result.push(Err(e));
                 }
             }
         }
         let duration = start.elapsed().as_fractional_secs();
-        info!(
-            "Mounted {} containers in {:.03}s",
-            containers.len(),
-            duration
-        );
+        if result.iter().any(|e| e.is_err()) {
+            warn!("Mount operation failed after {:.03}s", duration);
+        } else {
+            info!(
+                "Successfully {} container(s) in {:.03}s",
+                result.len(),
+                duration
+            );
+        }
         result
     }
 

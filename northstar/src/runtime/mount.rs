@@ -2,9 +2,9 @@ use super::{key::PublicKey, repository::Npk};
 use crate::{
     common::{name::Name, version::Version},
     npk::{dm_verity::VerityHeader, npk::Hashes},
+    util::TimeAsFloat,
 };
-use devicemapper::{DevId, DmError, DmName, DmUuid};
-use floating_duration::TimeAsFloat;
+use devicemapper::{DevId, DmError, DmName, DmOptions, DmUuid};
 use futures::{Future, StreamExt};
 use inotify::WatchMask;
 use log::{debug, info, warn};
@@ -28,6 +28,12 @@ const FS_TYPE: &str = "squashfs";
 const DEVICE_MAPPER_DEV: &str = "/dev/dm-";
 #[cfg(target_os = "android")]
 const DEVICE_MAPPER_DEV: &str = "/dev/block/dm-";
+
+/// Maximum duration to wait for a device mapper device to be removed by the
+/// kernel after umount.
+const DM_DEVICE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
+/// Loop device acquire timeout
+const LOOP_DEVICE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -67,8 +73,17 @@ impl std::fmt::Debug for MountControl {
 
 impl MountControl {
     pub(super) async fn new() -> Result<MountControl, Error> {
+        debug!("Opening loop control");
         let lc = LoopControl::open().map_err(Error::LoopDevice)?;
+        debug!("Opening device mapper control");
         let dm = devicemapper::DM::new().map_err(Error::DeviceMapper)?;
+
+        let dm_version = dm
+            .version()
+            .map_err(Error::DeviceMapper)
+            .map(Version::from)?;
+        debug!("Device mapper version is {}", dm_version);
+
         Ok(MountControl {
             lc: Arc::new(lc),
             dm: Arc::new(dm),
@@ -115,7 +130,7 @@ impl MountControl {
 
             let duration = start.elapsed();
             info!(
-                "Mounted {}:{} Mounting: {:.03}s",
+                "Finishing mount of {}:{} after {:.03}s",
                 name,
                 version,
                 duration.as_fractional_secs(),
@@ -129,12 +144,12 @@ impl MountControl {
         debug!("Unmounting {}", mount_info.target.display());
 
         if let Some(dm_name) = mount_info.dm_name.as_ref() {
-            debug!("Removing device {}", dm_name);
+            debug!("Removing verity device {}", dm_name);
 
             self.dm
                 .device_remove(
                     &DevId::Name(DmName::new(dm_name).unwrap()),
-                    devicemapper::DmOptions::default(),
+                    DmOptions::default(),
                 )
                 .ok();
 
@@ -173,12 +188,21 @@ async fn mount(
     target: &Path,
     verity: bool,
 ) -> Result<MountInfo, Error> {
-    let dm_name = format!("northstar_{}_{}_{}", process::id(), name, version);
-
     // Acquire a loop device and attach the backing file. This operation is racy because
     // getting the next free index and attaching is not atomic. Retry the operation in a
     // loop until successful or timeout.
     let start = time::Instant::now();
+
+    if !target.exists() {
+        debug!("Creating mount point {}", target.display());
+        std::fs::create_dir_all(&target).map_err(|e| {
+            Error::Io(
+                format!("Failed to create directory {}", target.display()),
+                e,
+            )
+        })?;
+    }
+
     let loop_device = loop {
         let loop_device = lc.next_free().map_err(Error::LoopDevice)?;
         if loop_device
@@ -193,27 +217,28 @@ async fn mount(
         {
             break loop_device;
         }
-        if start.elapsed() > time::Duration::from_secs(5) {
+        if start.elapsed() > LOOP_DEVICE_TIMEOUT {
             return Err(Error::Timeout("Failed to acquire loop device".into()));
         }
     };
 
-    let device = if !verity {
+    let (device, dm_name) = if !verity {
         // We're done. Use the loop device path e.g. /dev/loop4
-        loop_device.path().unwrap()
+        (loop_device.path().unwrap(), None)
     } else {
-        match (&verity_header, hashes) {
+        let name = format!("northstar_{}_{}_{}", process::id(), name, version);
+        let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
                 let (major, minor) = (loop_device.major().unwrap(), loop_device.minor().unwrap());
                 let loop_device_id = format!("{}:{}", major, minor);
 
-                debug!("Loop device id is {}", loop_device_id);
+                debug!("Using loop device id {}", loop_device_id);
 
                 let verity_device = dmsetup(
                     dm.clone(),
                     &loop_device_id,
                     header,
-                    &dm_name,
+                    &name,
                     hashes.fs_verity_hash.as_str(),
                     hashes.fs_verity_offset,
                 )?;
@@ -224,20 +249,24 @@ async fn mount(
                     "Cannot mount {}:{} without verity information from a repository with key",
                     name, version
                 );
+
+                // The loopdevice has been attached before. Ensure that it is detached in order
+                // to avoid leaking the loop device. If the detach failed something is really
+                // broken and probably best is to propagate the error with a panic.
+                warn!(
+                    "Detaching {} because of failed dmsetup",
+                    loop_device.path().unwrap().display()
+                );
+                loop_device
+                    .detach()
+                    .map_err(Error::LoopDevice)
+                    .expect("Failed to detach loopbach device");
+
                 return Err(Error::Npk("Missing verity information in NPK"));
             }
-        }
+        };
+        (device, Some(name))
     };
-
-    if !target.exists() {
-        debug!("Creating mount point {}", target.display());
-        std::fs::create_dir_all(&target).map_err(|e| {
-            Error::Io(
-                format!("Failed to create directory {}", target.display()),
-                e,
-            )
-        })?;
-    }
 
     // Finally mount
     debug!(
@@ -247,30 +276,28 @@ async fn mount(
         target.display(),
     );
     let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
-    nix::mount::mount(
-        Some(&device),
-        target,
-        Some(FS_TYPE),
-        flags,
-        Option::<&str>::None,
-    )
-    .map_err(Error::Os)?;
+    let source = Some(&device);
+    let fstype = Some(FS_TYPE);
+    let data = Option::<&str>::None;
+    let mount_result = nix::mount::mount(source, target, fstype, flags, data).map_err(Error::Os);
 
-    // Set the device to auto-remove once unmounted
-    let dm_name = if verity {
-        debug!("Enabling deferred removal on device {}", dm_name);
+    if let Err(ref e) = mount_result {
+        warn!("Failed to mount: {}", e);
+    }
+
+    // Set the device to auto-remove. If the above mount operation failed the verity device is removed.
+    // If the defered removal fail the runtime panics in order to avoid leaking the verity device.
+    if let Some(ref dm_name) = dm_name {
+        debug!("Enabling deferred removal of device {}", dm_name);
         dm.device_remove(
             &DevId::Name(DmName::new(&dm_name).unwrap()),
-            devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
+            DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )
-        .map_err(Error::DeviceMapper)?;
+        .expect("Failed to enable deferred removal");
+    }
 
-        Some(dm_name)
-    } else {
-        None
-    };
-
-    Ok(MountInfo {
+    // Return the mount error of the happy result
+    mount_result.map(|_| MountInfo {
         device,
         target: target.to_owned(),
         dm_name,
@@ -285,7 +312,6 @@ fn dmsetup(
     verity_hash: &str,
     size: u64,
 ) -> Result<PathBuf, Error> {
-    debug!("Creating a read-only verity device {}", &name);
     let start = time::Instant::now();
 
     let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
@@ -304,50 +330,82 @@ fn dmsetup(
         verity_hash,
         hex_salt
     );
-    let table = vec![(0, size / 512, "verity".to_string(), verity_table)];
-
+    let table = [(0, size / 512, "verity".to_string(), verity_table)];
     let name = DmName::new(name).unwrap();
     let id = DevId::Name(name);
+    let uuid_str = uuid::Uuid::new_v4().to_string();
+    let uuid = DmUuid::new(&uuid_str).unwrap();
+    let uuid_display = &uuid_str[..8];
 
-    let uuid = uuid::Uuid::new_v4().to_string();
-    let uuid = DmUuid::new(&uuid).map_err(Error::DeviceMapper)?;
-
+    debug!("Creating verity device {} ({}...)", name, uuid_display);
     let dm_device = dm
         .device_create(
             name,
             Some(uuid),
-            devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
+            DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
         )
         .map_err(Error::DeviceMapper)?;
-    let dm_dev = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
 
-    debug!("Created verity device {}", dm_dev.display());
-
-    dm.table_load(
-        &id,
-        &table,
-        devicemapper::DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
-    )
-    .map_err(Error::DeviceMapper)?;
-
-    debug!("Resuming device {}", dm_dev.display());
-    dm.device_suspend(&id, devicemapper::DmOptions::default())
+    let load = || {
+        dm.table_load(
+            &id,
+            &table,
+            DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
+        )
         .map_err(Error::DeviceMapper)?;
 
-    debug!("Waiting for device {}", dm_dev.display());
-    while !dm_dev.exists() {
-        // Use a std::thread::sleep because this is run on a futures
-        // executor and not a tokio runtime
-        thread::sleep(time::Duration::from_millis(1));
-    }
+        let device = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
 
-    let veritysetup_duration = start.elapsed();
+        debug!(
+            "Resuming verity device {} ({}...)",
+            device.display(),
+            uuid_display
+        );
+        dm.device_suspend(&id, DmOptions::default())
+            .map_err(Error::DeviceMapper)?;
+
+        debug!(
+            "Waiting for verity device {} ({}...)",
+            device.display(),
+            uuid_display
+        );
+        while !device.exists() {
+            // Use a std::thread::sleep because this is run on a futures
+            // executor and not a tokio runtime
+            thread::sleep(time::Duration::from_millis(1));
+
+            if start.elapsed() > DM_DEVICE_TIMEOUT {
+                return Err(Error::Timeout(format!(
+                    "Timeout while waiting for verity device {} ({}...)",
+                    device.display(),
+                    uuid_display
+                )));
+            }
+        }
+        Ok(device)
+    };
+
+    let device = match load() {
+        Ok(device) => device,
+        Err(e) => {
+            warn!("Failed to setup {} ({}...)", name, uuid_display);
+            debug!("Trying to remove device {} ({}...)", name, uuid_display);
+            if let Err(e) = dm.device_remove(&id, DmOptions::default()) {
+                warn!("Failed to remove {} ({}...) with {}", name, uuid_display, e);
+            }
+            return Err(e);
+        }
+    };
+
+    let duration = start.elapsed().as_fractional_secs();
     debug!(
-        "Verity completed after {:.03}s",
-        veritysetup_duration.as_fractional_secs()
+        "Finishing verity device setup of {} ({}...) after {:.03}s",
+        device.display(),
+        uuid_display,
+        duration,
     );
 
-    Ok(dm_dev)
+    Ok(device)
 }
 
 async fn wait_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {

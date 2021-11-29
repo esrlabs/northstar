@@ -44,9 +44,12 @@ fn hierarchy() -> Box<dyn Hierarchy> {
 pub async fn init(name: &Path) -> Result<(), Error> {
     // TODO: Add check for supported controllers
 
-    info!("Initializing cgroups",);
+    info!("Initializing cgroups with name {}", name.display());
     let cgroup = cgroups_rs::Cgroup::new(hierarchy(), name);
-    debug!("Using cgroups {}", if cgroup.v2() { "v2" } else { "v1" });
+    debug!(
+        "Using cgroups version {}",
+        if cgroup.v2() { "2" } else { "1" }
+    );
     Ok(())
 }
 
