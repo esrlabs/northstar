@@ -316,7 +316,7 @@ impl<'de> Deserialize<'de> for MountOptions {
         impl<'de> Visitor<'de> for MountOptionsVisitor {
             type Value = MountOptions;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> ::std::fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("comma seperated mount options")
             }
 

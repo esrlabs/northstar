@@ -6,7 +6,6 @@ use super::{
 use crate::{
     npk::npk::{self},
     runtime::ipc::raw_fd_ext::RawFdExt,
-    util::TimeAsFloat,
 };
 use bytes::Bytes;
 use log::{debug, info};
@@ -96,8 +95,8 @@ impl DirRepository {
             "Loaded {} containers from {} in {:.03}s (avg: {:.05}s)",
             containers.len(),
             dir.display(),
-            duration.as_fractional_secs(),
-            duration.as_fractional_secs() / containers.len() as f64
+            duration.as_secs_f32(),
+            duration.as_secs_f32() / containers.len() as f32
         );
 
         Ok(DirRepository {
