@@ -1,26 +1,25 @@
 use super::{key::PublicKey, repository::Npk};
 use crate::{
-    common::{name::Name, version::Version},
+    common::version::Version,
     npk::{dm_verity::VerityHeader, npk::Hashes},
     util::TimeAsFloat,
 };
-use devicemapper::{DevId, DmError, DmName, DmOptions, DmUuid};
-use futures::{Future, StreamExt};
-use inotify::WatchMask;
+use devicemapper::{DevId, DmError, DmName, DmOptions};
+use futures::Future;
 use log::{debug, info, warn};
 use loopdev::LoopControl;
-pub use nix::mount::MsFlags as MountFlags;
 use std::{
     io,
     os::unix::{io::AsRawFd, prelude::RawFd},
     path::{Path, PathBuf},
-    process,
     str::Utf8Error,
     sync::Arc,
     thread,
 };
 use thiserror::Error;
 use tokio::{fs, time};
+
+pub use nix::mount::MsFlags as MountFlags;
 
 const FS_TYPE: &str = "squashfs";
 
@@ -57,7 +56,6 @@ pub enum Error {
 pub(super) struct MountInfo {
     pub device: PathBuf,
     pub target: PathBuf,
-    pub dm_name: Option<String>,
 }
 
 pub(super) struct MountControl {
@@ -119,7 +117,6 @@ impl MountControl {
                 fd,
                 fsimg_offset,
                 fsimg_size,
-                &name,
                 &version,
                 verity_header,
                 hashes,
@@ -142,27 +139,11 @@ impl MountControl {
 
     pub(super) async fn umount(&self, mount_info: &MountInfo) -> Result<(), Error> {
         debug!("Unmounting {}", mount_info.target.display());
-
-        if let Some(dm_name) = mount_info.dm_name.as_ref() {
-            debug!("Removing verity device {}", dm_name);
-
-            self.dm
-                .device_remove(
-                    &DevId::Name(DmName::new(dm_name).unwrap()),
-                    DmOptions::default(),
-                )
-                .ok();
-
-            nix::mount::umount(&mount_info.target).map_err(Error::Os)?;
-
-            debug!("Waiting for dm device {}", mount_info.device.display());
-            wait_file_deleted(&mount_info.device, time::Duration::from_secs(5)).await?;
-        } else {
-            nix::mount::umount(&mount_info.target).map_err(Error::Os)?;
-        }
+        nix::mount::umount(&mount_info.target)
+            .map_err(Error::Os)
+            .expect("Failed to umount");
 
         debug!("Removing mountpoint {}", mount_info.target.display());
-
         fs::remove_dir(&mount_info.target).await.map_err(|e| {
             Error::Io(
                 format!("Failed to remove {}", mount_info.target.display()),
@@ -181,7 +162,6 @@ async fn mount(
     fd: RawFd,
     fsimg_offset: u64,
     fsimg_size: u64,
-    name: &Name,
     version: &Version,
     verity_header: Option<VerityHeader>,
     hashes: Option<Hashes>,
@@ -226,7 +206,7 @@ async fn mount(
         // We're done. Use the loop device path e.g. /dev/loop4
         (loop_device.path().unwrap(), None)
     } else {
-        let name = format!("northstar_{}_{}_{}", process::id(), name, version);
+        let name = format!("northstar-{}", nanoid::nanoid!());
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
                 let (major, minor) = (loop_device.major().unwrap(), loop_device.minor().unwrap());
@@ -290,7 +270,7 @@ async fn mount(
     if let Some(ref dm_name) = dm_name {
         debug!("Enabling deferred removal of device {}", dm_name);
         dm.device_remove(
-            &DevId::Name(DmName::new(&dm_name).unwrap()),
+            &DevId::Name(DmName::new(dm_name).unwrap()),
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )
         .expect("Failed to enable deferred removal");
@@ -300,7 +280,6 @@ async fn mount(
     mount_result.map(|_| MountInfo {
         device,
         target: target.to_owned(),
-        dm_name,
     })
 }
 
@@ -333,15 +312,12 @@ fn dmsetup(
     let table = [(0, size / 512, "verity".to_string(), verity_table)];
     let name = DmName::new(name).unwrap();
     let id = DevId::Name(name);
-    let uuid_str = uuid::Uuid::new_v4().to_string();
-    let uuid = DmUuid::new(&uuid_str).unwrap();
-    let uuid_display = &uuid_str[..8];
 
-    debug!("Creating verity device {} ({}...)", name, uuid_display);
+    debug!("Creating verity device {}", name);
     let dm_device = dm
         .device_create(
             name,
-            Some(uuid),
+            None,
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
         )
         .map_err(Error::DeviceMapper)?;
@@ -356,19 +332,11 @@ fn dmsetup(
 
         let device = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
 
-        debug!(
-            "Resuming verity device {} ({}...)",
-            device.display(),
-            uuid_display
-        );
+        debug!("Resuming verity device {}", device.display(),);
         dm.device_suspend(&id, DmOptions::default())
             .map_err(Error::DeviceMapper)?;
 
-        debug!(
-            "Waiting for verity device {} ({}...)",
-            device.display(),
-            uuid_display
-        );
+        debug!("Waiting for verity device {}", device.display(),);
         while !device.exists() {
             // Use a std::thread::sleep because this is run on a futures
             // executor and not a tokio runtime
@@ -376,9 +344,8 @@ fn dmsetup(
 
             if start.elapsed() > DM_DEVICE_TIMEOUT {
                 return Err(Error::Timeout(format!(
-                    "Timeout while waiting for verity device {} ({}...)",
+                    "Timeout while waiting for verity device {}",
                     device.display(),
-                    uuid_display
                 )));
             }
         }
@@ -388,10 +355,10 @@ fn dmsetup(
     let device = match load() {
         Ok(device) => device,
         Err(e) => {
-            warn!("Failed to setup {} ({}...)", name, uuid_display);
-            debug!("Trying to remove device {} ({}...)", name, uuid_display);
+            warn!("Failed to setup {}", name);
+            debug!("Trying to remove device {}", name);
             if let Err(e) = dm.device_remove(&id, DmOptions::default()) {
-                warn!("Failed to remove {} ({}...) with {}", name, uuid_display, e);
+                warn!("Failed to remove {} with {}", name, e);
             }
             return Err(e);
         }
@@ -399,72 +366,10 @@ fn dmsetup(
 
     let duration = start.elapsed().as_fractional_secs();
     debug!(
-        "Finishing verity device setup of {} ({}...) after {:.03}s",
+        "Finishing verity device setup of {} after {:.03}s",
         device.display(),
-        uuid_display,
         duration,
     );
 
     Ok(device)
-}
-
-async fn wait_file_deleted(path: &Path, timeout: time::Duration) -> Result<(), Error> {
-    let mut inotify =
-        inotify::Inotify::init().map_err(|e| Error::Io("Initialize inotify".into(), e))?;
-
-    let path = path.to_owned();
-    match inotify.add_watch(&path, WatchMask::DELETE) {
-        Ok(_) => (),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => {
-            return Err(Error::Io(
-                format!("Inotify watch path: {}", path.display()),
-                e,
-            ));
-        }
-    };
-
-    let buffer = [0u8; 1024];
-    let mut stream = inotify
-        .event_stream(buffer)
-        .map_err(|e| Error::Io("Inotify event stream".into(), e))?;
-
-    match time::timeout(timeout, stream.next())
-        .await
-        .map_err(|_| Error::Timeout(format!("Inotify timeout deletion of {}", path.display())))?
-    {
-        Some(Ok(_)) => Ok(()),
-        Some(Err(e)) => Err(Error::Io("Inotify stream error".into(), e)),
-        None => unreachable!("Inotify closed"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::wait_file_deleted;
-    use std::{path::Path, time::Duration};
-    use tokio::{fs, task};
-
-    #[tokio::test]
-    async fn wait_for_non_existing_file() {
-        assert!(
-            wait_file_deleted(Path::new("non_existing_file"), Duration::from_millis(0))
-                .await
-                .is_ok()
-        );
-    }
-
-    #[tokio::test]
-    async fn wait_for_file_deleted() {
-        let tmpdir = tempfile::tempdir().unwrap();
-        let path = tmpdir.path().join("foo");
-        for _ in 0..1000 {
-            let _ = fs::File::create(&path).await.unwrap();
-            task::spawn(fs::remove_file(path.clone()));
-            wait_file_deleted(&path, Duration::from_secs(5))
-                .await
-                .unwrap();
-            assert!(!path.exists());
-        }
-    }
 }

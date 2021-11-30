@@ -11,6 +11,7 @@ use crate::{
 use bytes::Bytes;
 use log::{debug, info};
 use mpsc::Receiver;
+use nanoid::nanoid;
 use std::{
     collections::HashMap,
     fmt,
@@ -110,7 +111,7 @@ impl DirRepository {
 #[async_trait::async_trait]
 impl<'a> Repository for DirRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
-        let dest = self.dir.join(format!("{}.npk", uuid::Uuid::new_v4()));
+        let dest = self.dir.join(format!("{}.npk", nanoid!()));
         let mut file = fs::File::create(&dest)
             .await
             .context("Failed create npk in repository")?;
@@ -202,9 +203,7 @@ impl<'a> Repository for MemRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);
-        let fd = opts
-            .create(uuid::Uuid::new_v4().to_string())
-            .context("Failed to create memfd")?;
+        let fd = opts.create(nanoid!()).context("Failed to create memfd")?;
 
         // Write buffer to the memfd
         let mut file = unsafe { fs::File::from_raw_fd(fd.as_raw_fd()) };
