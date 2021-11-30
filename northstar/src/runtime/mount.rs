@@ -2,7 +2,6 @@ use super::{key::PublicKey, repository::Npk};
 use crate::{
     common::version::Version,
     npk::{dm_verity::VerityHeader, npk::Hashes},
-    util::TimeAsFloat,
 };
 use devicemapper::{DevId, DmError, DmName, DmOptions};
 use futures::Future;
@@ -130,7 +129,7 @@ impl MountControl {
                 "Finishing mount of {}:{} after {:.03}s",
                 name,
                 version,
-                duration.as_fractional_secs(),
+                duration.as_secs_f32(),
             );
 
             Ok(device)
@@ -364,7 +363,7 @@ fn dmsetup(
         }
     };
 
-    let duration = start.elapsed().as_fractional_secs();
+    let duration = start.elapsed().as_secs_f32();
     debug!(
         "Finishing verity device setup of {} after {:.03}s",
         device.display(),

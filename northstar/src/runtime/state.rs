@@ -14,7 +14,6 @@ use crate::{
     common::non_null_string::NonNullString,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{error::Context, CGroupEvent, ENV_NAME, ENV_VERSION},
-    util::TimeAsFloat,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -474,7 +473,7 @@ impl<'a> State<'a> {
             cgroups,
         });
 
-        let duration = start.elapsed().as_fractional_secs();
+        let duration = start.elapsed().as_secs_f32();
         info!("Started {} ({}) in {:.03}s", container, pid, duration);
 
         // Send container started event
@@ -843,7 +842,7 @@ impl<'a> State<'a> {
                 }
             }
         }
-        let duration = start.elapsed().as_fractional_secs();
+        let duration = start.elapsed().as_secs_f32();
         if result.iter().any(|e| e.is_err()) {
             warn!("Mount operation failed after {:.03}s", duration);
         } else {
