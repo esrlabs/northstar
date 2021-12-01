@@ -1,14 +1,13 @@
-use std::time::Duration;
+use std::{thread::sleep, time::Duration};
+
+const PERIOD: Duration = Duration::from_millis(100);
 
 fn main() {
-    let mut n = 10;
-    loop {
-        if n == 0 {
-            println!("BOOM!");
-            panic!("BOOM");
-        }
-        println!("Crashing in {} seconds", n);
-        std::thread::sleep(Duration::from_secs(1));
-        n -= 1;
+    for n in (1..=10).rev() {
+        println!("Crashing in {:.1}s", (PERIOD * n).as_secs_f32());
+        sleep(PERIOD);
     }
+
+    println!("BOOM!");
+    panic!();
 }
