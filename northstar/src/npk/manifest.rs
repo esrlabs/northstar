@@ -29,7 +29,7 @@ pub struct Manifest {
     /// Container version
     pub version: Version,
     /// Pass a console fd number in NORTHSTAR_CONSOLE
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_default")]
     pub console: bool,
     /// Path to init
     pub init: Option<PathBuf>,
@@ -737,6 +737,10 @@ pub mod cgroups {
         /// Customized key-value attributes
         pub attrs: HashMap<String, String>,
     }
+}
+
+fn is_default<T: Default + PartialEq>(t: &T) -> bool {
+    t == &T::default()
 }
 
 #[cfg(test)]
