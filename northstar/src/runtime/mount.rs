@@ -51,12 +51,6 @@ pub enum Error {
     Timeout(String),
 }
 
-#[derive(Debug)]
-pub(super) struct MountInfo {
-    pub device: PathBuf,
-    pub target: PathBuf,
-}
-
 pub(super) struct MountControl {
     dm: Arc<devicemapper::DM>,
     lc: Arc<loopdev::LoopControl>,
@@ -93,7 +87,7 @@ impl MountControl {
         npk: &Npk,
         target: &Path,
         key: Option<&PublicKey>,
-    ) -> impl Future<Output = Result<MountInfo, Error>> {
+    ) -> impl Future<Output = Result<(), Error>> {
         let dm = self.dm.clone();
         let lc = self.lc.clone();
         let key = key.cloned();
@@ -136,19 +130,16 @@ impl MountControl {
         }
     }
 
-    pub(super) async fn umount(&self, mount_info: &MountInfo) -> Result<(), Error> {
-        debug!("Unmounting {}", mount_info.target.display());
-        nix::mount::umount(&mount_info.target)
+    pub(super) async fn umount(&self, target: &Path) -> Result<(), Error> {
+        debug!("Unmounting {}", target.display());
+        nix::mount::umount(target)
             .map_err(Error::Os)
             .expect("Failed to umount");
 
-        debug!("Removing mountpoint {}", mount_info.target.display());
-        fs::remove_dir(&mount_info.target).await.map_err(|e| {
-            Error::Io(
-                format!("Failed to remove {}", mount_info.target.display()),
-                e,
-            )
-        })?;
+        debug!("Removing mountpoint {}", target.display());
+        fs::remove_dir(target)
+            .await
+            .map_err(|e| Error::Io(format!("Failed to remove {}", target.display()), e))?;
 
         Ok(())
     }
@@ -166,7 +157,7 @@ async fn mount(
     hashes: Option<Hashes>,
     target: &Path,
     verity: bool,
-) -> Result<MountInfo, Error> {
+) -> Result<(), Error> {
     // Acquire a loop device and attach the backing file. This operation is racy because
     // getting the next free index and attaching is not atomic. Retry the operation in a
     // loop until successful or timeout.
@@ -275,11 +266,7 @@ async fn mount(
         .expect("Failed to enable deferred removal");
     }
 
-    // Return the mount error of the happy result
-    mount_result.map(|_| MountInfo {
-        device,
-        target: target.to_owned(),
-    })
+    Ok(())
 }
 
 fn dmsetup(

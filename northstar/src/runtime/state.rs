@@ -3,7 +3,7 @@ use super::{
     config::{Config, RepositoryType},
     console::Request,
     error::Error,
-    mount::{MountControl, MountInfo},
+    mount::MountControl,
     process::Launcher,
     repository::{DirRepository, MemRepository, Npk},
     stats::ContainerStats,
@@ -21,7 +21,7 @@ use futures::{
     executor::{ThreadPool, ThreadPoolBuilder},
     future::{join_all, ready, Either},
     task::SpawnExt,
-    Future, TryFutureExt,
+    Future, FutureExt, TryFutureExt,
 };
 use log::{debug, error, info, warn};
 use nix::sys::signal::Signal;
@@ -30,6 +30,7 @@ use std::{
     convert::TryFrom,
     fmt::Debug,
     iter::FromIterator,
+    path::PathBuf,
     result,
     sync::Arc,
 };
@@ -71,10 +72,16 @@ pub(super) struct State<'a> {
 pub(super) struct ContainerState {
     /// Reference to the repository where the npk resides
     pub repository: RepositoryId,
-    /// Meta information about this containers rootfs mount
-    pub mount_info: Option<MountInfo>,
+    /// Mount point of the root fs
+    pub root: Option<PathBuf>,
     /// Process information when started
     pub process: Option<ProcessContext>,
+}
+
+impl ContainerState {
+    pub fn is_mounted(&self) -> bool {
+        self.root.is_some()
+    }
 }
 
 #[derive(Debug)]
@@ -241,7 +248,7 @@ impl<'a> State<'a> {
     }
 
     /// Create a future that mounts `container`
-    fn mount(&self, container: &Container) -> impl Future<Output = Result<MountInfo, Error>> {
+    fn mount(&self, container: &Container) -> impl Future<Output = Result<PathBuf, Error>> {
         // Find the repository that has the container
         let container_state = self.containers.get(container).expect("Internal error");
         let repository = self
@@ -255,6 +262,7 @@ impl<'a> State<'a> {
         mount_control
             .mount(npk, &root, key.as_ref())
             .map_err(Error::Mount)
+            .map(|_| Ok(root))
     }
 
     /// Umount a given container
@@ -301,9 +309,9 @@ impl<'a> State<'a> {
             }
         }
 
-        if let Some(mount_info) = &container_state.mount_info {
+        if let Some(root) = &container_state.root {
             self.mount_control
-                .umount(mount_info)
+                .umount(root)
                 .await
                 .map_err(Error::Mount)?;
         } else {
@@ -312,7 +320,7 @@ impl<'a> State<'a> {
         }
 
         let container_state = self.state_mut(container).expect("Internal error");
-        container_state.mount_info.take();
+        container_state.root.take();
         Ok(())
     }
 
@@ -360,7 +368,7 @@ impl<'a> State<'a> {
         let mut need_mount = HashSet::new();
 
         // The container to be started
-        if container_state.mount_info.is_none() {
+        if !container_state.is_mounted() {
             need_mount.insert(container.clone());
         }
 
@@ -389,7 +397,7 @@ impl<'a> State<'a> {
         // Add resources to the mount vector
         for resource in resources {
             let resource_state = self.state(&resource).expect("Internal error");
-            if resource_state.mount_info.is_none() {
+            if !resource_state.is_mounted() {
                 need_mount.insert(resource.clone());
             }
         }
@@ -415,10 +423,10 @@ impl<'a> State<'a> {
 
         // Root of container
         let root = container_state
-            .mount_info
+            .root
             .as_ref()
-            .and_then(|m| m.target.canonicalize().ok())
-            .expect("Failed to canonicalize root");
+            .map(|root| root.canonicalize().expect("Failed to canonicalize root"))
+            .unwrap();
 
         // Spawn process
         info!("Creating {}", container);
@@ -504,7 +512,8 @@ impl<'a> State<'a> {
         let to_umount = self
             .containers
             .iter()
-            .filter_map(|(container, state)| state.mount_info.as_ref().map(|_| container.clone()))
+            .filter(|(_, state)| state.is_mounted())
+            .map(|(container, state)| container.clone())
             .collect::<Vec<_>>();
 
         for (container, state) in &mut self.containers {
@@ -578,11 +587,10 @@ impl<'a> State<'a> {
         info!("Trying to uninstall {}", container);
 
         let state = self.state(container)?;
-        let is_mounted = state.mount_info.is_some();
         let repository = state.repository.clone();
 
         // Umount
-        if is_mounted {
+        if state.is_mounted() {
             self.umount(container).await?;
         }
 
@@ -811,7 +819,7 @@ impl<'a> State<'a> {
             if self
                 .containers
                 .get(c)
-                .map(|s| s.mount_info.is_some())
+                .map(|s| s.is_mounted())
                 .unwrap_or(false)
             {
                 let error = Err(Error::MountBusy(c.clone()));
@@ -830,9 +838,9 @@ impl<'a> State<'a> {
         let mut result = Vec::new();
         for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
             match mount_result {
-                Ok(mount_info) => {
+                Ok(root) => {
                     let container_state = self.state_mut(container).expect("Internal error");
-                    container_state.mount_info = Some(mount_info);
+                    container_state.root = Some(root);
                     info!("Mounted {}", container);
                     result.push(Ok(container.clone()));
                 }
@@ -865,13 +873,13 @@ impl<'a> State<'a> {
                 uptime: context.started.elapsed().as_nanos() as u64,
             });
             let repository = state.repository.clone();
-            let mounted = state.mount_info.is_some();
+            let is_mounted = state.is_mounted();
             let container_data = api::model::ContainerData::new(
                 container.clone(),
                 repository,
                 manifest,
                 process,
-                mounted,
+                is_mounted,
             );
             result.push(container_data);
         }
