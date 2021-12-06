@@ -10,16 +10,17 @@ use crate::{
 };
 use log::debug;
 use nix::{mount::MsFlags, unistd};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
 /// Instructions for mount system call done in init
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Mount {
     pub source: Option<PathBuf>,
     pub target: PathBuf,
-    pub fstype: Option<&'static str>,
-    pub flags: MsFlags,
+    pub fstype: Option<String>,
+    pub flags: u64,
     pub data: Option<String>,
     pub error_msg: String,
 }
@@ -43,8 +44,8 @@ impl Mount {
         Mount {
             source,
             target,
-            fstype,
-            flags,
+            fstype: fstype.map(|s| s.to_string()),
+            flags: flags.bits(),
             data,
             error_msg,
         }
@@ -55,8 +56,9 @@ impl Mount {
         nix::mount::mount(
             self.source.as_ref(),
             &self.target,
-            self.fstype,
-            self.flags,
+            self.fstype.as_deref(),
+            // Safe because flags is private and only set in Mount::new via MsFlags::bits
+            unsafe { MsFlags::from_bits_unchecked(self.flags) },
             self.data.as_deref(),
         )
         .expect(&self.error_msg);

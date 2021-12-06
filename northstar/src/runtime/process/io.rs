@@ -10,6 +10,7 @@ use crate::{
 use bytes::{Buf, BufMut, BytesMut};
 use log::{debug, error, info, trace, warn};
 use nix::libc;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -90,7 +91,7 @@ pub(super) struct Io {
     _stderr: Option<PipeWrite>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) enum Fd {
     // Close the fd
     Close,
