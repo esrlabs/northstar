@@ -9,6 +9,7 @@ use bindings::{
 };
 use log::trace;
 use nix::errno::Errno;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
@@ -181,10 +182,29 @@ fn check_platform_requirements() {
     compile_error!("Seccomp is not supported on Big Endian architectures");
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SockFilter {
+    pub code: u16,
+    pub jt: u8,
+    pub jf: u8,
+    pub k: u32,
+}
+
+impl From<&SockFilter> for sock_filter {
+    fn from(s: &SockFilter) -> sock_filter {
+        sock_filter {
+            code: s.code,
+            jt: s.jt,
+            jf: s.jf,
+            k: s.k,
+        }
+    }
+}
+
 /// Read-only list of allowed syscalls. Methods do not cause memory allocations on the heap.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AllowList {
-    list: Vec<sock_filter>,
+    list: Vec<SockFilter>,
 }
 
 impl AllowList {
@@ -194,18 +214,24 @@ impl AllowList {
         const PR_SET_SECCOMP: nix::libc::c_int = 22;
         #[cfg(target_os = "android")]
         const SECCOMP_MODE_FILTER: nix::libc::c_int = 2;
+
         #[cfg(not(target_os = "android"))]
-        use nix::libc::PR_SET_SECCOMP;
-        #[cfg(not(target_os = "android"))]
-        use nix::libc::SECCOMP_MODE_FILTER;
+        use nix::libc::{PR_SET_SECCOMP, SECCOMP_MODE_FILTER};
 
         if self.list.len() > BPF_MAXINSNS as usize {
             return Err(Error::ListTooLong);
         }
 
+        // Convert the list of instructions into the bindings sock_filter
+        let list = self
+            .list
+            .iter()
+            .map(Into::into)
+            .collect::<Vec<sock_filter>>();
+
         let sf_prog = sock_fprog {
-            len: self.list.len() as u16,
-            filter: self.list.as_ptr() as *mut bindings::sock_filter,
+            len: list.len() as u16,
+            filter: list.as_ptr() as *mut bindings::sock_filter,
         };
         let sf_prog_ptr = &sf_prog as *const sock_fprog;
         let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
@@ -595,39 +621,39 @@ fn return_success(filter: &mut AllowList) -> u32 {
 }
 
 /// Negate accumulator
-fn _bpf_neg() -> sock_filter {
+fn _bpf_neg() -> SockFilter {
     trace!("bpf_neg");
     bpf_stmt(BPF_ALU | BPF_NEG, 0)
 }
 
 /// And accumulator with value
-fn bpf_and(k: u32) -> sock_filter {
+fn bpf_and(k: u32) -> SockFilter {
     trace!("bpf_and({})", k);
     bpf_stmt(BPF_ALU | BPF_AND | BPF_K, k)
 }
 
 /// Or accumulator with value
-fn _bpf_or(k: u32) -> sock_filter {
+fn _bpf_or(k: u32) -> SockFilter {
     trace!("bpf_or({})", k);
     bpf_stmt(BPF_ALU | BPF_OR | BPF_K, k)
 }
 
 /// Add return clause (e.g. allow, kill, log)
-fn bpf_ret(k: u32) -> sock_filter {
+fn bpf_ret(k: u32) -> SockFilter {
     trace!("bpf_ret({})", k);
     bpf_stmt(BPF_RET | BPF_K, k)
 }
 
 // https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/filter.h#L48
-fn bpf_stmt(code: u32, k: u32) -> sock_filter {
+fn bpf_stmt(code: u32, k: u32) -> SockFilter {
     trace!("bpf_stmt({}, {})", code, k);
     bpf_jump(code, k, 0, 0)
 }
 
 // https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/filter.h#L51
-fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> sock_filter {
+fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> SockFilter {
     trace!("*bpf_jump({}, {}, {}, {})", code, k, jt, jf);
-    sock_filter {
+    SockFilter {
         code: code as u16,
         k,
         jt,

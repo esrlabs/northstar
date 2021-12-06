@@ -1,5 +1,6 @@
-use super::{fs::Mount, io::Fd, Capabilities, RLimits};
+use super::{fs::Mount, io::Fd};
 use crate::{
+    npk::manifest::{Capability, RLimitResource, RLimitValue},
     runtime::{
         ipc::{channel::Channel, condition::ConditionNotify},
         ExitStatus,
@@ -13,8 +14,17 @@ use nix::{
     sys::wait::{waitpid, WaitStatus},
     unistd::{self, Uid},
 };
-use std::{env, ffi::CString, os::unix::prelude::RawFd, path::PathBuf, process::exit};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+    ffi::CString,
+    os::unix::prelude::RawFd,
+    path::PathBuf,
+    process::exit,
+};
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct Init {
     pub root: PathBuf,
     pub init: CString,
@@ -25,8 +35,8 @@ pub(super) struct Init {
     pub mounts: Vec<Mount>,
     pub fds: Vec<(RawFd, Fd)>,
     pub groups: Vec<u32>,
-    pub capabilities: Capabilities,
-    pub rlimits: RLimits,
+    pub capabilities: Option<HashSet<Capability>>,
+    pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
     pub seccomp: Option<AllowList>,
 }
 
@@ -160,35 +170,65 @@ impl Init {
     }
 
     fn set_rlimits(&self) {
-        for (r, l) in &self.rlimits {
-            r.set(
-                l.soft.unwrap_or(rlimit::INFINITY),
-                l.hard.unwrap_or(rlimit::INFINITY),
-            )
-            .expect("Failed to set rlimit");
+        if let Some(limits) = self.rlimits.as_ref() {
+            for (resource, limit) in limits {
+                let resource = match resource {
+                    RLimitResource::AS => rlimit::Resource::AS,
+                    RLimitResource::CORE => rlimit::Resource::CORE,
+                    RLimitResource::CPU => rlimit::Resource::CPU,
+                    RLimitResource::DATA => rlimit::Resource::DATA,
+                    RLimitResource::FSIZE => rlimit::Resource::FSIZE,
+                    RLimitResource::LOCKS => rlimit::Resource::LOCKS,
+                    RLimitResource::MEMLOCK => rlimit::Resource::MEMLOCK,
+                    RLimitResource::MSGQUEUE => rlimit::Resource::MSGQUEUE,
+                    RLimitResource::NICE => rlimit::Resource::NICE,
+                    RLimitResource::NOFILE => rlimit::Resource::NOFILE,
+                    RLimitResource::NPROC => rlimit::Resource::NPROC,
+                    RLimitResource::RSS => rlimit::Resource::RSS,
+                    RLimitResource::RTPRIO => rlimit::Resource::RTPRIO,
+                    #[cfg(not(target_os = "android"))]
+                    RLimitResource::RTTIME => rlimit::Resource::RTTIME,
+                    RLimitResource::SIGPENDING => rlimit::Resource::SIGPENDING,
+                    RLimitResource::STACK => rlimit::Resource::STACK,
+                };
+                resource
+                    .set(
+                        limit.soft.unwrap_or(rlimit::INFINITY),
+                        limit.hard.unwrap_or(rlimit::INFINITY),
+                    )
+                    .expect("Failed to set rlimit");
+            }
         }
     }
 
     /// Drop capabilities
     fn drop_privileges(&self) {
-        for cap in &self.capabilities.bounded {
+        let mut bounded =
+            caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
+        // Convert the set from the manifest to a set of caps::Capbility
+        let set = self
+            .capabilities
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(Into::into)
+            .collect::<HashSet<caps::Capability>>();
+        bounded.retain(|c| !set.contains(c));
+
+        for cap in &bounded {
             // caps::set cannot be called for bounded
             caps::drop(None, caps::CapSet::Bounding, *cap).expect("Failed to drop bounding cap");
         }
-        caps::set(None, caps::CapSet::Effective, &self.capabilities.set)
-            .expect("Failed to set effective caps");
-        caps::set(None, caps::CapSet::Permitted, &self.capabilities.set)
-            .expect("Failed to set permitted caps");
-        caps::set(None, caps::CapSet::Inheritable, &self.capabilities.set)
-            .expect("Failed to set inheritable caps");
-        caps::set(None, caps::CapSet::Ambient, &self.capabilities.set)
-            .expect("Failed to set ambient caps");
+        caps::set(None, caps::CapSet::Effective, &set).expect("Failed to set effective caps");
+        caps::set(None, caps::CapSet::Permitted, &set).expect("Failed to set permitted caps");
+        caps::set(None, caps::CapSet::Inheritable, &set).expect("Failed to set inheritable caps");
+        caps::set(None, caps::CapSet::Ambient, &set).expect("Failed to set ambient caps");
     }
 
     // Reset effective caps to the most possible set
     fn reset_effective_caps(&self) {
-        caps::set(None, caps::CapSet::Effective, &self.capabilities.all)
-            .expect("Failed to reset effective caps");
+        let all = caps::all();
+        caps::set(None, caps::CapSet::Effective, &all).expect("Failed to reset effective caps");
     }
 
     /// Apply file descriptor configuration
@@ -239,4 +279,52 @@ fn set_process_name() {
     Errno::result(result)
         .map(drop)
         .expect("Failed to set PR_SET_NAME");
+}
+
+impl From<Capability> for caps::Capability {
+    fn from(cap: Capability) -> Self {
+        match cap {
+            Capability::CAP_CHOWN => caps::Capability::CAP_CHOWN,
+            Capability::CAP_DAC_OVERRIDE => caps::Capability::CAP_DAC_OVERRIDE,
+            Capability::CAP_DAC_READ_SEARCH => caps::Capability::CAP_DAC_READ_SEARCH,
+            Capability::CAP_FOWNER => caps::Capability::CAP_FOWNER,
+            Capability::CAP_FSETID => caps::Capability::CAP_FSETID,
+            Capability::CAP_KILL => caps::Capability::CAP_KILL,
+            Capability::CAP_SETGID => caps::Capability::CAP_SETGID,
+            Capability::CAP_SETUID => caps::Capability::CAP_SETUID,
+            Capability::CAP_SETPCAP => caps::Capability::CAP_SETPCAP,
+            Capability::CAP_LINUX_IMMUTABLE => caps::Capability::CAP_LINUX_IMMUTABLE,
+            Capability::CAP_NET_BIND_SERVICE => caps::Capability::CAP_NET_BIND_SERVICE,
+            Capability::CAP_NET_BROADCAST => caps::Capability::CAP_NET_BROADCAST,
+            Capability::CAP_NET_ADMIN => caps::Capability::CAP_NET_ADMIN,
+            Capability::CAP_NET_RAW => caps::Capability::CAP_NET_RAW,
+            Capability::CAP_IPC_LOCK => caps::Capability::CAP_IPC_LOCK,
+            Capability::CAP_IPC_OWNER => caps::Capability::CAP_IPC_OWNER,
+            Capability::CAP_SYS_MODULE => caps::Capability::CAP_SYS_MODULE,
+            Capability::CAP_SYS_RAWIO => caps::Capability::CAP_SYS_RAWIO,
+            Capability::CAP_SYS_CHROOT => caps::Capability::CAP_SYS_CHROOT,
+            Capability::CAP_SYS_PTRACE => caps::Capability::CAP_SYS_PTRACE,
+            Capability::CAP_SYS_PACCT => caps::Capability::CAP_SYS_PACCT,
+            Capability::CAP_SYS_ADMIN => caps::Capability::CAP_SYS_ADMIN,
+            Capability::CAP_SYS_BOOT => caps::Capability::CAP_SYS_BOOT,
+            Capability::CAP_SYS_NICE => caps::Capability::CAP_SYS_NICE,
+            Capability::CAP_SYS_RESOURCE => caps::Capability::CAP_SYS_RESOURCE,
+            Capability::CAP_SYS_TIME => caps::Capability::CAP_SYS_TIME,
+            Capability::CAP_SYS_TTY_CONFIG => caps::Capability::CAP_SYS_TTY_CONFIG,
+            Capability::CAP_MKNOD => caps::Capability::CAP_MKNOD,
+            Capability::CAP_LEASE => caps::Capability::CAP_LEASE,
+            Capability::CAP_AUDIT_WRITE => caps::Capability::CAP_AUDIT_WRITE,
+            Capability::CAP_AUDIT_CONTROL => caps::Capability::CAP_AUDIT_CONTROL,
+            Capability::CAP_SETFCAP => caps::Capability::CAP_SETFCAP,
+            Capability::CAP_MAC_OVERRIDE => caps::Capability::CAP_MAC_OVERRIDE,
+            Capability::CAP_MAC_ADMIN => caps::Capability::CAP_MAC_ADMIN,
+            Capability::CAP_SYSLOG => caps::Capability::CAP_SYSLOG,
+            Capability::CAP_WAKE_ALARM => caps::Capability::CAP_WAKE_ALARM,
+            Capability::CAP_BLOCK_SUSPEND => caps::Capability::CAP_BLOCK_SUSPEND,
+            Capability::CAP_AUDIT_READ => caps::Capability::CAP_AUDIT_READ,
+            Capability::CAP_PERFMON => caps::Capability::CAP_PERFMON,
+            Capability::CAP_BPF => caps::Capability::CAP_BPF,
+            Capability::CAP_CHECKPOINT_RESTORE => caps::Capability::CAP_CHECKPOINT_RESTORE,
+        }
+    }
 }

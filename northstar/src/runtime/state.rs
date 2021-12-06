@@ -513,7 +513,7 @@ impl<'a> State<'a> {
             .containers
             .iter()
             .filter(|(_, state)| state.is_mounted())
-            .map(|(container, state)| container.clone())
+            .map(|(container, _)| container.clone())
             .collect::<Vec<_>>();
 
         for (container, state) in &mut self.containers {
