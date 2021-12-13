@@ -37,7 +37,7 @@ use crate::{
     seccomp,
 };
 
-use self::init::Exec;
+use self::init::ExecMessage;
 
 mod fork;
 mod fs;
@@ -52,7 +52,7 @@ pub(super) struct Launcher {
 }
 
 pub(super) struct Process {
-    init_tx: channel::AsyncSender<Exec>,
+    init_tx: channel::AsyncSender<ExecMessage>,
     init_rx: Option<channel::AsyncReceiver<InitMessage>>,
     console_stop: Option<CancellationToken>,
     container: Container,
@@ -117,8 +117,8 @@ impl Launcher {
         let (io, mut fds) = io::from_manifest(manifest).await?;
 
         // Two-way communication channels with the init process.
-        let mut pipe_to_init = channel::Channel::<Exec>::new();
-        let mut pipe_from_init = channel::Channel::<InitMessage>::new();
+        let mut pipe_to_init = channel::Channel::<init::ExecMessage>::new();
+        let mut pipe_from_init = channel::Channel::<init::InitMessage>::new();
 
         // Setup console if configured
         let console_fd = console_fd(
@@ -285,7 +285,7 @@ impl super::state::Process for Process {
         let mut init_rx = self.init_rx.take().unwrap();
 
         self.init_tx
-            .send(Exec {
+            .send(ExecMessage {
                 path: self.path.clone(),
                 args: self.args.clone(),
                 env: self.env.clone(),

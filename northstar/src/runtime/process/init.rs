@@ -21,6 +21,7 @@ use std::{
     path::PathBuf,
     process::exit,
     sync::mpsc,
+    thread,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,88 +39,99 @@ pub(super) struct Init {
 
 /// This is the type used to communicate with the init process from the runtime.
 #[derive(Debug, Serialize, Deserialize)]
-pub enum InitMessage {
+pub(crate) enum InitMessage {
+    /// The init process forked a new child with `pid`
     Forked { pid: i32 },
+    /// A child of init exited with `exit_status`
     Exit { pid: i32, exit_status: ExitStatus },
 }
 
 /// Command execution request
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Exec {
+pub(crate) struct ExecMessage {
     pub path: CString,
     pub args: Vec<CString>,
     pub env: Vec<CString>,
 }
 
 /// Init process main function
-fn init_main(
-    mut rt_tx: channel::Sender<InitMessage>,
-    mut rt_rx: channel::Receiver<Exec>,
+fn main(
+    mut runtime_tx: channel::Sender<InitMessage>,
+    mut runtime_rx: channel::Receiver<ExecMessage>,
     seccomp: Option<AllowList>,
 ) -> ! {
     enum Event {
+        /// A child process exited
         Exit { pid: i32, exit_status: ExitStatus },
-        Command(Exec),
+        /// Fork/exec request
+        Command { exec: ExecMessage },
     }
-    let (tx, rx) = mpsc::channel();
+
+    // Init internal channel
+    let (init_tx, init_rx) = mpsc::channel();
 
     // This thread forwards the commands coming from the runtime
-    let command_tx = tx.clone();
-    std::thread::spawn(move || loop {
-        let command = rt_rx
-            .recv()
-            .expect("Failed to receive init command from runtime");
-        command_tx.send(Event::Command(command)).unwrap();
-    });
+    {
+        let command_tx = init_tx.clone();
+        thread::spawn(move || loop {
+            let exec = runtime_rx
+                .recv()
+                .expect("Failed to receive init command from runtime");
+            command_tx
+                .send(Event::Command { exec })
+                .expect("Failed to forward command from runtime");
+        });
+    }
 
     // This thread sends the exit status of the child processes
-    let exit_status_tx = tx;
-    let reaper_thread = std::thread::spawn(move || {
-        loop {
-            match waitpid(None, None) {
-                Ok(WaitStatus::Exited(pid, status)) => {
-                    exit_status_tx
-                        .send(Event::Exit {
-                            pid: pid.as_raw(),
-                            exit_status: ExitStatus::Exit(status),
-                        })
-                        .unwrap();
+    let reaper_thread = {
+        thread::spawn(move || {
+            let exit_status_tx = init_tx;
+            loop {
+                match waitpid(None, None) {
+                    Ok(WaitStatus::Exited(pid, status)) => {
+                        exit_status_tx
+                            .send(Event::Exit {
+                                pid: pid.as_raw(),
+                                exit_status: ExitStatus::Exit(status),
+                            })
+                            .unwrap();
+                    }
+                    Ok(WaitStatus::Signaled(pid, status, _)) => {
+                        exit_status_tx
+                            .send(Event::Exit {
+                                pid: pid.as_raw() as i32,
+                                exit_status: ExitStatus::Signalled(status as u8),
+                            })
+                            .unwrap();
+                    }
+                    Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => continue,
+                    Err(Errno::ECHILD) => {
+                        // Wait untill a child process is spawned
+                        // This thread is unparked by the consumer thread after a Exec command
+                        // is received.
+                        thread::park();
+                    }
+                    e => panic!("Failed to waitpid: {:?}", e),
                 }
-                Ok(WaitStatus::Signaled(pid, status, _)) => {
-                    exit_status_tx
-                        .send(Event::Exit {
-                            pid: pid.as_raw() as i32,
-                            exit_status: ExitStatus::Signalled(status as u8),
-                        })
-                        .unwrap();
-                }
-                Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => continue,
-                Err(Errno::ECHILD) => {
-                    // wait till a child process is spawned
-                    // unparked by the consumer thread after a Exec is received
-                    std::thread::park();
-                }
-                e => panic!("Failed to waitpid: {:?}", e),
             }
-        }
-    });
+        })
+    };
 
     // Consume messages from threads
     loop {
-        match rx.recv() {
+        match init_rx.recv() {
             Ok(Event::Exit { pid, exit_status }) => {
-                rt_tx
+                runtime_tx
                     .send(InitMessage::Exit { pid, exit_status })
                     .expect("Failed to send exit status");
 
-                // Note:
-                // Currently the init process exists after the first child
-                // process exits.
+                // Note: The init process exists after the first child process exits.
                 exit(0);
             }
-            Ok(Event::Command(Exec { path, args, env })) => {
+            Ok(Event::Command { exec }) => {
                 // Start new process inside the container
-                let child_pid = fork(|| {
+                let pid = fork(|| {
                     // Set seccomp filter
                     if let Some(ref filter) = seccomp {
                         filter.apply().expect("Failed to apply seccomp filter.");
@@ -127,6 +139,7 @@ fn init_main(
 
                     // Checkpoint fds are FD_CLOEXEC and act as a signal for the launcher that this child
                     // is started. Therefore no explicit drop (close) of _checkpoint_notify is needed here.
+                    let ExecMessage { path, args, env } = exec;
                     panic!(
                         "Execve: {:?} {:?}: {:?}",
                         &path,
@@ -134,20 +147,18 @@ fn init_main(
                         unistd::execve(&path, &args, &env)
                     )
                 })
+                .map(unistd::Pid::as_raw)
                 .expect("Failed to spawn child process");
 
-                rt_tx
-                    .send(InitMessage::Forked {
-                        pid: child_pid.as_raw(),
-                    })
-                    .expect("Failed to send exit status");
+                let message = InitMessage::Forked { pid };
+                runtime_tx
+                    .send(message)
+                    .expect("Failed to send fork result");
 
-                // wake up the reaper thread
+                // Wake up the reaper thread
                 reaper_thread.thread().unpark();
             }
-            Err(e) => {
-                panic!("Failed to receive message: {}", e);
-            }
+            Err(e) => panic!("Failed to receive message: {}", e),
         }
     }
 }
@@ -156,7 +167,7 @@ impl Init {
     pub(super) fn run(
         self,
         rt_tx: channel::Sender<InitMessage>,
-        rt_rx: channel::Receiver<Exec>,
+        rt_rx: channel::Receiver<ExecMessage>,
     ) -> ! {
         // Set the process name to init. This process inherited the process name
         // from the runtime
@@ -197,7 +208,7 @@ impl Init {
         self.file_descriptors(&[rt_tx.as_raw_fd(), rt_rx.as_raw_fd()]);
 
         // We need to clone from the reference to be able to "move" the channel into the thread
-        init_main(rt_tx, rt_rx, self.seccomp)
+        main(rt_tx, rt_rx, self.seccomp)
     }
 
     /// Set uid/gid
