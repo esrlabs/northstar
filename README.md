@@ -123,7 +123,7 @@ Install build dependencies on Debian based distributions by running
 sudo apt-get install build-essential libclang1 squashfs-tools
 ```
 
-The `squashfs-tools` are required in version **4.6** or higher.
+The `squashfs-tools` are required in version **4.5** or higher.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
@@ -145,7 +145,7 @@ The Northstar workspace configuration configures a cargo
 example main binary with super user rights.
 
 Use the [nstar](./tools/nstar/README.md) utility to inspect and modify the
-runtimes state e.g
+runtimes state e.g.
 
 ```sh
 cargo build --release --bin nstar 
@@ -232,7 +232,7 @@ configured in `runtime::config::Config::console`.
 
 ## Integration tests
 
-Integrations tests start a runtime instance and assert on log output of
+Integration tests start a runtime instance and assert on log output of
 container of notification sent from the runtime. The testsuite is invoked by the
 Rust test system:
 
@@ -254,7 +254,7 @@ only. Northstar is tested on the architectures
 
 Northstar cannot be run on 32 bit systems! In order to verify that all needed
 Kernel features are available, either run the
-[check_conf](./tools/check_conf.sh) script or manually compare the targets
+[check_conf](./tools/check_conf.sh) script or manually compare the target's
 kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
 **TODO**: List required `CONFIG_` items here. The check_confi script runs on
