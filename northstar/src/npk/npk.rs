@@ -2,10 +2,7 @@ use crate::npk::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Bind, Manifest, Mount, MountOption},
 };
-use ed25519_dalek::{
-    ed25519::signature::Signature, Keypair, PublicKey, SecretKey, SignatureError, Signer,
-    SECRET_KEY_LENGTH,
-};
+use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand::rngs::OsRng;
 use semver::Version;
