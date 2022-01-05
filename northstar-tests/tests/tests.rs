@@ -332,8 +332,8 @@ test!(proc_is_mounted_ro, {
 });
 
 // Check that mount flags nosuid,nodev,noexec are properly set for bind mounts
-// assumtion: mount flags are always listed the same order (according mount.h)
-// note: MS_REC is not explicitely listed an cannot be checked with this test
+// assumption: mount flags are always listed the same order (according mount.h)
+// note: MS_REC is not explicitly listed an cannot be checked with this test
 test!(mount_flags_are_set_for_bind_mounts, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
