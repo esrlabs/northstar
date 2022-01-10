@@ -7,4 +7,4 @@ pub mod profiles;
 
 // internal types
 mod types;
-pub use types::{Profile, Seccomp, SyscallArgRule, SyscallRule};
+pub use types::{Profile, Seccomp, Selinux, SyscallArgRule, SyscallRule};

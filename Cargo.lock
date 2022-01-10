@@ -154,14 +154,18 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
+ "clap",
+ "env_logger 0.9.0",
  "lazy_static",
  "lazycell",
+ "log",
  "peeking_take_while",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash",
  "shlex",
+ "which",
 ]
 
 [[package]]
@@ -589,6 +593,12 @@ name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
+
+[[package]]
+name = "dunce"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "453440c271cf5577fd2a40e4942540cb7d0d2f85e27c8d07dd0023c925a67541"
 
 [[package]]
 name = "dyn-clone"
@@ -1247,6 +1257,7 @@ dependencies = [
  "rand 0.7.3",
  "rlimit",
  "schemars",
+ "selinux",
  "semver 1.0.4",
  "serde",
  "serde_json",
@@ -1260,6 +1271,7 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
+ "walkdir",
  "which",
  "zip",
 ]
@@ -1635,6 +1647,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "reference-counted-singleton"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef445213a92fdddc4bc69d9111156d20ffd50704a86ad82b372aab701a0d3a9a"
+
+[[package]]
 name = "regex"
 version = "1.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1736,6 +1754,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 
 [[package]]
+name = "same-file"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+dependencies = [
+ "winapi-util",
+]
+
+[[package]]
 name = "schema"
 version = "0.0.1"
 dependencies = [
@@ -1788,6 +1815,32 @@ dependencies = [
  "regex",
  "serde_yaml",
  "structopt",
+]
+
+[[package]]
+name = "selinux"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09715d6b4356e916047e61e4dce40a67ac93036851957b91713d3d9c282d1548"
+dependencies = [
+ "bitflags",
+ "libc",
+ "once_cell",
+ "reference-counted-singleton",
+ "selinux-sys",
+ "thiserror",
+]
+
+[[package]]
+name = "selinux-sys"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d842d177120716580c4c6cb56dfe3c5f3a3e3dcec635091f1b2034b6c0be4c6"
+dependencies = [
+ "bindgen",
+ "cc",
+ "dunce",
+ "walkdir",
 ]
 
 [[package]]
@@ -2417,6 +2470,17 @@ name = "waker-fn"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d5b2c62b4012a3e1eca5a7e077d13b3bf498c4073e33ccd58626607748ceeca"
+
+[[package]]
+name = "walkdir"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "808cf2735cd4b6866113f648b791c6adc5714537bc222d9347bb203386ffda56"
+dependencies = [
+ "same-file",
+ "winapi",
+ "winapi-util",
+]
 
 [[package]]
 name = "wasi"

@@ -1,3 +1,4 @@
+use crate::common::non_null_string::NonNullString;
 use crate::npk::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Bind, Manifest, Mount, MountOption},
@@ -5,9 +6,11 @@ use crate::npk::{
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand::rngs::OsRng;
+use selinux::SecurityContext;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::ffi::CStr;
 use std::{
     fmt, fs,
     io::{self, BufReader, Read, Seek, SeekFrom, Write},
@@ -18,6 +21,7 @@ use std::{
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
+use walkdir::WalkDir;
 use zip::{result::ZipError, ZipArchive};
 
 /// Manifest version supported by the runtime
@@ -51,6 +55,8 @@ pub enum Error {
         #[source]
         error: io::Error,
     },
+    #[error("Selinux error: {0}")]
+    Selinux(String),
     #[error("Squashfs error: {0}")]
     Squashfs(String),
     #[error("Archive error: {context}")]
@@ -373,6 +379,9 @@ impl Builder {
             error: e,
         })?;
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
+        if let Some(selinux) = &self.manifest.selinux {
+            set_selinux_contexts(&self.root, &selinux.context_type)?;
+        }
         create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_opts)?;
 
         // Sign and write NPK
@@ -746,6 +755,51 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
         "{}---\nkey: {}\nsignature: {}",
         &hashes_yaml, &key_id, &signature_base64
     )
+}
+
+fn set_selinux_contexts(root: &PathBuf, context_type: &NonNullString) -> Result<(), Error> {
+    for dir_entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if let Ok(Some(context)) = &SecurityContext::of_path(dir_entry.path(), false, false) {
+            if let Ok(Some(context)) = context.to_c_string() {
+                if let Ok(context) = context.to_str() {
+                    println!("Old context: {}", &context);
+
+                    // Replace selinux type of current file
+                    let mut components: Vec<_> = context.split(":").collect();
+                    if components.len() >= 3 {
+                        components[2] = context_type;
+                    }
+
+                    // Write back updated context
+                    let mut context_null_term = components.join(":");
+                    context_null_term.push('\0');
+                    if let Ok(context) = CStr::from_bytes_with_nul(context_null_term.as_bytes()) {
+                        let context = SecurityContext::from_c_str(context, false);
+                        if context.set_for_path(dir_entry.path(), false, false).is_ok() {
+                            continue; // Successfully set new selinux context
+                        }
+                    }
+
+                    // Catch all write related errors
+                    return Err(Error::Selinux(format!(
+                        "Failed to write selinux context to {}",
+                        &dir_entry.path().display()
+                    )));
+                }
+            }
+
+            // Catch all read related errors
+            return Err(Error::Selinux(format!(
+                "Failed to read selinux context of {}",
+                &dir_entry.path().display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn create_squashfs_img(

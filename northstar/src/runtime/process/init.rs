@@ -205,7 +205,7 @@ impl Init {
     fn drop_privileges(&self) {
         let mut bounded =
             caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
-        // Convert the set from the manifest to a set of caps::Capbility
+        // Convert the set from the manifest to a set of caps::Capability
         let set = self
             .capabilities
             .clone()
