@@ -1,6 +1,6 @@
 use crate::{
     common::{name::Name, non_null_string::NonNullString, version::Version},
-    seccomp::{Seccomp, SyscallRule},
+    seccomp::{Seccomp, Selinux, SyscallRule},
 };
 use derive_more::Deref;
 use itertools::Itertools;
@@ -47,10 +47,12 @@ pub struct Manifest {
     pub env: Option<HashMap<NonNullString, NonNullString>>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
-    /// CGroup config
+    /// CGroup configuration
     pub cgroups: Option<cgroups::CGroups>,
     /// Seccomp configuration
     pub seccomp: Option<Seccomp>,
+    /// SELinux configuration
+    pub selinux: Option<Selinux>,
     /// Capabilities
     pub capabilities: Option<HashSet<Capability>>,
     /// String containing group names to give to new container
@@ -149,6 +151,30 @@ impl Manifest {
                 }
                 _ => Ok(()),
             })?;
+
+        // Check selinux context type
+        if let Some(selinux) = &self.selinux {
+            // Maximum length since at least Linux v3.7
+            // (https://elixir.bootlin.com/linux/v3.7/source/include/uapi/linux/limits.h)
+            const XATTR_SIZE_MAX: usize = 65536;
+
+            if selinux.context_type.len() >= XATTR_SIZE_MAX {
+                return Err(Error::Invalid(format!(
+                    "Selinux context os too long. Maximum length in {}",
+                    XATTR_SIZE_MAX
+                )));
+            }
+            if !selinux
+                .context_type
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                return Err(Error::Invalid(
+                    "Selinux context type must consist of alphanumeric ASCII characters or '_'"
+                        .to_string(),
+                ));
+            }
+        }
 
         // Check seccomp filter
         const MAX_ARG_INDEX: usize = 5; // Restricted by seccomp_data struct
