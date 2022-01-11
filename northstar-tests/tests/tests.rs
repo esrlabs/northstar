@@ -337,7 +337,11 @@ test!(proc_is_mounted_ro, {
 test!(mount_flags_are_set_for_bind_mounts, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
-    assume("/.* /host_root \\w+ ro,nosuid,nodev,noexec,", 5).await?;
+    assume(
+        "/.* /resource \\w+ ro,(\\w+,)*nosuid,(\\w+,)*nodev,(\\w+,)*noexec,",
+        5,
+    )
+    .await?;
     runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
