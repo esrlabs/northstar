@@ -767,7 +767,8 @@ fn set_selinux_contexts(root: &Path, context_type: &NonNullString) -> Result<(),
     {
         let path = dir_entry.path();
         let path_c = CString::new(path.as_os_str().as_bytes()).expect("Failed to create C string");
-        let name_c = CString::new("security.selinux").unwrap();
+        let name_c =
+            unsafe { CStr::from_bytes_with_nul_unchecked("security.selinux\0".as_bytes()) };
 
         // Read existing selinux context
         let size = unsafe {
