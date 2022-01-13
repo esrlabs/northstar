@@ -1,7 +1,9 @@
-use crate::common::non_null_string::NonNullString;
-use crate::npk::{
-    dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-    manifest::{Bind, Manifest, Mount, MountOption},
+use crate::{
+    common::non_null_string::NonNullString,
+    npk::{
+        dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
+        manifest::{Bind, Manifest, Mount, MountOption},
+    },
 };
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
@@ -10,12 +12,14 @@ use rand::rngs::OsRng;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::ffi::{CStr, CString};
-use std::os::unix::ffi::OsStrExt;
 use std::{
+    ffi::{CStr, CString},
     fmt, fs,
     io::{self, BufReader, Read, Seek, SeekFrom, Write},
-    os::unix::io::{AsRawFd, RawFd},
+    os::unix::{
+        ffi::OsStrExt,
+        io::{AsRawFd, RawFd},
+    },
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
