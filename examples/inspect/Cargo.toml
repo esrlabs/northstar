@@ -3,6 +3,7 @@ name = "inspect"
 version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 caps = "0.5.3"

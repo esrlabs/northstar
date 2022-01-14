@@ -4,7 +4,7 @@ version = "0.6.4"
 authors = ["ESRLabs"]
 edition = "2021"
 build = "build.rs"
-license-file = "LICENSE.md"
+license = "Apache-2.0"
 
 [dependencies]
 async-stream = { version = "0.3.2", optional = true }
