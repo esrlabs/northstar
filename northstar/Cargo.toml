@@ -42,7 +42,7 @@ serde_json = { version = "1.0.68", optional = true }
 serde_with = { version = "1.11.0", optional = true }
 serde_yaml = { version = "0.8.21", optional = true }
 sha2 = { version = "0.10.1", optional = true }
-tempfile = { version = "3.2.0", optional = true }
+tempfile = { version = "3.3.0", optional = true }
 thiserror = "1.0.30"
 tokio = { version = "1.12.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt", "sync", "time"], optional = true }
 tokio-eventfd = { version = "0.2.0", optional = true }
@@ -125,7 +125,7 @@ seccomp = [
 anyhow = "1.0.44"
 nix = "0.23.0"
 proptest = "1.0.0"
-tempfile = "3.2.0"
+tempfile = "3.3.0"
 tokio = { version = "1.12.0", features = ["rt-multi-thread"] }
 
 [build-dependencies]

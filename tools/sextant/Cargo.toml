@@ -13,5 +13,5 @@ env_logger = "0.9.0"
 log = "0.4.14"
 northstar = { path = "../../northstar", features = ["npk"] }
 structopt = "0.3.25"
-tempfile = "3.2.0"
+tempfile = "3.3.0"
 which = "4.2.2"
