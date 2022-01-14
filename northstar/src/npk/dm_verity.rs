@@ -1,5 +1,5 @@
 use byteorder::{LittleEndian, ReadBytesExt};
-use rand::RngCore;
+use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
 use std::{
     io,
@@ -158,7 +158,7 @@ pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Dig
 
 fn gen_salt() -> Salt {
     let mut salt: Salt = [0u8; SHA256_SIZE];
-    rand::thread_rng().fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut salt);
     salt
 }
 
