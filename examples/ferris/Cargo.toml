@@ -3,6 +3,7 @@ name = "ferris"
 version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 ferris-says = "0.2.1"

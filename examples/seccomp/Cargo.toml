@@ -3,3 +3,4 @@ name = "seccomp"
 version = "0.0.1"
 authors = ["ESRLabs"]
 edition = "2021"
+license = "Apache-2.0"

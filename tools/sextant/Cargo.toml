@@ -3,6 +3,7 @@ name = "sextant"
 version = "0.2.0"
 authors = ["ESRLabs"]
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.44"

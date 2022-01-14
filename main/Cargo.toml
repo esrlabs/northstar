@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2021"
 default-run = "northstar"
+license = "Apache-2.0"
 
 [[bin]]
 name = "northstar"
