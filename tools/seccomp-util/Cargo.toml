@@ -14,4 +14,4 @@ serde_yaml = "0.8.21"
 structopt = "0.3.25"
 
 [dev-dependencies]
-assert_cmd = "2.0.2"
+assert_cmd = "2.0.4"
