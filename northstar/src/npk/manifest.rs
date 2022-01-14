@@ -837,7 +837,7 @@ cgroups:
       attrs: {}
 ";
 
-        let manifest = Manifest::from_str(&manifest)?;
+        let manifest = Manifest::from_str(manifest)?;
 
         assert_eq!(manifest.init, Some(PathBuf::from("/binary")));
         assert_eq!(manifest.name.to_string(), "hello");

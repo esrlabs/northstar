@@ -70,26 +70,22 @@ test!(start_stop, {
 // Mount and umount all containers known to the runtime
 test!(mount_umount, {
     let mut runtime = Northstar::launch().await?;
-    runtime.install(&EXAMPLE_CPUEATER_NPK, "test-0").await?;
-    runtime.install(&EXAMPLE_CONSOLE_NPK, "test-0").await?;
-    runtime.install(&EXAMPLE_CRASHING_NPK, "test-0").await?;
-    runtime.install(&EXAMPLE_FERRIS_NPK, "test-0").await?;
-    runtime.install(&EXAMPLE_HELLO_FERRIS_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_CPUEATER_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_CONSOLE_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_CRASHING_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_FERRIS_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_HELLO_FERRIS_NPK, "test-0").await?;
     runtime
-        .install(&EXAMPLE_HELLO_RESOURCE_NPK, "test-0")
+        .install(EXAMPLE_HELLO_RESOURCE_NPK, "test-0")
         .await?;
-    runtime.install(&EXAMPLE_INSPECT_NPK, "test-0").await?;
-    runtime.install(&EXAMPLE_MEMEATER_NPK, "test-0").await?;
-    runtime
-        .install(&EXAMPLE_MESSAGE_0_0_1_NPK, "test-0")
-        .await?;
-    runtime
-        .install(&EXAMPLE_MESSAGE_0_0_2_NPK, "test-0")
-        .await?;
-    runtime.install(&EXAMPLE_PERSISTENCE_NPK, "test-0").await?;
-    runtime.install(&EXAMPLE_SECCOMP_NPK, "test-0").await?;
-    runtime.install(&TEST_CONTAINER_NPK, "test-0").await?;
-    runtime.install(&TEST_RESOURCE_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_INSPECT_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_MEMEATER_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_MESSAGE_0_0_1_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_MESSAGE_0_0_2_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_PERSISTENCE_NPK, "test-0").await?;
+    runtime.install(EXAMPLE_SECCOMP_NPK, "test-0").await?;
+    runtime.install(TEST_CONTAINER_NPK, "test-0").await?;
+    runtime.install(TEST_RESOURCE_NPK, "test-0").await?;
 
     let mut containers = runtime.containers().await?;
     runtime
@@ -375,12 +371,12 @@ test!(seccomp_allowed_syscall_with_prohibited_arg, {
         .start_with_args(TEST_CONTAINER, ["call-delete-module", "7"])
         .await?;
 
-    let n = |n: &Notification| match n {
+    let n = |n: &Notification| {
+        matches!(n,
         Notification::Exit {
             status: ExitStatus::Signalled { signal },
             ..
-        } if signal == &31 => true,
-        _ => false,
+        } if signal == &31)
     };
     runtime.assume_notification(n, 5).await?;
     runtime.shutdown().await
@@ -393,12 +389,11 @@ test!(exitcodes, {
         runtime
             .start_with_args(TEST_CONTAINER, ["exit".to_string(), c.to_string()])
             .await?;
-        let n = |n: &Notification| match n {
-            Notification::Exit {
+        let n = |n: &Notification| {
+            matches!(n, Notification::Exit {
                 status: ExitStatus::Exit { code },
                 ..
-            } if code == c => true,
-            _ => false,
+            } if code == c => true)
         };
         runtime.assume_notification(n, 5).await?;
     }

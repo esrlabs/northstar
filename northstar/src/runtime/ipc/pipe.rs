@@ -210,7 +210,7 @@ mod tests {
     fn smoke() {
         let (mut read, mut write) = pipe().unwrap();
 
-        write.write(b"Hello").unwrap();
+        write.write_all(b"Hello").unwrap();
 
         let mut buf = [0u8; 5];
         read.read_exact(&mut buf).unwrap();
@@ -223,7 +223,7 @@ mod tests {
     fn close() {
         let (mut read, mut write) = pipe().unwrap();
 
-        write.write(b"Hello").unwrap();
+        write.write_all(b"Hello").unwrap();
         drop(write);
 
         let mut buf = String::new();
@@ -260,7 +260,7 @@ mod tests {
 
         let writer = thread::spawn(move || {
             for n in 0..=65535u32 {
-                write.write(&n.to_be_bytes()).unwrap();
+                write.write_all(&n.to_be_bytes()).unwrap();
             }
         });
 
@@ -305,7 +305,7 @@ mod tests {
             unistd::ForkResult::Parent { child } => {
                 drop(read);
                 for n in 0..=65535u32 {
-                    write.write(&n.to_be_bytes()).unwrap();
+                    write.write_all(&n.to_be_bytes()).unwrap();
                 }
                 nix::sys::wait::waitpid(child, None).ok();
             }
@@ -336,7 +336,7 @@ mod tests {
             unistd::ForkResult::Child => {
                 drop(read);
                 for n in 0..=65535u32 {
-                    write.write(&n.to_be_bytes()).unwrap();
+                    write.write_all(&n.to_be_bytes()).unwrap();
                 }
                 process::exit(0);
             }

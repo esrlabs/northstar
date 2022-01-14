@@ -135,9 +135,9 @@ mounts:
     fn create_test_npk(dest: &Path) -> PathBuf {
         let src = create_tmp_dir();
         let key_dir = create_tmp_dir();
-        let manifest = create_test_manifest(&src.path());
-        let (_pub_key, prv_key) = gen_test_key(&key_dir.path());
-        pack(&manifest, &src.path(), &dest, Some(&prv_key)).expect("Pack NPK");
+        let manifest = create_test_manifest(src.path());
+        let (_pub_key, prv_key) = gen_test_key(key_dir.path());
+        pack(&manifest, src.path(), dest, Some(&prv_key)).expect("Pack NPK");
         dest.join("hello-0.0.2.npk")
     }
 
@@ -155,7 +155,7 @@ mounts:
     }
 
     fn gen_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
-        generate_key(&TEST_KEY_NAME, &key_dir).expect("Generate key pair");
+        generate_key(TEST_KEY_NAME, key_dir).expect("Generate key pair");
         let prv_key = key_dir.join(&TEST_KEY_NAME).with_extension("key");
         let pub_key = key_dir.join(&TEST_KEY_NAME).with_extension("pub");
         assert!(prv_key.exists());
@@ -174,7 +174,7 @@ mounts:
 
     #[test]
     fn inspect_npk_no_file() {
-        inspect(&Path::new("invalid"), true).expect_err("Invalid NPK");
-        inspect(&Path::new("invalid"), false).expect_err("Invalid NPK");
+        inspect(Path::new("invalid"), true).expect_err("Invalid NPK");
+        inspect(Path::new("invalid"), false).expect_err("Invalid NPK");
     }
 }
