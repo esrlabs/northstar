@@ -8,7 +8,7 @@ use crate::{
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use nix::NixPath;
-use rand::rngs::OsRng;
+use rand_core::{OsRng, RngCore};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -565,14 +565,23 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
         Ok(())
     }
 
-    let mut csprng = OsRng {};
-    let key_pair = Keypair::generate(&mut csprng);
-    let pub_key = out.join(name).with_extension("pub");
-    let prv_key = out.join(name).with_extension("key");
-    assume_non_existing(&pub_key)?;
-    assume_non_existing(&prv_key)?;
-    write(&key_pair.public.to_bytes(), &pub_key)?;
-    write(&key_pair.secret.to_bytes(), &prv_key)?;
+    let mut secret_key_bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut secret_key_bytes);
+    let secret_key: SecretKey =
+        SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
+            context: "Failed to create secret key".to_string(),
+            error: e,
+        })?;
+    let public_key: ed25519_dalek::PublicKey = (&secret_key).into();
+
+    let secret_key_file = out.join(name).with_extension("key");
+    let public_key_file = out.join(name).with_extension("pub");
+
+    assume_non_existing(&public_key_file)?;
+    assume_non_existing(&secret_key_file)?;
+
+    write(&secret_key.to_bytes(), &secret_key_file)?;
+    write(&public_key.to_bytes(), &public_key_file)?;
 
     Ok(())
 }

@@ -393,7 +393,7 @@ test!(exitcodes, {
             matches!(n, Notification::Exit {
                 status: ExitStatus::Exit { code },
                 ..
-            } if code == c => true)
+            } if code == c)
         };
         runtime.assume_notification(n, 5).await?;
     }

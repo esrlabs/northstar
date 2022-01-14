@@ -1244,7 +1244,7 @@ dependencies = [
  "nanoid",
  "nix 0.23.1",
  "proptest",
- "rand 0.7.3",
+ "rand_core 0.6.3",
  "rlimit",
  "schemars",
  "semver 1.0.4",
