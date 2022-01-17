@@ -14,8 +14,8 @@ normal=$(tput sgr0)
 CLONES=""
 KEY="./examples/northstar.key"
 EXAMPLES=(
-  "./examples/cpueater"
   "./examples/console"
+  "./examples/cpueater"
   "./examples/crashing"
   "./examples/ferris"
   "./examples/hello-ferris"
@@ -27,6 +27,7 @@ EXAMPLES=(
   "./examples/message-0.0.2"
   "./examples/persistence"
   "./examples/seccomp"
+  "./examples/selinux"
 )
 
 usage() {

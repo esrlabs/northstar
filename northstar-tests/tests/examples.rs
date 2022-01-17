@@ -132,3 +132,11 @@ test!(seccomp, {
     runtime.start(EXAMPLE_SECCOMP).await?;
     runtime.shutdown().await
 });
+
+// Start seccomp example
+test!(selinux, {
+    let mut runtime = Northstar::launch().await?;
+    runtime.install(EXAMPLE_SELINUX_NPK, "test-0").await?;
+    runtime.start(EXAMPLE_SELINUX).await?;
+    runtime.shutdown().await
+});
