@@ -1,23 +1,24 @@
 [workspace]
 members = [
-    "examples/cpueater",
     "examples/console",
+    "examples/cpueater",
     "examples/crashing",
+    "examples/ferris",
+    "examples/hello-resource",
     "examples/hello-world",
     "examples/inspect",
     "examples/memeater",
-    "examples/ferris",
-    "examples/hello-resource",
     "examples/persistence",
     "examples/seccomp",
+    "examples/selinux",
     "main",
     "northstar",
     "northstar-tests",
     "northstar-tests/test-container",
     "tools/nstar",
+    "tools/schema",
     "tools/seccomp-util",
     "tools/sextant",
-    "tools/schema",
     "tools/stress",
 ]
 
