@@ -22,6 +22,7 @@ fn main() {
         "../examples/message-0.0.2",
         "../examples/persistence",
         "../examples/seccomp",
+        "../examples/selinux",
         "test-container",
         "test-resource",
     ] {

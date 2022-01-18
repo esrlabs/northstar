@@ -27,7 +27,7 @@ pub struct Seccomp {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Selinux {
     /// Explicit list of allowed syscalls
-    pub context_type: NonNullString,
+    pub context: NonNullString,
 }
 
 /// Syscall rule
