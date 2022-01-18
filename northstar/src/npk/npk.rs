@@ -385,7 +385,7 @@ impl Builder {
         })?;
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
         if let Some(selinux) = &self.manifest.selinux {
-            set_selinux_contexts(&self.root, &selinux.context_type)?;
+            set_selinux_contexts(&self.root, &selinux.context)?;
         }
         create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_opts)?;
 
@@ -770,8 +770,8 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
     )
 }
 
-/// Recursively update all SELinux contexts with a provided type.
-fn set_selinux_contexts(root: &Path, context_type: &NonNullString) -> Result<(), Error> {
+/// Recursively update all SELinux contexts.
+fn set_selinux_contexts(root: &Path, context: &NonNullString) -> Result<(), Error> {
     for dir_entry in WalkDir::new(root)
         .follow_links(false)
         .into_iter()
@@ -781,8 +781,9 @@ fn set_selinux_contexts(root: &Path, context_type: &NonNullString) -> Result<(),
         let path_c = CString::new(path.as_os_str().as_bytes()).expect("Failed to create C string");
         let name_c =
             unsafe { CStr::from_bytes_with_nul_unchecked("security.selinux\0".as_bytes()) };
+        let context = CString::new(context.to_string()).expect("Failed to create C string");
 
-        // Read existing selinux context
+        // Read existing selinux context size
         let size = unsafe {
             nix::libc::getxattr(
                 path_c.as_ptr() as *const nix::libc::c_char,
@@ -791,61 +792,36 @@ fn set_selinux_contexts(root: &Path, context_type: &NonNullString) -> Result<(),
                 0,
             )
         };
-        if size == -1 {
+        let error_occurred = size < 0;
+        let context_missing = nix::errno::errno() == nix::errno::Errno::ENODATA as i32;
+        if error_occurred && !context_missing {
             return Err(Error::Selinux(format!(
-                "Failed to call getxattr. Return value was {}",
-                &size
+                "Failed to call getxattr. Return value was {}, errno: {}",
+                &size,
+                std::io::Error::last_os_error()
             )));
         }
-        let mut context_buf = vec![0u8; size.try_into().expect("Failed to convert size value")];
-        let size = unsafe {
-            nix::libc::getxattr(
-                path_c.as_ptr() as *const nix::libc::c_char,
-                name_c.as_ptr() as *const nix::libc::c_char,
-                context_buf.as_mut_ptr() as *mut core::ffi::c_void,
-                context_buf.len(),
-            )
-        };
-        if size == -1 {
-            return Err(Error::Selinux(format!(
-                "Failed to call getxattr. Return value was {}",
-                &size
-            )));
-        }
-        let context = CStr::from_bytes_with_nul(
-            &context_buf[..size.try_into().expect("Failed to convert size value")],
-        )
-        .expect("Failed to create C string")
-        .to_str()
-        .expect("Failed to convert C string")
-        .to_string();
-
-        // Replace type substring
-        let mut components: Vec<_> = context.split(':').collect();
-        if components.len() < 3 {
-            return Err(Error::Selinux(format!(
-                "Invalid selinux label format: {}",
-                &context
-            )));
-        }
-        components[2] = context_type;
-        let context =
-            CString::new(components.join(":").as_bytes()).expect("Failed to create C string");
 
         // Write updated context
+        let flags = if error_occurred && context_missing {
+            nix::libc::XATTR_CREATE
+        } else {
+            nix::libc::XATTR_REPLACE
+        };
         let ret = unsafe {
             nix::libc::setxattr(
                 path_c.as_ptr() as *const nix::libc::c_char,
                 name_c.as_ptr() as *const nix::libc::c_char,
                 context.as_ptr() as *mut core::ffi::c_void,
                 context.len(),
-                nix::libc::XATTR_REPLACE,
+                flags,
             )
         };
         if ret != 0 {
             return Err(Error::Selinux(format!(
-                "Failed to call setxattr. Return value was {}",
-                &ret
+                "Failed to call setxattr. Return value was {}, errno: {}",
+                &ret,
+                std::io::Error::last_os_error()
             )));
         }
     }

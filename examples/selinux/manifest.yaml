@@ -4,7 +4,7 @@ init: /selinux
 uid: 1000
 gid: 1000
 selinux:
-  context_type: unconfined_u:object_r:user_home_t:s0
+  context: unconfined_u:object_r:user_home_t:s0
 io:
   stdout:
     log:

@@ -152,25 +152,25 @@ impl Manifest {
                 _ => Ok(()),
             })?;
 
-        // Check selinux context type
+        // Check selinux context
         if let Some(selinux) = &self.selinux {
             // Maximum length since at least Linux v3.7
             // (https://elixir.bootlin.com/linux/v3.7/source/include/uapi/linux/limits.h)
             const XATTR_SIZE_MAX: usize = 65536;
 
-            if selinux.context_type.len() >= XATTR_SIZE_MAX {
+            if selinux.context.len() >= XATTR_SIZE_MAX {
                 return Err(Error::Invalid(format!(
                     "Selinux context os too long. Maximum length in {}",
                     XATTR_SIZE_MAX
                 )));
             }
             if !selinux
-                .context_type
+                .context
                 .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '_')
             {
                 return Err(Error::Invalid(
-                    "Selinux context type must consist of alphanumeric ASCII characters or '_'"
+                    "Selinux context must consist of alphanumeric ASCII characters, '?' or '_'"
                         .to_string(),
                 ));
             }
