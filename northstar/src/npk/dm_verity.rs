@@ -62,7 +62,7 @@ impl VerityHeader {
         let mut padded_algorithm = [0u8; 32];
         padded_algorithm[..VerityHeader::ALGORITHM.len()].copy_from_slice(VerityHeader::ALGORITHM);
         let mut padded_salt = [0u8; 256];
-        padded_salt[..salt.len()].copy_from_slice(&salt.to_vec());
+        padded_salt[..salt.len()].copy_from_slice(salt);
         VerityHeader {
             header: padded_header,
             version: 1,
@@ -303,7 +303,7 @@ fn append_superblock_and_hashtree(
         })?;
     let mut uuid = [0u8; 16];
     uuid.copy_from_slice(
-        hex::decode(Uuid::new_v4().to_string().replace("-", ""))
+        hex::decode(Uuid::new_v4().to_string().replace('-', ""))
             .map_err(|_e| Error::Uuid)?
             .as_slice(),
     );
