@@ -676,7 +676,7 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     let pseudos = manifest
         .mounts
         .iter()
-        .map(|(target, mount)| {
+        .flat_map(|(target, mount)| {
             match mount {
                 Mount::Bind(Bind { options: flags, .. }) => {
                     let mode = if flags.contains(&MountOption::Rw) {
@@ -738,7 +738,6 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                 }
             }
         })
-        .flatten()
         .collect::<Vec<String>>();
 
     let mut pseudo_file_entries = NamedTempFile::new()

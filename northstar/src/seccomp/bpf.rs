@@ -67,15 +67,10 @@ pub fn seccomp_filter(
 pub(crate) fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builder {
     let mut builder = Builder::new();
     for (name, call_rule) in rules {
-        let arg_rule;
-        match call_rule {
-            SyscallRule::Any => {
-                arg_rule = None;
-            }
-            SyscallRule::Args(a) => {
-                arg_rule = Some(a);
-            }
-        }
+        let arg_rule = match call_rule {
+            SyscallRule::Any => None,
+            SyscallRule::Args(a) => Some(a),
+        };
         if let Err(e) = builder.allow_syscall_name(&name.to_string(), arg_rule.cloned()) {
             // Only issue a warning as a missing syscall on the allow list does not lead to insecure behaviour
             trace!("Failed to allow syscall {}: {}", &name.to_string(), e);
