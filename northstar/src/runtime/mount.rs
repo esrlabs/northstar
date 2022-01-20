@@ -18,6 +18,7 @@ use std::{
 use thiserror::Error;
 use tokio::{fs, time};
 
+use crate::seccomp::Selinux;
 pub use nix::mount::MsFlags as MountFlags;
 
 const FS_TYPE: &str = "squashfs";
@@ -98,6 +99,7 @@ impl MountControl {
         let name = npk.manifest().name.clone();
         let version = npk.manifest().version.clone();
         let verity_header = npk.verity_header().cloned();
+        let selinux = npk.manifest().selinux.clone();
         let hashes = npk.hashes().cloned();
 
         async move {
@@ -112,6 +114,7 @@ impl MountControl {
                 fsimg_size,
                 &version,
                 verity_header,
+                selinux,
                 hashes,
                 &target,
                 key.is_some(),
@@ -154,6 +157,7 @@ async fn mount(
     fsimg_size: u64,
     version: &Version,
     verity_header: Option<VerityHeader>,
+    selinux: Option<Selinux>,
     hashes: Option<Hashes>,
     target: &Path,
     verity: bool,
@@ -230,7 +234,7 @@ async fn mount(
                 loop_device
                     .detach()
                     .map_err(Error::LoopDevice)
-                    .expect("Failed to detach loopbach device");
+                    .expect("Failed to detach loopback device");
 
                 return Err(Error::Npk("Missing verity information in NPK"));
             }
@@ -248,7 +252,12 @@ async fn mount(
     let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
     let source = Some(&device);
     let fstype = Some(FS_TYPE);
-    let data = Option::<&str>::None;
+    let data = if let Some(selinux) = selinux {
+        Some(format!("{}{}", "context=", selinux.context.as_str()))
+    } else {
+        None
+    };
+    let data = data.as_deref();
     let mount_result = nix::mount::mount(source, target, fstype, flags, data).map_err(Error::Os);
 
     if let Err(ref e) = mount_result {
@@ -256,7 +265,7 @@ async fn mount(
     }
 
     // Set the device to auto-remove. If the above mount operation failed the verity device is removed.
-    // If the defered removal fail the runtime panics in order to avoid leaking the verity device.
+    // If the deferred removal fail the runtime panics in order to avoid leaking the verity device.
     if let Some(ref dm_name) = dm_name {
         debug!("Enabling deferred removal of device {}", dm_name);
         dm.device_remove(
