@@ -10,7 +10,6 @@ members = [
     "examples/memeater",
     "examples/persistence",
     "examples/seccomp",
-    "examples/selinux",
     "main",
     "northstar",
     "northstar-tests",
