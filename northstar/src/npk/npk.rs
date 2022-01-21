@@ -1,32 +1,23 @@
-use crate::{
-    common::non_null_string::NonNullString,
-    npk::{
-        dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-        manifest::{Bind, Manifest, Mount, MountOption},
-    },
+use crate::npk::{
+    dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
+    manifest::{Bind, Manifest, Mount, MountOption},
 };
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
-use nix::NixPath;
 use rand_core::{OsRng, RngCore};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    ffi::{CStr, CString},
     fmt, fs,
     io::{self, BufReader, Read, Seek, SeekFrom, Write},
-    os::unix::{
-        ffi::OsStrExt,
-        io::{AsRawFd, RawFd},
-    },
+    os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
-use walkdir::WalkDir;
 use zip::{result::ZipError, ZipArchive};
 
 /// Manifest version supported by the runtime
@@ -384,9 +375,6 @@ impl Builder {
             error: e,
         })?;
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-        if let Some(selinux) = &self.manifest.selinux {
-            set_selinux_contexts(&self.root, &selinux.context)?;
-        }
         create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_opts)?;
 
         // Sign and write NPK
@@ -768,64 +756,6 @@ fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
         "{}---\nkey: {}\nsignature: {}",
         &hashes_yaml, &key_id, &signature_base64
     )
-}
-
-/// Recursively update all SELinux contexts.
-fn set_selinux_contexts(root: &Path, context: &NonNullString) -> Result<(), Error> {
-    for dir_entry in WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
-        let path = dir_entry.path();
-        let path_c = CString::new(path.as_os_str().as_bytes()).expect("Failed to create C string");
-        let name_c =
-            unsafe { CStr::from_bytes_with_nul_unchecked("security.selinux\0".as_bytes()) };
-        let context = CString::new(context.to_string()).expect("Failed to create C string");
-
-        // Read existing selinux context size
-        let size = unsafe {
-            nix::libc::getxattr(
-                path_c.as_ptr() as *const nix::libc::c_char,
-                name_c.as_ptr() as *const nix::libc::c_char,
-                std::ptr::null_mut() as *mut core::ffi::c_void,
-                0,
-            )
-        };
-        let error_occurred = size < 0;
-        let context_missing = nix::errno::errno() == nix::errno::Errno::ENODATA as i32;
-        if error_occurred && !context_missing {
-            return Err(Error::Selinux(format!(
-                "Failed to call getxattr. Return value was {}, errno: {}",
-                &size,
-                std::io::Error::last_os_error()
-            )));
-        }
-
-        // Write updated context
-        let flags = if error_occurred && context_missing {
-            nix::libc::XATTR_CREATE
-        } else {
-            nix::libc::XATTR_REPLACE
-        };
-        let ret = unsafe {
-            nix::libc::setxattr(
-                path_c.as_ptr() as *const nix::libc::c_char,
-                name_c.as_ptr() as *const nix::libc::c_char,
-                context.as_ptr() as *mut core::ffi::c_void,
-                context.len(),
-                flags,
-            )
-        };
-        if ret != 0 {
-            return Err(Error::Selinux(format!(
-                "Failed to call setxattr. Return value was {}, errno: {}",
-                &ret,
-                std::io::Error::last_os_error()
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn create_squashfs_img(
