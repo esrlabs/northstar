@@ -334,7 +334,20 @@ test!(mount_flags_are_set_for_bind_mounts, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
     assume(
-        "/.* /resource \\w+ ro,(\\w+,)*nosuid,(\\w+,)*nodev,(\\w+,)*noexec,",
+        "/.* /resource \\w+ ro,(\\w+,)*nosuid,(\\w+,)*nodev,(\\w+,)*noexec",
+        5,
+    )
+    .await?;
+    runtime.stop(TEST_CONTAINER, 5).await?;
+    runtime.shutdown().await
+});
+
+// The test container only gets the cap_kill capability. See the manifest
+test!(selinux_mounted_squasfs_has_correct_context, {
+    let mut runtime = Northstar::launch_install_test_container().await?;
+    runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+    assume(
+        "/.* squashfs (\\w+,)*context=unconfined_u:object_r:user_home_t:s0",
         5,
     )
     .await?;
