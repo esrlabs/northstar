@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.44"
+anyhow = "1.0.53"
 base64 = "0.13.0"
 colored = "2.0.0"
 ed25519-dalek = "1.0.1"
