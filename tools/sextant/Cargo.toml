@@ -15,4 +15,4 @@ log = "0.4.14"
 northstar = { path = "../../northstar", features = ["npk"] }
 structopt = "0.3.26"
 tempfile = "3.3.0"
-which = "4.2.2"
+which = "4.2.4"
