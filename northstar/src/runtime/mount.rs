@@ -253,7 +253,12 @@ async fn mount(
     let source = Some(&device);
     let fstype = Some(FS_TYPE);
     let data = if let Some(selinux) = selinux {
-        Some(format!("{}{}", "context=", selinux.context.as_str()))
+        if Path::new("/sys/fs/selinux/enforce").exists() {
+            Some(format!("{}{}", "context=", selinux.context.as_str()))
+        } else {
+            warn!("Failed to determine SELinux status of host system. SELinux will not be used for container.");
+            None
+        }
     } else {
         None
     };
