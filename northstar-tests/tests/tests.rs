@@ -7,7 +7,7 @@ use northstar::api::{
     model::{self, ConnectNack, ExitStatus, Notification},
 };
 use northstar_tests::{containers::*, logger, runtime::Northstar, test};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::UnixStream,
@@ -346,11 +346,16 @@ test!(mount_flags_are_set_for_bind_mounts, {
 test!(selinux_mounted_squasfs_has_correct_context, {
     let mut runtime = Northstar::launch_install_test_container().await?;
     runtime.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
-    assume(
-        "/.* squashfs (\\w+,)*context=unconfined_u:object_r:user_home_t:s0",
-        5,
-    )
-    .await?;
+    // Only expect selinux context if system supports it
+    if Path::new("/sys/fs/selinux/enforce").exists() {
+        assume(
+            "/.* squashfs (\\w+,)*context=unconfined_u:object_r:user_home_t:s0",
+            5,
+        )
+        .await?;
+    } else {
+        assume("/.* squashfs (\\w+,)*", 5).await?;
+    }
     runtime.stop(TEST_CONTAINER, 5).await?;
     runtime.shutdown().await
 });
