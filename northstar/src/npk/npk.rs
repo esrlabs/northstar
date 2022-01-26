@@ -31,6 +31,7 @@ const UNSQUASHFS: &str = "unsquashfs";
 
 // File name and directory components
 const FS_IMG_NAME: &str = "fs.img";
+const METADATA_NAME: &str = "metadata.yaml";
 const MANIFEST_NAME: &str = "manifest.yaml";
 const SIGNATURE_NAME: &str = "signature.yaml";
 const FS_IMG_BASE: &str = "fs";
@@ -69,8 +70,8 @@ pub enum Error {
         #[source]
         error: SignatureError,
     },
-    #[error("comment malformed: {0}")]
-    MalformedComment(String),
+    #[error("metadata malformed: {0}")]
+    MalformedMetadata(String),
     #[error("hashes malformed: {0}")]
     MalformedHashes(String),
     #[error("signature malformed: {0}")]
@@ -166,7 +167,7 @@ impl<R: Read + Seek> Npk<R> {
             error,
         })?;
 
-        let meta = meta(&zip)?;
+        let meta = meta(&mut zip)?;
         // TODO: Should we do semver comparison here?
         if meta.version != VERSION {
             return Err(Error::Version(meta.version, VERSION));
@@ -269,8 +270,9 @@ impl AsRawFd for Npk<BufReader<fs::File>> {
     }
 }
 
-fn meta<R: Read + Seek>(zip: &Zip<R>) -> Result<Meta, Error> {
-    serde_yaml::from_slice(zip.comment()).map_err(|e| Error::MalformedComment(e.to_string()))
+fn meta<R: Read + Seek>(zip: &mut Zip<R>) -> Result<Meta, Error> {
+    let version = read_to_string(zip, METADATA_NAME)?;
+    serde_yaml::from_str(&version).map_err(|e| Error::MalformedMetadata(e.to_string()))
 }
 
 fn hashes<R: Read + Seek>(zip: &mut Zip<R>, key: &PublicKey) -> Result<Hashes, Error> {
@@ -872,7 +874,6 @@ fn write_npk<W: Write + Seek>(
         .map_err(|e| Error::Manifest(format!("failed to serialize manifest: {}", e)))?;
 
     let mut zip = zip::ZipWriter::new(npk);
-    zip.set_comment(serde_yaml::to_string(&Meta { version: VERSION }).unwrap());
 
     if let Some(signature) = signature {
         || -> Result<(), io::Error> {
@@ -896,13 +897,28 @@ fn write_npk<W: Write + Seek>(
             error: e,
         })?;
 
+    zip.start_file_aligned(METADATA_NAME, options, BLOCK_SIZE as u16)
+        .map_err(|e| Error::Zip {
+            context: "Failed to create aligned zip-file".to_string(),
+            error: e,
+        })?;
+    zip.write_all(
+        serde_yaml::to_string(&Meta { version: VERSION })
+            .unwrap()
+            .as_bytes(),
+    )
+    .map_err(|e| Error::Io {
+        context: "Failed write version file".to_string(),
+        error: e,
+    })?;
+
     // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
     // 'extra data' to inflate the header of the ZIP file.
     // See chapter 4.3.6 of APPNOTE.TXT
     // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
     zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
         .map_err(|e| Error::Zip {
-            context: "Could create aligned zip-file".to_string(),
+            context: "Failed to create aligned zip-file".to_string(),
             error: e,
         })?;
     io::copy(&mut fsimg, &mut zip)
