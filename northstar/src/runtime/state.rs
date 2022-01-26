@@ -228,7 +228,7 @@ impl State {
         for container in self.containers.keys() {
             if let Some(autostart) = self
                 .manifest(container)
-                .expect("Internal error")
+                .expect("internal error")
                 .autostart
                 .as_ref()
             {
@@ -440,7 +440,7 @@ impl State {
             for mount in self.mount_all(&Vec::from_iter(need_mount)).await {
                 // Abort if at least one container failed to mount
                 if let Err(e) = mount {
-                    warn!("failed to mount: {}", e);
+                    warn!("Failed to mount: {}", e);
                     return Err(e);
                 }
             }
@@ -556,7 +556,7 @@ impl State {
             .exec(container.clone(), init, args, env, io)
             .await
         {
-            warn!("failed to exec {} ({}): {}", container, pid, e);
+            warn!("Failed to exec {} ({}): {}", container, pid, e);
 
             stop.cancel();
 
@@ -879,7 +879,7 @@ impl State {
                         self.events_tx
                             .send(Event::Shutdown)
                             .await
-                            .expect("Internal channel error on main");
+                            .expect("internal channel error on main");
                         model::Response::Ok
                     }
                     model::Request::Start(container, args, env) => {
@@ -971,13 +971,20 @@ impl State {
         for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
             match mount_result {
                 Ok(root) => {
-                    let state = self.state_mut(container).expect("Internal error");
+                    let npk = self.npk(container).expect("internal error");
+                    let date = npk.metadata().date.clone();
+                    let author = npk.metadata().author.clone();
+                    let state = self.state_mut(container).expect("internal error");
                     state.root = Some(root);
-                    info!("Mounted {}", container);
+                    if let Some(author) = author {
+                        info!("Mounted {} (packed {} by {})", container, date, author);
+                    } else {
+                        info!("Mounted {} (packed {})", container, date);
+                    }
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("failed to mount {}: {}", container, e);
+                    warn!("Failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }
@@ -1081,7 +1088,7 @@ impl State {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("failed to umount {}: {}", container, e);
+                    warn!("Failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }

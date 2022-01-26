@@ -1,5 +1,5 @@
 use escargot::CargoBuild;
-use northstar::npk;
+use northstar::npk::npk::{pack, SquashfsOpts};
 use std::{env, fs, path::Path};
 
 const KEY: &str = "../examples/northstar.key";
@@ -69,11 +69,13 @@ fn main() {
             }
         };
 
-        npk::npk::pack(
+        pack(
             &dir.join("manifest.yaml"),
             &root,
             out_dir,
+            SquashfsOpts::default(),
             Some(Path::new(KEY)),
+            Some("northstar-tests"),
         )
         .expect("failed to pack npk");
         drop(tmpdir);

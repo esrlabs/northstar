@@ -2,6 +2,7 @@ use crate::npk::{
     dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
     manifest::{Bind, Manifest, Mount, MountOption},
 };
+use ::time::OffsetDateTime;
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand_core::{OsRng, RngCore};
@@ -18,6 +19,7 @@ use std::{
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
+use time::format_description::well_known::Rfc3339;
 use zip::{result::ZipError, ZipArchive};
 
 /// Manifest version supported by the runtime
@@ -31,6 +33,7 @@ const UNSQUASHFS: &str = "unsquashfs";
 
 // File name and directory components
 const FS_IMG_NAME: &str = "fs.img";
+const METADATA_NAME: &str = "metadata.yaml";
 const MANIFEST_NAME: &str = "manifest.yaml";
 const SIGNATURE_NAME: &str = "signature.yaml";
 const FS_IMG_BASE: &str = "fs";
@@ -69,8 +72,8 @@ pub enum Error {
         #[source]
         error: SignatureError,
     },
-    #[error("comment malformed: {0}")]
-    MalformedComment(String),
+    #[error("metadata malformed: {0}")]
+    MalformedMetadata(String),
     #[error("hashes malformed: {0}")]
     MalformedHashes(String),
     #[error("signature malformed: {0}")]
@@ -90,13 +93,38 @@ impl Error {
             error,
         }
     }
+
+    fn zip<T: ToString>(context: T, error: ZipError) -> Error {
+        Error::Zip {
+            context: context.to_string(),
+            error,
+        }
+    }
 }
 
-/// NPK archive comment
+/// NPK archive meta information
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Meta {
-    /// Version
-    pub version: Version,
+pub struct Metadata {
+    /// NPK Version
+    pub npk_version: Version,
+    /// Date
+    pub date: String,
+    /// Author
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+}
+
+impl Metadata {
+    /// Create a new NPK archive comment
+    pub fn new(author: Option<&str>) -> Self {
+        Metadata {
+            npk_version: VERSION,
+            date: OffsetDateTime::now_utc()
+                .format(&Rfc3339)
+                .expect("failed to format time"),
+            author: author.map(ToOwned::to_owned),
+        }
+    }
 }
 
 /// NPK Hashes
@@ -149,7 +177,7 @@ impl FromStr for Hashes {
 /// Northstar package
 #[derive(Debug)]
 pub struct Npk<R> {
-    meta: Meta,
+    meta: Metadata,
     file: R,
     manifest: Manifest,
     fs_img_offset: u64,
@@ -162,13 +190,13 @@ impl<R: Read + Seek> Npk<R> {
     /// Read a npk from `reader`
     pub fn from_reader(reader: R, key: Option<&PublicKey>) -> Result<Self, Error> {
         let mut zip = Zip::new(reader).map_err(|error| Error::Zip {
-            context: "failed to open NPK".to_string(),
+            context: "failed to read NPK".to_string(),
             error,
         })?;
 
-        let meta = meta(&zip)?;
-        if meta.version != VERSION {
-            return Err(Error::Version(meta.version, VERSION));
+        let meta = metadata(&mut zip)?;
+        if meta.npk_version != VERSION {
+            return Err(Error::Version(meta.npk_version, VERSION));
         }
 
         // Read hashes from the npk if a key is passed
@@ -227,7 +255,7 @@ impl<R: Read + Seek> Npk<R> {
     }
 
     /// Meta information
-    pub fn meta(&self) -> &Meta {
+    pub fn meta(&self) -> &Metadata {
         &self.meta
     }
 
@@ -236,9 +264,9 @@ impl<R: Read + Seek> Npk<R> {
         &self.manifest
     }
 
-    /// Version
-    pub fn version(&self) -> &Version {
-        &self.meta.version
+    /// NPK metadata
+    pub fn metadata(&self) -> &Metadata {
+        &self.meta
     }
 
     /// Offset of the fsimage within the npk
@@ -268,8 +296,9 @@ impl AsRawFd for Npk<BufReader<fs::File>> {
     }
 }
 
-fn meta<R: Read + Seek>(zip: &Zip<R>) -> Result<Meta, Error> {
-    serde_yaml::from_slice(zip.comment()).map_err(|e| Error::MalformedComment(e.to_string()))
+fn metadata<R: Read + Seek>(zip: &mut Zip<R>) -> Result<Metadata, Error> {
+    let version = read_to_string(zip, METADATA_NAME)?;
+    serde_yaml::from_str(&version).map_err(|e| Error::MalformedMetadata(e.to_string()))
 }
 
 fn hashes<R: Read + Seek>(zip: &mut Zip<R>, key: &PublicKey) -> Result<Hashes, Error> {
@@ -345,48 +374,69 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
     })
 }
 
-struct Builder {
+/// NPK Builder
+#[derive(Debug)]
+pub struct Builder<'a> {
     root: PathBuf,
     manifest: Manifest,
     key: Option<PathBuf>,
+    author: Option<&'a str>,
     squashfs_opts: SquashfsOpts,
 }
 
-impl Builder {
-    fn new(root: &Path, manifest: Manifest) -> Builder {
+impl<'a> Builder<'a> {
+    /// Create a new NPK builder.
+    pub fn new(root: &Path, manifest: Manifest) -> Builder<'a> {
         Builder {
             root: PathBuf::from(root),
             manifest,
             key: None,
+            author: None,
             squashfs_opts: SquashfsOpts::default(),
         }
     }
 
-    fn key(mut self, key: &Path) -> Builder {
+    /// Add key.
+    pub fn key(mut self, key: &Path) -> Builder<'a> {
         self.key = Some(key.to_path_buf());
         self
     }
 
-    fn squashfs_opts(mut self, opts: &SquashfsOpts) -> Builder {
-        self.squashfs_opts = opts.clone();
+    /// Optional author information stored in the NPKs metadata section.
+    pub fn author(mut self, author: &'a str) -> Builder<'a> {
+        self.author = Some(author);
         self
     }
 
-    fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
-        // Create squashfs image
-        let tmp = tempfile::TempDir::new().map_err(|e| Error::Io {
-            context: "failed to create temporary directory".to_string(),
-            error: e,
+    /// Set squashfs options.
+    pub fn squashfs_opts(mut self, opts: SquashfsOpts) -> Builder<'a> {
+        self.squashfs_opts = opts;
+        self
+    }
+
+    /// Create the NPK.
+    pub fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
+        // Serialize metadata
+        let metadata = serde_yaml::to_string(&Metadata::new(self.author)).map_err(|e| {
+            Error::MalformedMetadata(format!("failed to serialize metadata: {}", e))
         })?;
-        let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
+
+        // Serialize manifest
+        let manifest = serde_yaml::to_string(&self.manifest)
+            .map_err(|e| Error::Manifest(format!("failed to serialize manifest: {}", e)))?;
+
+        // Create squashfs image
+        let tmpdir =
+            tempfile::TempDir::new().map_err(|e| Error::io("failed to create tempdir", e))?;
+        let fsimg = tmpdir.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
         create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_opts)?;
 
         // Sign and write NPK
         if let Some(key) = &self.key {
             let signature = signature(key, &fsimg, &self.manifest)?;
-            write_npk(writer, &self.manifest, &fsimg, Some(&signature))
+            write_npk(writer, &metadata, &manifest, Some(&signature), &fsimg)
         } else {
-            write_npk(writer, &self.manifest, &fsimg, None)
+            write_npk(writer, &metadata, &manifest, None, &fsimg)
         }
     }
 }
@@ -447,78 +497,51 @@ impl Default for SquashfsOpts {
     }
 }
 
-/// Create an NPK for the northstar runtime.
-/// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
-/// and packs the results into a zipped NPK file.
+/// Create an NPK with special `squashfs` options sextant collects the artifacts
+/// in a given container directory, creates and signs the necessary metadata and
+/// packs the results into a zipped NPK file.
 ///
 /// # Arguments
 /// * `manifest` - Path to the container's manifest file
 /// * `root` - Path to the container's root directory
-/// * `out` - Target directory or filename of the packed NPK
-/// * `key` - Path to the key used to sign the package
-///
-/// # Example
-///
-/// To build the 'hello' example container:
-///
-/// sextant pack \
-/// --manifest examples/hello/manifest.yaml \
-/// --root examples/hello/root \
-/// --out target/northstar/repository \
-/// --key examples/keys/northstar.key \
-pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
-    pack_with(manifest, root, out, key, &SquashfsOpts::default())
-}
-
-/// Create an NPK with special `squashfs` options
-/// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
-/// and packs the results into a zipped NPK file.
-///
-/// # Arguments
-/// * `manifest` - Path to the container's manifest file
-/// * `root` - Path to the container's root directory
-/// * `out` - Target directory or filename of the packed NPK
-/// * `key` - Path to the key used to sign the package
+/// * `out` - Target directory or filename. If `out` is a directory a file with
+///   format `<name>:<version>.npk` will be created in the directory.
 /// * `squashfs_opts` - Options for `mksquashfs`
-///
-/// # Example
-///
-/// To build the 'hello' example container:
-///
-/// sextant pack \
-/// --manifest examples/hello/manifest.yaml \
-/// --root examples/hello/root \
-/// --out target/northstar/repository \
-/// --key examples/keys/northstar.key \
-/// --comp xz \
-/// --block-size 65536 \
-pub fn pack_with(
+/// * `key` - Optional key used to sign the NPK
+/// * `author` - Optional author information stored in the NPKs metadata section
+pub fn pack(
     manifest: &Path,
     root: &Path,
     out: &Path,
+    squashfs_opts: SquashfsOpts,
     key: Option<&Path>,
-    squashfs_opts: &SquashfsOpts,
+    author: Option<&str>,
 ) -> Result<(), Error> {
     let manifest = read_manifest(manifest)?;
-    let name = manifest.name.clone();
-    let version = manifest.version.clone();
+    let container = manifest.container();
     let mut builder = Builder::new(root, manifest);
+
     if let Some(key) = key {
         builder = builder.key(key);
     }
+
+    if let Some(author) = author {
+        builder = builder.author(author);
+    }
+
     builder = builder.squashfs_opts(squashfs_opts);
 
     let mut dest = out.to_path_buf();
     // Append filename from manifest if only a directory path was given
     if Path::is_dir(out) {
-        dest.push(format!("{}-{}.", &name, &version));
-        dest.set_extension(&NPK_EXT);
+        dest.push(format!("{}.{}", container, NPK_EXT));
     }
-    let npk = fs::File::create(&dest).map_err(|e| Error::Io {
-        context: format!("failed to create NPK: '{}'", &dest.display()),
-        error: e,
-    })?;
-    builder.build(npk)
+    fs::File::create(&dest)
+        .map_err(|error| Error::Io {
+            context: format!("failed to create '{}'", &dest.display()),
+            error,
+        })
+        .and_then(|npk| builder.build(npk))
 }
 
 /// Extract the npk content to `out`
@@ -859,41 +882,43 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
 
 fn write_npk<W: Write + Seek>(
     npk: W,
-    manifest: &Manifest,
-    fsimg: &Path,
+    metadata: &str,
+    manifest: &str,
     signature: Option<&str>,
+    fsimg: &Path,
 ) -> Result<(), Error> {
     let mut fsimg = fs::File::open(&fsimg)
         .map_err(|e| Error::io(format!("failed to open '{}'", &fsimg.display()), e))?;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    let manifest_string = serde_yaml::to_string(&manifest)
-        .map_err(|e| Error::Manifest(format!("failed to serialize manifest: {}", e)))?;
 
     let mut zip = zip::ZipWriter::new(npk);
-    zip.set_comment(serde_yaml::to_string(&Meta { version: VERSION }).unwrap());
 
-    if let Some(signature) = signature {
-        || -> Result<(), io::Error> {
-            zip.start_file(SIGNATURE_NAME, options)?;
-            zip.write_all(signature.as_bytes())
-        }()
-        .map_err(|e| Error::Io {
-            context: "failed to write signature to NPK".to_string(),
-            error: e,
+    // Metadata
+    zip.start_file(METADATA_NAME, options)
+        .map_err(|e| Error::zip("failed to write metadata to NPK", e))
+        .and_then(|_| {
+            zip.write_all(metadata.as_bytes())
+                .map_err(|e| Error::io("failed write metadata to NPK", e))
         })?;
-    }
 
+    // Manifest
     zip.start_file(MANIFEST_NAME, options)
-        .map_err(|e| Error::Zip {
-            context: "failed to write manifest to NPK".to_string(),
-            error: e,
+        .map_err(|e| Error::zip("failed to write manifest to NPK", e))
+        .and_then(|_| {
+            zip.write_all(manifest.as_bytes())
+                .map_err(|e| Error::io("failed to write manifest to NPK", e))
         })?;
-    zip.write_all(manifest_string.as_bytes())
-        .map_err(|e| Error::Io {
-            context: "failed to convert manifest to NPK".to_string(),
-            error: e,
-        })?;
+
+    // Signature
+    if let Some(signature) = signature {
+        zip.start_file(SIGNATURE_NAME, options)
+            .map_err(|e| Error::zip("failed to write signature to NPK".to_string(), e))
+            .and_then(|_| {
+                zip.write_all(signature.as_bytes())
+                    .map_err(|e| Error::io("failed to write signature to NPK", e))
+            })?;
+    }
 
     // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
     // 'extra data' to inflate the header of the ZIP file.
@@ -901,7 +926,7 @@ fn write_npk<W: Write + Seek>(
     // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
     zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
         .map_err(|e| Error::Zip {
-            context: "Could create aligned zip-file".to_string(),
+            context: "Failed to create aligned zip-file".to_string(),
             error: e,
         })?;
     io::copy(&mut fsimg, &mut zip)
