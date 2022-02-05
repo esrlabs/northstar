@@ -7,6 +7,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use api::{client::Client, model::Message};
 use clap::{self, IntoApp, Parser};
 use futures::{sink::SinkExt, StreamExt};
+use nix::{sys::select, unistd};
 use northstar::{
     api::{
         self,
@@ -14,7 +15,13 @@ use northstar::{
     },
     common::{name::Name, version::Version},
 };
-use std::{collections::HashMap, convert::TryFrom, path::PathBuf, process, str::FromStr};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    os::unix::prelude::{AsRawFd, RawFd},
+    path::PathBuf,
+    process,
+};
 use tokio::{
     fs,
     io::{copy, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -22,8 +29,14 @@ use tokio::{
     time,
 };
 
-trait N: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+trait N: AsyncRead + AsyncWrite + Send + Unpin + AsRawFd {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin + AsRawFd {}
+
+impl AsRawFd for Box<dyn N> {
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
+        (**self).as_raw_fd()
+    }
+}
 
 mod pretty;
 
@@ -76,6 +89,19 @@ enum Subcommand {
         container: String,
         /// Signal
         signal: Option<i32>,
+    },
+    /// Start an additional process inside a container
+    Exec {
+        /// Container name and optional version
+        #[clap(value_name = "name[:version]")]
+        container: String,
+        /// Command
+        path: String,
+        /// Command arguments
+        args: Vec<String>,
+        /// Environment variables
+        #[structopt(short, long)]
+        env: Vec<String>,
     },
     /// Install a npk
     Install {
@@ -153,7 +179,7 @@ struct Opt {
 /// Parse a str containing a u64 into a `std::time::Duration` and take the value
 /// as seconds
 fn parse_secs(src: &str) -> Result<time::Duration, anyhow::Error> {
-    u64::from_str(src)
+    src.parse::<u64>()
         .map(time::Duration::from_secs)
         .map_err(Into::into)
 }
@@ -169,7 +195,7 @@ fn parse_secs(src: &str) -> Result<time::Duration, anyhow::Error> {
 ///
 async fn parse_container<T>(name: &str, client: &mut Client<T>) -> Result<Container>
 where
-    T: AsyncRead + AsyncWrite + Unpin,
+    T: AsyncRead + AsyncWrite + Unpin + AsRawFd,
 {
     let (name, version): (Name, Version) = if let Some((name, version)) = name.split_once(':') {
         (Name::try_from(name)?, Version::parse(version)?)
@@ -193,7 +219,7 @@ where
     Ok(Container::new(name, version))
 }
 
-async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
+async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin + AsRawFd>(
     command: Subcommand,
     client: &mut Client<T>,
 ) -> Result<Request> {
@@ -289,6 +315,8 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             Ok(Request::TokenVerify(token.into(), user, shared))
         }
         Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
+        // This subcommand is handled separately
+        Subcommand::Exec { .. } => unreachable!(),
     }
 }
 
@@ -371,6 +399,49 @@ async fn main() -> Result<()> {
                 process::exit(0);
             }
         }
+        // Start process inside running container and attach a pseudo-terminal to it
+        Subcommand::Exec {
+            container,
+            env,
+            path,
+            args,
+        } => {
+            // Connect
+            let mut client = Client::new(io, None, opt.timeout)
+                .await
+                .context("Failed to connect")?;
+
+            let container = parse_container(&container, &mut client).await?;
+
+            let env: Result<Vec<_>> = env
+                .into_iter()
+                .map(|c| c.try_into().context("Invalid arg"))
+                .collect();
+
+            let path = path.try_into().context("Invalid arg")?;
+
+            let args: Result<Vec<_>> = args
+                .iter()
+                .map(|c| c.as_str().try_into().context("Invalid arg"))
+                .collect();
+
+            let request = Request::Exec {
+                container,
+                env: env?,
+                path,
+                args: args?,
+                pty: None,
+            };
+
+            client
+                .request(request)
+                .await
+                .context("Failed to send request")?;
+
+            let connection = client.into_inner();
+            let master = connection.as_raw_fd();
+            bridge(master, nix::libc::STDIN_FILENO)?;
+        }
         // Request response mode
         command => {
             // Connect
@@ -432,4 +503,47 @@ async fn main() -> Result<()> {
     };
 
     Ok(())
+}
+
+// TODO refactor using tokio
+/// Sends io back an forth between the input FDs
+fn bridge<L, R>(lhs: L, rhs: R) -> std::io::Result<()>
+where
+    L: AsRawFd,
+    R: AsRawFd,
+{
+    let lhs = lhs.as_raw_fd();
+    let rhs = rhs.as_raw_fd();
+
+    loop {
+        let mut fd_set = select::FdSet::new();
+        fd_set.insert(lhs);
+        fd_set.insert(rhs);
+
+        select::select(None, &mut fd_set, None, None, None).map_err(io_err)?;
+
+        if fd_set.contains(lhs) && copy_bytes(lhs, rhs)? == 0 {
+            return Ok(());
+        }
+
+        if fd_set.contains(rhs) && copy_bytes(rhs, lhs)? == 0 {
+            return Ok(());
+        }
+    }
+}
+
+/// Copy bytes from one FD to another.
+fn copy_bytes(from: RawFd, to: RawFd) -> std::io::Result<usize> {
+    let mut buf = [0; 512];
+    let n = unistd::read(from, &mut buf).map_err(io_err)?;
+
+    if n > 0 {
+        unistd::write(to, &buf[..n]).map_err(io_err)
+    } else {
+        Ok(0)
+    }
+}
+
+fn io_err(err: nix::Error) -> std::io::Error {
+    std::io::Error::from_raw_os_error(err as i32)
 }

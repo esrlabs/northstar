@@ -110,7 +110,7 @@ impl MountControl {
             let start = time::Instant::now();
 
             debug!("Mounting {}:{}", name, version);
-            let device = mount(
+            mount(
                 dm,
                 lc,
                 fd,
@@ -134,7 +134,7 @@ impl MountControl {
                 format_duration(duration)
             );
 
-            Ok(device)
+            Ok(())
         })
         .map(|r| match r {
             Ok(r) => r,

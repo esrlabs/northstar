@@ -11,7 +11,7 @@ use northstar::api::{
     client::{self, Client},
     model::{self, Container, ExitStatus, Notification},
 };
-use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{os::unix::prelude::AsRawFd, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, UnixStream},
@@ -89,8 +89,14 @@ struct Opt {
     timeout: Duration,
 }
 
-pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+pub trait N: AsyncRead + AsyncWrite + Send + Unpin + AsRawFd {}
+impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin + AsRawFd {}
+
+impl AsRawFd for Box<dyn N> {
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
+        self.as_ref().as_raw_fd()
+    }
+}
 
 async fn io(url: &Url) -> Result<Box<dyn N>> {
     let timeout = time::Duration::from_secs(5);

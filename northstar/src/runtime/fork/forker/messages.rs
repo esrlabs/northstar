@@ -22,6 +22,7 @@ pub enum Message {
         path: NonNulString,
         args: Vec<NonNulString>,
         env: Vec<NonNulString>,
+        setsid: bool,
         #[serde(skip)]
         io: Option<[OwnedFd; 3]>,
     },

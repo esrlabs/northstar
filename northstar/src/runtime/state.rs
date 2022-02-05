@@ -38,7 +38,7 @@ use std::{
     convert::TryFrom,
     fmt::Debug,
     iter::{once, FromIterator},
-    os::unix::net::UnixStream as StdUnixStream,
+    os::unix::{net::UnixStream as StdUnixStream, prelude::FromRawFd},
     path::PathBuf,
     result,
     sync::Arc,
@@ -556,10 +556,9 @@ impl State {
         debug!("Container {} argv is {}", container, args.iter().join(" "));
         debug!("Container {} env is {}", container, env.iter().join(", "));
 
-        // Send exec request to launcher
         if let Err(e) = self
             .launcher
-            .exec(container.clone(), init, args, env, io)
+            .exec(container.clone(), init, args, env, false, io)
             .await
         {
             warn!("failed to exec {} ({}): {}", container, pid, e);
@@ -596,6 +595,31 @@ impl State {
         self.container_event(container, ContainerEvent::Started);
 
         Ok(())
+    }
+
+    /// Request the forker to start an additional process in a running container
+    pub(super) async fn exec(
+        &mut self,
+        container: &Container,
+        env: Vec<NonNulString>,
+        path: NonNulString,
+        args: Vec<NonNulString>,
+        pty: &std::path::Path,
+    ) -> Result<(), Error> {
+        // TODO this is probably better done in forker
+        // also opening the file 3 times is probably no the best way to do this
+        fn open(path: &std::path::Path) -> OwnedFd {
+            use nix::fcntl;
+            let fd = fcntl::open(path, fcntl::OFlag::O_RDWR, nix::sys::stat::Mode::empty())
+                .expect("Failed to open PTY device");
+            unsafe { OwnedFd::from_raw_fd(fd) }
+        }
+
+        let io = [open(pty), open(pty), open(pty)];
+
+        self.launcher
+            .exec(container.clone(), path, args, env, true, io)
+            .await
     }
 
     /// Send signal `signal` to container if running
@@ -896,6 +920,26 @@ impl State {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
                                 warn!("failed to start {}: {}", container, e);
+                                model::Response::Error(e.into())
+                            }
+                        }
+                    }
+                    api::model::Request::Exec {
+                        container,
+                        env,
+                        path,
+                        args,
+                        pty,
+                    } => {
+                        let pty = pty.as_ref().expect("Failed to read path to slave pty");
+
+                        match self
+                            .exec(container, env.to_vec(), path.clone(), args.to_vec(), pty)
+                            .await
+                        {
+                            Ok(_) => model::Response::Ok,
+                            Err(e) => {
+                                warn!("Failed to exec {}: {}", container, e);
                                 model::Response::Error(e.into())
                             }
                         }

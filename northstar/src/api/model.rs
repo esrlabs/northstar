@@ -8,6 +8,7 @@ use serde::{de::Visitor, Deserialize, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    path::PathBuf,
 };
 
 /// Console configuration
@@ -124,6 +125,13 @@ pub enum Request {
         Vec<NonNulString>,
         HashMap<NonNulString, NonNulString>,
     ),
+    Exec {
+        container: Container,
+        env: Vec<NonNulString>,
+        path: NonNulString,
+        args: Vec<NonNulString>,
+        pty: Option<PathBuf>,
+    },
     TokenCreate(Vec<u8>, Vec<u8>),
     TokenVerify(Token, Vec<u8>, Vec<u8>),
     Umount(Vec<Container>),

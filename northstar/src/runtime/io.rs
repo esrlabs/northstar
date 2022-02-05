@@ -1,17 +1,19 @@
 use std::{
-    os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
+    os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
     path::{Path, PathBuf},
 };
 
 use crate::{
     common::container::Container,
     npk::manifest::{self, Output},
+    runtime::ipc::RawFdExt,
 };
 use log::debug;
 use nix::{
     fcntl::OFlag,
     pty,
-    sys::{stat::Mode, termios::SetArg},
+    sys::{select, stat::Mode, termios::SetArg},
+    unistd,
 };
 use tokio::{
     io::{self, AsyncBufReadExt, AsyncRead},
@@ -95,7 +97,7 @@ fn openrw<T: AsRef<Path>>(f: T) -> io::Result<OwnedFd> {
 }
 
 /// Create a new pty and return the main fd along with the sub name.
-fn openpty() -> (OwnedFd, PathBuf) {
+pub(super) fn openpty() -> (OwnedFd, PathBuf) {
     let main = pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY | OFlag::O_NONBLOCK)
         .expect("failed to open pty");
 
@@ -130,4 +132,54 @@ async fn log_lines<R: AsyncRead + Unpin>(target: String, output: R) -> io::Resul
     }
 
     Ok(())
+}
+
+/// Sends io back an forth between the input file descriptors.
+///
+/// This function requires that the input file descriptors have the option O_NONBLOCK unset.
+pub(super) async fn bridge<L, R>(lhs: L, rhs: R) -> io::Result<()>
+where
+    L: AsRawFd,
+    R: AsRawFd,
+{
+    debug_assert!(!lhs.is_nonblocking()?);
+    debug_assert!(!rhs.is_nonblocking()?);
+
+    let lhs = lhs.as_raw_fd();
+    let rhs = rhs.as_raw_fd();
+    tokio::task::spawn_blocking(move || loop {
+        let mut fd_set = select::FdSet::new();
+        fd_set.insert(lhs);
+        fd_set.insert(rhs);
+
+        select::select(None, &mut fd_set, None, None, None).map_err(io_err)?;
+
+        if fd_set.contains(lhs) && copy(lhs, rhs)? == 0 {
+            break Ok(());
+        }
+
+        if fd_set.contains(rhs) && copy(rhs, lhs)? == 0 {
+            break Ok(());
+        }
+    })
+    .await
+    .expect("failed to spawn task to forward io")
+}
+
+/// Copy bytes from one file descriptor to another.
+///
+/// Returns the number of bytes copied.
+fn copy(from: RawFd, to: RawFd) -> io::Result<usize> {
+    let mut buf = [0; 512];
+    let n = unistd::read(from, &mut buf).map_err(io_err)?;
+
+    if n > 0 {
+        unistd::write(to, &buf[..n]).map_err(io_err)
+    } else {
+        Ok(0)
+    }
+}
+
+fn io_err(err: nix::Error) -> std::io::Error {
+    std::io::Error::from_raw_os_error(err as i32)
 }

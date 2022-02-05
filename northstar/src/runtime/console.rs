@@ -2,7 +2,7 @@ use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed, VERSION as API_VERSION},
     common::container::Container,
-    runtime::{token::Token, EventTx, ExitStatus},
+    runtime::{ipc::RawFdExt, token::Token, EventTx, ExitStatus},
 };
 use api::model;
 use async_stream::stream;
@@ -16,6 +16,7 @@ use futures::{
 use log::{debug, error, info, trace, warn};
 use std::{
     fmt,
+    os::unix::prelude::AsRawFd,
     path::{Path, PathBuf},
     unreachable,
 };
@@ -144,7 +145,7 @@ impl Console {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
+    pub(super) async fn connection<T: AsyncRead + AsyncWrite + Unpin + AsRawFd>(
         stream: T,
         peer: Peer,
         stop: CancellationToken,
@@ -291,39 +292,68 @@ impl Console {
                     }
                 }
                 item = network_stream.next() => {
-                    match item {
-                        Some(Ok(model::Message::Request { request })) => {
-                            trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, token_validity, request).await {
-                                Ok(response) => response,
-                                Err(e) => {
-                                    warn!("Failed to process request: {}", e);
-                                    break;
-                                }
-                            };
-                            trace!("{}: <-- {:?}", peer, response);
+                    let mut message = if let Some(Ok(msg)) = item {
+                        msg
+                    } else {
+                        break;
+                    };
 
-                            if let Err(e) = network_stream.send(response).await {
-                                warn!("{}: Connection error: {}", peer, e);
+                    // In case of an exec request, a PTY device is configured and its slave end is
+                    // sent inside the request. After processing the request, the connection is
+                    // used to forward the io coming and going from the master file descriptor.
+                    let master_fd = match message {
+                        model::Message::Request {
+                            request: model::Request::Exec {
+                                ref mut pty, ..
+                            }
+                        } => {
+                            let (master_fd, slave_name) = super::io::openpty();
+                            *pty = Some(slave_name);
+                            Some(master_fd)
+                        }
+                        _ => None
+                    };
+
+                    if let model::Message::Request { request } = message {
+                        trace!("{}: --> {:?}", peer, request);
+                        let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, token_validity, request).await {
+                            Ok(response) => response,
+                            Err(e) => {
+                                warn!("failed to process request: {}", e);
                                 break;
                             }
-                        }
-                        Some(Ok(message)) => {
-                            warn!("{}: Unexpected message: {:?}. Disconnecting...", peer, message);
+                        };
+                        trace!("{}: <-- {:?}", peer, response);
+
+                        if let Err(e) = network_stream.send(response).await {
+                            warn!("{}: Connection error: {}", peer, e);
                             break;
                         }
-                        Some(Err(e)) => {
-                            warn!("{}: Connection error: {:?}. Disconnecting...", peer, e);
-                            break;
+                    } else {
+                        warn!("{}: Unexpected message: {:?}. Disconnecting...", peer, message);
+                        break;
+                    }
+
+                    // Repourpose the connection to processe's io
+                    if let Some(master_fd) = master_fd {
+                        let connection = network_stream.into_inner();
+                        connection.set_nonblocking(false).expect("failed to set connection to blocking");
+                        master_fd.set_nonblocking(false).expect("failed to set PTY master fd to blocking");
+                        match super::io::bridge(connection, master_fd).await {
+                            Ok(()) => {
+                                info!("{}: Connection closed", peer);
+                            }
+                            Err(e) => {
+                                warn!("{}: Connection error: {}", peer, e);
+                            }
                         }
-                        None => break,
+                        return Ok(());
                     }
                 }
             }
         }
 
         info!("{}: Connection closed", peer);
-
         Ok(())
     }
 }
@@ -362,6 +392,7 @@ where
         model::Request::TokenVerify { .. } => Permission::Token,
         model::Request::Umount { .. } => Permission::Umount,
         model::Request::Uninstall { .. } => Permission::Uninstall,
+        model::Request::Exec { .. } => Permission::Exec,
     };
 
     if !permissions.contains(&required_permission) {
@@ -555,7 +586,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
-    Stream: AsyncWrite + AsyncRead + Unpin + Send + 'static,
+    Stream: AsyncWrite + AsyncRead + Unpin + Send + Sync + 'static + AsRawFd,
     Addr: Into<Peer>,
 {
     let mut connections = FuturesUnordered::new();

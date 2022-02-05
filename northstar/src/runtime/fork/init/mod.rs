@@ -4,21 +4,23 @@ use crate::{
     npk::manifest::{Capability, RLimitResource, RLimitValue},
     runtime::{
         fork::util::{self, fork, set_child_subreaper, set_log_target, set_process_name},
-        ipc::{owned_fd::OwnedFd, Message as IpcMessage},
+        ipc::{owned_fd::OwnedFd, raw_fd_ext::RawFdExt, Message as IpcMessage},
         ExitStatus, Pid,
     },
     seccomp::AllowList,
 };
 pub use builder::build;
+use byteorder::ReadBytesExt;
 use itertools::Itertools;
 use nix::{
     errno::Errno,
-    libc::{self, c_ulong},
+    libc::{self, c_ulong, SIGCHLD},
     mount::MsFlags,
     sched::unshare,
     sys::{
+        select,
         signal::Signal,
-        wait::{waitpid, WaitStatus},
+        wait::{waitpid, WaitPidFlag, WaitStatus},
     },
     unistd,
     unistd::Uid,
@@ -33,7 +35,6 @@ use std::{
         prelude::{AsRawFd, RawFd},
     },
     path::PathBuf,
-    process::exit,
 };
 
 mod builder;
@@ -50,6 +51,7 @@ pub enum Message {
         path: NonNulString,
         args: Vec<NonNulString>,
         env: Vec<NonNulString>,
+        setsid: bool,
     },
 }
 
@@ -65,6 +67,22 @@ pub struct Init {
     pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
     pub console: bool,
+}
+
+/// Registers SIGCHLD handler and returns a socket that receives the notifications
+fn register_sigchld_handler() -> std::io::Result<UnixStream> {
+    let (write, read) = UnixStream::pair()?;
+    write.set_cloexec(true)?;
+    read.set_cloexec(true)?;
+
+    unsafe {
+        signal_hook::low_level::register(SIGCHLD, move || {
+            unistd::write(write.as_raw_fd(), &[b'0'])
+                .expect("failed to write byte into signal socket");
+        })?;
+    }
+
+    Ok(read)
 }
 
 impl Init {
@@ -112,120 +130,137 @@ impl Init {
         // Capabilities
         self.drop_privileges();
 
-        loop {
-            match stream.recv() {
-                Ok(Some(Message::Exec {
-                    path,
-                    args,
-                    mut env,
-                })) => {
-                    debug!("Execing {} {}", path, args.iter().join(" "));
+        // Set SIGCHLD signal handler
+        let mut signals = register_sigchld_handler().expect("failed to register signal handler");
 
-                    // The init process got adopted by the forker after the trampoline exited. It is
-                    // safe to set the parent death signal now.
+        let signals_fd = signals.as_raw_fd();
+        let forker_fd = stream.as_raw_fd();
+
+        loop {
+            let mut fd_set = select::FdSet::new();
+            fd_set.insert(forker_fd);
+            fd_set.insert(signals_fd);
+
+            match select::select(None, &mut fd_set, None, None, None) {
+                Ok(_) => {}
+                Err(Errno::EINTR) => {
+                    // Signal was caught
+                    continue;
+                }
+                Err(e) => {
+                    panic!("Failed to select: {}", e);
+                }
+            }
+
+            // Received an exec request from forker
+            if fd_set.contains(forker_fd) {
+                let (path, args, mut env, setsid) = match stream.recv() {
+                    Ok(Some(Message::Exec {
+                        path,
+                        args,
+                        env,
+                        setsid,
+                    })) => (path, args, env, setsid),
+                    Ok(None) => {
+                        info!("Channel closed. Exiting...");
+                        std::process::exit(0);
+                    }
+                    Ok(Some(msg)) => panic!("unexpected message: {:?}", msg),
+                    Err(e) => panic!("failed to receive message: {}", e),
+                };
+                debug!("Execing {} {}", path, args.iter().join(" "));
+
+                // The init process got adopted by the forker after the trampoline exited. It is
+                // safe to set the parent death signal now.
+                util::set_parent_death_signal(Signal::SIGKILL);
+
+                if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
+                    // Add the fd number to the environment of the application
+                    let console_env = format!("NORTHSTAR_CONSOLE={}", fd);
+                    // Safety: `console_env` is a valid UTF-8 string
+                    env.push(unsafe { NonNulString::from_string_unchecked(console_env) });
+                }
+
+                let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
+                debug_assert!(io.len() == 3);
+                let stdin = io[0];
+                let stdout = io[1];
+                let stderr = io[2];
+
+                // Start new process inside the container
+                let pid = fork(|| {
+                    set_log_target(format!("northstar::{}", self.container));
                     util::set_parent_death_signal(Signal::SIGKILL);
 
-                    if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
-                        // Add the fd number to the environment of the application
-                        let s = unsafe {
-                            NonNulString::from_string_unchecked(format!("NORTHSTAR_CONSOLE={}", fd))
-                        };
-                        env.push(s);
+                    if setsid {
+                        unistd::setsid().expect("failed to call setsid");
+                        if unsafe { nix::libc::ioctl(stdin.as_raw_fd(), nix::libc::TIOCSCTTY) } < 0
+                        {
+                            panic!("Failed to TIOCSCTTY");
+                        }
                     }
 
-                    let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
-                    debug_assert!(io.len() == 3);
-                    let stdin = io[0];
-                    let stdout = io[1];
-                    let stderr = io[2];
+                    unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("failed to dup2");
+                    unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("failed to dup2");
+                    unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("failed to dup2");
 
-                    // Start new process inside the container
-                    let pid = fork(|| {
-                        set_log_target(format!("northstar::{}", self.container));
-                        util::set_parent_death_signal(Signal::SIGKILL);
-
-                        unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("failed to dup2");
-                        unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("failed to dup2");
-                        unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("failed to dup2");
-
-                        unistd::close(stdin).expect("failed to close stdout after dup2");
-                        unistd::close(stdout).expect("failed to close stdout after dup2");
-                        unistd::close(stderr).expect("failed to close stderr after dup2");
-
-                        // Set seccomp filter
-                        if let Some(ref filter) = self.seccomp {
-                            filter.apply().expect("failed to apply seccomp filter.");
-                        }
-
-                        let path = CString::from(path);
-                        let args = args.into_iter().map_into::<CString>().collect_vec();
-                        let env = env.into_iter().map_into::<CString>().collect_vec();
-
-                        panic!(
-                            "execve: {:?} {:?}: {:?}",
-                            &path,
-                            &args,
-                            unistd::execve(&path, &args, &env)
-                        )
-                    })
-                    .expect("failed to spawn child process");
-
-                    // close fds
-                    drop(console);
                     unistd::close(stdin).expect("failed to close stdout");
                     unistd::close(stdout).expect("failed to close stdout");
                     unistd::close(stderr).expect("failed to close stderr");
 
-                    let message = Message::Forked { pid };
-                    stream.send(&message).expect("failed to send fork result");
-
-                    // Wait for the child to exit
-                    loop {
-                        debug!("Waiting for child process {} to exit", pid);
-                        match waitpid(Some(unistd::Pid::from_raw(pid as i32)), None) {
-                            Ok(WaitStatus::Exited(_pid, status)) => {
-                                debug!("Child process {} exited with status code {}", pid, status);
-                                let exit_status = ExitStatus::Exit(status);
-                                stream
-                                    .send(Message::Exit { pid, exit_status })
-                                    .expect("Channel error");
-
-                                assert_eq!(
-                                    waitpid(Some(unistd::Pid::from_raw(pid as i32)), None),
-                                    Err(nix::Error::ECHILD)
-                                );
-
-                                exit(0);
-                            }
-                            Ok(WaitStatus::Signaled(_pid, status, _)) => {
-                                debug!("Child process {} exited with signal {}", pid, status);
-                                let exit_status = ExitStatus::Signalled(status as u8);
-                                stream
-                                    .send(Message::Exit { pid, exit_status })
-                                    .expect("Channel error");
-
-                                assert_eq!(
-                                    waitpid(Some(unistd::Pid::from_raw(pid as i32)), None),
-                                    Err(nix::Error::ECHILD)
-                                );
-
-                                exit(0);
-                            }
-                            Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
-                                log::error!("Child process continued or stopped");
-                                continue;
-                            }
-                            Err(nix::Error::EINTR) => continue,
-                            e => panic!("failed to waitpid on {}: {:?}", pid, e),
-                        }
+                    // Set seccomp filter
+                    if let Some(ref filter) = self.seccomp {
+                        filter.apply().expect("failed to apply seccomp filter.");
                     }
+
+                    let path = CString::from(path);
+                    let args = args.into_iter().map_into::<CString>().collect_vec();
+                    let env = env.into_iter().map_into::<CString>().collect_vec();
+
+                    panic!(
+                        "execve: {:?} {:?}: {:?}",
+                        &path,
+                        &args,
+                        unistd::execve(&path, &args, &env)
+                    )
+                })
+                .expect("failed to spawn child process");
+
+                unistd::close(stdin).expect("failed to close stdout");
+                unistd::close(stdout).expect("failed to close stdout");
+                unistd::close(stderr).expect("failed to close stderr");
+
+                let message = Message::Forked { pid };
+                stream.send(&message).expect("failed to send fork result");
+            }
+
+            // Reap child process
+            if fd_set.contains(signals_fd) {
+                signals
+                    .read_u8()
+                    .expect("failed to read byte from signal socket");
+
+                loop {
+                    let (pid, exit_status) = match waitpid(None, Some(WaitPidFlag::WNOHANG)) {
+                        Ok(WaitStatus::Exited(pid, status)) => {
+                            (pid.as_raw() as u32, ExitStatus::Exit(status))
+                        }
+                        Ok(WaitStatus::Signaled(pid, status, _)) => {
+                            (pid.as_raw() as u32, ExitStatus::Signalled(status as u8))
+                        }
+                        Ok(WaitStatus::StillAlive) => break,
+                        Err(Errno::ECHILD) => {
+                            // No more processes to wait for
+                            std::process::exit(0);
+                        }
+                        Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => continue,
+                        e => panic!("Failed to waitpid: {:?}", e),
+                    };
+
+                    stream
+                        .send(Message::Exit { pid, exit_status })
+                        .expect("failed to send exit message");
                 }
-                Ok(None) => {
-                    info!("Channel closed. Exiting...");
-                    std::process::exit(0);
-                }
-                Ok(_) => unimplemented!("Unimplemented message"),
-                Err(e) => panic!("failed to receive message: {}", e),
             }
         }
     }

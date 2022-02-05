@@ -1,6 +1,6 @@
 mod message;
 pub mod owned_fd;
-mod raw_fd_ext;
+pub(crate) mod raw_fd_ext;
 mod socket_pair;
 
 pub use message::{AsyncMessage, Message};

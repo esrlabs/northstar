@@ -1,22 +1,17 @@
-use super::{
-    init,
-    init::Init,
-    messages::{Message, Notification},
-    util::fork,
-};
+use super::{init, init::Init, messages::Message, util::fork};
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     debug,
     runtime::{
-        fork::util::{self, set_log_target},
+        fork::{
+            util::{self, set_log_target},
+            Notification,
+        },
         ipc::{self, owned_fd::OwnedFd, socket_pair, AsyncMessage, Message as IpcMessage},
         ExitStatus, Pid,
     },
 };
-use futures::{
-    stream::{FuturesUnordered, StreamExt},
-    Future,
-};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use itertools::Itertools;
 use nix::{
     errno::Errno,
@@ -31,15 +26,169 @@ use std::{
         prelude::{IntoRawFd, RawFd},
     },
 };
-use tokio::{net::UnixStream, select};
+use tokio::{
+    net::UnixStream,
+    select,
+    sync::{mpsc, oneshot},
+};
 
 type Inits = HashMap<Container, InitProcess>;
 
+type ExitStatusFuture = oneshot::Receiver<ExitStatus>;
+
+#[derive(Debug)]
+struct Command {
+    path: NonNulString,
+    args: Vec<NonNulString>,
+    env: Vec<NonNulString>,
+    setsid: bool,
+    io: [OwnedFd; 3],
+}
+
 /// Handle the communication between the forker and the init process.
 struct InitProcess {
+    /// Init process PID.
     pid: Pid,
-    /// Used to send messages to the init process.
-    stream: AsyncMessage<UnixStream>,
+    /// Receives futures for exit status of running processes
+    exit_rx: mpsc::Receiver<(Pid, ExitStatusFuture)>,
+    /// Send exec requests
+    exec_tx: mpsc::Sender<Command>,
+}
+
+impl InitProcess {
+    fn new(
+        init_pid: Pid,
+        mut stream: AsyncMessage<UnixStream>,
+    ) -> (Self, impl Future<Output = ExitStatus>) {
+        // Returns the exit status of the processes inside the container.
+        let (exit_tx, exit_rx) = mpsc::channel(1);
+        // Send the requests to Init to start new processes.
+        let (exec_tx, mut exec_rx) = mpsc::channel(1);
+
+        // Exit status of the init process.
+        let (init_exit_tx, init_exit_rx) = oneshot::channel();
+
+        // Spawns task that owns the stream used to communicate with the init process. InitProcess
+        // communicates with this task throug the two channels.
+        //
+        //  ┌─────────────┐   exec   ┌────────────┐
+        //  │             │─────────►│            │    socket    ┌──────┐
+        //  │ InitProcess │          │ async task │◄────────────►│ Init │
+        //  │             │◄─────────│            │              └──────┘
+        //  └─────────────┘   exit   └────────────┘
+        //
+        tokio::spawn(async move {
+            // Used to track processes inside the contaner that are spawned from the init and
+            // forward thir exit status when they exit.
+            let mut ps = HashMap::new();
+
+            loop {
+                select! {
+                    // Incoming messages from the container's init process
+                    msg = stream.recv() => {
+                        match msg {
+                            Ok(Some(init::Message::Forked { pid })) => {
+                                let (tx, rx) = oneshot::channel();
+                                let entry = ps.insert(pid, tx);
+                                debug_assert!(entry.is_none(), "PID already registered");
+
+                                exit_tx
+                                    .send((pid, rx))
+                                    .await
+                                    .expect("failed to send exit status future");
+                            }
+                            Ok(Some(init::Message::Exit { pid, exit_status })) => {
+                                // Note it is possible to receive exit statuses from processes that
+                                // are not tracked for being childs of childs. We simply ignore
+                                // those and only care for those directly bellow the init.
+                                // TODO This does not solve the problem with orphans
+                                let tx = match ps.remove(&pid) {
+                                    Some(tx) => tx,
+                                    None => continue,
+                                };
+
+                                // TODO the process exit status is sent as the init exit status
+                                // because that's what the runtime and tests expect currently.
+                                let init_exit_status = exit_status.clone();
+
+                                tx.send(exit_status)
+                                    .expect("failed to send process exit status");
+
+                                // check if last process exited
+                                if ps.is_empty() {
+                                    // TODO This call is blocking but it should not take long since
+                                    // the init process exits as soon as its last child terminates.
+                                    let result = waitpid(unistd::Pid::from_raw(init_pid as i32), None).expect("failed to wait for init");
+                                    debug!("Init {} exit status: {:?}", init_pid, result);
+
+                                    init_exit_tx.send(init_exit_status).expect("failed to send init exit status");
+                                    break;
+                                }
+                            }
+                            Ok(Some(_)) => panic!("unexpected init message"),
+                            Ok(None) | Err(_) => {
+                                debug!("Init connection closed, exiting");
+                                break;
+                            }
+                        }
+                    }
+                    // Forward exec requests to the container's init process
+                    exec = exec_rx.recv() => {
+                        let Command { path, args, env, setsid, io } = exec.expect("failed to receive command");
+                        stream
+                            .send(init::Message::Exec { path, args, env, setsid })
+                            .await
+                            .expect("failed to send");
+
+                        stream.send_fds(&io).await.expect("failed to send pty fd");
+                    }
+                }
+            }
+        });
+
+        (
+            Self {
+                pid: init_pid,
+                exit_rx,
+                exec_tx,
+            },
+            init_exit_rx.map(|exit| exit.unwrap_or(ExitStatus::Exit(-1))),
+        )
+    }
+
+    /// Returns the init process PID
+    fn pid(&self) -> Pid {
+        self.pid
+    }
+
+    /// Start a process in the container
+    async fn exec(
+        &mut self,
+        path: NonNulString,
+        args: Vec<NonNulString>,
+        env: Vec<NonNulString>,
+        setsid: bool,
+        io: [OwnedFd; 3],
+    ) -> (Pid, impl Future<Output = ExitStatus>) {
+        self.exec_tx
+            .send(Command {
+                path,
+                args,
+                env,
+                setsid,
+                io,
+            })
+            .await
+            .expect("failed to send command");
+
+        let (pid, exit) = self
+            .exit_rx
+            .recv()
+            .await
+            .expect("failed to receive PID and exit status future");
+
+        (pid, exit.map(|s| s.unwrap_or(ExitStatus::Exit(-1))))
+    }
 }
 
 /// Entry point of the forker process
@@ -49,37 +198,73 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
         .expect("failed to create async message");
     let mut stream: AsyncMessage<UnixStream> =
         stream.try_into().expect("failed to create async message");
-    let mut inits = Inits::new();
     let mut exits = FuturesUnordered::new();
+    let mut ps_exit = FuturesUnordered::new();
+
+    // Bookkeeping of container init processes
+    let mut inits = Inits::new();
 
     debug!("Entering main loop");
 
     loop {
         select! {
+            process_exit = ps_exit.next(), if !ps_exit.is_empty() => {
+                let (container, pid, exit_status) = process_exit.expect("invalid exit status");
+                debug!("Container {}, process {} exit with status {}", container, pid, exit_status);
+            }
             request = recv(&mut stream) => {
                 match request {
                     Some(Message::CreateRequest { init, console }) => {
                         debug!("Creating init process for {}", init.container);
                         let container = init.container.clone();
-                        let (pid, init) = create(init, console).await;
-                        if inits.insert(container.clone(), init).is_some() {
-                            panic!("duplicate init request for {}", container);
+
+                        if inits.contains_key(&container) {
+                            let error = format!("Container {} already created", container);
+                            log::warn!("{}", error);
+                            stream.send(Message::Failure(error)).await.expect("failed to send response");
+                            continue;
                         }
-                        stream.send(Message::CreateResult { init: pid }).await.expect("failed to send response");
-                    }
-                    Some(Message::ExecRequest { container, path, args, env, io }) => {
-                        let io = io.expect("exec request without io");
-                        let init = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {}", container));
-                        // There's a init - let's exec!
-                        let (response, exit) = exec(init, container, path, args, env, io).await;
 
-                        // Add exit status future of this exec request
-                        exits.push(exit);
+                        debug!("Creating init process for {}", container);
+                        let (init_process, exit_fut) = create(init, console).await;
+                        let init_pid = init_process.pid();
 
-                        // Send the result of the exec request to the runtime
-                        stream.send(response).await.expect("failed to send response");
+                        let entry = inits.insert(container.clone(), init_process);
+                        debug_assert!(entry.is_none(), "Container already created");
+
+                        exits.push(exit_fut.map(|status| (container, status)));
+
+                        stream.send(Message::CreateResult { init: init_pid }).await.expect("failed to send response");
                     }
-                    Some(_) => unreachable!("Unexpected message"),
+                    Some(Message::ExecRequest { container, path, args, env, setsid, io }) => {
+                        let io = io.expect("failed to receive io");
+
+                        debug_assert!(io.len() == 3);
+                        let init = match inits.get_mut(&container) {
+                            Some(init) => init,
+                            None => {
+                                let error_msg = format!("Container {} has no running init", container);
+                                log::warn!("{}", error_msg);
+                                stream.send(Message::Failure(error_msg)).await.expect("failed to send response");
+                                continue;
+                            }
+                        };
+
+                        debug!(
+                            "Forwarding exec request for container {}: {} {}",
+                            container,
+                            path,
+                            args.iter().map(ToString::to_string).join(" ")
+                        );
+
+                        // Send the exec request to the init process
+                        let (pid, exit) = init.exec(path, args, env, setsid, io).await;
+
+                        ps_exit.push(exit.map(move |status| (container, pid, status)));
+
+                        stream.send(Message::ExecResult).await.expect("failed to send response");
+                    }
+                    Some(_) => unreachable!("unexpected message"),
                     None => {
                         debug!("Forker request channel closed. Exiting ");
                         std::process::exit(0);
@@ -88,6 +273,7 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
             }
             exit = exits.next(), if !exits.is_empty() => {
                 let (container, exit_status) = exit.expect("invalid exit status");
+                inits.remove(&container);
                 debug!("Forwarding exit status notification of {}: {}", container, exit_status);
                 notifications.send(Notification::Exit { container, exit_status }).await.expect("failed to send exit notification");
             }
@@ -96,7 +282,10 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
 }
 
 /// Create a new init process ("container")
-async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
+async fn create(
+    init: Init,
+    console: Option<OwnedFd>,
+) -> (InitProcess, impl Future<Output = ExitStatus>) {
     let container = init.container.clone();
     debug!("Creating container {}", container);
     let mut stream = socket_pair().expect("failed to create socket pair");
@@ -156,68 +345,7 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
 
     debug!("Created container {} with pid {}", container, pid);
 
-    (pid, InitProcess { pid, stream })
-}
-
-/// Send a exec request to a container
-async fn exec(
-    mut init: InitProcess,
-    container: Container,
-    path: NonNulString,
-    args: Vec<NonNulString>,
-    env: Vec<NonNulString>,
-    io: [OwnedFd; 3],
-) -> (Message, impl Future<Output = (Container, ExitStatus)>) {
-    debug_assert!(io.len() == 3);
-
-    debug!(
-        "Forwarding exec request for container {}: {}",
-        container,
-        args.iter().map(ToString::to_string).join(" ")
-    );
-
-    // Send the exec request to the init process
-    let message = init::Message::Exec { path, args, env };
-    init.stream
-        .send(message)
-        .await
-        .expect("failed to send exec to init");
-
-    // Send io file descriptors
-    init.stream.send_fds(&io).await.expect("failed to send fd");
-    drop(io);
-
-    match init.stream.recv().await.expect("failed to receive") {
-        Some(init::Message::Forked { .. }) => (),
-        _ => panic!("Unexpected init message"),
-    }
-
-    // Construct a future that waits to the init to signal a exit of it's child
-    // Afterwards reap the init process which should have exited already
-    let exit = async move {
-        match init.stream.recv().await {
-            Ok(Some(init::Message::Exit {
-                pid: _,
-                exit_status,
-            })) => {
-                // Reap init process
-                debug!("Reaping init process of {} ({})", container, init.pid);
-                waitpid(unistd::Pid::from_raw(init.pid as i32), None)
-                    .expect("failed to reap init process");
-                (container, exit_status)
-            }
-            Ok(None) | Err(_) => {
-                // Reap init process
-                debug!("Reaping init process of {} ({})", container, init.pid);
-                waitpid(unistd::Pid::from_raw(init.pid as i32), None)
-                    .expect("failed to reap init process");
-                (container, ExitStatus::Exit(-1))
-            }
-            Ok(_) => panic!("Unexpected message from init"),
-        }
-    };
-
-    (Message::ExecResult, exit)
+    InitProcess::new(pid, stream)
 }
 
 async fn recv(stream: &mut AsyncMessage<UnixStream>) -> Option<Message> {
@@ -248,6 +376,7 @@ async fn recv(stream: &mut AsyncMessage<UnixStream>) -> Option<Message> {
             path,
             args,
             env,
+            setsid,
             ..
         }) => {
             let io = stream
@@ -259,6 +388,7 @@ async fn recv(stream: &mut AsyncMessage<UnixStream>) -> Option<Message> {
                 path,
                 args,
                 env,
+                setsid,
                 io: Some(io),
             })
         }

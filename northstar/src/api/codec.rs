@@ -47,6 +47,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Framed<T> {
         }
         item
     }
+
+    /// Return the inner connection
+    pub fn into_inner(self) -> T {
+        self.inner.into_inner()
+    }
 }
 
 impl<T> std::ops::Deref for Framed<T> {

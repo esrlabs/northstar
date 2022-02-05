@@ -45,6 +45,8 @@ pub enum Permission {
     Kill,
     /// Install a container
     Install,
+    /// Exec process inside container
+    Exec,
     /// Mount a container
     Mount,
     /// Umount a container

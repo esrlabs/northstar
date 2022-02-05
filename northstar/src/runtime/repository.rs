@@ -118,7 +118,7 @@ impl DirRepository {
 }
 
 #[async_trait::async_trait]
-impl<'a> Repository for DirRepository {
+impl Repository for DirRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         let dest = self.dir.join(format!("{}.npk", nanoid!()));
         let mut file = fs::File::create(&dest)
@@ -217,7 +217,7 @@ impl MemRepository {
 }
 
 #[async_trait::async_trait]
-impl<'a> Repository for MemRepository {
+impl Repository for MemRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);

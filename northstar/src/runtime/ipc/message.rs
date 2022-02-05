@@ -92,6 +92,12 @@ impl Message<std::os::unix::net::UnixStream> {
     }
 }
 
+impl AsRawFd for Message<std::os::unix::net::UnixStream> {
+    fn as_raw_fd(&self) -> RawFd {
+        self.inner.as_raw_fd()
+    }
+}
+
 impl<T> From<T> for Message<T>
 where
     T: Read + Write,
