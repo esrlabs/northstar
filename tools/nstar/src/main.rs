@@ -3,7 +3,7 @@
 #![deny(clippy::all)]
 #![deny(missing_docs)]
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use api::{client::Client, model::Message};
 use futures::{sink::SinkExt, StreamExt};
 use northstar::{
@@ -61,24 +61,21 @@ enum Subcommand {
     Repositories,
     /// Mount a container
     Mount {
-        /// Container name
-        name: String,
-        /// Container version
-        version: Option<Version>,
+        /// Container name and optional version
+        #[structopt(value_name = "name[:version]")]
+        container: String,
     },
     /// Umount a container
     Umount {
-        /// Container name
-        name: String,
-        /// Container version
-        version: Option<Version>,
+        /// Container name and optional version
+        #[structopt(value_name = "name[:version]")]
+        container: String,
     },
     /// Start a container
     Start {
-        /// Container name
-        name: String,
-        /// Container version
-        version: Option<Version>,
+        /// Container name and optional version
+        #[structopt(value_name = "name[:version]")]
+        container: String,
         /// Command line arguments
         #[structopt(short, long)]
         args: Option<Vec<String>>,
@@ -88,10 +85,9 @@ enum Subcommand {
     },
     /// Stop a container
     Kill {
-        /// Container name
-        name: String,
-        /// Container version
-        version: Option<Version>,
+        /// Container name and optional version
+        #[structopt(value_name = "name[:version]")]
+        container: String,
         /// Signal
         signal: Option<i32>,
     },
@@ -104,10 +100,9 @@ enum Subcommand {
     },
     /// Uninstall a container
     Uninstall {
-        /// Container name
-        name: String,
-        /// Container version
-        version: Version,
+        /// Container name and optional version
+        #[structopt(value_name = "name[:version]")]
+        container: String,
     },
     /// Shutdown Northstar
     Shutdown,
@@ -128,10 +123,9 @@ enum Subcommand {
     },
     /// Request container statistics
     ContainerStats {
-        /// Container name
-        name: String,
-        /// Container version
-        version: Option<Version>,
+        /// Container name and optional version
+        #[structopt(value_name = "name[:version]")]
+        container: String,
     },
 }
 
@@ -160,29 +154,38 @@ fn parse_secs(src: &str) -> Result<time::Duration, anyhow::Error> {
         .map_err(Into::into)
 }
 
-/// Return the version passed or query the runtime and return the version of a container
-/// if the name is unique
-async fn or_version<T: AsyncRead + AsyncWrite + Unpin>(
-    name: &str,
-    version: Option<Version>,
-    client: &mut Client<T>,
-) -> Result<Version> {
-    if let Some(version) = version {
-        Ok(version)
+/// Parse the container name and version out of the user input
+///
+/// # Format
+///
+/// The string format for the container name is specified as `<name>[:<version>]`.
+///
+/// if the version is not specified, Northstar is queried for all the versions associated to
+/// `<name>` and only if a single version is found, it is used.
+///
+async fn parse_container<T>(name: &str, client: &mut Client<T>) -> Result<Container>
+where
+    T: AsyncRead + AsyncWrite + Unpin,
+{
+    let (name, version) = if let Some((name, version)) = name.split_once(':') {
+        (name, Version::parse(version)?)
     } else {
-        // If there's only one container matching the name - use the version
-        let containers = client.containers().await?;
-        let containers = containers
-            .iter()
-            .filter(|c| *c.manifest.name == name)
-            .collect::<Vec<_>>();
+        let versions: Vec<Version> = client
+            .containers()
+            .await?
+            .into_iter()
+            .filter_map(|c| (c.manifest.name.as_str() == name).then(|| c.manifest.version))
+            .collect();
 
-        if containers.len() == 1 {
-            Ok(containers[0].manifest.version.clone())
+        if versions.is_empty() {
+            bail!("No container found with name {}", name);
+        } else if versions.len() > 1 {
+            bail!("Container {} has multiple versions: {:?}", name, versions);
         } else {
-            Err(anyhow!("Version not unique"))
+            (name, versions[0].clone())
         }
-    }
+    };
+    Ok(Container::new(name.try_into()?, version))
 }
 
 async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
@@ -192,24 +195,22 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
     match command {
         Subcommand::Containers => Ok(Request::Containers),
         Subcommand::Repositories => Ok(Request::Repositories),
-        Subcommand::Mount { name, version } => {
-            let version = or_version(&name, version, client).await?;
-            let name = name.try_into()?;
-            let containers = vec![Container::new(name, version)];
+        Subcommand::Mount { container } => {
+            let container = parse_container(&container, client).await?;
+            let containers = vec![container];
             Ok(Request::Mount { containers })
         }
-        Subcommand::Umount { name, version } => {
-            let version = or_version(&name, version, client).await?;
-            let name = name.try_into()?;
-            let container = Container::new(name, version);
+        Subcommand::Umount { container } => {
+            let container = parse_container(&container, client).await?;
             Ok(Request::Umount { container })
         }
         Subcommand::Start {
-            name,
-            version,
+            container,
             args,
             env,
         } => {
+            let container = parse_container(&container, client).await?;
+
             // Convert args
             let args = if let Some(args) = args {
                 let mut non_null = Vec::with_capacity(args.len());
@@ -241,41 +242,28 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                 None
             };
 
-            let version = or_version(&name, version, client).await?;
-
             Ok(Request::Start {
-                container: Container::new(name.try_into()?, version),
+                container,
                 args,
                 env,
             })
         }
-        Subcommand::Kill {
-            name,
-            version,
-            signal,
-        } => {
-            let version = or_version(&name, version, client).await?;
+        Subcommand::Kill { container, signal } => {
+            let container = parse_container(&container, client).await?;
             let signal = signal.unwrap_or(15);
-            let name = name.try_into()?;
-            Ok(Request::Kill {
-                container: Container::new(name, version),
-                signal,
-            })
+            Ok(Request::Kill { container, signal })
         }
         Subcommand::Install { npk, repository } => {
             let size = npk.metadata().map(|m| m.len())?;
             Ok(Request::Install { repository, size })
         }
-        Subcommand::Uninstall { name, version } => Ok(Request::Uninstall {
-            container: Container::new(name.try_into()?, version),
+        Subcommand::Uninstall { container } => Ok(Request::Uninstall {
+            container: parse_container(&container, client).await?,
         }),
         Subcommand::Shutdown => Ok(Request::Shutdown),
-        Subcommand::ContainerStats { name, version } => {
-            let version = or_version(&name, version, client).await?;
-            let name = name.try_into()?;
-            Ok(Request::ContainerStats {
-                container: Container::new(name, version),
-            })
+        Subcommand::ContainerStats { container } => {
+            let container = parse_container(&container, client).await?;
+            Ok(Request::ContainerStats { container })
         }
         Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }
