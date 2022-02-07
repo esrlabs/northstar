@@ -560,7 +560,7 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
             context: "Failed to create secret key".to_string(),
             error: e,
         })?;
-    let public_key: ed25519_dalek::PublicKey = (&secret_key).into();
+    let public_key = ed25519_dalek::PublicKey::from(&secret_key);
 
     let secret_key_file = out.join(name).with_extension("key");
     let public_key_file = out.join(name).with_extension("pub");

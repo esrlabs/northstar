@@ -20,5 +20,5 @@ pub(super) async fn load(path: &Path) -> Result<PublicKey, Error> {
         .await
         .map_err(|e| Error::Io(format!("Failed to load key from {}", path.display()), e))?;
 
-    Ok(PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)?)
+    PublicKey::from_bytes(&key_bytes).map_err(Error::Signature)
 }

@@ -85,7 +85,7 @@ fn cat(path: &Path) -> Result<()> {
     io::copy(&mut input, &mut output)
         .map(drop)
         .with_context(|| format!("Failed to cat {}", path.display()))?;
-    writeln!(&mut output).context("Failed to write to stdout")
+    writeln!(output).context("Failed to write to stdout")
 }
 
 fn crash() {
