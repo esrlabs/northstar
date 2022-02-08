@@ -4,62 +4,62 @@
 #![deny(missing_docs)]
 
 use anyhow::Result;
+use clap::Parser;
 use northstar::npk;
 use std::path::PathBuf;
-use structopt::StructOpt;
 
 mod inspect;
 mod pack;
 
-#[derive(Debug, StructOpt)]
-#[structopt(about = "Northstar CLI")]
+#[derive(Debug, Parser)]
+#[clap(about = "Northstar CLI")]
 enum Opt {
     /// Pack Northstar containers
     Pack {
         /// Manifest path
-        #[structopt(short, long)]
+        #[clap(short, long)]
         manifest: PathBuf,
         /// Container source directory
-        #[structopt(short, long)]
+        #[clap(short, long)]
         root: PathBuf,
         /// Key file
-        #[structopt(short, long)]
+        #[clap(short, long)]
         key: Option<PathBuf>,
         /// Output directory
-        #[structopt(short, long)]
+        #[clap(short, long)]
         out: PathBuf,
         /// Compression algorithm to use in squashfs (default gzip)
-        #[structopt(short, long, default_value = "gzip")]
+        #[clap(short, long, default_value = "gzip")]
         comp: npk::npk::CompressionAlgorithm,
         /// Block size used by squashfs (default 128 KiB)
-        #[structopt(short, long)]
+        #[clap(short, long)]
         block_size: Option<u32>,
         /// Create n clones of the container
-        #[structopt(long)]
+        #[clap(long)]
         clones: Option<u32>,
     },
     /// Unpack Northstar containers
     Unpack {
         /// NPK path
-        #[structopt(short, long)]
+        #[clap(short, long)]
         npk: PathBuf,
         /// Output directory
-        #[structopt(short, long)]
+        #[clap(short, long)]
         out: PathBuf,
     },
     /// Print information about a Northstar container
     Inspect {
-        #[structopt(short, long)]
+        #[clap(short, long)]
         short: bool,
         /// NPK to inspect
         npk: PathBuf,
     },
     GenKey {
         /// Name of key
-        #[structopt(short, long)]
+        #[clap(short, long)]
         name: String,
         /// Key directory
-        #[structopt(short, long)]
+        #[clap(short, long)]
         out: PathBuf,
     },
 }
@@ -67,7 +67,7 @@ enum Opt {
 fn main() -> Result<()> {
     env_logger::init();
 
-    match Opt::from_args() {
+    match Opt::parse() {
         Opt::Pack {
             manifest,
             root,

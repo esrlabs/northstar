@@ -4,11 +4,11 @@
 #![deny(missing_docs)]
 
 use anyhow::{Context, Result};
+use clap::Parser;
 use northstar::api;
 use okapi::openapi3::{Components, Contact, Info};
 use schemars::{gen::SchemaSettings, JsonSchema};
 use std::{fs::write, path::PathBuf, str::FromStr};
-use structopt::{clap::AppSettings, StructOpt};
 
 /// About string for CLI
 fn about() -> &'static str {
@@ -42,20 +42,20 @@ impl FromStr for Model {
 }
 
 /// CLI
-#[derive(StructOpt)]
-#[structopt(name = "schema", author, about = about(), global_setting(AppSettings::ColoredHelp))]
+#[derive(Parser)]
+#[clap(name = "schema", author, about = about())]
 struct Opt {
     /// Output destination. Defaults to stdout
-    #[structopt(short, long)]
+    #[clap(short, long)]
     output: Option<PathBuf>,
 
     /// Model to generate
-    #[structopt(short, long)]
+    #[clap(short, long)]
     model: Model,
 }
 
 fn main() -> Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     let settings = SchemaSettings::openapi3();
     let mut gen = settings.into_generator();
 

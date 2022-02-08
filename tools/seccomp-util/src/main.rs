@@ -1,25 +1,25 @@
 use anyhow::{Context, Result};
+use clap::Parser;
 use northstar::{
     common::non_null_string::NonNullString,
     seccomp::{profiles::default::SYSCALLS_BASE, Profile, Seccomp, SyscallRule},
 };
 use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, fs::File, io, io::BufRead, path::PathBuf};
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct Opt {
     /// Path to strace log file
     input: PathBuf,
     /// Whether or not to allow the syscalls defined by the default profile
-    #[structopt(long)]
+    #[clap(long)]
     no_default_profile: bool,
 }
 
 fn main() -> Result<()> {
     env_logger::init();
-    let path: PathBuf = Opt::from_args().input;
-    let no_default_profile = Opt::from_args().no_default_profile;
+    let path: PathBuf = Opt::parse().input;
+    let no_default_profile = Opt::parse().no_default_profile;
 
     // Collect syscall names from strace file
     let file =

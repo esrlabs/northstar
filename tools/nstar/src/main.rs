@@ -5,6 +5,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use api::{client::Client, model::Message};
+use clap::{self, IntoApp, Parser};
 use futures::{sink::SinkExt, StreamExt};
 use northstar::{
     api::{
@@ -19,12 +20,6 @@ use std::{
     path::PathBuf,
     process,
     str::FromStr,
-};
-use structopt::{
-    clap::{
-        AppSettings, {self},
-    },
-    StructOpt,
 };
 use tokio::{
     fs,
@@ -50,43 +45,43 @@ fn about() -> &'static str {
 }
 
 /// Subcommands
-#[derive(StructOpt, Clone)]
-#[structopt(name = "nstar", author, about = about(), global_setting(AppSettings::ColoredHelp))]
+#[derive(Parser, Clone)]
+#[clap(name = "nstar", author, about = about())]
 enum Subcommand {
     /// List available containers
-    #[structopt(alias = "ls", alias = "list")]
+    #[clap(alias = "ls", alias = "list")]
     Containers,
     /// List configured repositories
-    #[structopt(alias = "repos")]
+    #[clap(alias = "repos")]
     Repositories,
     /// Mount a container
     Mount {
         /// Container name and optional version
-        #[structopt(value_name = "name[:version]")]
+        #[clap(value_name = "name[:version]")]
         container: String,
     },
     /// Umount a container
     Umount {
         /// Container name and optional version
-        #[structopt(value_name = "name[:version]")]
+        #[clap(value_name = "name[:version]")]
         container: String,
     },
     /// Start a container
     Start {
         /// Container name and optional version
-        #[structopt(value_name = "name[:version]")]
+        #[clap(value_name = "name[:version]")]
         container: String,
         /// Command line arguments
-        #[structopt(short, long)]
+        #[clap(short, long)]
         args: Option<Vec<String>>,
         /// Environment variables in KEY=VALUE format
-        #[structopt(short, long)]
+        #[clap(short, long)]
         env: Option<Vec<String>>,
     },
     /// Stop a container
     Kill {
         /// Container name and optional version
-        #[structopt(value_name = "name[:version]")]
+        #[clap(value_name = "name[:version]")]
         container: String,
         /// Signal
         signal: Option<i32>,
@@ -101,7 +96,7 @@ enum Subcommand {
     /// Uninstall a container
     Uninstall {
         /// Container name and optional version
-        #[structopt(value_name = "name[:version]")]
+        #[clap(value_name = "name[:version]")]
         container: String,
     },
     /// Shutdown Northstar
@@ -109,40 +104,40 @@ enum Subcommand {
     /// Notifications
     Notifications {
         /// Exit after n notifications
-        #[structopt(short, long)]
+        #[clap(short, long)]
         number: Option<usize>,
     },
     /// Shell completion script generation
     Completion {
         /// Output directory where to generate completions into
-        #[structopt(short, long)]
-        output: PathBuf,
+        #[clap(short, long)]
+        output: Option<PathBuf>,
         /// Generate completions for shell type
-        #[structopt(short, long)]
-        shell: clap::Shell,
+        #[clap(short, long)]
+        shell: clap_complete::Shell,
     },
     /// Request container statistics
     ContainerStats {
         /// Container name and optional version
-        #[structopt(value_name = "name[:version]")]
+        #[clap(value_name = "name[:version]")]
         container: String,
     },
 }
 
 /// CLI
-#[derive(StructOpt)]
+#[derive(Parser)]
 struct Opt {
     /// Northstar address
-    #[structopt(short, long, default_value = DEFAULT_HOST)]
+    #[clap(short, long, default_value = DEFAULT_HOST)]
     pub url: url::Url,
     /// Output json
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub json: bool,
     /// Connect timeout in seconds
-    #[structopt(short, long, default_value = "10", parse(try_from_str = parse_secs))]
+    #[clap(short, long, default_value = "10", parse(try_from_str = parse_secs))]
     pub timeout: time::Duration,
     /// Command
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     pub command: Subcommand,
 }
 
@@ -271,13 +266,31 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     let timeout = time::Duration::from_secs(5);
 
     // Generate shell completions and exit on give subcommand
     if let Subcommand::Completion { output, shell } = opt.command {
-        println!("Generating {} completions to {}", shell, output.display());
-        Opt::clap().gen_completions(env!("CARGO_PKG_NAME"), shell, output);
+        let mut output: Box<dyn std::io::Write> = match output {
+            Some(path) => {
+                println!("Generating {} completions to {}", shell, path.display());
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&path)
+                    .with_context(|| format!("Failed to open {}", path.display()))?;
+                Box::new(file)
+            }
+            None => Box::new(std::io::stdout()),
+        };
+
+        clap_complete::generate(
+            shell,
+            &mut Opt::into_app(),
+            Opt::into_app().get_name().to_string(),
+            &mut output,
+        );
+
         process::exit(0);
     }
 
