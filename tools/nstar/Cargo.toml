@@ -7,7 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.44"
-futures = "0.3.17"
+futures = "0.3.21"
 itertools = "0.10.1"
 northstar = { path = "../../northstar", features = ["api"], default-features = false }
 prettytable-rs = "0.8.0"
