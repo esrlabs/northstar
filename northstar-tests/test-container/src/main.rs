@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use clap::Parser;
 use nix::{
     libc,
     unistd::{self, Gid},
@@ -10,18 +11,17 @@ use std::{
     ptr::null_mut,
     thread, time,
 };
-use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 struct Opt {
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     command: Option<Command>,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 enum Command {
     Cat {
-        #[structopt(parse(from_os_str))]
+        #[clap(parse(from_os_str))]
         path: PathBuf,
     },
     Crash,
@@ -46,7 +46,7 @@ enum Command {
 }
 
 fn main() -> Result<()> {
-    let command = Opt::from_args().command.unwrap_or(Command::Sleep);
+    let command = Opt::parse().command.unwrap_or(Command::Sleep);
     println!("Executing \"{:?}\"", command);
     match command {
         Command::Cat { path } => cat(&path)?,

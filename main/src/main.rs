@@ -4,6 +4,7 @@
 #![deny(missing_docs)]
 
 use anyhow::{anyhow, Context, Error};
+use clap::Parser;
 use log::{debug, info, warn};
 use nix::mount::MsFlags;
 use northstar::runtime;
@@ -13,28 +14,27 @@ use std::{
     path::{Path, PathBuf},
     process::exit,
 };
-use structopt::StructOpt;
 use tokio::{select, signal::unix::SignalKind};
 
 mod logger;
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "northstar", about = "Northstar")]
+#[derive(Debug, Parser)]
+#[clap(name = "northstar", about = "Northstar")]
 struct Opt {
     /// File that contains the northstar configuration
-    #[structopt(short, long, default_value = "northstar.toml")]
+    #[clap(short, long, default_value = "northstar.toml")]
     pub config: PathBuf,
 
     /// Do not enter a mount namespace if this option is set Be aware that in
     /// case of a non normal termination of the runtime the images mounted in
     /// `run_dir` have to be umounted manually before starting the runtime again.
-    #[structopt(short, long)]
+    #[clap(short, long)]
     pub disable_mount_namespace: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Error> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     let config = read_to_string(&opt.config)
         .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
     let config: Config = toml::from_str(&config)

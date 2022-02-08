@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use clap::Parser;
 use futures::{
     future::{self, pending, ready, try_join_all},
     FutureExt, StreamExt,
@@ -9,7 +10,6 @@ use northstar::api::{
     model::{self, ExitStatus, Notification},
 };
 use std::{path::PathBuf, str::FromStr};
-use structopt::StructOpt;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, UnixStream},
@@ -42,46 +42,46 @@ impl FromStr for Mode {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[clap(
     name = "stress",
     about = "Manual stress test the start and stop of Nortstar containers"
 )]
 struct Opt {
     /// Runtime address
-    #[structopt(short, long, default_value = "tcp://localhost:4200")]
+    #[clap(short, long, default_value = "tcp://localhost:4200")]
     url: url::Url,
 
     /// Duration to run the test for in seconds
-    #[structopt(short, long)]
+    #[clap(short, long)]
     duration: Option<u64>,
 
     /// Random delay between each iteration within 0..value ms
-    #[structopt(short, long)]
+    #[clap(short, long)]
     random: Option<u64>,
 
     /// Mode
-    #[structopt(short, long, default_value = "start-stop")]
+    #[clap(short, long, default_value = "start-stop")]
     mode: Mode,
 
     /// Npk for install-uninstall mode
-    #[structopt(long, required_if("mode", "install-uninstall"))]
+    #[clap(long, required_if_eq("mode", "install-uninstall"))]
     npk: Option<PathBuf>,
 
     /// Repository for install-uninstall mode
-    #[structopt(long, required_if("mode", "install-uninstall"))]
+    #[clap(long, required_if_eq("mode", "install-uninstall"))]
     repository: Option<String>,
 
     /// Relaxed result
-    #[structopt(long)]
+    #[clap(long)]
     relaxed: bool,
 
     /// Initial random delay in ms to randomize tasks
-    #[structopt(long)]
+    #[clap(long)]
     initial_random_delay: Option<u64>,
 
     /// Notification timeout in seconds
-    #[structopt(short, long, default_value = "60")]
+    #[clap(short, long, default_value = "60")]
     timeout: u64,
 }
 
@@ -115,7 +115,7 @@ async fn io(url: &Url) -> Result<Box<dyn N>> {
 #[tokio::main]
 async fn main() -> Result<()> {
     env_logger::init();
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     info!("mode: {:?}", opt.mode);
     info!("duration: {:?}", opt.duration);
