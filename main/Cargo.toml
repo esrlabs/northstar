@@ -11,7 +11,7 @@ name = "northstar"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.44"
+anyhow = "1.0.54"
 clap = { version = "3.1.0", features = ["derive"] }
 log = "0.4.14"
 nix = "0.23.0"
