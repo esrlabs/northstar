@@ -318,7 +318,6 @@ list of
 * `cap_setpcap`: drop capabilities
 * `cap_setuid`: user id
 * `cap_sys_admin`: `mount`, `umount`, setns
-* `cap_sys_chroot`: `chroot` (init)
 * `cap_sys_resource`: increase `rlimits` (init)
 
 ## Internals

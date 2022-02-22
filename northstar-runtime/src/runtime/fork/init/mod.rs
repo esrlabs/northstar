@@ -16,11 +16,13 @@ use itertools::Itertools;
 use log::{debug, info, warn};
 use nix::{
     errno::Errno,
+    fcntl::{self},
     libc::{self, c_ulong},
-    mount::MsFlags,
-    sched::{setns, unshare, CloneFlags},
+    mount::{self},
+    sched,
     sys::{
         signal::Signal,
+        stat::Mode,
         wait::{waitpid, WaitStatus},
     },
     unistd,
@@ -86,14 +88,14 @@ impl Init {
 
         // Enter mount namespace
         debug!("Entering mount namespace");
-        unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("failed to unshare NEWNS");
+        sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("failed to unshare NEWNS");
 
         // Perform all mounts passed in mounts
         self.mount();
 
-        // Set the chroot to the containers root mount point
-        debug!("Chrooting to {}", self.root.display());
-        unistd::chroot(&self.root).expect("failed to chroot");
+        // Set the root to the containers root mount point
+        debug!("Pivot rooting to {}", self.root.display());
+        self.pivot_rootfs(&self.root);
 
         // Set current working directory to root
         debug!("Setting current working directory to root");
@@ -346,11 +348,55 @@ impl Init {
                     .open(&path)
                     .expect("failed to open netns");
                 debug!("Attaching to network namespace \"{}\"", netns);
-                setns(handle.as_raw_fd(), CloneFlags::CLONE_NEWNET).expect("failed to enter netns");
+                sched::setns(handle.as_raw_fd(), sched::CloneFlags::CLONE_NEWNET)
+                    .expect("failed to enter netns");
             } else {
                 warn!("Failed to attach to network namespace \"{}\"", netns);
             }
         }
+    }
+
+    /// Set the rootfs to `path`. Thanks to the `youki` project where this code borrowed from.
+    /// https://github.com/containers/youki.
+    fn pivot_rootfs(&self, path: &Path) {
+        // Open the path as directory and read only
+        let newroot = fcntl::open(
+            path,
+            fcntl::OFlag::O_DIRECTORY | fcntl::OFlag::O_RDONLY,
+            Mode::empty(),
+        )
+        .expect("failed to open new root");
+
+        // Make the given path as the root directory for the container
+        // see https://man7.org/linux/man-pages/man2/pivot_root.2.html, specially the notes
+        // pivot root usually changes the root directory to first argument, and then mounts the original root
+        // directory at second argument. Giving same path for both stacks mapping of the original root directory
+        // above the new directory at the same path, then the call to umount unmounts the original root directory from
+        // this path. This is done, as otherwise, we will need to create a separate temporary directory under the new root path
+        // so we can move the original root there, and then unmount that. This way saves the creation of the temporary
+        // directory to put original root directory.
+        unistd::pivot_root(path, path).expect("failed to set pivot root");
+
+        // Make the original root directory rslave to avoid propagating unmount event to the host mount namespace.
+        // We should use MS_SLAVE not MS_PRIVATE according to https://github.com/opencontainers/runc/pull/1500.
+        mount::mount(
+            None::<&str>,
+            "/",
+            None::<&str>,
+            mount::MsFlags::MS_SLAVE | mount::MsFlags::MS_REC,
+            None::<&str>,
+        )
+        .expect("failed to mount");
+
+        // Unmount the original root directory which was stacked on top of new root directory
+        // MNT_DETACH makes the mount point unavailable to new accesses, but waits till the original mount point
+        // to be free of activity to actually unmount
+        // see https://man7.org/linux/man-pages/man2/umount2.2.html for more information
+        mount::umount2("/", mount::MntFlags::MNT_DETACH).expect("failed to umount old root");
+
+        // Change directory to root
+        unistd::fchdir(newroot).expect("failed to fchdir");
+        unistd::close(newroot).expect("failed to close");
     }
 }
 
@@ -418,7 +464,7 @@ impl Mount {
         source: Option<PathBuf>,
         target: PathBuf,
         fstype: Option<&'static str>,
-        flags: MsFlags,
+        flags: mount::MsFlags,
         data: Option<String>,
     ) -> Mount {
         let error_msg = format!(
@@ -446,7 +492,7 @@ impl Mount {
             &self.target,
             self.fstype.as_deref(),
             // Safe because flags is private and only set in Mount::new via MsFlags::bits
-            unsafe { MsFlags::from_bits_unchecked(self.flags) },
+            unsafe { mount::MsFlags::from_bits_unchecked(self.flags) },
             self.data.as_deref(),
         )
         .expect(&self.error_msg);
