@@ -73,7 +73,7 @@ Northstar containers are called `NPK`. The NPK format is heavily inspired by the
 Northstar container contains:
 
 * Root filesystem in a [Squashfs](https://github.com/plougher/squashfs-tools)
-  file system image (optionally compressed) Northstar manifest with container
+  file system image (optionally compressed)
 * Northstar manifest with process configuration and container meta information
 
 Northstar containers can be created with the Northstar utility
