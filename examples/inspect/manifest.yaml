@@ -29,3 +29,5 @@ rlimits:
     soft: 10000
     hard: 20000
 suppl_groups: [src, inet]
+selinux:
+  context: unconfined_u:object_r:user_home_t:s0
