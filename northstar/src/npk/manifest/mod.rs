@@ -23,7 +23,7 @@ mod cgroups;
 mod console;
 mod mount;
 
-/// Environment varibables used by the runtime and not available to the user.
+/// Environment variables used by the runtime and not available to the user.
 const RESERVED_ENV_VARIABLES: &[&str] = &[
     "NORTHSTAR_NAME",
     "NORTHSTAR_VERSION",
@@ -199,7 +199,7 @@ impl Manifest {
 
             if selinux.context.len() >= XATTR_SIZE_MAX {
                 return Err(Error::Invalid(format!(
-                    "Selinux context os too long. Maximum length in {}",
+                    "Selinux context is too long. Maximum length is {}",
                     XATTR_SIZE_MAX
                 )));
             }
