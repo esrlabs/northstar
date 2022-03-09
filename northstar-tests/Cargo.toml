@@ -14,7 +14,7 @@ log = "0.4.14"
 nanoid = "0.4.0"
 nix = "0.23.0"
 northstar = { path = "../northstar", features = ["api", "runtime"] }
-regex = "1.5.4"
+regex = "1.5.5"
 rusty-fork = "0.3.0"
 tempfile = "3.3.0"
 tokio = { version = "1.17.0", features = ["fs", "time"] }
