@@ -52,7 +52,7 @@ url = { version = "2.2.2", features = ["serde"], optional = true }
 uuid = { version = "0.8.2", features = ["v4"], optional = true }
 walkdir = { version = "2.3.2", optional = true }
 which = { version = "4.2.2", optional = true }
-zip = { version = "0.5.13", features = ["unreserved"], optional = true }
+zip = { version = "0.6.0", default-features = false, optional = true }
 
 [features]
 api = [
