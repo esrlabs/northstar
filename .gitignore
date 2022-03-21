@@ -1,6 +1,4 @@
-mkmf.log
-target
-download_dir/
-remote/
-.vscode/
 .DS_Store
+.vscode/
+remote/
+target
