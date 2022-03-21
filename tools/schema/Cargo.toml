@@ -10,5 +10,5 @@ anyhow = "1.0.56"
 clap = { version = "3.1.6", features = ["derive"] }
 northstar = { path = "../../northstar", features = ["api"], default-features = false }
 okapi = "0.7.0-rc.1"
-schemars = "0.8.6"
+schemars = "0.8.8"
 serde_json = "1.0.79"
