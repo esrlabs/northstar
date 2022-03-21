@@ -17,7 +17,7 @@
     <br/>
     <br/>
     <a href="https://github.com/esrlabs/northstar">
-        <img src="images/northstar.gif">
+        <img src="doc/northstar.gif">
     </a>
   </p>
 </p>
@@ -264,7 +264,7 @@ kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
 ### Container launch sequence
 
-<br/><img src="images/container-startup.png" class="inline" width=600/>
+<br/><img src="doc/container-startup.png" class="inline" width=600/>
 
 ### Manifest Format
 
