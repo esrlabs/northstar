@@ -22,7 +22,7 @@ db-path = "~/.cargo/advisory-db"
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # The lint level for security vulnerabilities
-vulnerability = "allow"
+vulnerability = "deny"
 # The lint level for unmaintained crates
 unmaintained = "allow"
 # The lint level for crates that have been yanked from their source registry
@@ -34,7 +34,8 @@ notice = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    #"RUSTSEC-0000-0000",
+    # safe: Use of outdated smallvec in ferris-says crate. Used only in a example
+    "RUSTSEC-2018-0018"
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
