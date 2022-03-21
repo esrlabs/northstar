@@ -287,82 +287,73 @@ fn recv_control_msg<T: FromRawFd, const N: usize>(
 
 #[cfg(test)]
 mod test {
-    use std::{io::Seek, process::exit};
+    use std::{fs::File, io::Seek, process::exit};
 
-    use nix::unistd::close;
-    use tokio::{io::AsyncSeekExt, runtime::Builder};
+    use tokio::runtime::Builder;
 
     use super::*;
 
-    #[test]
-    fn send_recv_fd_async() {
-        let mut fd0 = nix::sys::memfd::memfd_create(
+    const ITERATIONS: usize = 10_000;
+
+    /// Open two memfds for testing
+    fn open_test_files() -> [File; 2] {
+        let fd0 = nix::sys::memfd::memfd_create(
             &std::ffi::CString::new("hello").unwrap(),
             nix::sys::memfd::MemFdCreateFlag::empty(),
         )
         .unwrap();
-        let mut fd1 = nix::sys::memfd::memfd_create(
+        let fd1 = nix::sys::memfd::memfd_create(
             &std::ffi::CString::new("again").unwrap(),
             nix::sys::memfd::MemFdCreateFlag::empty(),
         )
         .unwrap();
+        unsafe { [File::from_raw_fd(fd0), File::from_raw_fd(fd1)] }
+    }
 
+    /// Read file to end and assert the result is equal to the expected `s`
+    fn read_assert(file: &mut File, s: &str) {
+        let mut buf = String::new();
+        file.read_to_string(&mut buf).unwrap();
+        write_seek_flush(file, "");
+        assert_eq!(buf, s);
+    }
+
+    /// Write `s` to file and seek to the beginning
+    fn write_seek_flush(file: &mut File, s: &str) {
+        file.write_all(s.as_bytes()).unwrap();
+        file.seek(io::SeekFrom::Start(0)).unwrap();
+        file.flush().unwrap();
+    }
+
+    #[test]
+    fn send_recv_fd_async() {
+        let mut files = open_test_files();
         let mut pair = super::super::socket_pair().unwrap();
-
-        const ITERATONS: usize = 100_000;
 
         match unsafe { nix::unistd::fork() }.unwrap() {
             nix::unistd::ForkResult::Parent { child: _ } => {
-                let parent = pair.first();
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
                 rt.block_on(async move {
-                    let stream = AsyncMessage::try_from(parent).unwrap();
+                    let stream = AsyncMessage::try_from(pair.first()).unwrap();
 
-                    // Send and receive the fds a couple of times
-                    for _ in 0..ITERATONS {
-                        stream.send_fds(&[fd0, fd1]).await.unwrap();
-                        close(fd0).unwrap();
-                        close(fd1).unwrap();
-
-                        let fds = stream.recv_fds::<RawFd, 2>().await.unwrap();
-                        fd0 = fds[0];
-                        fd1 = fds[1];
+                    for _ in 0..ITERATIONS {
+                        stream.send_fds(&files).await.unwrap();
+                        files = stream.recv_fds::<File, 2>().await.unwrap();
                     }
 
-                    // Done - check fd content
-
-                    let mut buf = String::new();
-                    let mut file0 = unsafe { tokio::fs::File::from_raw_fd(fd0) };
-                    file0.seek(io::SeekFrom::Start(0)).await.unwrap();
-                    file0.read_to_string(&mut buf).await.unwrap();
-                    assert_eq!(buf, "hello");
-
-                    let mut buf = String::new();
-                    let mut file1 = unsafe { tokio::fs::File::from_raw_fd(fd1) };
-                    file1.seek(io::SeekFrom::Start(0)).await.unwrap();
-                    file1.read_to_string(&mut buf).await.unwrap();
-                    assert_eq!(buf, "again");
+                    read_assert(&mut files[0], "hello");
+                    read_assert(&mut files[1], "again");
                 });
             }
             nix::unistd::ForkResult::Child => {
-                let child = pair.second();
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
                 rt.block_on(async move {
-                    let stream = AsyncMessage::try_from(child).unwrap();
+                    let stream = AsyncMessage::try_from(pair.second()).unwrap();
 
-                    // Send and receive the fds a couple of times
-                    for _ in 0..ITERATONS {
-                        let mut files = stream.recv_fds::<tokio::fs::File, 2>().await.unwrap();
-
-                        files[0].seek(io::SeekFrom::Start(0)).await.unwrap();
-                        files[0].write_all(b"hello").await.unwrap();
-                        files[0].flush().await.unwrap();
-
-                        files[1].seek(io::SeekFrom::Start(0)).await.unwrap();
-                        files[1].write_all(b"again").await.unwrap();
-                        files[1].flush().await.unwrap();
-
-                        // Send it back
+                    for _ in 0..ITERATIONS {
+                        let mut files = stream.recv_fds::<File, 2>().await.unwrap();
+                        write_seek_flush(&mut files[0], "hello");
+                        write_seek_flush(&mut files[1], "again");
                         stream.send_fds(&files).await.unwrap();
                     }
                 });
@@ -373,49 +364,30 @@ mod test {
 
     #[test]
     fn send_recv_fd_blocking() {
-        let mut fd = nix::sys::memfd::memfd_create(
-            &std::ffi::CString::new("foo").unwrap(),
-            nix::sys::memfd::MemFdCreateFlag::empty(),
-        )
-        .unwrap();
-
+        let mut files = open_test_files();
         let mut pair = super::super::socket_pair().unwrap();
-
-        const ITERATONS: usize = 100_000;
 
         match unsafe { nix::unistd::fork() }.unwrap() {
             nix::unistd::ForkResult::Parent { child: _ } => {
-                let parent = pair.first();
-                let stream = Message::try_from(parent).unwrap();
-                for _ in 0..ITERATONS {
-                    stream.send_fds(&[fd]).unwrap();
-                    close(fd).unwrap();
-                    fd = stream.recv_fds::<RawFd, 1>().unwrap()[0];
+                let stream: Message<_> = pair.first().into();
+
+                for _ in 0..ITERATIONS {
+                    stream.send_fds(&files).unwrap();
+                    files = stream.recv_fds::<File, 2>().unwrap();
                 }
 
-                // Done - check fd content
-                let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
-                file.seek(io::SeekFrom::Start(0)).unwrap();
-                let mut buf = String::new();
-                file.read_to_string(&mut buf).unwrap();
-                assert_eq!(buf, "hello");
+                read_assert(&mut files[0], "hello");
+                read_assert(&mut files[1], "again");
             }
             nix::unistd::ForkResult::Child => {
-                let child = pair.second();
-                let mut stream = Message::try_from(child).unwrap();
-                for _ in 0..ITERATONS {
-                    let mut file = stream.recv_fds::<std::fs::File, 1>().unwrap();
+                let stream: Message<_> = pair.second().into();
 
-                    // Write some bytes in to the fd
-                    file[0].seek(io::SeekFrom::Start(0)).unwrap();
-                    file[0].write_all(b"hello").unwrap();
-                    file[0].flush().unwrap();
-
-                    // Send it back
-                    stream.send_fds(&[file[0].as_raw_fd()]).unwrap();
-                    drop(file);
+                for _ in 0..ITERATIONS {
+                    let mut files = stream.recv_fds::<File, 2>().unwrap();
+                    write_seek_flush(&mut files[0], "hello");
+                    write_seek_flush(&mut files[1], "again");
+                    stream.send_fds(&files).unwrap();
                 }
-                stream.recv::<i32>().ok();
                 exit(0);
             }
         }
