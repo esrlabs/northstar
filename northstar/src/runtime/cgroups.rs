@@ -129,7 +129,7 @@ impl CGroups {
         config: &manifest::cgroups::CGroups,
         pid: Pid,
     ) -> Result<CGroups, Error> {
-        info!("Creating cgroups for {}", container);
+        debug!("Creating cgroups for {}", container);
         let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(
             hierarchy(),
             Path::new(top_level_dir).join(container.name().to_str()),
@@ -151,7 +151,6 @@ impl CGroups {
 
         // If adding the task fails it's a fault of the runtime or it's integration
         // and not of the container
-        debug!("Assigning pid {} of {} to cgroups", pid, container);
         cgroup
             .add_task(cgroups_rs::CgroupPid::from(pid as u64))
             .expect("Failed to assign pid");

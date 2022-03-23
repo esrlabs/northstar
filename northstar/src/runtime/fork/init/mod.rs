@@ -95,7 +95,7 @@ impl Init {
         unistd::chroot(&self.root).expect("Failed to chroot");
 
         // Set current working directory to root
-        debug!("Setting cwd to /");
+        debug!("Setting current working directory to root");
         env::set_current_dir("/").expect("Failed to set cwd to /");
 
         // UID / GID
@@ -336,7 +336,6 @@ impl Init {
     /// Execute list of mount calls
     fn mount(&self) {
         for mount in &self.mounts {
-            debug!("Mounting {:?} on {}", mount.source, mount.target.display());
             mount.mount();
         }
     }

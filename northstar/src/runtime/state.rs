@@ -452,7 +452,6 @@ impl State {
 
         // CGroups
         let cgroups = {
-            debug!("Configuring CGroups for {}", container);
             let config = manifest.cgroups.clone().unwrap_or_default();
             let events_tx = self.events_tx.clone();
 

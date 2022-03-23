@@ -124,24 +124,36 @@ async fn prepare_mounts(
 }
 
 fn proc(root: &Path, target: &Path) -> Mount {
-    log::debug!("Mounting proc on {}", target.display());
+    log::debug!(
+        "Adding proc on {} with options ro, nosuid, noexec and nodev",
+        target.display()
+    );
     let source = PathBuf::from("proc");
     let target = root.join_strip(target);
-    let fstype = "proc";
+    const FSTYPE: Option<&'static str> = Some("proc");
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
-    Mount::new(Some(source), target, Some(fstype), flags, None)
+    Mount::new(Some(source), target, FSTYPE, flags, None)
 }
 
 fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<Mount> {
     if host.exists() {
         let rw = options.contains(&MountOption::Rw);
         let mut mounts = Vec::with_capacity(if rw { 2 } else { 1 });
-        log::debug!(
-            "Mounting {} on {} with flags {}",
-            host.display(),
-            target.display(),
-            options
-        );
+        if options.is_empty() {
+            log::debug!(
+                "Adding {} on {} with flags {}",
+                host.display(),
+                target.display(),
+                options
+            );
+        } else {
+            log::debug!(
+                "Adding {} on {} with flags {}",
+                host.display(),
+                target.display(),
+                options
+            );
+        }
         let source = host.to_owned();
         let target = root.join_strip(target);
         let mut flags = options_to_flags(options);
@@ -155,6 +167,11 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<
         ));
 
         if !rw {
+            log::debug!(
+                "Adding read only remount of {} on {}",
+                host.display(),
+                target.display()
+            );
             flags.set(MsFlags::MS_REMOUNT, true);
             flags.set(MsFlags::MS_RDONLY, true);
             mounts.push(Mount::new(Some(source), target, None, flags, None));
@@ -197,7 +214,11 @@ async fn persist(
         gid
     ))?;
 
-    log::debug!("Mounting {} on {}", source.display(), target.display(),);
+    log::debug!(
+        "Adding {} on {} with options nodev, nosuid and noexec",
+        source.display(),
+        target.display(),
+    );
 
     let target = root.join_strip(target);
     let flags = MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
