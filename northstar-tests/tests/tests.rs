@@ -55,6 +55,11 @@ test!(install_uninstall_to_fs_repository, {
     }
 });
 
+// Uninstalling an unknown container should fail
+test!(uninstall_unknown_container, {
+    assert!(client().uninstall("fckptn:0.0.1").await.is_err());
+});
+
 // Start and stop a container multiple times
 test!(start_stop, {
     client().install_test_container().await?;
