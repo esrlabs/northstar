@@ -167,17 +167,16 @@ impl<'a> Repository for DirRepository {
     }
 
     async fn remove(&mut self, container: &Container) -> Result<(), Error> {
-        if let Some((path, npk)) = self.containers.remove(container) {
-            debug!("Removing {}", path.display());
-            drop(npk);
-            fs::remove_file(path)
-                .await
-                .context("Failed to remove npk")
-                .map(drop)
-        } else {
-            // TODO: this is an error
-            Ok(())
-        }
+        let (path, npk) = self
+            .containers
+            .remove(container)
+            .expect("Container not found");
+        debug!("Removing {}", path.display());
+        drop(npk);
+        fs::remove_file(path)
+            .await
+            .context("Failed to remove npk")
+            .map(drop)
     }
 
     fn get(&self, container: &Container) -> Option<&Npk> {
@@ -272,6 +271,7 @@ impl<'a> Repository for MemRepository {
     }
 
     async fn remove(&mut self, container: &Container) -> Result<(), Error> {
+        debug_assert!(self.containers.contains_key(container));
         self.containers.remove(container);
         Ok(())
     }
