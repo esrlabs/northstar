@@ -54,16 +54,18 @@ impl Runtime {
 
         let mut repositories = HashMap::new();
         repositories.insert(
-            "test-0".into(),
+            "mem".into(),
             config::Repository {
                 r#type: RepositoryType::Memory,
                 key: Some(example_key.clone()),
             },
         );
         repositories.insert(
-            "test-1".into(),
+            "fs".into(),
             config::Repository {
-                r#type: RepositoryType::Memory,
+                r#type: RepositoryType::Fs {
+                    dir: test_repository,
+                },
                 key: Some(example_key),
             },
         );
@@ -174,7 +176,7 @@ impl Client {
 
     /// Install the test container and wait for the notification
     pub async fn install_test_container(&mut self) -> Result<()> {
-        self.install(TEST_CONTAINER_NPK, "test-0")
+        self.install(TEST_CONTAINER_NPK, "mem")
             .await
             .context("Failed to install test container")?;
 
@@ -196,7 +198,7 @@ impl Client {
 
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
-        self.install(TEST_RESOURCE_NPK, "test-0")
+        self.install(TEST_RESOURCE_NPK, "mem")
             .await
             .context("Failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install { .. }), 15)

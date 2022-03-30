@@ -38,11 +38,21 @@ test!(install_duplicate, {
 
 // Install a container that already exists in another repository
 test!(install_duplicate_other_repository, {
-    client().install(TEST_CONTAINER_NPK, "test-0").await?;
-    assert!(client()
-        .install(TEST_CONTAINER_NPK, "test-1")
-        .await
-        .is_err());
+    client().install(TEST_CONTAINER_NPK, "mem").await?;
+    assert!(client().install(TEST_CONTAINER_NPK, "fs").await.is_err());
+});
+
+// Install a container to the file system backed repository
+test!(install_uninstall_to_fs_repository, {
+    client().install_test_resource().await?;
+    for _ in 0u32..5 {
+        client().install(TEST_CONTAINER_NPK, "fs").await?;
+        client().start_with_args(TEST_CONTAINER, ["sleep"]).await?;
+        assume("Sleeping", 5u64).await?;
+        client().stop(TEST_CONTAINER, 5).await?;
+        assume("Process test-container:0.0.1 exited", 5).await?;
+        client().uninstall_test_container().await?;
+    }
 });
 
 // Start and stop a container multiple times
@@ -60,26 +70,20 @@ test!(start_stop, {
 
 // Install and uninsteall the example npks
 test!(install_uninstall_examples, {
-    client().install(EXAMPLE_CPUEATER_NPK, "test-0").await?;
-    client().install(EXAMPLE_CONSOLE_NPK, "test-0").await?;
-    client().install(EXAMPLE_CRASHING_NPK, "test-0").await?;
-    client().install(EXAMPLE_FERRIS_NPK, "test-0").await?;
-    client().install(EXAMPLE_HELLO_FERRIS_NPK, "test-0").await?;
-    client()
-        .install(EXAMPLE_HELLO_RESOURCE_NPK, "test-0")
-        .await?;
-    client().install(EXAMPLE_INSPECT_NPK, "test-0").await?;
-    client().install(EXAMPLE_MEMEATER_NPK, "test-0").await?;
-    client()
-        .install(EXAMPLE_MESSAGE_0_0_1_NPK, "test-0")
-        .await?;
-    client()
-        .install(EXAMPLE_MESSAGE_0_0_2_NPK, "test-0")
-        .await?;
-    client().install(EXAMPLE_PERSISTENCE_NPK, "test-0").await?;
-    client().install(EXAMPLE_SECCOMP_NPK, "test-0").await?;
-    client().install(TEST_CONTAINER_NPK, "test-0").await?;
-    client().install(TEST_RESOURCE_NPK, "test-0").await?;
+    client().install(EXAMPLE_CPUEATER_NPK, "mem").await?;
+    client().install(EXAMPLE_CONSOLE_NPK, "mem").await?;
+    client().install(EXAMPLE_CRASHING_NPK, "mem").await?;
+    client().install(EXAMPLE_FERRIS_NPK, "mem").await?;
+    client().install(EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
+    client().install(EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
+    client().install(EXAMPLE_INSPECT_NPK, "mem").await?;
+    client().install(EXAMPLE_MEMEATER_NPK, "mem").await?;
+    client().install(EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
+    client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
+    client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
+    client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
+    client().install(TEST_CONTAINER_NPK, "mem").await?;
+    client().install(TEST_RESOURCE_NPK, "mem").await?;
 
     client().uninstall(EXAMPLE_CPUEATER).await?;
     client().uninstall(EXAMPLE_CONSOLE).await?;
@@ -99,26 +103,20 @@ test!(install_uninstall_examples, {
 
 // Mount and umount all containers known to the client()
 test!(mount_umount, {
-    client().install(EXAMPLE_CPUEATER_NPK, "test-0").await?;
-    client().install(EXAMPLE_CONSOLE_NPK, "test-0").await?;
-    client().install(EXAMPLE_CRASHING_NPK, "test-0").await?;
-    client().install(EXAMPLE_FERRIS_NPK, "test-0").await?;
-    client().install(EXAMPLE_HELLO_FERRIS_NPK, "test-0").await?;
-    client()
-        .install(EXAMPLE_HELLO_RESOURCE_NPK, "test-0")
-        .await?;
-    client().install(EXAMPLE_INSPECT_NPK, "test-0").await?;
-    client().install(EXAMPLE_MEMEATER_NPK, "test-0").await?;
-    client()
-        .install(EXAMPLE_MESSAGE_0_0_1_NPK, "test-0")
-        .await?;
-    client()
-        .install(EXAMPLE_MESSAGE_0_0_2_NPK, "test-0")
-        .await?;
-    client().install(EXAMPLE_PERSISTENCE_NPK, "test-0").await?;
-    client().install(EXAMPLE_SECCOMP_NPK, "test-0").await?;
-    client().install(TEST_CONTAINER_NPK, "test-0").await?;
-    client().install(TEST_RESOURCE_NPK, "test-0").await?;
+    client().install(EXAMPLE_CPUEATER_NPK, "mem").await?;
+    client().install(EXAMPLE_CONSOLE_NPK, "mem").await?;
+    client().install(EXAMPLE_CRASHING_NPK, "mem").await?;
+    client().install(EXAMPLE_FERRIS_NPK, "mem").await?;
+    client().install(EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
+    client().install(EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
+    client().install(EXAMPLE_INSPECT_NPK, "mem").await?;
+    client().install(EXAMPLE_MEMEATER_NPK, "mem").await?;
+    client().install(EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
+    client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
+    client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
+    client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
+    client().install(TEST_CONTAINER_NPK, "mem").await?;
+    client().install(TEST_RESOURCE_NPK, "mem").await?;
 
     let mut containers = client().containers().await?;
     client()
