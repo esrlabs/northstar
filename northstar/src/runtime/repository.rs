@@ -226,9 +226,11 @@ impl<'a> Repository for MemRepository {
         file.seek(SeekFrom::Start(0)).await.context("Failed seek")?;
 
         // Seal the memfd
-        let mut seals = memfd::SealsHashSet::new();
-        seals.insert(memfd::FileSeal::SealShrink);
-        seals.insert(memfd::FileSeal::SealGrow);
+        let seals = memfd::SealsHashSet::from_iter([
+            memfd::FileSeal::SealGrow,
+            memfd::FileSeal::SealShrink,
+            memfd::FileSeal::SealWrite,
+        ]);
         fd.add_seals(&seals)
             .and_then(|_| fd.add_seal(memfd::FileSeal::SealSeal))
             .context("Failed to add memfd seals")?;
