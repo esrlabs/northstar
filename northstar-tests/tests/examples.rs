@@ -4,7 +4,7 @@ use northstar_tests::{containers::*, logger, runtime::client, test};
 
 // Start crashing example
 test!(crashing, {
-    client().install(EXAMPLE_CRASHING_NPK, "test-0").await?;
+    client().install(EXAMPLE_CRASHING_NPK, "mem").await?;
     client().start(EXAMPLE_CRASHING).await?;
     client()
         .assume_notification(
@@ -24,7 +24,7 @@ test!(crashing, {
 
 // Start console example
 test!(console, {
-    client().install(EXAMPLE_CONSOLE_NPK, "test-0").await?;
+    client().install(EXAMPLE_CONSOLE_NPK, "mem").await?;
     client().start(EXAMPLE_CONSOLE).await?;
     // The console example stop itself - so wait for it...
     assume("Client console:0.0.1 connected", 5).await?;
@@ -33,7 +33,7 @@ test!(console, {
 
 // Start cpueater example and assume log message
 test!(cpueater, {
-    client().install(EXAMPLE_CPUEATER_NPK, "test-0").await?;
+    client().install(EXAMPLE_CPUEATER_NPK, "mem").await?;
     client().start(EXAMPLE_CPUEATER).await?;
     assume("Eating CPU", 5).await?;
 
@@ -42,11 +42,9 @@ test!(cpueater, {
 
 // Start hello-ferris example
 test!(hello_ferris, {
-    client().install(EXAMPLE_FERRIS_NPK, "test-0").await?;
-    client()
-        .install(EXAMPLE_MESSAGE_0_0_1_NPK, "test-0")
-        .await?;
-    client().install(EXAMPLE_HELLO_FERRIS_NPK, "test-0").await?;
+    client().install(EXAMPLE_FERRIS_NPK, "mem").await?;
+    client().install(EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
+    client().install(EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
     client().start(EXAMPLE_HELLO_FERRIS).await?;
     assume("Hello once more from 0.0.1!", 5).await?;
     // The hello-ferris example terminates after printing something.
@@ -70,12 +68,8 @@ test!(hello_ferris, {
 
 // Start hello-resource example
 test!(hello_resource, {
-    client()
-        .install(EXAMPLE_MESSAGE_0_0_2_NPK, "test-0")
-        .await?;
-    client()
-        .install(EXAMPLE_HELLO_RESOURCE_NPK, "test-0")
-        .await?;
+    client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
+    client().install(EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
     client().start(EXAMPLE_HELLO_RESOURCE).await?;
     assume(
         "0: Content of /message/hello: Hello once more from v0.0.2!",
@@ -91,7 +85,7 @@ test!(hello_resource, {
 
 // Start inspect example
 test!(inspect, {
-    client().install(EXAMPLE_INSPECT_NPK, "test-0").await?;
+    client().install(EXAMPLE_INSPECT_NPK, "mem").await?;
     client().start(EXAMPLE_INSPECT).await?;
     client().stop(EXAMPLE_INSPECT, 5).await?;
 });
@@ -99,14 +93,14 @@ test!(inspect, {
 // Start memeater example
 // test!(memeater, {
 //     let mut client() = Northstar::launch().await?;
-//     client().install(&EXAMPLE_MEMEATER_NPK, "test-0").await?;
+//     client().install(&EXAMPLE_MEMEATER_NPK, "mem").await?;
 //     client().start(EXAMPLE_MEMEATER).await?;
 //     assume("Process memeater:0.0.1 is out of memory", 20).await
 // });
 
 // Start persistence example and check output
 test!(persistence, {
-    client().install(EXAMPLE_PERSISTENCE_NPK, "test-0").await?;
+    client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
     client().start(EXAMPLE_PERSISTENCE).await?;
     assume("Writing Hello! to /data/file", 5).await?;
     assume("Content of /data/file: Hello!", 5).await?;
@@ -114,6 +108,6 @@ test!(persistence, {
 
 // Start seccomp example
 test!(seccomp, {
-    client().install(EXAMPLE_SECCOMP_NPK, "test-0").await?;
+    client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
     client().start(EXAMPLE_SECCOMP).await?;
 });

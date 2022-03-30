@@ -6,7 +6,7 @@ use super::{
 use crate::{npk::npk::Npk as NpkNpk, runtime::ipc::RawFdExt};
 use bytes::Bytes;
 use futures::{future::try_join_all, FutureExt};
-use log::{debug, info};
+use log::{debug, info, warn};
 use mpsc::Receiver;
 use nanoid::nanoid;
 use std::{
@@ -130,7 +130,7 @@ impl<'a> Repository for DirRepository {
         file.flush().await.context("Failed to flush npk")?;
         drop(file);
 
-        debug!("Loading {}", dest.display());
+        debug!("Loading temporary npk {}", dest.display());
         let npk = match Npk::from_path(dest.as_path(), self.key.as_ref())
             .map_err(|e| Error::Npk(dest.display().to_string(), e))
         {
@@ -142,17 +142,26 @@ impl<'a> Repository for DirRepository {
                 Err(e)
             }
         }?;
-        let name = npk.manifest().name.clone();
-        let version = npk.manifest().version.clone();
-        let container = Container::new(name, version);
+        let container = npk.manifest().container();
+        info!("Loaded {} from {}", container, dest.display());
+
+        // Check of the container is present
         if self.containers.contains_key(&container) {
+            warn!("Container {} is already present in repository", container);
             fs::remove_file(&dest)
                 .await
                 .context("Remove file from repository")?;
             Err(Error::InstallDuplicate(container.clone()))
         } else {
-            self.containers.insert(container.clone(), (dest, npk));
-            info!("Loaded {}", container);
+            let old = dest;
+            let new = self.dir.join(format!("{}.npk", container));
+            debug!("Moving {} to {}", old.display(), new.display());
+            // Renaming a file with an open fd is ok if the file remains on the same fs.
+            // The rename here is in the same directory, so it's ok.
+            fs::rename(&old, &new)
+                .await
+                .context("Rename file in repository")?;
+            self.containers.insert(container.clone(), (new, npk));
             Ok(container)
         }
     }
@@ -166,6 +175,7 @@ impl<'a> Repository for DirRepository {
                 .context("Failed to remove npk")
                 .map(drop)
         } else {
+            // TODO: this is an error
             Ok(())
         }
     }
@@ -246,14 +256,17 @@ impl<'a> Repository for MemRepository {
         debug!("Loading memfd as npk");
         let npk = NpkNpk::from_reader(file, self.key.as_ref())
             .map_err(|e| Error::Npk("Memory".into(), e))?;
-        let manifest = npk.manifest();
-        let container = Container::new(manifest.name.clone(), manifest.version.clone());
+        let container = npk.manifest().container();
+        info!("Loaded {} from memfd", container);
 
         if self.containers.contains_key(&container) {
+            warn!(
+                "Container {} is already present in repository. Dropping...",
+                container
+            );
             Err(Error::InstallDuplicate(container))
         } else {
             self.containers.insert(container.clone(), npk);
-            info!("Loaded {}", container);
             Ok(container)
         }
     }
