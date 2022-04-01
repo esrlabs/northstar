@@ -528,6 +528,42 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         }
     }
 
+    /// Mount a container
+    /// ```no_run
+    /// # use northstar::api::client::Client;
+    /// # use std::time::Duration;
+    /// # use northstar::common::version::Version;
+    /// # use std::path::Path;
+    /// # use std::convert::TryInto;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// client.mount("test:0.0.1").await.expect("Failed to mount");
+    /// # }
+    /// ```
+    pub async fn mount<E, C>(&mut self, container: C) -> Result<MountResult, Error>
+    where
+        E: Into<Error>,
+        C: TryInto<Container, Error = E>,
+    {
+        self.fused()?;
+        let container = container.try_into().map_err(Into::into)?;
+        match self
+            .request(Request::Mount {
+                containers: vec![container],
+            })
+            .await?
+        {
+            Response::Mount { mut result } => Ok(result.pop().ok_or(Error::Protocol)?),
+            Response::Error { error } => Err(Error::Api(error)),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
+        }
+    }
+
     /// Mount a list of containers
     /// ```no_run
     /// # use northstar::api::client::Client;
@@ -539,17 +575,16 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.mount(vec!("test:0.0.1")).await.expect("Failed to mount");
+    /// client.mount_all(vec!("hello-world:0.0.1", "cpueater:0.0.1")).await.expect("Failed to mount");
     /// # }
     /// ```
-    pub async fn mount<E, C, I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
+    pub async fn mount_all<E, C, I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
     where
         E: Into<Error>,
         C: TryInto<Container, Error = E>,
         I: 'a + IntoIterator<Item = C>,
     {
         self.fused()?;
-
         let mut result = vec![];
         for container in containers.into_iter() {
             let container = container.try_into().map_err(Into::into)?;
@@ -577,10 +612,46 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.umount(vec!("hello:0.0.1")).await.expect("Failed to unmount \"hello:0.0.1\"");
+    /// client.umount("hello:0.0.1").await.expect("Failed to unmount \"hello:0.0.1\"");
     /// # }
     /// ```
-    pub async fn umount<E, C, I>(&mut self, containers: I) -> Result<Vec<UmountResult>, Error>
+    pub async fn umount<E, C>(&mut self, container: C) -> Result<UmountResult, Error>
+    where
+        E: Into<Error>,
+        C: TryInto<Container, Error = E>,
+    {
+        self.fused()?;
+        let container = container.try_into().map_err(Into::into)?;
+        match self
+            .request(Request::Umount {
+                containers: vec![container],
+            })
+            .await?
+        {
+            Response::Umount { mut result } => Ok(result.pop().ok_or(Error::Protocol)?),
+            Response::Error { error } => Err(Error::Api(error)),
+            _ => {
+                self.fuse();
+                Err(Error::Protocol)
+            }
+        }
+    }
+
+    /// Umount a list of mounted containers
+    ///
+    /// ```no_run
+    /// # use std::time::Duration;
+    /// # use std::path::Path;
+    /// # use northstar::api::client::Client;
+    /// # use northstar::common::version::Version;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// client.umount_all(vec!("hello:0.0.1", "cpueater:0.0.1")).await.expect("Failed to unmount \"hello:0.0.1\" and \"cpueater:0.0.1\"");
+    /// # }
+    /// ```
+    pub async fn umount_all<E, C, I>(&mut self, containers: I) -> Result<Vec<UmountResult>, Error>
     where
         E: Into<Error>,
         C: TryInto<Container, Error = E>,

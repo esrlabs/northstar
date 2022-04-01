@@ -125,11 +125,11 @@ test!(mount_umount, {
 
     let containers = client().containers().await?;
     client()
-        .mount(containers.iter().map(|c| &c.container))
+        .mount_all(containers.iter().map(|c| &c.container))
         .await?;
 
     client()
-        .umount(containers.iter().map(|c| &c.container))
+        .umount_all(containers.iter().map(|c| &c.container))
         .await?;
 });
 
@@ -195,7 +195,7 @@ test!(start_mounted_container_with_not_mounted_resource, {
     client().stop(TEST_CONTAINER, 5).await?;
 
     // Umount the resource and start the container again.
-    client().umount([TEST_RESOURCE]).await?;
+    client().umount(TEST_RESOURCE).await?;
 
     client().start_with_args(TEST_CONTAINER, ["sleep"]).await?;
     assume("Sleeping...", 5u64).await?;

@@ -279,7 +279,7 @@ async fn iteration(
 ) -> Result<()> {
     if *mode == Mode::MountStartStopUmount || *mode == Mode::MountUmount {
         info!("{} mount", &container);
-        client.mount(vec![container.clone()]).await?;
+        client.mount(container).await?;
     }
 
     if *mode != Mode::MountUmount {
@@ -314,10 +314,7 @@ async fn iteration(
     // Check if we need to umount
     if *mode != Mode::StartStop {
         info!("{}: umounting", container);
-        client
-            .umount([container])
-            .await
-            .context("Failed to umount")?;
+        client.umount(container).await.context("Failed to umount")?;
     }
 
     Ok(())
