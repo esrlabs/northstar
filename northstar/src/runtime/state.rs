@@ -18,7 +18,7 @@ use crate::{
         console::{Console, Peer},
         io::ContainerIo,
         ipc::owned_fd::OwnedFd,
-        CGroupEvent, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
+        CGroupEvent, ENV_CONSOLE, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
     },
 };
 use bytes::Bytes;
@@ -335,11 +335,12 @@ impl State {
             if env.keys().any(|k| {
                 k.as_str() == ENV_NAME
                     || k.as_str() == ENV_VERSION
-                    || k.as_str() == "NORTHSTAR_CONSOLE"
+                    || k.as_str() == ENV_CONTAINER
+                    || k.as_str() == ENV_CONSOLE
             }) {
                 return Err(Error::InvalidArguments(format!(
-                    "env contains reserved key {} or {}",
-                    ENV_NAME, ENV_VERSION
+                    "env contains reserved key {} or {} or {} or {}",
+                    ENV_NAME, ENV_VERSION, ENV_CONTAINER, ENV_CONSOLE
                 )));
             }
         }
@@ -461,8 +462,6 @@ impl State {
             .await
             .expect("IO setup error");
 
-        // Signal the process to continue starting. This can fail because of the container content
-
         let path = manifest.init.unwrap();
         let mut args = vec![path.display().to_string()];
         if let Some(extra_args) = args_extra {
@@ -474,7 +473,7 @@ impl State {
         // Prepare the environment for the container according to the manifest
         let env = match (env_extra, &manifest.env) {
             (Some(env), _) => env.clone(),
-            (None, Some(env_manifest)) => env_manifest.clone(),
+            (None, Some(env)) => env.clone(),
             (None, None) => HashMap::with_capacity(3),
         };
         let env = env
@@ -492,7 +491,7 @@ impl State {
         // Send exec request to launcher
         if let Err(e) = self
             .launcher
-            .exec(container.clone(), path, args, env, io)
+            .exec(container.clone(), path, args, dbg!(env), io)
             .await
         {
             warn!("Failed to exec {} ({}): {}", container, pid, e);
@@ -812,13 +811,17 @@ impl State {
                             container,
                             args,
                             env,
-                        } => match self.start(container, args.as_ref(), env.as_ref()).await {
-                            Ok(_) => model::Response::Ok,
-                            Err(e) => {
-                                warn!("Failed to start {}: {}", container, e);
-                                model::Response::Error { error: e.into() }
+                        } => {
+                            let args = (!args.is_empty()).then(|| args);
+                            let env = (!env.is_empty()).then(|| env);
+                            match self.start(container, args, env).await {
+                                Ok(_) => model::Response::Ok,
+                                Err(e) => {
+                                    warn!("Failed to start {}: {}", container, e);
+                                    model::Response::Error { error: e.into() }
+                                }
                             }
-                        },
+                        }
                         api::model::Request::Kill { container, signal } => {
                             let signal = Signal::try_from(*signal).unwrap();
                             match self.kill(container, signal).await {

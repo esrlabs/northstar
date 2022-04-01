@@ -61,10 +61,3 @@ impl TryFrom<&str> for Name {
         value.to_string().try_into()
     }
 }
-
-impl Name {
-    /// &str representation of a Name
-    pub fn to_str(&self) -> &str {
-        self.0.as_str()
-    }
-}

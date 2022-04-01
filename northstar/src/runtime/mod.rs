@@ -68,6 +68,8 @@ const ENV_NAME: &str = "NORTHSTAR_NAME";
 const ENV_VERSION: &str = "NORTHSTAR_VERSION";
 /// Environment variable name passed to the container with the containers id
 const ENV_CONTAINER: &str = "NORTHSTAR_CONTAINER";
+/// Environment variable name passed to the container with the console fd
+const ENV_CONSOLE: &str = "NORTHSTAR_CONSOLE";
 
 #[derive(Debug)]
 enum Event {

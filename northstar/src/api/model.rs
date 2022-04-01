@@ -115,7 +115,7 @@ pub enum ConnectNack {
 }
 
 /// Request
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Request {
@@ -130,9 +130,9 @@ pub enum Request {
         /// Container
         container: Container,
         /// Optional command line arguments
-        args: Option<Vec<NonNullString>>,
-        /// Env variables
-        env: Option<HashMap<NonNullString, NonNullString>>,
+        args: Vec<NonNullString>,
+        /// Optional environment variables
+        env: HashMap<NonNullString, NonNullString>,
     },
     Kill {
         container: Container,

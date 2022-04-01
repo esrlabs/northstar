@@ -221,9 +221,9 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                 for arg in args {
                     non_null.push(NonNullString::try_from(arg.as_str()).context("Invalid arg")?);
                 }
-                Some(non_null)
+                non_null
             } else {
-                None
+                Vec::with_capacity(0)
             };
 
             // Convert env
@@ -241,9 +241,9 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                         .and_then(|s| NonNullString::try_from(s).context("Invalid value"))?;
                     non_null.insert(key, value);
                 }
-                Some(non_null)
+                non_null
             } else {
-                None
+                HashMap::with_capacity(0)
             };
 
             Ok(Request::Start {

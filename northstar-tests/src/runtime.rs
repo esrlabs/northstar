@@ -162,7 +162,7 @@ impl Client {
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
-        drop(self.client.shutdown().await);
+        self.client.shutdown().await;
         logger::assume("Shutdown complete", 5u64).await?;
         Ok(())
     }
