@@ -2,7 +2,7 @@ use super::{
     codec,
     model::{
         self, Connect, Container, ContainerData, ContainerStats, Message, MountResult,
-        Notification, RepositoryId, Request, Response,
+        Notification, RepositoryId, Request, Response, UmountResult,
     },
 };
 use crate::common::{
@@ -577,16 +577,25 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.umount("hello:0.0.1").await.expect("Failed to unmount \"hello\"");
+    /// client.umount(vec!("hello:0.0.1")).await.expect("Failed to unmount \"hello:0.0.1\"");
     /// # }
     /// ```
-    pub async fn umount(
-        &mut self,
-        container: impl TryInto<Container, Error = impl Into<Error>>,
-    ) -> Result<(), Error> {
-        let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Umount { container }).await? {
-            Response::Ok => Ok(()),
+    pub async fn umount<E, C, I>(&mut self, containers: I) -> Result<Vec<UmountResult>, Error>
+    where
+        E: Into<Error>,
+        C: TryInto<Container, Error = E>,
+        I: 'a + IntoIterator<Item = C>,
+    {
+        self.fused()?;
+
+        let mut result = vec![];
+        for container in containers.into_iter() {
+            let container = container.try_into().map_err(Into::into)?;
+            result.push(container);
+        }
+
+        match self.request(Request::Umount { containers: result }).await? {
+            Response::Umount { result } => Ok(result),
             Response::Error { error } => Err(Error::Api(error)),
             _ => {
                 self.fuse();

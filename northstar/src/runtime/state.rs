@@ -140,7 +140,10 @@ impl State {
         };
 
         // Initialize repositories. This populates self.containers and self.repositories
-        state.initialize_repositories().await?;
+        let mount_repositories = state.initialize_repositories().await?;
+
+        // Mount all containers if configured
+        state.automount(&mount_repositories).await?;
 
         // Start containers flagged with autostart
         state.autostart().await?;
@@ -149,9 +152,16 @@ impl State {
     }
 
     /// Iterate the list of repositories and initialize them
-    async fn initialize_repositories(&mut self) -> Result<(), Error> {
+    async fn initialize_repositories(&mut self) -> Result<HashSet<RepositoryId>, Error> {
+        // List of repositories to mount
+        let mut mount_repositories = HashSet::with_capacity(self.config.repositories.len());
+
         // Build a map of repositories from the configuration
         for (id, repository) in &self.config.repositories {
+            if repository.mount_on_start {
+                mount_repositories.insert(id.clone());
+            }
+
             let repository = match &repository.r#type {
                 RepositoryType::Fs { dir } => {
                     let repository = DirRepository::new(dir, repository.key.as_deref()).await?;
@@ -162,6 +172,7 @@ impl State {
                     Box::new(repository) as Repository
                 }
             };
+
             for npk in repository.containers() {
                 let name = npk.manifest().name.clone();
                 let version = npk.manifest().version.clone();
@@ -180,6 +191,33 @@ impl State {
                 }
             }
             self.repositories.insert(id.clone(), repository);
+        }
+
+        Ok(mount_repositories)
+    }
+
+    /// Try to mount all installed continers
+    async fn automount(&mut self, repositories: &HashSet<RepositoryId>) -> Result<(), Error> {
+        if repositories.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Trying to mount containers from repository {}",
+            repositories.iter().join(", ")
+        );
+        // Collect all containers that match a repository in `repositories
+        let containers = self
+            .containers
+            .iter()
+            .filter(|(_, state)| repositories.contains(&state.repository))
+            .map(|(container, _)| container.clone())
+            .collect::<Vec<Container>>();
+
+        if !containers.is_empty() {
+            for result in self.mount_all(&containers).await {
+                result?;
+            }
         }
 
         Ok(())
@@ -202,8 +240,10 @@ impl State {
         // Collect list of mounts to be done before starting the containers
         let mut to_mount = autostarts
             .iter()
+            .filter(|(c, _)| !self.state(c).unwrap().is_mounted()) // safe - list from above
             .map(|(c, _)| c.clone())
             .collect::<Vec<_>>();
+
         // Add resources of containers that have the autostart flag set
         for (container, _) in &autostarts {
             let manifest = self.manifest(container)?;
@@ -256,63 +296,18 @@ impl State {
             .map(|_| Ok(root))
     }
 
-    /// Umount a given container
-    #[allow(clippy::blocks_in_if_conditions)]
-    async fn umount(&mut self, container: &Container) -> Result<(), Error> {
-        let container_state = self.state(container)?;
-
-        info!("Umounting {}", container);
-        // Check if the application is started - if yes it cannot be uninstalled
-        if container_state.process.is_some() {
-            return Err(Error::UmountBusy(container.clone()));
+    /// Create a future that umounts `container`. Return a futures that yield
+    /// a busy error if the container is not mounted.
+    fn umount(&self, container: &Container) -> impl Future<Output = Result<(), Error>> {
+        match self.state(container).and_then(|state| {
+            state
+                .root
+                .as_ref()
+                .ok_or_else(|| Error::UmountBusy(container.clone()))
+        }) {
+            Ok(root) => Either::Left(MountControl::umount(root).map_err(Error::Mount)),
+            Err(e) => Either::Right(ready(Err(e))),
         }
-
-        let manifest = self.manifest(container).unwrap();
-
-        // If this container is a resource check all runing containers if they
-        // depend on `container`
-        if manifest.init.is_none() {
-            for (c, state) in &self.containers {
-                // A not started container cannot use `container`
-                if state.process.is_none() {
-                    continue;
-                }
-
-                // Get manifest for container in question
-                let manifest = self.manifest(c).expect("Internal error");
-
-                // Resources cannot have resource dependencies
-                if manifest.init.is_none() {
-                    continue;
-                }
-
-                for mount in &manifest.mounts {
-                    if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
-                        if container.name() == name && container.version() == version {
-                            warn!(
-                                "Failed to umount busy resource container {}. Used by {}",
-                                container, c
-                            );
-                            return Err(Error::UmountBusy(container.clone()));
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(root) = &container_state.root {
-            self.mount_control
-                .umount(root)
-                .await
-                .map_err(Error::Mount)?;
-        } else {
-            warn!("Container {} is not mounted", container);
-            return Err(Error::UmountBusy(container.clone()));
-        }
-
-        let container_state = self.state_mut(container).expect("Internal error");
-        container_state.root.take();
-        Ok(())
     }
 
     /// Start a container
@@ -557,52 +552,37 @@ impl State {
         mut self,
         event_rx: impl Stream<Item = Event>,
     ) -> Result<(), Error> {
+        let started_containers = self
+            .containers
+            .iter()
+            .filter_map(|(container, state)| state.process.as_ref().map(|_| container.clone()))
+            .collect::<Vec<_>>();
+
+        // Send a SIGKILL to each started container
+        for container in &started_containers {
+            self.kill(container, Signal::SIGKILL).await?;
+        }
+
+        // Wait until all processes are gone
+        pin!(event_rx);
+        while self
+            .containers
+            .values()
+            .any(|state| state.process.is_some())
+        {
+            if let Some(Event::Container(container, event)) = event_rx.next().await {
+                self.on_event(&container, &event, true).await?;
+            }
+        }
+
+        // Try to umount mounted containers
         let to_umount = self
             .containers
             .iter()
             .filter(|(_, state)| state.is_mounted())
             .map(|(container, _)| container.clone())
             .collect::<Vec<_>>();
-
-        let to_kill = self
-            .containers
-            .iter()
-            .filter_map(|(container, state)| state.process.as_ref().map(|_| container.clone()))
-            .collect::<Vec<_>>();
-
-        for container in &to_kill {
-            self.kill(container, Signal::SIGKILL).await?;
-        }
-
-        // Wait until all processes are dead
-        if self
-            .containers
-            .values()
-            .any(|state| state.process.is_some())
-        {
-            pin!(event_rx);
-
-            loop {
-                if let Some(Event::Container(container, event)) = event_rx.next().await {
-                    self.on_event(&container, &event, true).await?;
-
-                    // Check if all containers exited if this is a exit event
-                    if let ContainerEvent::Exit(_) = event {
-                        if self
-                            .containers
-                            .values()
-                            .all(|state| state.process.is_none())
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        for container in to_umount {
-            self.umount(&container).await?;
-        }
+        self.umount_all(&to_umount).await;
 
         Ok(())
     }
@@ -654,8 +634,7 @@ impl State {
     }
 
     /// Remove and umount a specific app
-    #[allow(clippy::blocks_in_if_conditions)]
-    async fn uninstall(&mut self, container: &Container) -> result::Result<(), Error> {
+    async fn uninstall(&mut self, container: &Container) -> Result<(), Error> {
         info!("Trying to uninstall {}", container);
 
         let state = self.state(container)?;
@@ -663,7 +642,7 @@ impl State {
 
         // Umount
         if state.is_mounted() {
-            self.umount(container).await?;
+            self.umount_all(&[container.clone()]).await.pop().unwrap()?;
         }
 
         // Remove from repository
@@ -802,6 +781,22 @@ impl State {
                                 .collect();
                             model::Response::Mount { result }
                         }
+                        api::model::Request::Umount { containers } => {
+                            let result = self
+                                .umount_all(containers)
+                                .await
+                                .drain(..)
+                                .zip(containers)
+                                .map(|(r, c)| match r {
+                                    Ok(r) => model::UmountResult::Ok { container: r },
+                                    Err(e) => model::UmountResult::Error {
+                                        container: c.clone(),
+                                        error: e.into(),
+                                    },
+                                })
+                                .collect();
+                            model::Response::Umount { result }
+                        }
                         api::model::Request::Repositories => {
                             let repositories = self.repositories.keys().cloned().collect();
                             model::Response::Repositories { repositories }
@@ -830,15 +825,6 @@ impl State {
                                 Ok(_) => model::Response::Ok,
                                 Err(e) => {
                                     error!("Failed to kill {} with {}: {}", container, signal, e);
-                                    model::Response::Error { error: e.into() }
-                                }
-                            }
-                        }
-                        api::model::Request::Umount { container } => {
-                            match self.umount(container).await {
-                                Ok(_) => api::model::Response::Ok,
-                                Err(e) => {
-                                    warn!("Failed to unmount{}: {}", container, e);
                                     model::Response::Error { error: e.into() }
                                 }
                             }
@@ -895,45 +881,147 @@ impl State {
         let mut mounts = Vec::with_capacity(containers.len());
 
         // Create mount futures
-        for c in containers {
-            // Containers cannot be mounted twice
-            if self
-                .containers
-                .get(c)
+        for container in containers {
+            // Containers cannot be mounted twice. If the container
+            // is already mounted return an error for this entity.
+            let is_mounted = self
+                .state(container)
                 .map(|s| s.is_mounted())
-                .unwrap_or(false)
-            {
-                let error = Err(Error::MountBusy(c.clone()));
+                .unwrap_or(false);
+            if is_mounted {
+                let error = Err(Error::MountBusy(container.clone()));
                 mounts.push(Either::Right(ready(error)));
             } else {
-                mounts.push(Either::Left(self.mount(c)))
+                mounts.push(Either::Left(self.mount(container)))
             }
         }
 
-        // Process mount results
-        let mut result = Vec::new();
+        // Mount and process results
+        let mut result = Vec::with_capacity(containers.len());
         for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
             match mount_result {
                 Ok(root) => {
-                    let container_state = self.state_mut(container).expect("Internal error");
-                    container_state.root = Some(root);
+                    let state = self.state_mut(container).expect("Internal error");
+                    state.root = Some(root);
                     info!("Mounted {}", container);
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("Failed to mount {}: {:#?}", container, e);
+                    warn!("Failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }
         }
-        let duration = start.elapsed().as_secs_f32();
+
+        let duration = start.elapsed();
         if result.iter().any(|e| e.is_err()) {
-            warn!("Mount operation failed after {:.03}s", duration);
+            warn!("Mount operation failed after {}", format_duration(duration));
         } else {
             info!(
-                "Successfully mounted {} container(s) in {:.03}s",
+                "Successfully mounted {} container(s) in {}",
                 result.len(),
-                duration
+                format_duration(duration)
+            );
+        }
+        result
+    }
+
+    async fn umount_all(&mut self, containers: &[Container]) -> Vec<Result<Container, Error>> {
+        let start = time::Instant::now();
+        let mut mounts = Vec::with_capacity(containers.len());
+
+        // Create mount futures
+        'outer: for container in containers {
+            // Retrieve container state. If the container is unknown insert a
+            // ready future with the corresponding error
+            let container_state = if let Ok(state) = self.state(container) {
+                state
+            } else {
+                let error = Err(Error::InvalidContainer(container.clone()));
+                mounts.push(Either::Right(ready(error)));
+                continue;
+            };
+
+            // Check if container is mounted at all
+            if !container_state.is_mounted() {
+                let error = Err(Error::MountBusy(container.clone()));
+                mounts.push(Either::Right(ready(error)));
+                continue;
+            }
+
+            // Check if container is started
+            if container_state.process.is_some() {
+                let error = Err(Error::MountBusy(container.clone()));
+                mounts.push(Either::Right(ready(error)));
+                continue;
+            }
+
+            let manifest = self.manifest(container).unwrap(); // safe - checked above
+
+            // If this container is a resource check all running containers if they
+            // depend on `container`
+            if manifest.init.is_none() {
+                for (c, state) in &self.containers {
+                    // A not started container cannot use `container`
+                    if state.process.is_none() {
+                        continue;
+                    }
+
+                    // Get manifest for container in question
+                    let manifest = self.manifest(c).expect("Internal error");
+
+                    // Resources cannot have resource dependencies
+                    if manifest.init.is_none() {
+                        continue;
+                    }
+
+                    for mount in &manifest.mounts {
+                        if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
+                            if container.name() == name && container.version() == version {
+                                warn!("Resource container {} is used by {}", container, c);
+                                let error = Err(Error::MountBusy(c.clone()));
+                                mounts.push(Either::Right(ready(error)));
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Hm. Seems that it really needs to be umounted.
+            mounts.push(Either::Left(self.umount(container)));
+        }
+
+        debug_assert_eq!(mounts.len(), containers.len());
+
+        // Umount and process umount results
+        let mut result = Vec::with_capacity(containers.len());
+        for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
+            match mount_result {
+                Ok(_) => {
+                    let state = self.state_mut(container).expect("Internal error");
+                    state.root = None;
+                    info!("Umounted {}", container);
+                    result.push(Ok(container.clone()));
+                }
+                Err(e) => {
+                    warn!("Failed to mount {}: {}", container, e);
+                    result.push(Err(e));
+                }
+            }
+        }
+
+        let duration = start.elapsed();
+        if result.iter().any(|e| e.is_err()) {
+            warn!(
+                "Umount operation failed after {}",
+                format_duration(duration)
+            );
+        } else {
+            info!(
+                "Successfully umounted {} container(s) in {}",
+                result.len(),
+                format_duration(duration)
             );
         }
         result

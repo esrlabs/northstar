@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use model::ExitStatus;
 use northstar::api::model::{
-    self, ContainerData, MountResult, Notification, RepositoryId, Response,
+    self, ContainerData, MountResult, Notification, RepositoryId, Response, UmountResult,
 };
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::collections::HashSet;
@@ -20,7 +20,7 @@ pub(crate) fn notification(notification: &Notification) {
             container,
             match status {
                 ExitStatus::Exit { code } => format!("exit code {}", code),
-                ExitStatus::Signalled { signal } => format!("signaled {}", signal),
+                ExitStatus::Signalled { signal } => format!("signalled {}", signal),
             }
         ),
         Notification::Install { container } => println!("installed {}", container),
@@ -30,97 +30,98 @@ pub(crate) fn notification(notification: &Notification) {
     }
 }
 
-pub(crate) fn containers(containers: &[ContainerData]) {
-    let mut table = Table::new();
-    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    table.set_titles(Row::new(vec![
-        Cell::new("Name").with_style(Attr::Bold),
-        Cell::new("Version").with_style(Attr::Bold),
-        Cell::new("Repository").with_style(Attr::Bold),
-        Cell::new("Type").with_style(Attr::Bold),
-        Cell::new("Mounted").with_style(Attr::Bold),
-        Cell::new("PID").with_style(Attr::Bold),
-        Cell::new("Uptime").with_style(Attr::Bold),
-    ]));
-    for container in containers
+fn containers(containers: &[ContainerData]) {
+    let titles = [
+        "Name",
+        "Version",
+        "Repository",
+        "Type",
+        "Mounted",
+        "PID",
+        "Uptime",
+    ];
+
+    let rows = containers
         .iter()
         .sorted_by_key(|c| c.manifest.name.to_string())
         .sorted_by_key(|c| c.manifest.init.is_none())
-    {
-        table.add_row(Row::new(vec![
-            Cell::new(container.container.name()).with_style(Attr::Bold),
-            Cell::new(&container.container.version().to_string()),
-            Cell::new(&container.repository),
-            Cell::new(
-                container
-                    .manifest
-                    .init
-                    .as_ref()
-                    .map(|_| "App")
-                    .unwrap_or("Resource"),
-            ),
-            Cell::new(if container.mounted { "yes" } else { "no" }),
-            Cell::new(
-                &container
-                    .process
-                    .as_ref()
-                    .map(|p| p.pid.to_string())
-                    .unwrap_or_default(),
-            )
-            .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
-            Cell::new(
-                &container
-                    .process
-                    .as_ref()
-                    .map(|p| format!("{:?}", time::Duration::from_nanos(p.uptime)))
-                    .unwrap_or_default(),
-            ),
-        ]));
-    }
+        .map(|container| {
+            [
+                Cell::new(container.container.name()).with_style(Attr::Bold),
+                Cell::new(&container.container.version().to_string()),
+                Cell::new(&container.repository),
+                if container.manifest.init.is_some() {
+                    Cell::new("app").with_style(Attr::ForegroundColor(prettytable::color::BLUE))
+                } else {
+                    Cell::new("resource")
+                        .with_style(Attr::ForegroundColor(prettytable::color::GREEN))
+                },
+                if container.mounted {
+                    Cell::new("yes").with_style(Attr::ForegroundColor(prettytable::color::YELLOW))
+                } else {
+                    Cell::new("no").with_style(Attr::ForegroundColor(prettytable::color::CYAN))
+                },
+                Cell::new(
+                    &container
+                        .process
+                        .as_ref()
+                        .map(|p| p.pid.to_string())
+                        .unwrap_or_default(),
+                )
+                .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
+                Cell::new(
+                    &container
+                        .process
+                        .as_ref()
+                        .map(|p| {
+                            humantime::format_duration(time::Duration::from_nanos(p.uptime))
+                                .to_string()
+                        })
+                        .unwrap_or_default(),
+                ),
+            ]
+        });
 
-    table.printstd();
+    print_table(titles, rows);
 }
 
-pub fn repositories(repositories: &HashSet<RepositoryId>) {
-    let mut table = Table::new();
-    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    table.set_titles(Row::new(vec![Cell::new("Name").with_style(Attr::Bold)]));
-    for repository in repositories.iter().sorted_by_key(|i| (*i).clone()) {
-        table.add_row(Row::new(vec![Cell::new(repository).with_style(Attr::Bold)]));
-    }
-
-    table.printstd();
+fn repositories(repositories: &HashSet<RepositoryId>) {
+    let iter = repositories
+        .iter()
+        .sorted_by_key(|i| (*i).clone())
+        .map(|i| [Cell::new(i).with_style(Attr::Bold)]);
+    print_table(["Name"], iter);
 }
 
-pub fn mounts(mounts: &[MountResult]) {
-    let mut table = Table::new();
-    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    table.set_titles(Row::new(vec![
-        Cell::new("Name").with_style(Attr::Bold),
-        Cell::new("Path").with_style(Attr::Bold),
-    ]));
-    for result in mounts {
-        let row = match result {
-            MountResult::Ok { container } => {
-                vec![
-                    Cell::new(&container.to_string()).with_style(Attr::Bold),
-                    Cell::new("ok"),
-                ]
-            }
-            MountResult::Error { container, error } => {
-                vec![
-                    Cell::new(&container.to_string()).with_style(Attr::Bold),
-                    Cell::new(&format_err(error)),
-                ]
-            }
-        };
-        table.add_row(Row::new(row));
-    }
-
-    table.printstd();
+fn mounts(mounts: &[MountResult]) {
+    let iter = mounts.iter().map(|r| match r {
+        MountResult::Ok { container } => [
+            Cell::new(&container.to_string()).with_style(Attr::Bold),
+            Cell::new("ok"),
+        ],
+        MountResult::Error { container, error } => [
+            Cell::new(&container.to_string()).with_style(Attr::Bold),
+            Cell::new(&format_err(error)),
+        ],
+    });
+    print_table(["Name", "Result"].iter(), iter);
 }
 
-pub fn response(response: &Response) -> i32 {
+fn umounts(mounts: &[UmountResult]) {
+    let iter = mounts.iter().map(|r| match r {
+        UmountResult::Ok { container } => [
+            Cell::new(&container.to_string()).with_style(Attr::Bold),
+            Cell::new("ok"),
+        ],
+        UmountResult::Error { container, error } => [
+            Cell::new(&container.to_string()).with_style(Attr::Bold),
+            Cell::new(&format_err(error)),
+        ],
+    });
+    print_table(["Name", "Result"], iter);
+}
+
+pub(crate) fn response(response: &Response) -> i32 {
     match response {
         Response::Containers { containers: c } => {
             containers(c);
@@ -132,6 +133,10 @@ pub fn response(response: &Response) -> i32 {
         }
         Response::Mount { result } => {
             mounts(result);
+            0
+        }
+        Response::Umount { result } => {
+            umounts(result);
             0
         }
         Response::Ok => {
@@ -199,4 +204,26 @@ fn format_err(err: &model::Error) -> String {
         }
         model::Error::Unexpected { module, error } => format!("{}: {}", module, error),
     }
+}
+
+fn print_table<S, T, C, R>(titles: T, rows: R)
+where
+    S: ToString,
+    T: IntoIterator<Item = S>,
+    R: IntoIterator<Item = C>,
+    C: IntoIterator<Item = Cell>,
+{
+    let mut table = Table::new();
+    table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+    let titles = titles
+        .into_iter()
+        .map(|t| Cell::new(&t.to_string()).with_style(Attr::Bold));
+    table.set_titles(Row::new(titles.collect()));
+
+    rows.into_iter()
+        .map(|row| Row::new(row.into_iter().collect::<Vec<_>>()))
+        .for_each(|r| {
+            table.add_row(r);
+        });
+    table.printstd();
 }

@@ -315,7 +315,7 @@ async fn iteration(
     if *mode != Mode::StartStop {
         info!("{}: umounting", container);
         client
-            .umount(container.clone())
+            .umount([container])
             .await
             .context("Failed to umount")?;
     }

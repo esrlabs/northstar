@@ -23,7 +23,7 @@ pub type Version = crate::common::version::Version;
 pub type ContainerStats = HashMap<String, serde_json::Value>;
 
 /// API version
-const VERSION: Version = Version::new(0, 2, 1);
+const VERSION: Version = Version::new(0, 2, 2);
 
 /// API version
 pub const fn version() -> Version {
@@ -146,7 +146,7 @@ pub enum Request {
         containers: Vec<Container>,
     },
     Umount {
-        container: Container,
+        containers: Vec<Container>,
     },
     Uninstall {
         container: Container,
@@ -191,6 +191,15 @@ pub enum MountResult {
     Error { container: Container, error: Error },
 }
 
+/// Result of a umount operation
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum UmountResult {
+    Ok { container: Container },
+    Error { container: Container, error: Error },
+}
+
 /// Response
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -205,6 +214,9 @@ pub enum Response {
     },
     Mount {
         result: Vec<MountResult>,
+    },
+    Umount {
+        result: Vec<UmountResult>,
     },
     ContainerStats {
         container: Container,

@@ -56,6 +56,7 @@ impl Runtime {
         repositories.insert(
             "mem".into(),
             config::Repository {
+                mount_on_start: false,
                 r#type: RepositoryType::Memory,
                 key: Some(example_key.clone()),
             },
@@ -63,6 +64,7 @@ impl Runtime {
         repositories.insert(
             "fs".into(),
             config::Repository {
+                mount_on_start: false,
                 r#type: RepositoryType::Fs {
                     dir: test_repository,
                 },
@@ -75,7 +77,6 @@ impl Runtime {
             run_dir,
             data_dir,
             log_dir,
-            mount_parallel: 10,
             cgroup: NonNullString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,
             debug: None,

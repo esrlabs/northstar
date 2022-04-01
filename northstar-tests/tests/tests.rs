@@ -123,15 +123,14 @@ test!(mount_umount, {
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
-    let mut containers = client().containers().await?;
+    let containers = client().containers().await?;
     client()
-        .mount(containers.drain(..).map(|c| c.container))
+        .mount(containers.iter().map(|c| &c.container))
         .await?;
 
-    let containers = &mut client().containers().await?;
-    for c in containers.iter().filter(|c| c.mounted) {
-        client().umount(c.container.clone()).await?;
-    }
+    client()
+        .umount(containers.iter().map(|c| &c.container))
+        .await?;
 });
 
 // Try to stop a not started container and expect an Err
@@ -196,7 +195,7 @@ test!(start_mounted_container_with_not_mounted_resource, {
     client().stop(TEST_CONTAINER, 5).await?;
 
     // Umount the resource and start the container again.
-    client().umount(TEST_RESOURCE).await?;
+    client().umount([TEST_RESOURCE]).await?;
 
     client().start_with_args(TEST_CONTAINER, ["sleep"]).await?;
     assume("Sleeping...", 5u64).await?;
