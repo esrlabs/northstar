@@ -24,8 +24,6 @@ pub struct Config {
     pub log_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNullString,
-    /// Max number of parallel mounts
-    pub mount_parallel: usize,
     /// Repositories
     pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options
@@ -49,6 +47,9 @@ pub enum RepositoryType {
 /// Repository configuration
 #[derive(Clone, Debug, Deserialize)]
 pub struct Repository {
+    /// Mount the containers from this repository on runtime start. Default: false
+    #[serde(default)]
+    pub mount_on_start: bool,
     /// Optional key for this repository
     pub key: Option<PathBuf>,
     /// Repository type: fs or mem

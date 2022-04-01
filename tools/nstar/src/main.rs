@@ -58,13 +58,13 @@ enum Subcommand {
     Mount {
         /// Container name and optional version
         #[clap(value_name = "name[:version]")]
-        container: String,
+        containers: Vec<String>,
     },
     /// Umount a container
     Umount {
         /// Container name and optional version
         #[clap(value_name = "name[:version]")]
-        container: String,
+        containers: Vec<String>,
     },
     /// Start a container
     Start {
@@ -190,14 +190,23 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
     match command {
         Subcommand::Containers => Ok(Request::Containers),
         Subcommand::Repositories => Ok(Request::Repositories),
-        Subcommand::Mount { container } => {
-            let container = parse_container(&container, client).await?;
-            let containers = vec![container];
-            Ok(Request::Mount { containers })
+        Subcommand::Mount { containers } => {
+            let mut converted = Vec::with_capacity(containers.len());
+            for container in containers {
+                converted.push(parse_container(&container, client).await?);
+            }
+            Ok(Request::Mount {
+                containers: converted,
+            })
         }
-        Subcommand::Umount { container } => {
-            let container = parse_container(&container, client).await?;
-            Ok(Request::Umount { container })
+        Subcommand::Umount { containers } => {
+            let mut converted = Vec::with_capacity(containers.len());
+            for container in containers {
+                converted.push(parse_container(&container, client).await?);
+            }
+            Ok(Request::Umount {
+                containers: converted,
+            })
         }
         Subcommand::Start {
             container,

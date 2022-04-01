@@ -5,7 +5,8 @@ use crate::{
 };
 use devicemapper::{DevId, DmError, DmName, DmOptions};
 use futures::{Future, FutureExt};
-use log::{debug, info, warn};
+use humantime::format_duration;
+use log::{debug, warn};
 use loopdev::LoopControl;
 use std::{
     io,
@@ -15,7 +16,7 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tokio::{fs, task, time};
+use tokio::{task, time};
 
 use crate::seccomp::Selinux;
 pub use nix::mount::MsFlags as MountFlags;
@@ -120,11 +121,11 @@ impl MountControl {
             )?;
 
             let duration = start.elapsed();
-            info!(
-                "Finishing mount of {}:{} after {:.03}s",
+            debug!(
+                "Finished mount of {}:{} in {}",
                 name,
                 version,
-                duration.as_secs_f32(),
+                format_duration(duration)
             );
 
             Ok(device)
@@ -135,18 +136,33 @@ impl MountControl {
         })
     }
 
-    pub(super) async fn umount(&self, target: &Path) -> Result<(), Error> {
-        debug!("Unmounting {}", target.display());
-        nix::mount::umount(target)
-            .map_err(Error::Os)
-            .expect("Failed to umount");
+    /// Umount target
+    pub(super) fn umount(target: &Path) -> impl Future<Output = Result<(), Error>> {
+        let target = target.to_owned();
 
-        debug!("Removing mountpoint {}", target.display());
-        fs::remove_dir(target)
-            .await
-            .map_err(|e| Error::Io(format!("Failed to remove {}", target.display()), e))?;
+        task::spawn_blocking(move || {
+            let start = time::Instant::now();
 
-        Ok(())
+            debug!("Unmounting {}", target.display());
+            nix::mount::umount(&target).map_err(Error::Os)?;
+
+            debug!("Removing mountpoint {}", target.display());
+            std::fs::remove_dir(&target)
+                .map_err(|e| Error::Io(format!("Failed to remove {}", target.display()), e))?;
+
+            let duration = start.elapsed();
+            debug!(
+                "Finished umount of {} in {}",
+                target.display(),
+                format_duration(duration)
+            );
+
+            Ok(())
+        })
+        .map(|r| match r {
+            Ok(r) => r,
+            Err(e) => panic!("Task error: {}", e),
+        })
     }
 }
 

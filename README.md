@@ -172,8 +172,6 @@ run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
 # Log directory for debug logs and traces
 log_dir = "target/northstar/logs"
-# Number of paralllel mounts possible
-mount_parallel = 10
 # Top level cgroup name
 cgroup = "northstar"
 
@@ -206,6 +204,8 @@ type = "mem"
 
 # NPK Repository `default` in `dir`
 [repositories.default]
+# Mount the containers from this repository on runtime start. Default: false
+mount = true
 key = "examples/northstar.pub"
 type = { fs = { dir = "target/northstar/repository" }}
 ```
