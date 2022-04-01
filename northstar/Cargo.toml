@@ -1,6 +1,6 @@
 [package]
 name = "northstar"
-version = "0.7.0-dev"
+version = "0.7.1-dev"
 authors = ["ESRLabs"]
 edition = "2021"
 build = "build.rs"
