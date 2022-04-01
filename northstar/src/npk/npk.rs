@@ -102,11 +102,9 @@ pub struct Meta {
 /// NPK Hashes
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Hashes {
-    /// Hash of the manifest yaml
+    /// Hash of the manifest.yaml
     pub manifest_hash: String,
-    /// Fs hash
-    pub fs_hash: String,
-    /// Verity hash
+    /// Verity root hash
     pub fs_verity_hash: String,
     /// Offset of the verity block within the fs image
     pub fs_verity_offset: u64,
@@ -123,8 +121,7 @@ impl FromStr for Hashes {
 
         #[derive(Deserialize)]
         #[serde(rename_all = "kebab-case")]
-        struct FsHashes {
-            hash: String,
+        struct FsHash {
             verity_hash: String,
             verity_offset: u64,
         }
@@ -135,7 +132,7 @@ impl FromStr for Hashes {
             #[serde(rename = "manifest.yaml")]
             manifest: ManifestHash,
             #[serde(rename = "fs.img")]
-            fs: FsHashes,
+            fs: FsHash,
         }
 
         let hashes = serde_yaml::from_str::<SerdeHashes>(s)
@@ -143,7 +140,6 @@ impl FromStr for Hashes {
 
         Ok(Hashes {
             manifest_hash: hashes.manifest.hash,
-            fs_hash: hashes.fs.hash,
             fs_verity_hash: hashes.fs.verity_hash,
             fs_verity_offset: hashes.fs.verity_offset,
         })
@@ -176,7 +172,14 @@ impl<R: Read + Seek> Npk<R> {
             return Err(Error::Version(meta.version, VERSION));
         }
 
-        let hashes = hashes(&mut zip, key)?;
+        // Read hashes from the npk if a key is passed
+        let hashes = if let Some(key) = key {
+            let hashes = hashes(&mut zip, key)?;
+            Some(hashes)
+        } else {
+            None
+        };
+
         let manifest = manifest(&mut zip, hashes.as_ref())?;
         let (fs_img_offset, fs_img_size) = {
             let fs_img = &zip.by_name(FS_IMG_NAME).map_err(|e| Error::Zip {
@@ -270,23 +273,26 @@ fn meta<R: Read + Seek>(zip: &Zip<R>) -> Result<Meta, Error> {
     serde_yaml::from_slice(zip.comment()).map_err(|e| Error::MalformedComment(e.to_string()))
 }
 
-fn hashes<R: Read + Seek>(
-    zip: &mut Zip<R>,
-    key: Option<&PublicKey>,
-) -> Result<Option<Hashes>, Error> {
-    match key {
-        Some(k) => {
-            let signature_content = read_to_string(zip, SIGNATURE_NAME)?;
-            let mut sections = signature_content.split("---");
-            let hashes_string = sections.next().unwrap_or_default();
-            let signature_string = sections.next().unwrap_or_default();
-            let signature = decode_signature(signature_string)?;
-            k.verify_strict(hashes_string.as_bytes(), &signature)
-                .map_err(|_e| Error::InvalidSignature("invalid signature".to_string()))?;
-            Ok(Some(Hashes::from_str(hashes_string)?))
-        }
-        None => Ok(None),
-    }
+fn hashes<R: Read + Seek>(zip: &mut Zip<R>, key: &PublicKey) -> Result<Hashes, Error> {
+    // Read the signature file from the zip
+    let signature_content = read_to_string(zip, SIGNATURE_NAME)?;
+
+    // Split the two yaml components
+    let mut documents = signature_content.split("---");
+    let hashes_str = documents
+        .next()
+        .ok_or_else(|| Error::InvalidSignature("malformed signatures file".to_string()))?;
+    let hashes = Hashes::from_str(hashes_str)?;
+
+    let signature = documents
+        .next()
+        .ok_or_else(|| Error::InvalidSignature("malformed signatures file".to_string()))?;
+    let signature = decode_signature(signature)?;
+
+    key.verify_strict(hashes_str.as_bytes(), &signature)
+        .map_err(|e| Error::InvalidSignature(format!("invalid signature: {}", e)))?;
+
+    Ok(hashes)
 }
 
 fn manifest<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result<Manifest, Error> {
@@ -324,7 +330,6 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
     #[allow(unused)]
     #[derive(Debug, Deserialize)]
     struct SerdeSignature {
-        key: String,
         signature: String,
     }
 
@@ -379,7 +384,7 @@ impl Builder {
 
         // Sign and write NPK
         if let Some(key) = &self.key {
-            let signature = sign_npk(key, &fsimg, &self.manifest)?;
+            let signature = signature(key, &fsimg, &self.manifest)?;
             write_npk(writer, &self.manifest, &fsimg, Some(&signature))
         } else {
             write_npk(writer, &self.manifest, &fsimg, None)
@@ -603,56 +608,53 @@ fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     })
 }
 
-fn gen_hashes_yaml(
-    manifest: &Manifest,
-    fsimg: &Path,
-    fsimg_size: u64,
-    hash: &[u8],
-) -> Result<String, Error> {
-    // Create hashes YAML
-    let mut sha256 = Sha256::new();
-    sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
-    let manifest_hash = sha256.finalize();
-    let mut sha256 = Sha256::new();
-    let mut fsimg = fs::File::open(&fsimg)
-        .map_err(|e| Error::io(format!("failed to open '{}'", &fsimg.display()), e))?;
-    io::copy(&mut fsimg, &mut sha256).map_err(|e| Error::Io {
-        context: "failed to read fs image".to_string(),
-        error: e,
-    })?;
-
-    let fs_hash = sha256.finalize();
-    let hashes = format!(
+/// Generate the signatures yaml file
+fn hashes_yaml(manifest_hash: &[u8], verity_hash: &[u8], verity_offset: u64) -> String {
+    format!(
         "{}:\n  hash: {:02x?}\n\
-         {}:\n  hash: {:02x?}\n  verity-hash: {:02x?}\n  verity-offset: {}\n",
+         {}:\n  verity-hash: {:02x?}\n  verity-offset: {}\n",
         &MANIFEST_NAME,
         manifest_hash.iter().format(""),
         &FS_IMG_NAME,
-        fs_hash.iter().format(""),
-        hash.iter().format(""),
-        fsimg_size
-    );
-
-    Ok(hashes)
+        verity_hash.iter().format(""),
+        verity_offset
+    )
 }
 
-fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
+/// Try to construct the signature yaml file
+fn signature(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
+    let manifest_hash = {
+        let mut sha256 = Sha256::new();
+        sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
+        sha256.finalize()
+    };
+
+    // The size of the fs image is the offset of the verity block. The verity block
+    // is appended to the fs.img
     let fsimg_size = fs::metadata(&fsimg)
         .map_err(|e| Error::Io {
             context: format!("failed to read file size: '{}'", &fsimg.display()),
             error: e,
         })?
         .len();
-    let root_hash: &[u8] = &append_dm_verity_block(fsimg, fsimg_size).map_err(Error::Verity)?;
+    // Calculate verity root hash
+    let fsimg_hash: &[u8] = &append_dm_verity_block(fsimg, fsimg_size).map_err(Error::Verity)?;
+
+    // Format the signutures.yaml
+    let hashes_yaml = hashes_yaml(&manifest_hash, fsimg_hash, fsimg_size);
+
     let key_pair = read_keypair(key)?;
-    let hashes_yaml = gen_hashes_yaml(manifest, fsimg, fsimg_size, root_hash)?;
-    let signature_yaml = sign_hashes(&key_pair, &hashes_yaml);
+
+    let signature = key_pair.sign(hashes_yaml.as_bytes());
+    let signature_base64 = base64::encode(signature);
+
+    let signature_yaml = { format!("{}---\nsignature: {}", &hashes_yaml, &signature_base64) };
 
     Ok(signature_yaml)
 }
 
 /// Returns a temporary file with all the pseudo file definitions
-fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
+fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     let uid = manifest.uid;
     let gid = manifest.gid;
 
@@ -748,23 +750,13 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     Ok(pseudo_file_entries)
 }
 
-fn sign_hashes(key_pair: &Keypair, hashes_yaml: &str) -> String {
-    let signature = key_pair.sign(hashes_yaml.as_bytes());
-    let signature_base64 = base64::encode(signature);
-    let key_id = "northstar";
-    format!(
-        "{}---\nkey: {}\nsignature: {}",
-        &hashes_yaml, &key_id, &signature_base64
-    )
-}
-
 fn create_squashfs_img(
     manifest: &Manifest,
     root: &Path,
     image: &Path,
     squashfs_opts: &SquashfsOpts,
 ) -> Result<(), Error> {
-    let pseudo_files = gen_pseudo_files(manifest)?;
+    let pseudo_files = pseudo_files(manifest)?;
 
     // Locate mksquashfs
     which::which(&MKSQUASHFS)

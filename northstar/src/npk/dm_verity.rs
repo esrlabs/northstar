@@ -150,19 +150,20 @@ impl VerityHeader {
 /// to the given file.
 pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest, Error> {
     let (level_offsets, tree_size) =
-        calc_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
-    let (salt, root_hash, hash_tree) = gen_hash_tree(fsimg, fsimg_size, &level_offsets, tree_size)?;
+        calculate_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
+    let (salt, root_hash, hash_tree) =
+        generate_hash_tree(fsimg, fsimg_size, &level_offsets, tree_size)?;
     append_superblock_and_hashtree(fsimg, fsimg_size, &salt, &hash_tree)?;
     Ok(root_hash)
 }
 
-fn gen_salt() -> Salt {
+fn generate_salt() -> Salt {
     let mut salt: Salt = [0u8; SHA256_SIZE];
     OsRng.fill_bytes(&mut salt);
     salt
 }
 
-fn calc_hash_tree_level_offsets(
+fn calculate_hash_tree_level_offsets(
     image_size: usize,
     block_size: usize,
     digest_size: usize,
@@ -194,7 +195,7 @@ fn calc_hash_tree_level_offsets(
     (level_offsets, tree_size)
 }
 
-fn gen_hash_tree(
+fn generate_hash_tree(
     fsimg: &Path,
     image_size: u64,
     level_offsets: &[usize],
@@ -220,7 +221,7 @@ fn gen_hash_tree(
     }
 
     // "1. Choose a random salt (hexadecimal encoding)."
-    let salt = gen_salt();
+    let salt = generate_salt();
 
     // "To form the hash, the system image is split at layer 0 into 4k blocks, each assigned a SHA256 hash.
     // Layer 1 is formed by joining only those SHA256 hashes into 4k blocks, resulting in a much smaller image.
