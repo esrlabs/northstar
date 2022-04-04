@@ -3,6 +3,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+/// Console configuration
+pub type Configuration = crate::npk::manifest::Console;
 /// Container identification
 pub type Container = crate::common::container::Container;
 /// Container exit code
@@ -98,7 +100,7 @@ pub enum Connect {
         subscribe_notifications: bool,
     },
     /// Ack
-    Ack,
+    Ack { configuration: Configuration },
     /// Nack
     Nack {
         /// Nack reason

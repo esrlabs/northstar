@@ -119,7 +119,7 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     match connect.await {
         Ok(Some(Ok(message))) => match message {
             Message::Connect {
-                connect: Connect::Ack,
+                connect: Connect::Ack { .. },
             } => Ok(connection),
             _ => unreachable!("connect sequence"),
         },

@@ -412,29 +412,41 @@ impl State {
         // Spawn process
         info!("Creating {}", container);
 
-        // Create a toke to stop tasks spawned related to this container
+        // Create a token to stop tasks spawned related to this container
         let stop = CancellationToken::new();
 
         // We send the fd to the forker so that it can pass it to the init
-        let console_fd = if manifest.console {
+        let console_fd = if !manifest.console.is_empty() {
             let peer = Peer::from(container.to_string());
-            let (runtime, container) = StdUnixStream::pair().expect("Failed to create socketpair");
-            let container: OwnedFd = container.into();
+            let (runtime_stream, container_stream) =
+                StdUnixStream::pair().expect("Failed to create socketpair");
+            let container_fd: OwnedFd = container_stream.into();
 
-            let runtime = runtime
+            let runtime = runtime_stream
                 .set_nonblocking(true)
-                .and_then(|_| UnixStream::from_std(runtime))
+                .and_then(|_| UnixStream::from_std(runtime_stream))
                 .expect("Failed to set socket into nonblocking mode");
 
             let notifications = self.notification_tx.subscribe();
             let events_tx = self.events_tx.clone();
-            let connection =
-                Console::connection(runtime, peer, stop.clone(), events_tx, notifications, None);
+            let stop = stop.clone();
+            let container = Some(container.clone());
+            let permissions = manifest.console.clone();
+            let connection = Console::connection(
+                runtime,
+                peer,
+                stop,
+                container,
+                permissions,
+                events_tx,
+                notifications,
+                None,
+            );
 
             // Start console task
             task::spawn(connection);
 
-            Some(container)
+            Some(container_fd)
         } else {
             None
         };

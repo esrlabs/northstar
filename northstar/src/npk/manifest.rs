@@ -19,6 +19,12 @@ use std::{
 };
 use thiserror::Error;
 
+// Reexport console types
+pub use console::*;
+
+#[path = "console.rs"]
+mod console;
+
 /// Northstar package manifest
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
@@ -29,8 +35,8 @@ pub struct Manifest {
     /// Container version
     pub version: Version,
     /// Pass a console fd number in NORTHSTAR_CONSOLE
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub console: bool,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub console: Console,
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
@@ -1065,6 +1071,7 @@ version: 0.0.0
 init: /binary
 uid: 1000
 gid: 1001
+console: full
 args:
   - one
   - two

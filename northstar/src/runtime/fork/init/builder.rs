@@ -28,7 +28,7 @@ pub async fn build(config: &Config, manifest: &Manifest) -> Result<Init, Error> 
     let root = config.run_dir.join(container.to_string());
 
     let capabilities = manifest.capabilities.clone();
-    let console = manifest.console;
+    let console = !manifest.console.is_empty();
     let gid = manifest.gid;
     let groups = groups(manifest);
     let mounts = prepare_mounts(config, &root, manifest).await?;

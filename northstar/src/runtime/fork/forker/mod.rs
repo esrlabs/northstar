@@ -91,7 +91,7 @@ impl Forker {
         manifest: &Manifest,
         console: Option<OwnedFd>,
     ) -> Result<Pid, Error> {
-        debug_assert_eq!(manifest.console, console.is_some());
+        debug_assert_eq!(!manifest.console.is_empty(), console.is_some());
 
         let init = init::build(config, manifest).await?;
         let console = console.map(Into::into);
