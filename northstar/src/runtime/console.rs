@@ -2,6 +2,7 @@ use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed},
     common::container::Container,
+    npk::manifest,
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
@@ -105,15 +106,28 @@ impl Console {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn connection<T: AsyncRead + AsyncWrite + Unpin>(
         stream: T,
         peer: Peer,
         stop: CancellationToken,
+        container: Option<Container>,
+        configuration: manifest::Console,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
     ) -> Result<(), Error> {
-        debug!("Client {} connected", peer);
+        if let Some(container) = &container {
+            debug!(
+                "Container {} connected with permissions {}",
+                container, configuration
+            );
+        } else {
+            debug!(
+                "Client {} connected with permissions {}",
+                peer, configuration
+            );
+        }
 
         // Get a framed stream and sink interface.
         let mut network_stream = api::codec::Framed::with_capacity(stream, BUFFER_SIZE);
@@ -167,8 +181,10 @@ impl Console {
             return Ok(());
         } else {
             // Send ConnectAck
-            let conack = model::Connect::Ack;
-            let message = model::Message::Connect { connect: conack };
+            let connect = model::Connect::Ack {
+                configuration: configuration.clone(),
+            };
+            let message = model::Message::Connect { connect };
 
             if let Err(e) = network_stream.send(message).await {
                 warn!("{}: Connection error: {}", peer, e);
@@ -396,6 +412,8 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
                             stream,
                             client.into(),
                             stop.clone(),
+                            None,
+                            manifest::Console::default(),
                             event_tx.clone(),
                             notification_tx.subscribe(),
                             Some(time::Duration::from_secs(10)),

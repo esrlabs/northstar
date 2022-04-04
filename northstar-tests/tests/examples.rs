@@ -27,7 +27,7 @@ test!(console, {
     client().install(EXAMPLE_CONSOLE_NPK, "mem").await?;
     client().start(EXAMPLE_CONSOLE).await?;
     // The console example stop itself - so wait for it...
-    assume("Client console:0.0.1 connected", 5).await?;
+    assume("Container console:0.0.1 connected with permissions .*", 5).await?;
     assume("Killing console:0.0.1 with SIGTERM", 5).await?;
 });
 
