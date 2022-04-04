@@ -47,7 +47,7 @@ macro_rules! test {
                         $e
                         northstar_tests::runtime::client().shutdown().await?;
                         drop(runtime);
-                        tokio::fs::remove_file(northstar_tests::runtime::console().path()).await?;
+                        tokio::fs::remove_file(northstar_tests::runtime::console_url().path()).await?;
                         Ok(())
                     }) {
                         Ok(_) => std::process::exit(0),

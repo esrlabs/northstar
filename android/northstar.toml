@@ -1,8 +1,11 @@
-console = ["tcp://localhost:4200"]
 run_dir = "/data/northstar/run"
 data_dir = "/data/northstar/data"
 log_dir = "/data/northstar/logs"
 cgroup = "northstar"
+
+# Debug TCP console on localhost with full access
+[consoles."tcp://localhost:4200"]
+permissions = "full"
 
 [repositories.system]
 key = "/system/etc/northstar/system.pub"

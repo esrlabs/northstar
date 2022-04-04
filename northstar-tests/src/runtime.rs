@@ -10,10 +10,7 @@ use northstar::{
         model::{Container, ExitStatus, Notification},
     },
     common::non_null_string::NonNullString,
-    runtime::{
-        config::{self, Config, RepositoryType},
-        Runtime as Northstar,
-    },
+    runtime::{config, Runtime as Northstar},
 };
 use std::{
     collections::HashMap,
@@ -28,7 +25,7 @@ pub fn client() -> &'static mut Client {
     unsafe { CLIENT.as_mut().unwrap() }
 }
 
-pub fn console() -> url::Url {
+pub fn console_url() -> url::Url {
     let console = std::env::temp_dir().join(format!("northstar-{}", std::process::id()));
     url::Url::parse(&format!("unix://{}", console.display())).unwrap()
 }
@@ -51,13 +48,20 @@ impl Runtime {
         std::fs::create_dir(&test_repository)?;
         let example_key = tmpdir.path().join("key.pub");
         std::fs::write(&example_key, include_bytes!("../../examples/northstar.pub"))?;
+        let mut consoles = HashMap::with_capacity(1);
+        consoles.insert(
+            console_url(),
+            config::Console {
+                permissions: config::ConsoleConfiguration::full(),
+            },
+        );
 
         let mut repositories = HashMap::new();
         repositories.insert(
             "mem".into(),
             config::Repository {
                 mount_on_start: false,
-                r#type: RepositoryType::Memory,
+                r#type: config::RepositoryType::Memory,
                 key: Some(example_key.clone()),
             },
         );
@@ -65,25 +69,25 @@ impl Runtime {
             "fs".into(),
             config::Repository {
                 mount_on_start: false,
-                r#type: RepositoryType::Fs {
+                r#type: config::RepositoryType::Fs {
                     dir: test_repository,
                 },
                 key: Some(example_key),
             },
         );
 
-        let config = Config {
-            console: Some(vec![console()]),
+        let config = config::Config {
             run_dir,
             data_dir,
             log_dir,
+            consoles,
             cgroup: NonNullString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,
             debug: None,
         };
-        let b = Northstar::new(config)?;
+        let runtime = Northstar::new(config)?;
 
-        Ok(Runtime::Created(b, tmpdir))
+        Ok(Runtime::Created(runtime, tmpdir))
     }
 
     pub async fn start(self) -> Result<Runtime> {
@@ -125,7 +129,7 @@ impl Client {
     /// Launches an instance of Northstar
     pub async fn new() -> Result<Client> {
         // Connect to the runtime
-        let io = UnixStream::connect(console().path())
+        let io = UnixStream::connect(console_url().path())
             .await
             .expect("Failed to connect to console");
         let client = client::Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
@@ -137,7 +141,7 @@ impl Client {
 
     /// Connect a new client instance to the runtime
     pub async fn client(&self) -> Result<client::Client<UnixStream>> {
-        let io = UnixStream::connect(console().path())
+        let io = UnixStream::connect(console_url().path())
             .await
             .context("Failed to connect to console")?;
         client::Client::new(io, Some(1000), time::Duration::from_secs(30))

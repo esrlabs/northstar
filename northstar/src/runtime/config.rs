@@ -10,12 +10,20 @@ use std::{
 use tokio::fs;
 use url::Url;
 
+/// Console permission configuration
+pub use crate::npk::manifest::Console as ConsoleConfiguration;
+
+/// Console configuration
+#[derive(Clone, Debug, Deserialize)]
+pub struct Console {
+    /// Console permisssions
+    pub permissions: ConsoleConfiguration,
+}
+
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Console address.
-    pub console: Option<Vec<Url>>,
     /// Directory with unpacked containers.
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored
@@ -24,6 +32,8 @@ pub struct Config {
     pub log_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNullString,
+    /// Console configuration
+    pub consoles: HashMap<Url, Console>,
     /// Repositories
     pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options

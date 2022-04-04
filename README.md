@@ -164,8 +164,6 @@ The example executable `northstar` reads a configuration file that represents
 `northstar::runtime::config::Config`.
 
 ```toml
-# Console adresses
-console = ["tcp://localhost:4200"]
 # Directory where containers are mounted
 run_dir = "target/northstar/run"
 # Directory for `persist` mounts of containers
@@ -174,6 +172,10 @@ data_dir = "target/northstar/data"
 log_dir = "target/northstar/logs"
 # Top level cgroup name
 cgroup = "northstar"
+
+# Debug TCP console on localhost with full access
+[consoles."tcp://localhost:4200"]
+permissions = "full"
 
 # Start a `strace -p PID ...` instance after a container is started.
 # The execution of the application is deferred until strace is attached.

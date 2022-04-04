@@ -295,16 +295,16 @@ async fn run(
     let (notification_tx, _) = sync::broadcast::channel(NOTIFICATION_BUFFER_SIZE);
 
     // Initialize the console if configured
-    let console = if let Some(consoles) = config.console.as_ref() {
-        if consoles.is_empty() {
-            None
-        } else {
-            let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
-            for url in consoles {
-                console.listen(url).await.map_err(Error::Console)?;
-            }
-            Some(console)
+    let console = if !config.consoles.is_empty() {
+        let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
+        for (url, configuration) in config.consoles.iter() {
+            let configuration = &configuration.permissions;
+            console
+                .listen(url, configuration)
+                .await
+                .map_err(Error::Console)?;
         }
+        Some(console)
     } else {
         None
     };

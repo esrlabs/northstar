@@ -467,7 +467,7 @@ test!(check_api_version_on_connect, {
     impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
 
     let mut connection = api::codec::Framed::new(
-        UnixStream::connect(&northstar_tests::runtime::console().path()).await?,
+        UnixStream::connect(&northstar_tests::runtime::console_url().path()).await?,
     );
 
     // Send a connect with an version unequal to the one defined in the model
