@@ -1,4 +1,4 @@
-use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
+use super::{config::ConsoleConfiguration, ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed},
     common::container::Container,
@@ -76,21 +76,44 @@ impl Console {
 
     /// Spawn a task that listens on `url` for new connections. Spawn a task for
     /// each client
-    pub(super) async fn listen(&mut self, url: &Url) -> Result<(), Error> {
+    pub(super) async fn listen(
+        &mut self,
+        url: &Url,
+        configuration: &ConsoleConfiguration,
+    ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
+        let configuration = configuration.clone();
         // Stop token for self *and* the connections
         let stop = self.stop.clone();
 
+        debug!(
+            "Starting console on {} with permissions \"{}\"",
+            url, configuration
+        );
         let task = match Listener::new(url)
             .await
             .map_err(|e| Error::Io("Failed start console listener".into(), e))?
         {
             Listener::Tcp(listener) => task::spawn(async move {
-                serve(|| listener.accept(), event_tx, notification_tx, stop).await
+                serve(
+                    || listener.accept(),
+                    event_tx,
+                    notification_tx,
+                    stop,
+                    configuration,
+                )
+                .await
             }),
             Listener::Unix(listener) => task::spawn(async move {
-                serve(|| listener.accept(), event_tx, notification_tx, stop).await
+                serve(
+                    || listener.accept(),
+                    event_tx,
+                    notification_tx,
+                    stop,
+                    configuration,
+                )
+                .await
             }),
         };
 
@@ -351,7 +374,6 @@ impl Listener {
         let listener = match url.scheme() {
             "tcp" => {
                 let address = url.socket_addrs(|| Some(4200))?.first().unwrap().to_owned();
-                debug!("Starting console on {}", &address);
                 let listener = TcpListener::bind(&address).await?;
                 debug!("Started console on {}", &address);
 
@@ -359,7 +381,6 @@ impl Listener {
             }
             "unix" => {
                 let path = PathBuf::from(url.path());
-                debug!("Starting console on {}", path.display());
 
                 // TODO this file should not be deleted here
                 if path.exists() {
@@ -392,6 +413,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     event_tx: EventTx,
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
+    configuration: ConsoleConfiguration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
@@ -413,7 +435,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
                             client.into(),
                             stop.clone(),
                             None,
-                            manifest::Console::default(),
+                            configuration.clone(),
                             event_tx.clone(),
                             notification_tx.subscribe(),
                             Some(time::Duration::from_secs(10)),
