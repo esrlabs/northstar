@@ -7,7 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.56"
-clap = { version = "3.1.7", features = ["derive"] }
+clap = { version = "3.1.8", features = ["derive"] }
 northstar = { path = "../../northstar", features = ["api"], default-features = false }
 okapi = "0.7.0-rc.1"
 schemars = "0.8.8"
