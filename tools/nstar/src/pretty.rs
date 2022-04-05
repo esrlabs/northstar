@@ -158,6 +158,9 @@ pub(crate) fn response(response: &Response) -> i32 {
 fn format_err(err: &model::Error) -> String {
     match err {
         model::Error::Configuration { context } => format!("invalid configuration: {}", context),
+        model::Error::PermissionDenied { required, .. } => {
+            format!("permission denied: required: {}", required)
+        }
         model::Error::DuplicateContainer { container } => {
             format!("duplicate container name and version {}", container)
         }

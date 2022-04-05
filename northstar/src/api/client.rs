@@ -237,7 +237,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, Error> {
         match self.request(Request::Repositories).await? {
             Response::Repositories { repositories } => Ok(repositories),
-            _ => unreachable!("response on repositories should be repsoitories"),
+            Response::Error { error } => Err(Error::Runtime(error)),
+            _ => unreachable!("response on repositories should be ok or error"),
         }
     }
 

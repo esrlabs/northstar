@@ -34,6 +34,11 @@ async fn main() -> Result<()> {
     // Instantiate client and start connect sequence
     let mut client = client::Client::new(io, None, Duration::from_secs(5)).await?;
 
+    println!(
+        "Listing repositories is denied: {:?}",
+        client.repositories().await
+    );
+
     for container in client.containers().await? {
         println!(
             "{} is {}",

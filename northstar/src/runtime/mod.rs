@@ -351,7 +351,7 @@ async fn run(
             event = event_rx.next() => {
                 if let Err(e) = match event.unwrap() {
                     // Process console events enqueued by console::Console
-                    Event::Console(mut msg, response) => state.on_request(&mut msg, response).await,
+                    Event::Console(request, response) => state.on_request(request, response).await,
                     // The runtime os commanded to shut down and exit.
                     Event::Shutdown => {
                         debug!("Shutting down Northstar runtime");

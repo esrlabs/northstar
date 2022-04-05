@@ -1,8 +1,11 @@
-use super::{config::ConsoleConfiguration, ContainerEvent, Event, NotificationTx, RepositoryId};
+use super::{
+    config::ConsoleConfiguration as Configuration, ContainerEvent, Event, NotificationTx,
+    RepositoryId,
+};
 use crate::{
     api::{self, codec::Framed},
     common::container::Container,
-    npk::manifest,
+    npk::manifest::{self, ConsolePermission as Permission},
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
@@ -34,7 +37,7 @@ const BUFFER_SIZE: usize = 1024 * 1024;
 // Request from the main loop to the console
 #[derive(Debug)]
 pub(crate) enum Request {
-    Message(model::Message),
+    Request(model::Request),
     Install(RepositoryId, mpsc::Receiver<Bytes>),
 }
 
@@ -79,7 +82,7 @@ impl Console {
     pub(super) async fn listen(
         &mut self,
         url: &Url,
-        configuration: &ConsoleConfiguration,
+        configuration: &Configuration,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
@@ -191,8 +194,8 @@ impl Console {
         // Check protocol version from connect message against local model version
         if protocol_version != model::version() {
             warn!(
-                "{}: Client connected with invalid protocol version {}",
-                peer, protocol_version
+                "{}: Client connected with invalid protocol version {}. Expected {}. Disconnecting...",
+                peer, protocol_version, model::version()
             );
             // Send a ConnectNack and return -> closes the connection
             let error = model::ConnectNack::InvalidProtocolVersion {
@@ -202,17 +205,31 @@ impl Console {
             let message = model::Message::Connect { connect };
             network_stream.send(message).await.ok();
             return Ok(());
-        } else {
-            // Send ConnectAck
-            let connect = model::Connect::Ack {
-                configuration: configuration.clone(),
-            };
-            let message = model::Message::Connect { connect };
+        }
 
-            if let Err(e) = network_stream.send(message).await {
-                warn!("{}: Connection error: {}", peer, e);
-                return Ok(());
-            }
+        // Check notification permissions if the client want's to subscribe to
+        // notifications
+        if notifications && !configuration.contains(&Permission::Notifications) {
+            warn!(
+                "{}: Requested notifications without notification permission. Disconnecting...",
+                peer
+            );
+            // Send a ConnectNack and return -> closes the connection
+            let error = model::ConnectNack::PermissionDenied;
+            let connect = model::Connect::Nack { error };
+            let message = model::Message::Connect { connect };
+            network_stream.send(message).await.ok();
+            return Ok(());
+        }
+
+        // Looks good - send ConnectAck
+        let connect = model::Connect::Ack {
+            configuration: configuration.clone(),
+        };
+        let message = model::Message::Connect { connect };
+        if let Err(e) = network_stream.send(message).await {
+            warn!("{}: Connection error: {}", peer, e);
+            return Ok(());
         }
 
         // Notification input: If the client subscribe create a stream from the broadcast
@@ -255,24 +272,23 @@ impl Console {
                     }
                 }
                 item = network_stream.next() => {
-                    let message = if let Some(Ok(msg)) = item {
-                        msg
-                    } else {
-                        break;
-                    };
+                    if let Some(Ok(model::Message::Request { request })) = item {
+                        trace!("{}: --> {:?}", peer, request);
+                        let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
+                            Ok(response) => response,
+                            Err(e) => {
+                                warn!("Failed to process request: {}", e);
+                                break;
+                            }
+                        };
+                        trace!("{}: <-- {:?}", peer, response);
 
-                    trace!("{}: --> {:?}", peer, message);
-                    let response = match process_request(&peer, &mut network_stream, &stop, &event_tx, message).await {
-                        Ok(response) => response,
-                        Err(e) => {
-                            warn!("Failed to process request: {}", e);
+                        if let Err(e) = network_stream.send(response).await {
+                            warn!("{}: Connection error: {}", peer, e);
                             break;
                         }
-                    };
-                    trace!("{}: <-- {:?}", peer, response);
-
-                    if let Err(e) = network_stream.send(response).await {
-                        warn!("{}: Connection error: {}", peer, e);
+                    } else {
+                        warn!("{}: Unexpected message: {:?}. Disconnecting...", peer, item);
                         break;
                     }
                 }
@@ -296,19 +312,42 @@ async fn process_request<S>(
     client_id: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
+    configuration: &manifest::Console,
     event_loop: &EventTx,
-    message: model::Message,
+    request: model::Request,
 ) -> Result<model::Message, Error>
 where
     S: AsyncRead + Unpin,
 {
+    let required_permission = match &request {
+        model::Request::Shutdown => Permission::Shutdown,
+        model::Request::Containers => Permission::Containers,
+        model::Request::Repositories => Permission::Repositories,
+        model::Request::Start { .. } => Permission::Start,
+        model::Request::Kill { .. } => Permission::Kill,
+        model::Request::Install { .. } => Permission::Install,
+        model::Request::Mount { .. } => Permission::Mount,
+        model::Request::Umount { .. } => Permission::Umount,
+        model::Request::Uninstall { .. } => Permission::Uninstall,
+        model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
+    };
+
+    if !configuration.contains(&required_permission) {
+        return Ok(model::Message::Response {
+            response: model::Response::Error {
+                error: model::Error::PermissionDenied {
+                    permissions: configuration.iter().cloned().collect(),
+                    required: required_permission,
+                },
+            },
+        });
+    }
+
     let (reply_tx, reply_rx) = oneshot::channel();
-    if let model::Message::Request {
-        request: model::Request::Install {
-            repository,
-            mut size,
-        },
-    } = message
+    if let model::Request::Install {
+        repository,
+        mut size,
+    } = request
     {
         debug!(
             "{}: Received installation request with size {}",
@@ -346,9 +385,9 @@ where
             }
         }
     } else {
-        let request = Request::Message(message);
-        trace!("    {:?} -> event loop", request);
-        let event = Event::Console(request, reply_tx);
+        let message = Request::Request(request);
+        trace!("    {:?} -> event loop", message);
+        let event = Event::Console(message, reply_tx);
         event_loop.send(event).map_err(|_| Error::Shutdown).await?;
     }
 
@@ -413,7 +452,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     event_tx: EventTx,
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
-    configuration: ConsoleConfiguration,
+    configuration: Configuration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,

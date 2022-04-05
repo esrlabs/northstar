@@ -39,6 +39,12 @@ pub enum ConsolePermission {
     Notifications,
 }
 
+impl fmt::Display for ConsolePermission {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", serde_plain::to_string(self).unwrap())
+    }
+}
+
 /// Console access level: list of allowed request message types
 /// ```yaml
 /// console:
@@ -76,11 +82,7 @@ impl fmt::Display for Console {
         if self.permissions.len() == ConsolePermission::COUNT {
             write!(f, "full")
         } else {
-            let permissions = self
-                .permissions
-                .iter()
-                .map(|s| serde_plain::to_string(&s).unwrap())
-                .format(", ");
+            let permissions = self.permissions.iter().format(", ");
             write!(f, "{}", permissions)
         }
     }
