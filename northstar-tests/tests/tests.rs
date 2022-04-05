@@ -1,17 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use futures::{SinkExt, StreamExt};
+use anyhow::Result;
 use log::debug;
-use logger::assume;
-use northstar::api::{
-    self,
-    model::{self, ConnectNack, ExitStatus, Notification},
-};
-use northstar_tests::{containers::*, logger, runtime::client, test};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::UnixStream,
-};
+use northstar::api::model::{ExitStatus, Notification};
+use northstar_tests::{containers::*, logger::assume, runtime::client, test};
 
 // Test a good and bad log assumption
 test!(logger_smoketest, {
@@ -459,39 +451,6 @@ test!(exitcodes, {
         };
         client().assume_notification(n, 5).await?;
     }
-});
-
-// Verify that the client() reject a version mismatch in Connect
-test!(check_api_version_on_connect, {
-    trait AsyncReadWrite: AsyncRead + AsyncWrite + Unpin + Send {}
-    impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
-
-    let mut connection = api::codec::Framed::new(
-        UnixStream::connect(&northstar_tests::runtime::console_url().path()).await?,
-    );
-
-    // Send a connect with an version unequal to the one defined in the model
-    let mut version = api::model::version();
-    version.patch += 1;
-
-    let connect = api::model::Connect::Connect {
-        version,
-        subscribe_notifications: false,
-    };
-    let connect_message = api::model::Message::new_connect(connect);
-    connection.send(connect_message.clone()).await?;
-
-    // Receive connect nack
-    let connack = connection.next().await.unwrap().unwrap();
-
-    drop(connection);
-
-    let error = ConnectNack::InvalidProtocolVersion {
-        version: model::version(),
-    };
-    let expected_message = model::Message::new_connect(model::Connect::Nack { error });
-
-    assert_eq!(connack, expected_message);
 });
 
 // Check printing on stdout and stderr

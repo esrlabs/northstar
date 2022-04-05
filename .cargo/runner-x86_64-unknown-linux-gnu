@@ -2,7 +2,7 @@
 
 binary_name=`basename $1`
 
-if [[ $binary_name =~ ^(northstar|(tests|examples)-[a-z0-9]{16})$ ]]; then
+if [[ $binary_name =~ ^(northstar|(tests|examples|console)-[a-z0-9]{16})$ ]]; then
     sudo -E --preserve-env=PATH $@
 else
     eval $@

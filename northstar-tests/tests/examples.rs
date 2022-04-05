@@ -1,6 +1,5 @@
-use logger::assume;
 use northstar::api::model::{ExitStatus, Notification};
-use northstar_tests::{containers::*, logger, runtime::client, test};
+use northstar_tests::{containers::*, logger::assume, runtime::client, test};
 
 // Start crashing example
 test!(crashing, {

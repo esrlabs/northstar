@@ -91,7 +91,7 @@ pub struct MemoryNotification {
 }
 
 /// Connect meta information
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Connect {

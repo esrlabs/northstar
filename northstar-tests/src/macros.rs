@@ -6,7 +6,7 @@ macro_rules! test {
             #![rusty_fork(timeout_ms = 300000)]
             #[test]
             fn $name() {
-                crate::logger::init();
+                northstar_tests::logger::init();
                 log::set_max_level(log::LevelFilter::Debug);
 
                 // Enter a mount namespace. This needs to be done before spawning
@@ -30,13 +30,10 @@ macro_rules! test {
                     nix::mount::MsFlags::MS_PRIVATE | nix::mount::MsFlags::MS_REC,
                     Option::<&'static [u8]>::None,
                 )
-                .expect(
-                    "Failed to set mount propagation to private on
-                root",
-                );
+                .expect("Failed to set mount propagation to private on root");
                 let runtime = northstar_tests::runtime::Runtime::new().expect("Failed to start runtime");
 
-                match tokio::runtime::Builder::new_multi_thread()
+                if let Err(e) = tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(1)
                     .enable_all()
                     .thread_name(stringify!($name))
@@ -45,13 +42,11 @@ macro_rules! test {
                     .block_on(async {
                         let runtime = runtime.start().await?;
                         $e
-                        northstar_tests::runtime::client().shutdown().await?;
-                        drop(runtime);
-                        tokio::fs::remove_file(northstar_tests::runtime::console_url().path()).await?;
-                        Ok(())
+                        runtime.shutdown().await
                     }) {
-                        Ok(_) => std::process::exit(0),
-                        anyhow::Result::<()>::Err(e) => panic!("{}", e),
+                        panic!("{}", e);
+                    } else {
+                        std::process::exit(0);
                     }
             }
         }
