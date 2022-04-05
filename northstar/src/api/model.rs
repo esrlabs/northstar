@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Console configuration
 pub type Configuration = crate::npk::manifest::Console;
+/// Console permission entity
+pub type Permission = crate::npk::manifest::ConsolePermission;
 /// Container identification
 pub type Container = crate::common::container::Container;
 /// Container exit code
@@ -114,6 +116,7 @@ pub enum Connect {
 #[allow(missing_docs)]
 pub enum ConnectNack {
     InvalidProtocolVersion { version: Version },
+    PermissionDenied,
 }
 
 /// Request
@@ -249,10 +252,15 @@ pub enum ExitStatus {
 #[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
-//#[serde(tag = "error", content = "context")]
 pub enum Error {
     Configuration {
         context: String,
+    },
+    PermissionDenied {
+        /// Permissions of this connections
+        permissions: HashSet<Permission>,
+        /// Requred permission
+        required: Permission,
     },
     DuplicateContainer {
         container: Container,
