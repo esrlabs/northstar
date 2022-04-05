@@ -12,12 +12,13 @@ use northstar::{
     common::non_null_string::NonNullString,
     runtime::{config, Runtime as Northstar},
 };
-use std::{
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-};
+use std::convert::{TryFrom, TryInto};
 use tempfile::{NamedTempFile, TempDir};
-use tokio::{fs, net::UnixStream, pin, select, time};
+use tokio::{
+    fs::{self, remove_file},
+    net::UnixStream,
+    pin, select, time,
+};
 
 pub static mut CLIENT: Option<Client> = None;
 
@@ -25,8 +26,13 @@ pub fn client() -> &'static mut Client {
     unsafe { CLIENT.as_mut().unwrap() }
 }
 
-pub fn console_url() -> url::Url {
-    let console = std::env::temp_dir().join(format!("northstar-{}", std::process::id()));
+pub fn console_full() -> url::Url {
+    let console = std::env::temp_dir().join(format!("northstar-{}-full", std::process::id()));
+    url::Url::parse(&format!("unix://{}", console.display())).unwrap()
+}
+
+pub fn console_none() -> url::Url {
+    let console = std::env::temp_dir().join(format!("northstar-{}-none", std::process::id()));
     url::Url::parse(&format!("unix://{}", console.display())).unwrap()
 }
 
@@ -48,33 +54,43 @@ impl Runtime {
         std::fs::create_dir(&test_repository)?;
         let example_key = tmpdir.path().join("key.pub");
         std::fs::write(&example_key, include_bytes!("../../examples/northstar.pub"))?;
-        let mut consoles = HashMap::with_capacity(1);
-        consoles.insert(
-            console_url(),
-            config::Console {
-                permissions: config::ConsoleConfiguration::full(),
-            },
-        );
-
-        let mut repositories = HashMap::new();
-        repositories.insert(
-            "mem".into(),
-            config::Repository {
-                mount_on_start: false,
-                r#type: config::RepositoryType::Memory,
-                key: Some(example_key.clone()),
-            },
-        );
-        repositories.insert(
-            "fs".into(),
-            config::Repository {
-                mount_on_start: false,
-                r#type: config::RepositoryType::Fs {
-                    dir: test_repository,
+        let consoles = [
+            (
+                console_full(),
+                config::Console {
+                    permissions: config::ConsoleConfiguration::full(),
                 },
-                key: Some(example_key),
-            },
-        );
+            ),
+            (
+                console_none(),
+                config::Console {
+                    permissions: config::ConsoleConfiguration::default(),
+                },
+            ),
+        ]
+        .into();
+
+        let repositories = [
+            (
+                "mem".into(),
+                config::Repository {
+                    mount_on_start: false,
+                    r#type: config::RepositoryType::Memory,
+                    key: Some(example_key.clone()),
+                },
+            ),
+            (
+                "fs".into(),
+                config::Repository {
+                    mount_on_start: false,
+                    r#type: config::RepositoryType::Fs {
+                        dir: test_repository,
+                    },
+                    key: Some(example_key),
+                },
+            ),
+        ]
+        .into();
 
         let config = config::Config {
             run_dir,
@@ -104,6 +120,15 @@ impl Runtime {
             anyhow::bail!("Runtime is already started")
         }
     }
+
+    pub async fn shutdown(self) -> Result<()> {
+        client().shutdown().await?;
+        drop(self);
+
+        remove_file(console_full().path()).await?;
+        remove_file(console_none().path()).await?;
+        Ok(())
+    }
 }
 
 pub struct Client {
@@ -129,7 +154,7 @@ impl Client {
     /// Launches an instance of Northstar
     pub async fn new() -> Result<Client> {
         // Connect to the runtime
-        let io = UnixStream::connect(console_url().path())
+        let io = UnixStream::connect(console_full().path())
             .await
             .expect("Failed to connect to console");
         let client = client::Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
@@ -141,7 +166,7 @@ impl Client {
 
     /// Connect a new client instance to the runtime
     pub async fn client(&self) -> Result<client::Client<UnixStream>> {
-        let io = UnixStream::connect(console_url().path())
+        let io = UnixStream::connect(console_full().path())
             .await
             .context("Failed to connect to console")?;
         client::Client::new(io, Some(1000), time::Duration::from_secs(30))

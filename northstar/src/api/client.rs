@@ -1,7 +1,7 @@
 use super::{
     codec,
     model::{
-        self, Connect, Container, ContainerData, ContainerStats, Message, MountResult,
+        self, Connect, ConnectNack, Container, ContainerData, ContainerStats, Message, MountResult,
         Notification, RepositoryId, Request, Response, UmountResult,
     },
 };
@@ -104,11 +104,11 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     timeout: time::Duration,
 ) -> Result<Connection<T>, Error> {
     let mut connection = codec::Framed::with_capacity(io, BUFFER_SIZE);
+    let subscribe_notifications = notifications.is_some();
+    let version = model::version();
+
     // Send connect message
-    let connect = Connect::Connect {
-        version: model::version(),
-        subscribe_notifications: notifications.is_some(),
-    };
+    let connect = Connect::new_connect(version, subscribe_notifications);
     connection
         .send(Message::new_connect(connect))
         .await
@@ -116,19 +116,37 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
 
     // Wait for conack
     let connect = time::timeout(timeout, connection.next());
-    match connect.await {
-        Ok(Some(Ok(message))) => match message {
-            Message::Connect {
-                connect: Connect::Ack { .. },
-            } => Ok(connection),
-            _ => unreachable!("connect sequence"),
+    let message = match connect.await {
+        Ok(Some(Ok(message))) => message,
+        Ok(Some(Err(e))) => return Err(Error::Io(e)),
+        Ok(None) => {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "Connection closed",
+            )))
+        }
+        Err(_) => return Err(Error::Timeout),
+    };
+
+    // Expect a connect message
+    let connect = match message {
+        Message::Connect { connect } => connect,
+        _ => unreachable!("expecting connect"),
+    };
+
+    match connect {
+        Connect::Ack { .. } => Ok(connection),
+        Connect::Nack { error } => match dbg!(error) {
+            ConnectNack::InvalidProtocolVersion { .. } => Err(Error::Io(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Protocol version unsupported",
+            ))),
+            ConnectNack::PermissionDenied => Err(Error::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Permission denied",
+            ))),
         },
-        Ok(Some(Err(e))) => Err(Error::Io(e)),
-        Ok(None) => Err(Error::Io(io::Error::new(
-            io::ErrorKind::ConnectionReset,
-            "Connection reset",
-        ))),
-        Err(_) => Err(Error::Timeout),
+        _ => unreachable!("expecting connect ack or nack"),
     }
 }
 
@@ -216,6 +234,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn containers(&mut self) -> Result<Vec<ContainerData>, Error> {
         match self.request(Request::Containers).await? {
             Response::Containers { containers } => Ok(containers),
+            Response::Error { error } => Err(Error::Runtime(error)),
             _ => unreachable!("response on containers should be containers"),
         }
     }
@@ -521,6 +540,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
         match self.request(Request::Mount { containers: result }).await? {
             Response::Mount { result } => Ok(result),
+            Response::Error { error } => Err(Error::Runtime(error)),
             _ => unreachable!("response on umount_all should be mount"),
         }
     }
@@ -580,6 +600,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
         match self.request(Request::Umount { containers: result }).await? {
             Response::Umount { result } => Ok(result),
+            Response::Error { error } => Err(Error::Runtime(error)),
             _ => unreachable!("response on umount should be umount"),
         }
     }
@@ -605,6 +626,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         let container = container.try_into().map_err(Into::into)?;
         match self.request(Request::ContainerStats { container }).await? {
             Response::ContainerStats { stats, .. } => Ok(stats),
+            Response::Error { error } => Err(Error::Runtime(error)),
             _ => unreachable!("response on container_stats should be a container_stats"),
         }
     }
