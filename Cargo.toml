@@ -13,6 +13,7 @@ members = [
     "main",
     "northstar",
     "northstar-tests",
+    "northstar-tests/northstar-tests-derive",
     "northstar-tests/test-container",
     "tools/nstar",
     "tools/schema",

@@ -7,20 +7,20 @@ use northstar::api::{
     self,
     model::{self, ConnectNack},
 };
-use northstar_tests::test;
+use northstar_tests::runtime_test;
 use tokio::{net::UnixStream, time::Duration};
 
 /// Connect a client to the runtime console without any permission configured.
 async fn connect_none() -> Result<api::client::Client<UnixStream>> {
     let io = UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?;
-    dbg!(&io);
     api::client::Client::new(io, None, Duration::from_secs(10))
         .await
         .context("Failed to connect to the runtime")
 }
 
 // Verify that the client() reject a version mismatch in Connect
-test!(api_version, {
+#[runtime_test]
+async fn api_version() -> Result<()> {
     let mut connection = api::codec::Framed::new(
         UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?,
     );
@@ -44,32 +44,40 @@ test!(api_version, {
     let expected_message = model::Message::new_connect(model::Connect::Nack { error });
 
     assert_eq!(connack, expected_message);
-});
+    Ok(())
+}
 
-test!(notifications, {
+#[runtime_test]
+async fn notifications() -> Result<()> {
     let io = UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?;
     assert!(
         api::client::Client::new(io, Some(10), Duration::from_secs(10))
             .await
             .is_err()
     );
-});
+    Ok(())
+}
 
-test!(permission_containers, {
+#[runtime_test]
+async fn permissions_container() -> Result<()> {
     assert!(matches!(
         connect_none().await?.containers().await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_repositories, {
+#[runtime_test]
+async fn permissions_repositories() -> Result<()> {
     assert!(matches!(
         connect_none().await?.repositories().await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_start, {
+#[runtime_test]
+async fn permissions_start() -> Result<()> {
     assert!(matches!(
         connect_none().await?.start("hello-world:0.0.1").await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
@@ -88,16 +96,20 @@ test!(permission_start, {
             .await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_kill, {
+#[runtime_test]
+async fn permissions_kill() -> Result<()> {
     assert!(matches!(
         connect_none().await?.kill("hello-world:0.0.1", 15).await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_install, {
+#[runtime_test]
+async fn permissions_install() -> Result<()> {
     assert!(matches!(
         connect_none()
             .await?
@@ -105,16 +117,20 @@ test!(permission_install, {
             .await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_uninstall, {
+#[runtime_test]
+async fn permissions_uninstall() -> Result<()> {
     assert!(matches!(
         connect_none().await?.uninstall("hello-world:0.0.1").await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Result::<()>::Ok(())
+}
 
-test!(permission_mount, {
+#[runtime_test]
+async fn permissions_mount() -> Result<()> {
     assert!(matches!(
         connect_none().await?.mount("hello-world:0.0.1").await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
@@ -127,9 +143,11 @@ test!(permission_mount, {
             .await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_umount, {
+#[runtime_test]
+async fn permissions_umount() -> Result<()> {
     assert!(matches!(
         connect_none().await?.umount("hello-world:0.0.1").await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
@@ -142,9 +160,11 @@ test!(permission_umount, {
             .await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}
 
-test!(permission_stats, {
+#[runtime_test]
+async fn permissions_stats() -> Result<()> {
     assert!(matches!(
         connect_none()
             .await?
@@ -152,4 +172,5 @@ test!(permission_stats, {
             .await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
-});
+    Ok(())
+}

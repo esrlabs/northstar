@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use env_logger::Target;
 use lazy_static::lazy_static;
 use log::debug;
 use regex::Regex;
@@ -32,6 +33,7 @@ pub fn init() {
 
     env_logger::Builder::new()
         .parse_filters("debug")
+        .target(Target::Stdout)
         .format(|buf, record| {
             let elapsed = START.elapsed();
             let timestamp = format!("{}.{:06}s", elapsed.as_secs(), elapsed.subsec_micros());
