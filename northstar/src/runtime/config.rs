@@ -1,7 +1,8 @@
 use super::{Error, RepositoryId};
 use crate::common::non_null_string::NonNullString;
 use nix::{sys::stat, unistd};
-use serde::Deserialize;
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer};
 use std::{
     collections::HashMap,
     os::unix::prelude::{MetadataExt, PermissionsExt},
@@ -15,6 +16,7 @@ pub use crate::npk::manifest::Console as ConsoleConfiguration;
 
 /// Console configuration
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Console {
     /// Console permisssions
     pub permissions: ConsoleConfiguration,
@@ -33,8 +35,10 @@ pub struct Config {
     /// Top level cgroup name
     pub cgroup: NonNullString,
     /// Console configuration
+    #[serde(deserialize_with = "console")]
     pub consoles: HashMap<Url, Console>,
     /// Repositories
+    #[serde(default)]
     pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options
     pub debug: Option<Debug>,
@@ -56,6 +60,7 @@ pub enum RepositoryType {
 
 /// Repository configuration
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Repository {
     /// Mount the containers from this repository on runtime start. Default: false
     #[serde(default)]
@@ -68,6 +73,7 @@ pub struct Repository {
 
 /// Container debug settings
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Debug {
     /// Strace options
     pub strace: Option<debug::Strace>,
@@ -92,6 +98,7 @@ pub mod debug {
 
     /// Strace debug options
     #[derive(Clone, Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub struct Strace {
         /// Log to a file in log_dir
         pub output: StraceOutput,
@@ -105,6 +112,7 @@ pub mod debug {
 
     /// perf profiling options
     #[derive(Clone, Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub struct Perf {
         /// Path to the perf binary
         pub path: Option<PathBuf>,
@@ -178,4 +186,50 @@ async fn is_rw(path: &Path) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Validate the console configuration that the url schemes are all "tcp" or "unix"
+fn console<'de, D>(deserializer: D) -> Result<HashMap<Url, Console>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let consoles = HashMap::<Url, _>::deserialize(deserializer)?;
+    if consoles
+        .keys()
+        .any(|url| url.scheme() != "tcp" && url.scheme() != "unix")
+    {
+        Err(D::Error::custom("console must be tcp or unix"))
+    } else {
+        Ok(consoles)
+
+    }
+}
+
+#[test]
+fn console_url() {
+    let config = r#"
+run_dir = "target/northstar/run"
+data_dir = "target/northstar/data"
+log_dir = "target/northstar/logs"
+cgroup = "northstar"
+
+[consoles."tcp://localhost:4200"]
+permissions = "full"
+
+[consoles."unix://tmp/foo"]
+permissions = []"#;
+
+    toml::from_str::<Config>(config).unwrap();
+
+    // Invalid url
+    let config = r#"
+run_dir = "target/northstar/run"
+data_dir = "target/northstar/data"
+log_dir = "target/northstar/logs"
+cgroup = "northstar"
+
+[consoles."http://localhost:4200"]
+permissions = []"#;
+
+    assert!(toml::from_str::<Config>(config).is_err());
 }

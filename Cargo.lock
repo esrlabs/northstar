@@ -1237,6 +1237,7 @@ dependencies = [
  "tokio",
  "tokio-eventfd",
  "tokio-util",
+ "toml",
  "url",
  "uuid",
  "walkdir",
