@@ -599,7 +599,11 @@ impl State {
     }
 
     /// Install an NPK
-    async fn install(&mut self, id: &str, rx: &mut mpsc::Receiver<Bytes>) -> Result<(), Error> {
+    async fn install(
+        &mut self,
+        id: &str,
+        rx: &mut mpsc::Receiver<Bytes>,
+    ) -> Result<Container, Error> {
         // Find the repository
         let repository = self
             .repositories
@@ -641,7 +645,7 @@ impl State {
 
         self.container_event(&container, ContainerEvent::Installed);
 
-        Ok(())
+        Ok(container)
     }
 
     /// Remove and umount a specific app
@@ -872,7 +876,7 @@ impl State {
             }
             Request::Install(repository, mut rx) => {
                 let payload = match self.install(&repository, &mut rx).await {
-                    Ok(_) => model::Response::Ok,
+                    Ok(container) => model::Response::Install { container },
                     Err(e) => model::Response::Error { error: e.into() },
                 };
 

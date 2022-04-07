@@ -27,7 +27,7 @@ pub type Version = crate::common::version::Version;
 pub type ContainerStats = HashMap<String, serde_json::Value>;
 
 /// API version
-const VERSION: Version = Version::new(0, 2, 2);
+const VERSION: Version = Version::new(0, 2, 3);
 
 /// API version
 pub const fn version() -> Version {
@@ -226,6 +226,9 @@ pub enum Response {
     ContainerStats {
         container: Container,
         stats: ContainerStats,
+    },
+    Install {
+        container: Container,
     },
     Error {
         error: Error,

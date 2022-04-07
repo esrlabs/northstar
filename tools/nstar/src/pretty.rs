@@ -143,6 +143,10 @@ pub(crate) fn response(response: &Response) -> i32 {
             println!("ok");
             0
         }
+        Response::Install { container } => {
+            println!("installed {}", container);
+            0
+        }
         Response::ContainerStats { container, stats } => {
             println!("{}:", container);
             println!("{}", serde_json::to_string_pretty(&stats).unwrap());
