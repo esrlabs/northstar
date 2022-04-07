@@ -18,7 +18,11 @@ use futures::{
     Future, StreamExt, TryFutureExt,
 };
 use log::{debug, error, info, trace, warn};
-use std::{fmt, path::PathBuf, unreachable};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    unreachable,
+};
 use thiserror::Error;
 use tokio::{
     fs,
@@ -498,35 +502,37 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     debug!("Closed listener");
 }
 
-pub struct Peer(String);
-
-impl From<&str> for Peer {
-    fn from(s: &str) -> Self {
-        Peer(s.to_string())
-    }
-}
-
-impl From<String> for Peer {
-    fn from(s: String) -> Self {
-        Peer(s)
-    }
+pub enum Peer {
+    Remote(Url),
+    Container(Container),
 }
 
 impl From<std::net::SocketAddr> for Peer {
     fn from(socket: std::net::SocketAddr) -> Self {
-        Peer(socket.to_string())
+        let mut url = Url::parse("tcp://").unwrap();
+        url.set_ip_host(socket.ip()).unwrap();
+        url.set_port(Some(socket.port())).unwrap();
+        Peer::Remote(url)
     }
 }
 
 impl From<tokio::net::unix::SocketAddr> for Peer {
     fn from(socket: tokio::net::unix::SocketAddr) -> Self {
-        Peer(format!("{:?}", socket))
+        let path = socket
+            .as_pathname()
+            .unwrap_or_else(|| Path::new("unnamed"))
+            .display();
+        let url = Url::parse(&format!("unix://{}", path)).unwrap();
+        Peer::Remote(url)
     }
 }
 
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        match self {
+            Peer::Remote(url) => write!(f, "Remote({})", url),
+            Peer::Container(container) => write!(f, "Container({})", container),
+        }
     }
 }
 

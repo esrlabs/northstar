@@ -1,8 +1,7 @@
 use super::{Error, RepositoryId};
 use crate::common::non_null_string::NonNullString;
 use nix::{sys::stat, unistd};
-use serde::de::Error as SerdeError;
-use serde::{Deserialize, Deserializer};
+use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use std::{
     collections::HashMap,
     os::unix::prelude::{MetadataExt, PermissionsExt},
@@ -201,7 +200,6 @@ where
         Err(D::Error::custom("console must be tcp or unix"))
     } else {
         Ok(consoles)
-
     }
 }
 
