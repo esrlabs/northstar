@@ -44,6 +44,6 @@ type = "mem"
 
 # NPK Repository `default` in `dir`
 [repositories.default]
-mount = true
+mount_on_start = true
 key = "examples/northstar.pub"
 type = { fs = { dir = "target/northstar/repository" }}
