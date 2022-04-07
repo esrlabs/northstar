@@ -14,7 +14,7 @@ use strum_macros::{EnumCount, EnumIter};
     Clone, Eq, EnumIter, EnumCount, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum ConsolePermission {
+pub enum Permission {
     /// Shutdown the runtime
     Shutdown,
     /// List containers
@@ -39,7 +39,7 @@ pub enum ConsolePermission {
     Notifications,
 }
 
-impl fmt::Display for ConsolePermission {
+impl fmt::Display for Permission {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", serde_plain::to_string(self).unwrap())
     }
@@ -58,19 +58,19 @@ impl fmt::Display for ConsolePermission {
 #[derive(Default, Clone, Eq, PartialEq, Debug, JsonSchema)]
 pub struct Console {
     /// List of features
-    permissions: HashSet<ConsolePermission>,
+    permissions: HashSet<Permission>,
 }
 
 impl Console {
     /// Create a new `Console` with all permissions given
     pub fn full() -> Console {
-        let permissions = HashSet::from_iter(ConsolePermission::iter());
+        let permissions = HashSet::from_iter(Permission::iter());
         Console { permissions }
     }
 }
 
 impl std::ops::Deref for Console {
-    type Target = HashSet<ConsolePermission>;
+    type Target = HashSet<Permission>;
 
     fn deref(&self) -> &Self::Target {
         &self.permissions
@@ -79,7 +79,7 @@ impl std::ops::Deref for Console {
 
 impl fmt::Display for Console {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.permissions.len() == ConsolePermission::COUNT {
+        if self.permissions.len() == Permission::COUNT {
             write!(f, "full")
         } else {
             let permissions = self.permissions.iter().format(", ");
@@ -104,7 +104,7 @@ impl<'de> Deserialize<'de> for Console {
             fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<Console, E> {
                 match str_data.trim() {
                     "full" => Ok(Console {
-                        permissions: HashSet::from_iter(ConsolePermission::iter()),
+                        permissions: HashSet::from_iter(Permission::iter()),
                     }),
                     _ => Err(serde::de::Error::custom(format!(
                         "Invalid console permission: {}",
@@ -134,7 +134,7 @@ impl Serialize for Console {
     where
         S: Serializer,
     {
-        if self.permissions.len() == ConsolePermission::COUNT {
+        if self.permissions.len() == Permission::COUNT {
             serializer.serialize_str("full")
         } else {
             let mut seq = serializer.serialize_seq(Some(self.permissions.len()))?;
@@ -160,7 +160,7 @@ mod test {
 console: full
 ";
         let manifest = Manifest::from_str(manifest).expect("Failed to parse");
-        for permission in ConsolePermission::iter() {
+        for permission in Permission::iter() {
             assert!(manifest.console.contains(&permission));
         }
         Ok(())

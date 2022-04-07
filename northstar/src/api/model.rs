@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Console configuration
-pub type Configuration = crate::npk::manifest::Console;
+pub type ConsoleConfiguration = crate::npk::manifest::Console;
 /// Console permission entity
-pub type Permission = crate::npk::manifest::ConsolePermission;
+pub type ConsolePermission = crate::npk::manifest::Permission;
 /// Container identification
 pub type Container = crate::common::container::Container;
 /// Container exit code
@@ -102,7 +102,7 @@ pub enum Connect {
         subscribe_notifications: bool,
     },
     /// Ack
-    Ack { configuration: Configuration },
+    Ack { configuration: ConsoleConfiguration },
     /// Nack
     Nack {
         /// Nack reason
@@ -258,9 +258,9 @@ pub enum Error {
     },
     PermissionDenied {
         /// Permissions of this connections
-        permissions: HashSet<Permission>,
-        /// Requred permission
-        required: Permission,
+        permissions: HashSet<ConsolePermission>,
+        /// Required permission that was denied
+        required: ConsolePermission,
     },
     DuplicateContainer {
         container: Container,
