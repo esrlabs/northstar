@@ -47,6 +47,7 @@ async fn api_version() -> Result<()> {
     Ok(())
 }
 
+/// Check that subscribing to notifications is not permitted on the `console_none` url.
 #[runtime_test]
 async fn notifications() -> Result<()> {
     let io = UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?;
