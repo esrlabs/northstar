@@ -369,7 +369,7 @@ async fn main() -> Result<()> {
             let mut framed = client.framed();
 
             framed
-                .send(Message::new_request(request))
+                .send(Message::Request { request })
                 .await
                 .context("Failed to send request")?;
 

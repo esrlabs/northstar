@@ -268,7 +268,7 @@ impl Console {
                     };
 
                     if let Err(e) = network_stream
-                        .send(api::model::Message::new_notification(notification))
+                        .send(api::model::Message::Notification {notification })
                         .await
                     {
                         warn!("{}: Connection error: {}", peer, e);

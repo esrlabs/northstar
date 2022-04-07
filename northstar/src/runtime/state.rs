@@ -22,7 +22,6 @@ use crate::{
     },
 };
 use bytes::Bytes;
-use derive_new::new;
 use futures::{
     future::{join_all, ready, Either},
     Future, FutureExt, Stream, StreamExt, TryFutureExt,
@@ -84,7 +83,7 @@ impl ContainerState {
     }
 }
 
-#[derive(new, Debug)]
+#[derive(Debug)]
 pub(super) struct ContainerContext {
     pid: Pid,
     started: time::Instant,
@@ -520,7 +519,14 @@ impl State {
 
         // Add process context to process
         let started = time::Instant::now();
-        let context = ContainerContext::new(pid, started, debug, cgroups, stop, log_task);
+        let context = ContainerContext {
+            pid,
+            started,
+            debug,
+            cgroups,
+            stop,
+            log_task,
+        };
         container_state.process = Some(context);
 
         let duration = start.elapsed().as_secs_f32();
@@ -1052,14 +1058,15 @@ impl State {
                 uptime: context.started.elapsed().as_nanos() as u64,
             });
             let repository = state.repository.clone();
-            let is_mounted = state.is_mounted();
-            let container_data = api::model::ContainerData::new(
-                container.clone(),
+            let mounted = state.is_mounted();
+            let container = container.clone();
+            let container_data = api::model::ContainerData {
+                container,
                 repository,
                 manifest,
                 process,
-                is_mounted,
-            );
+                mounted,
+            };
             result.push(container_data);
         }
 

@@ -2,7 +2,6 @@ use crate::{
     common::{container::Container, name::Name, non_null_string::NonNullString, version::Version},
     seccomp::{Seccomp, Selinux, SyscallRule},
 };
-use derive_more::Deref;
 use itertools::Itertools;
 use schemars::JsonSchema;
 use serde::{
@@ -332,12 +331,20 @@ impl fmt::Display for MountOption {
 }
 
 /// Mount option set
-#[derive(Default, Clone, Eq, PartialEq, Debug, Deref, JsonSchema)]
+#[derive(Default, Clone, Eq, PartialEq, Debug, JsonSchema)]
 pub struct MountOptions(HashSet<MountOption>);
 
 impl MountOptions {
     fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+impl std::ops::Deref for MountOptions {
+    type Target = HashSet<MountOption>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

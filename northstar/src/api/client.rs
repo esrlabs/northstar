@@ -108,9 +108,12 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     let version = model::version();
 
     // Send connect message
-    let connect = Connect::new_connect(version, subscribe_notifications);
+    let connect = Connect::Connect {
+        version,
+        subscribe_notifications,
+    };
     connection
-        .send(Message::new_connect(connect))
+        .send(Message::Connect { connect })
         .await
         .map_err(Error::Io)?;
 
@@ -191,7 +194,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn request(&mut self, request: Request) -> Result<Response, Error> {
         self.fused()?;
 
-        let message = Message::new_request(request);
+        let message = Message::Request { request };
         self.connection.send(message).await.map_err(|e| {
             self.fuse();
             Error::Io(e)
@@ -353,7 +356,11 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
         let args = args_converted;
         let env = env_converted;
-        let request = Request::new_start(container, args, env);
+        let request = Request::Start {
+            container,
+            args,
+            env,
+        };
 
         match self.request(request).await? {
             Response::Ok => Ok(()),
@@ -412,7 +419,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             repository: repository.into(),
             size,
         };
-        let message = Message::new_request(request);
+        let message = Message::Request { request };
         self.connection.send(message).await.map_err(|_| {
             self.fuse();
             Error::Stopped

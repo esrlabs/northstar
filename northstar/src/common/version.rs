@@ -1,18 +1,23 @@
-use derive_more::Display;
 use schemars::{
     gen::SchemaGenerator,
     schema::{InstanceType, SchemaObject, StringValidation},
     JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 use thiserror::Error;
 
 /// Parsing error
-#[derive(Error, Debug, Display)]
+#[derive(Error, Debug)]
 pub struct ParseError {
     #[from]
     source: semver::Error,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.source)
+    }
 }
 
 /// Container version

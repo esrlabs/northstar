@@ -201,7 +201,7 @@ async fn exec(
     );
 
     // Send the exec request to the init process
-    let message = init::Message::new_exec(path, args, env);
+    let message = init::Message::Exec { path, args, env };
     init.stream
         .send(message)
         .await
@@ -217,7 +217,7 @@ async fn exec(
     }
 
     // Construct a future that waits to the init to signal a exit of it's child
-    // Afterwards reap the init process which should have exitted already
+    // Afterwards reap the init process which should have exited already
     let exit = async move {
         match init.stream.recv().await {
             Ok(Some(init::Message::Exit {

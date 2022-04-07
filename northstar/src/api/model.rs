@@ -1,4 +1,3 @@
-use derive_new::new;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -35,7 +34,7 @@ pub const fn version() -> Version {
 }
 
 /// Message
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Message {
@@ -46,7 +45,7 @@ pub enum Message {
 }
 
 /// Notification / Event
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Notification {
@@ -71,7 +70,7 @@ pub enum Notification {
 }
 
 /// Cgroup event
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum CgroupNotification {
@@ -79,7 +78,7 @@ pub enum CgroupNotification {
 }
 
 /// CGroup memory event data
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub struct MemoryNotification {
@@ -91,7 +90,7 @@ pub struct MemoryNotification {
 }
 
 /// Connect meta information
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Connect {
@@ -120,7 +119,7 @@ pub enum ConnectNack {
 }
 
 /// Request
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Request {
@@ -162,7 +161,7 @@ pub enum Request {
 }
 
 /// Container information
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ContainerData {
     /// Container name and version
@@ -188,7 +187,7 @@ pub struct Process {
 }
 
 /// Result of a mount operation
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum MountResult {
@@ -197,7 +196,7 @@ pub enum MountResult {
 }
 
 /// Result of a umount operation
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum UmountResult {
@@ -206,7 +205,7 @@ pub enum UmountResult {
 }
 
 /// Response
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Response {
@@ -236,7 +235,7 @@ pub enum Response {
 }
 
 /// Container exit status
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExitStatus {
     /// Process exited with exit code
@@ -252,7 +251,7 @@ pub enum ExitStatus {
 }
 
 /// API error
-#[derive(new, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Error {

@@ -29,8 +29,11 @@ async fn api_version() -> Result<()> {
     let mut version = api::model::version();
     version.patch += 1;
 
-    let connect = api::model::Connect::new_connect(version, false);
-    let connect_message = api::model::Message::new_connect(connect);
+    let connect = api::model::Connect::Connect {
+        version,
+        subscribe_notifications: false,
+    };
+    let connect_message = api::model::Message::Connect { connect };
     connection.send(connect_message.clone()).await?;
 
     // Receive connect nack
@@ -41,7 +44,8 @@ async fn api_version() -> Result<()> {
     let error = ConnectNack::InvalidProtocolVersion {
         version: model::version(),
     };
-    let expected_message = model::Message::new_connect(model::Connect::Nack { error });
+    let connect = model::Connect::Nack { error };
+    let expected_message = model::Message::Connect { connect };
 
     assert_eq!(connack, expected_message);
     Ok(())

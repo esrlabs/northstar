@@ -10,7 +10,6 @@ use crate::{
     seccomp::AllowList,
 };
 pub use builder::build;
-use derive_new::new;
 use itertools::Itertools;
 use nix::{
     errno::Errno,
@@ -40,7 +39,7 @@ use std::{
 mod builder;
 
 // Message from the forker to init and response
-#[derive(new, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
     /// The init process forked a new child with `pid`
     Forked { pid: Pid },

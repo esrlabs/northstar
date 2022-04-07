@@ -5,12 +5,11 @@ use crate::{
     common::container::Container,
     runtime::{ipc::owned_fd::OwnedFd, ExitStatus, Pid},
 };
-use derive_new::new;
 use serde::{Deserialize, Serialize};
 
 /// Request from the runtime to the forker
 #[non_exhaustive]
-#[derive(new, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
     CreateRequest {
         init: Init,

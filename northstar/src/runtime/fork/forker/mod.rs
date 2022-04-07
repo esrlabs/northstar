@@ -95,7 +95,7 @@ impl Forker {
 
         let init = init::build(config, manifest).await?;
         let console = console.map(Into::into);
-        let message = Message::new_create_request(init, console);
+        let message = Message::CreateRequest { init, console };
 
         match self
             .request_response(message)
@@ -119,7 +119,13 @@ impl Forker {
         env: Vec<String>,
         io: [OwnedFd; 3],
     ) -> Result<(), Error> {
-        let message = Message::new_exec_request(container, path, args, env, Some(io));
+        let message = Message::ExecRequest {
+            container,
+            path,
+            args,
+            env,
+            io: Some(io),
+        };
         self.request_response(message).await.map(drop)
     }
 

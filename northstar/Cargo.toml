@@ -17,8 +17,6 @@ bytes = { version = "1.1.0", optional = true }
 bytesize = { version = "1.1.0", optional = true }
 caps = { version = "0.5.3", optional = true }
 cgroups-rs = { git = "https://github.com/esrlabs/cgroups-rs.git", branch = "northstar", features = ["serde"], optional = true }
-derive-new = { version = "0.5.9", optional = true }
-derive_more = "0.99.17"
 devicemapper = { version = "0.32.0", optional = true }
 ed25519-dalek = { version = "1.0.1", optional = true }
 futures = { version = "0.3.21", features = ["thread-pool"], optional = true }
@@ -60,7 +58,6 @@ zip = { version = "0.6.2", default-features = false, optional = true }
 [features]
 api = [
     "bytes",
-    "derive-new",
     "futures",
     "npk",
     "serde_json",
@@ -93,19 +90,18 @@ runtime = [
     "api",
     "async-stream",
     "async-trait",
-    "bitflags",
     "bincode",
+    "bitflags",
     "bytesize",
     "caps",
     "cgroups-rs",
     "devicemapper",
-    "derive-new",
     "ed25519-dalek",
     "futures",
     "hex",
     "humantime",
-    "itertools",
     "inotify",
+    "itertools",
     "lazy_static",
     "loopdev",
     "memfd",
