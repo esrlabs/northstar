@@ -417,7 +417,7 @@ impl State {
 
         // We send the fd to the forker so that it can pass it to the init
         let console_fd = if !manifest.console.is_empty() {
-            let peer = Peer::from(container.to_string());
+            let peer = Peer::Container(container.clone());
             let (runtime_stream, container_stream) =
                 StdUnixStream::pair().expect("Failed to create socketpair");
             let container_fd: OwnedFd = container_stream.into();
