@@ -2,7 +2,9 @@ pub mod containers;
 pub mod logger;
 pub mod runtime;
 
-/// Northstar runtime test
+/// Northstar runtime test. Fixture for testing the Northstar runtime. This fixture start
+/// an instance of northstar with a hard coded configuration that uses tempdirs etc. The
+/// `client` fn delivers a connected and ready to use `api::client::Client` instance.
 ///
 /// ```rust
 /// # use anyhow::Result;

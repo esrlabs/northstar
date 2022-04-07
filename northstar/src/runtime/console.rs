@@ -5,7 +5,7 @@ use super::{
 use crate::{
     api::{self, codec::Framed},
     common::container::Container,
-    npk::manifest::{self, ConsolePermission as Permission},
+    npk::manifest::{self, Permission},
     runtime::{EventTx, ExitStatus},
 };
 use api::model;
