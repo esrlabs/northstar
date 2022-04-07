@@ -17,7 +17,7 @@ pub use crate::npk::manifest::Console as ConsoleConfiguration;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Console {
-    /// Console permisssions
+    /// Console permissions
     pub permissions: ConsoleConfiguration,
 }
 

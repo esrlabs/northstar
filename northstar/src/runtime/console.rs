@@ -211,7 +211,7 @@ impl Console {
             return Ok(());
         }
 
-        // Check notification permissions if the client want's to subscribe to
+        // Check notification permission if the client want's to subscribe to
         // notifications
         if notifications && !configuration.contains(&Permission::Notifications) {
             warn!(
@@ -373,7 +373,7 @@ where
             let read_buffer = stream.read_buffer_mut().split();
 
             // TODO: handle this case. The connected entity pushed the install file
-            // and a subsequenc request. If the codec pullen in the *full* install blob
+            // and a subsequent request. If the codec pulls in the *full* install blob
             // and some bytes from the following command the logic is screwed up.
             assert!(read_buffer.len() as u64 <= size);
 

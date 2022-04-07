@@ -79,7 +79,7 @@ async fn start_stop() -> Result<()> {
     Ok(())
 }
 
-// Install and uninsteall the example npks
+// Install and uninstall the example npks
 #[runtime_test]
 async fn install_uninstall_examples() -> Result<()> {
     client().install(EXAMPLE_CPUEATER_NPK, "mem").await?;
