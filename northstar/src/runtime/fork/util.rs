@@ -22,7 +22,7 @@ pub fn set_parent_death_signal(signal: Signal) {
     let result = unsafe { nix::libc::prctl(PR_SET_PDEATHSIG, signal, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .expect("Failed to set PR_SET_PDEATHSIG");
+        .expect("failed to set PR_SET_PDEATHSIG");
 }
 
 /// Set the name of the current process
@@ -53,7 +53,7 @@ pub fn set_process_name(name: &str) {
     let result = unsafe { libc::prctl(PR_SET_NAME, name.as_ptr() as c_ulong, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .expect("Failed to set PR_SET_NAME");
+        .expect("failed to set PR_SET_NAME");
 }
 
 // Set the child subreaper flag of the calling thread
@@ -69,7 +69,7 @@ pub fn set_child_subreaper(value: bool) {
     let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
     Errno::result(result)
         .map(drop)
-        .expect("Failed to set child subreaper flag")
+        .expect("failed to set child subreaper flag")
 }
 
 /// Fork a new process.
@@ -87,7 +87,7 @@ where
         unistd::ForkResult::Child => match f() {
             Ok(_) => exit(0),
             Err(e) => {
-                error!("Failed after fork: {:?}", e);
+                error!("failed after fork: {:?}", e);
                 exit(-1);
             }
         },

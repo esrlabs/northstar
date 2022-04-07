@@ -80,22 +80,22 @@ impl Init {
 
         // Become a session group leader
         debug!("Setting session id");
-        unistd::setsid().expect("Failed to call setsid");
+        unistd::setsid().expect("failed to call setsid");
 
         // Enter mount namespace
         debug!("Entering mount namespace");
-        unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("Failed to unshare NEWNS");
+        unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("failed to unshare NEWNS");
 
         // Perform all mounts passed in mounts
         self.mount();
 
         // Set the chroot to the containers root mount point
         debug!("Chrooting to {}", self.root.display());
-        unistd::chroot(&self.root).expect("Failed to chroot");
+        unistd::chroot(&self.root).expect("failed to chroot");
 
         // Set current working directory to root
         debug!("Setting current working directory to root");
-        env::set_current_dir("/").expect("Failed to set cwd to /");
+        env::set_current_dir("/").expect("failed to set cwd to /");
 
         // UID / GID
         self.set_ids();
@@ -130,7 +130,7 @@ impl Init {
                         env.push(format!("NORTHSTAR_CONSOLE={}", fd));
                     }
 
-                    let io = stream.recv_fds::<RawFd, 3>().expect("Failed to receive io");
+                    let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
                     debug_assert!(io.len() == 3);
                     let stdin = io[0];
                     let stdout = io[1];
@@ -141,17 +141,17 @@ impl Init {
                         set_log_target(format!("northstar::{}", self.container));
                         util::set_parent_death_signal(Signal::SIGKILL);
 
-                        unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("Failed to dup2");
-                        unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("Failed to dup2");
-                        unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("Failed to dup2");
+                        unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("failed to dup2");
+                        unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("failed to dup2");
+                        unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("failed to dup2");
 
-                        unistd::close(stdin).expect("Failed to close stdout after dup2");
-                        unistd::close(stdout).expect("Failed to close stdout after dup2");
-                        unistd::close(stderr).expect("Failed to close stderr after dup2");
+                        unistd::close(stdin).expect("failed to close stdout after dup2");
+                        unistd::close(stdout).expect("failed to close stdout after dup2");
+                        unistd::close(stderr).expect("failed to close stderr after dup2");
 
                         // Set seccomp filter
                         if let Some(ref filter) = self.seccomp {
-                            filter.apply().expect("Failed to apply seccomp filter.");
+                            filter.apply().expect("failed to apply seccomp filter.");
                         }
 
                         let path = CString::new(path.to_str().unwrap()).unwrap();
@@ -165,22 +165,22 @@ impl Init {
                             .collect::<Vec<_>>();
 
                         panic!(
-                            "Execve: {:?} {:?}: {:?}",
+                            "execve: {:?} {:?}: {:?}",
                             &path,
                             &args,
                             unistd::execve(&path, &args, &env)
                         )
                     })
-                    .expect("Failed to spawn child process");
+                    .expect("failed to spawn child process");
 
                     // close fds
                     drop(console);
-                    unistd::close(stdin).expect("Failed to close stdout");
-                    unistd::close(stdout).expect("Failed to close stdout");
-                    unistd::close(stderr).expect("Failed to close stderr");
+                    unistd::close(stdin).expect("failed to close stdout");
+                    unistd::close(stdout).expect("failed to close stdout");
+                    unistd::close(stderr).expect("failed to close stderr");
 
                     let message = Message::Forked { pid };
-                    stream.send(&message).expect("Failed to send fork result");
+                    stream.send(&message).expect("failed to send fork result");
 
                     // Wait for the child to exit
                     loop {
@@ -219,7 +219,7 @@ impl Init {
                                 continue;
                             }
                             Err(nix::Error::EINTR) => continue,
-                            e => panic!("Failed to waitpid on {}: {:?}", pid, e),
+                            e => panic!("failed to waitpid on {}: {:?}", pid, e),
                         }
                     }
                 }
@@ -228,7 +228,7 @@ impl Init {
                     std::process::exit(0);
                 }
                 Ok(_) => unimplemented!("Unimplemented message"),
-                Err(e) => panic!("Failed to receive message: {}", e),
+                Err(e) => panic!("failed to receive message: {}", e),
             }
         }
     }
@@ -242,20 +242,20 @@ impl Init {
 
         // If running as uid 0 save our caps across the uid/gid drop
         if rt_privileged {
-            caps::securebits::set_keepcaps(true).expect("Failed to set keep caps");
+            caps::securebits::set_keepcaps(true).expect("failed to set keep caps");
         }
 
         debug!("Setting resgid {}", gid);
         let gid = unistd::Gid::from_raw(gid.into());
-        unistd::setresgid(gid, gid, gid).expect("Failed to set resgid");
+        unistd::setresgid(gid, gid, gid).expect("failed to set resgid");
 
         let uid = unistd::Uid::from_raw(uid.into());
         debug!("Setting resuid {}", uid);
-        unistd::setresuid(uid, uid, uid).expect("Failed to set resuid");
+        unistd::setresuid(uid, uid, uid).expect("failed to set resuid");
 
         if rt_privileged {
             self.reset_effective_caps();
-            caps::securebits::set_keepcaps(false).expect("Failed to set keep caps");
+            caps::securebits::set_keepcaps(false).expect("failed to set keep caps");
         }
     }
 
@@ -265,7 +265,7 @@ impl Init {
 
         Errno::result(result)
             .map(drop)
-            .expect("Failed to set supplementary groups");
+            .expect("failed to set supplementary groups");
     }
 
     fn set_rlimits(&self) {
@@ -296,7 +296,7 @@ impl Init {
                         limit.soft.unwrap_or(rlimit::INFINITY),
                         limit.hard.unwrap_or(rlimit::INFINITY),
                     )
-                    .expect("Failed to set rlimit");
+                    .expect("failed to set rlimit");
             }
         }
     }
@@ -305,7 +305,7 @@ impl Init {
     fn drop_privileges(&self) {
         debug!("Dropping priviledges");
         let mut bounded =
-            caps::read(None, caps::CapSet::Bounding).expect("Failed to read bounding caps");
+            caps::read(None, caps::CapSet::Bounding).expect("failed to read bounding caps");
         // Convert the set from the manifest to a set of caps::Capability
         let set = self
             .capabilities
@@ -318,18 +318,18 @@ impl Init {
 
         for cap in &bounded {
             // caps::set cannot be called for bounded
-            caps::drop(None, caps::CapSet::Bounding, *cap).expect("Failed to drop bounding cap");
+            caps::drop(None, caps::CapSet::Bounding, *cap).expect("failed to drop bounding cap");
         }
-        caps::set(None, caps::CapSet::Effective, &set).expect("Failed to set effective caps");
-        caps::set(None, caps::CapSet::Permitted, &set).expect("Failed to set permitted caps");
-        caps::set(None, caps::CapSet::Inheritable, &set).expect("Failed to set inheritable caps");
-        caps::set(None, caps::CapSet::Ambient, &set).expect("Failed to set ambient caps");
+        caps::set(None, caps::CapSet::Effective, &set).expect("failed to set effective caps");
+        caps::set(None, caps::CapSet::Permitted, &set).expect("failed to set permitted caps");
+        caps::set(None, caps::CapSet::Inheritable, &set).expect("failed to set inheritable caps");
+        caps::set(None, caps::CapSet::Ambient, &set).expect("failed to set ambient caps");
     }
 
     // Reset effective caps to the most possible set
     fn reset_effective_caps(&self) {
         let all = caps::all();
-        caps::set(None, caps::CapSet::Effective, &all).expect("Failed to reset effective caps");
+        caps::set(None, caps::CapSet::Effective, &all).expect("failed to reset effective caps");
     }
 
     /// Execute list of mount calls
@@ -349,7 +349,7 @@ impl Init {
         let result = unsafe { nix::libc::prctl(PR_SET_NO_NEW_PRIVS, value as c_ulong, 0, 0, 0) };
         Errno::result(result)
             .map(drop)
-            .expect("Failed to set PR_SET_NO_NEW_PRIVS")
+            .expect("failed to set PR_SET_NO_NEW_PRIVS")
     }
 }
 
@@ -421,7 +421,7 @@ impl Mount {
         data: Option<String>,
     ) -> Mount {
         let error_msg = format!(
-            "Failed to mount '{}' of type '{}' on '{}' with flags '{:?}' and data '{}'",
+            "failed to mount '{}' of type '{}' on '{}' with flags '{:?}' and data '{}'",
             source.clone().unwrap_or_default().display(),
             fstype.unwrap_or_default(),
             target.display(),

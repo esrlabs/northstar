@@ -126,12 +126,12 @@ impl Config {
         // Check run_dir for existence and rw
         if !self.run_dir.exists() {
             return Err(Error::Configuration(format!(
-                "Configured run_dir {} does not exist",
+                "configured run_dir {} does not exist",
                 self.run_dir.display()
             )));
         } else if !is_rw(&self.run_dir).await {
             return Err(Error::Configuration(format!(
-                "Configured run_dir {} is not read and/or writeable",
+                "configured run_dir {} is not read and/or writeable",
                 self.run_dir.display()
             )));
         }
@@ -139,12 +139,12 @@ impl Config {
         // Check data_dir for existence and rw
         if !self.data_dir.exists() {
             return Err(Error::Configuration(format!(
-                "Configured data_dir {} does not exist",
+                "configured data_dir {} does not exist",
                 self.data_dir.display()
             )));
         } else if !is_rw(&self.data_dir).await {
             return Err(Error::Configuration(format!(
-                "Configured data_dir {} is not read and/or writeable",
+                "configured data_dir {} is not read and/or writeable",
                 self.data_dir.display()
             )));
         }
@@ -152,12 +152,12 @@ impl Config {
         // Check log_dir for existence and rw
         if !self.log_dir.exists() {
             return Err(Error::Configuration(format!(
-                "Configured data_dir {} does not exist",
+                "configured data_dir {} does not exist",
                 self.log_dir.display()
             )));
         } else if !is_rw(&self.log_dir).await {
             return Err(Error::Configuration(format!(
-                "Configured log_dir {} is not read and/or writeable",
+                "configured log_dir {} is not read and/or writeable",
                 self.log_dir.display()
             )));
         }

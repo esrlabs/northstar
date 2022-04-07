@@ -107,7 +107,7 @@ impl<'de> Deserialize<'de> for Console {
                         permissions: HashSet::from_iter(Permission::iter()),
                     }),
                     _ => Err(serde::de::Error::custom(format!(
-                        "Invalid console permission: {}",
+                        "invalid console permission: {}",
                         str_data
                     ))),
                 }
@@ -159,7 +159,7 @@ mod test {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 console: full
 ";
-        let manifest = Manifest::from_str(manifest).expect("Failed to parse");
+        let manifest = Manifest::from_str(manifest).expect("failed to parse");
         for permission in Permission::iter() {
             assert!(manifest.console.contains(&permission));
         }
@@ -170,7 +170,7 @@ console: full
     #[test]
     fn none() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001";
-        let manifest = Manifest::from_str(manifest).expect("Failed to parse");
+        let manifest = Manifest::from_str(manifest).expect("failed to parse");
         assert!(manifest.console.is_empty());
         Ok(())
     }
@@ -183,7 +183,7 @@ console:
   - shutdown
   - start
 ";
-        let manifest = Manifest::from_str(manifest).expect("Failed to parse");
+        let manifest = Manifest::from_str(manifest).expect("failed to parse");
         assert!(manifest.console.len() == 2);
         Ok(())
     }

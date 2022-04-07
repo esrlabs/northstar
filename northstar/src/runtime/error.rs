@@ -8,48 +8,48 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Invalid configuration: {0}")]
+    #[error("invalid configuration: {0}")]
     Configuration(String),
-    #[error("Invalid container {0}")]
+    #[error("invalid container {0}")]
     InvalidContainer(Container),
-    #[error("Invalid arguments {0}")]
+    #[error("invalid arguments {0}")]
     InvalidArguments(String),
-    #[error("Container {0} cannot be mounted because it is already mounted")]
+    #[error("container {0} cannot be mounted because it is already mounted")]
     MountBusy(Container),
-    #[error("Duplicate container {0}")]
+    #[error("duplicate container {0}")]
     DuplicateContainer(Container),
-    #[error("Container {0} cannot be unmounted: busy")]
+    #[error("container {0} cannot be unmounted: busy")]
     UmountBusy(Container),
-    #[error("Container {0} failed to start: Already started")]
+    #[error("container {0} failed to start: Already started")]
     StartContainerStarted(Container),
-    #[error("Container {0} failed to start: Resources failed to mount")]
+    #[error("container {0} failed to start: Resources failed to mount")]
     StartContainerResource(Container),
-    #[error("Container {0} failed to start: Resource {1} is missing")]
+    #[error("container {0} failed to start: Resource {1} is missing")]
     StartContainerMissingResource(Container, Container),
-    #[error("Container {0} failed to start: {1}")]
+    #[error("container {0} failed to start: {1}")]
     StartContainerFailed(Container, String),
-    #[error("Container {0} failed to stop")]
+    #[error("container {0} failed to stop")]
     StopContainerNotStarted(Container),
-    #[error("Container {0} failed is stop: not started")]
+    #[error("container {0} failed is stop: not started")]
     ContainerNotStarted(Container),
-    #[error("Invalid repository {0}")]
+    #[error("invalid repository {0}")]
     InvalidRepository(RepositoryId),
-    #[error("Failed to install {0}: Already installed")]
+    #[error("failed to install {0}: Already installed")]
     InstallDuplicate(Container),
-    #[error("Critical container failure")]
+    #[error("critical container failure")]
     CriticalContainer(Container, ExitStatus),
 
-    #[error("NPK {0:?}: {1:?}")]
+    #[error("npk {0:?}: {1:?}")]
     Npk(String, npk::npk::Error),
-    #[error("Console: {0:?}")]
+    #[error("console: {0:?}")]
     Console(super::console::Error),
-    #[error("Cgroups: {0}")]
+    #[error("cgroups: {0}")]
     Cgroups(#[from] super::cgroups::Error),
-    #[error("Mount: {0}")]
+    #[error("mount: {0}")]
     Mount(super::mount::Error),
-    #[error("Name: {0}")]
+    #[error("name: {0}")]
     Name(String),
-    #[error("Key: {0}")]
+    #[error("key: {0}")]
     Key(super::key::Error),
 
     #[error("{0}")]

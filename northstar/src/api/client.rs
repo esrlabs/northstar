@@ -32,21 +32,21 @@ const BUFFER_SIZE: usize = 1024 * 1024;
 #[allow(missing_docs)]
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("IO error: {0:?}")]
+    #[error("io error: {0:?}")]
     Io(#[from] io::Error),
-    #[error("Timeout")]
+    #[error("timeout")]
     Timeout,
-    #[error("Client is stopped")]
+    #[error("client is stopped")]
     Stopped,
-    #[error("Runtime error: {0:?}")]
+    #[error("runtime error: {0:?}")]
     Runtime(model::Error),
-    #[error("Notification consumer lagged")]
+    #[error("notification consumer lagged")]
     LaggedNotifications,
-    #[error("Invalid container {0}")]
+    #[error("invalid container {0}")]
     Container(container::Error),
-    #[error("Invalid string {0}")]
+    #[error("invalid string {0}")]
     String(InvalidNullChar),
-    #[error("Infalliable")]
+    #[error("infalliable")]
     Infalliable,
 }
 
@@ -79,7 +79,7 @@ impl From<Infallible> for Error {
 /// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
 ///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-///     client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
+///     client.start("hello:0.0.1").await.expect("failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }
@@ -187,7 +187,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let response = client.request(Containers).await.expect("Failed to request container list");
+    /// let response = client.request(Containers).await.expect("failed to request container list");
     /// println!("{:?}", response);
     /// # }
     /// ```
@@ -230,7 +230,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let containers = client.containers().await.expect("Failed to request container list");
+    /// let containers = client.containers().await.expect("failed to request container list");
     /// println!("{:#?}", containers);
     /// # }
     /// ```
@@ -252,7 +252,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let repositories = client.repositories().await.expect("Failed to request repository list");
+    /// let repositories = client.repositories().await.expect("failed to request repository list");
     /// println!("{:#?}", repositories);
     /// # }
     /// ```
@@ -274,7 +274,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
+    /// client.start("hello:0.0.1").await.expect("failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
@@ -297,7 +297,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.start_with_args("hello:0.0.1", ["--foo"]).await.expect("Failed to start \"hello --foor\"");
+    /// client.start_with_args("hello:0.0.1", ["--foo"]).await.expect("failed to start \"hello --foor\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
@@ -324,7 +324,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let mut env = HashMap::new();
     /// env.insert("FOO", "blah");
-    /// client.start_with_args_env("hello:0.0.1", ["--dump", "-v"], env).await.expect("Failed to start \"hello\"");
+    /// client.start_with_args_env("hello:0.0.1", ["--dump", "-v"], env).await.expect("failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
@@ -379,7 +379,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.kill("hello:0.0.1", 15).await.expect("Failed to start \"hello\"");
+    /// client.kill("hello:0.0.1", 15).await.expect("failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
@@ -408,7 +408,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let npk = Path::new("test.npk");
-    /// client.install(&npk, "default").await.expect("Failed to install \"test.npk\" into repository \"default\"");
+    /// client.install(&npk, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
     /// # }
     /// ```
     pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<(), Error> {
@@ -472,7 +472,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.uninstall("hello:0.0.1").await.expect("Failed to uninstall \"hello\"");
+    /// client.uninstall("hello:0.0.1").await.expect("failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
@@ -505,7 +505,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.mount("test:0.0.1").await.expect("Failed to mount");
+    /// client.mount("test:0.0.1").await.expect("failed to mount");
     /// # }
     /// ```
     pub async fn mount<E, C>(&mut self, container: C) -> Result<MountResult, Error>
@@ -529,7 +529,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.mount_all(vec!("hello-world:0.0.1", "cpueater:0.0.1")).await.expect("Failed to mount");
+    /// client.mount_all(vec!("hello-world:0.0.1", "cpueater:0.0.1")).await.expect("failed to mount");
     /// # }
     /// ```
     pub async fn mount_all<E, C, I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
@@ -563,7 +563,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.umount("hello:0.0.1").await.expect("Failed to unmount \"hello:0.0.1\"");
+    /// client.umount("hello:0.0.1").await.expect("failed to unmount \"hello:0.0.1\"");
     /// # }
     /// ```
     pub async fn umount<E, C>(&mut self, container: C) -> Result<UmountResult, Error>
@@ -587,7 +587,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.umount_all(vec!("hello:0.0.1", "cpueater:0.0.1")).await.expect("Failed to unmount \"hello:0.0.1\" and \"cpueater:0.0.1\"");
+    /// client.umount_all(vec!("hello:0.0.1", "cpueater:0.0.1")).await.expect("failed to unmount \"hello:0.0.1\" and \"cpueater:0.0.1\"");
     /// # }
     /// ```
     pub async fn umount_all<E, C, I>(&mut self, containers: I) -> Result<Vec<UmountResult>, Error>
@@ -678,7 +678,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 /// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
 ///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-///     client.start("hello:0.0.1").await.expect("Failed to start \"hello\"");
+///     client.start("hello:0.0.1").await.expect("failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
 ///     }

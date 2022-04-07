@@ -97,7 +97,7 @@ fn openrw<T: AsRef<Path>>(f: T) -> io::Result<OwnedFd> {
 /// Create a new pty and return the main fd along with the sub name.
 fn openpty() -> (OwnedFd, PathBuf) {
     let main = pty::posix_openpt(OFlag::O_RDWR | OFlag::O_NOCTTY | OFlag::O_NONBLOCK)
-        .expect("Failed to open pty");
+        .expect("failed to open pty");
 
     nix::sys::termios::tcgetattr(main.as_raw_fd())
         .map(|mut termios| {
@@ -109,12 +109,12 @@ fn openpty() -> (OwnedFd, PathBuf) {
         })
         .and_then(|_| pty::grantpt(&main))
         .and_then(|_| pty::unlockpt(&main))
-        .expect("Failed to configure pty");
+        .expect("failed to configure pty");
 
     // Get the name of the sub
     let sub = pty::ptsname_r(&main)
         .map(PathBuf::from)
-        .expect("Failed to get PTY sub name");
+        .expect("failed to get PTY sub name");
 
     debug!("Created PTY {}", sub.display());
     let main = unsafe { OwnedFd::from_raw_fd(main.into_raw_fd()) };

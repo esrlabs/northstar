@@ -53,7 +53,7 @@ fn main() {
         println!(
             "caps {}: {:?}",
             format!("{:?}", set).as_str().to_lowercase(),
-            caps::read(None, *set).expect("Failed to read caps")
+            caps::read(None, *set).expect("failed to read caps")
         );
     }
 

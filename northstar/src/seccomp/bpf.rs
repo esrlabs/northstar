@@ -73,7 +73,7 @@ pub(crate) fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) ->
         };
         if let Err(e) = builder.allow_syscall_name(&name.to_string(), arg_rule.cloned()) {
             // Only issue a warning as a missing syscall on the allow list does not lead to insecure behaviour
-            trace!("Failed to allow syscall {}: {}", &name.to_string(), e);
+            trace!("failed to allow syscall {}: {}", &name.to_string(), e);
         }
     }
     builder
@@ -170,11 +170,11 @@ fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -
 /// Check if the current platform is supported and return an error if not
 fn check_platform_requirements() {
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    compile_error!("Seccomp is only supported on aarch64 and x86_64");
+    compile_error!("seccomp is only supported on aarch64 and x86_64");
     #[cfg(target_pointer_width = "32")]
-    compile_error!("Seccomp is not supported on 32 Bit architectures");
+    compile_error!("seccomp is not supported on 32 Bit architectures");
     #[cfg(target_endian = "big")]
-    compile_error!("Seccomp is not supported on Big Endian architectures");
+    compile_error!("seccomp is not supported on Big Endian architectures");
 }
 
 #[derive(Clone, Debug, PartialEq)]

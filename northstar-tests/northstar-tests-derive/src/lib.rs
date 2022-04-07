@@ -49,7 +49,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         nix::mount::mount(Some("/"), "/", Option::<&str>::None, flags, Option::<&'static [u8]>::None).unwrap();
 
         // Initialize the runtime. The part without the Tokio runtime.
-        let runtime = northstar_tests::runtime::Runtime::new().expect("Failed to start runtime");
+        let runtime = northstar_tests::runtime::Runtime::new().expect("failed to start runtime");
 
         // The test code within the async context
         let body = async {
@@ -65,7 +65,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
             .enable_all()
             .worker_threads(2)
             .build()
-            .expect("Failed building the Runtime")
+            .expect("failed building the Runtime")
             .block_on(body)
 
     };
@@ -82,7 +82,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
             // Create a memfd for capturing stdout/stderr of the child (test) process
             let mfd = memfd::MemfdOptions::default().create("io").unwrap();
 
-            match unsafe { nix::unistd::fork().expect("Fork failed") } {
+            match unsafe { nix::unistd::fork().expect("fork failed") } {
                 ForkResult::Parent { child, .. } => {
                     let result = waitpid(child, None).unwrap();
 
@@ -96,7 +96,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
                     // Return depending on the child exit code.
                     match result {
                         WaitStatus::Exited(_, code) if code == 0 => Ok(()),
-                        s => Err(anyhow::anyhow!("Test failed with status: {:?}", s)),
+                        s => Err(anyhow::anyhow!("test failed with status: {:?}", s)),
                     }
                 }
                 ForkResult::Child => {

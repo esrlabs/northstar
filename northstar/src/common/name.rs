@@ -16,7 +16,7 @@ pub struct Name(String);
 
 /// Invalid character in name
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[error("Invalid character(s) in name")]
+#[error("invalid character(s) in name")]
 pub struct InvalidNameChar(usize);
 
 impl InvalidNameChar {

@@ -12,7 +12,7 @@ fn generate_seccomp() {
             .header_contents("syscall.h", "#include <sys/syscall.h>")
             .allowlist_var("SYS_[0-9a-zA-Z_]+")
             .generate()
-            .expect("Failed to generate syscall bindings")
+            .expect("failed to generate syscall bindings")
             .to_string();
         let lines: Vec<&str> = lines
             .lines()
@@ -75,10 +75,10 @@ fn generate_seccomp() {
             .allowlist_var("AUDIT_ARCH_X86_64")
             .allowlist_var("AUDIT_ARCH_AARCH64")
             .generate()
-            .expect("Failed to generate seccomp bindings")
+            .expect("failed to generate seccomp bindings")
             .write_to_file(&out_path.join("seccomp_bindings.rs"))?;
         Ok(())
     }
 
-    generate().expect("Failed to generate seccomp bindings");
+    generate().expect("failed to generate seccomp bindings");
 }

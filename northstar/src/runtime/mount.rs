@@ -132,7 +132,7 @@ impl MountControl {
         })
         .map(|r| match r {
             Ok(r) => r,
-            Err(e) => panic!("Task error: {}", e),
+            Err(e) => panic!("task error: {}", e),
         })
     }
 
@@ -148,7 +148,7 @@ impl MountControl {
 
             debug!("Removing mountpoint {}", target.display());
             std::fs::remove_dir(&target)
-                .map_err(|e| Error::Io(format!("Failed to remove {}", target.display()), e))?;
+                .map_err(|e| Error::Io(format!("failed to remove {}", target.display()), e))?;
 
             let duration = start.elapsed();
             debug!(
@@ -189,7 +189,7 @@ fn mount(
         debug!("Creating mount point {}", target.display());
         std::fs::create_dir_all(&target).map_err(|e| {
             Error::Io(
-                format!("Failed to create directory {}", target.display()),
+                format!("failed to create directory {}", target.display()),
                 e,
             )
         })?;
@@ -210,7 +210,7 @@ fn mount(
             break loop_device;
         }
         if start.elapsed() > LOOP_DEVICE_TIMEOUT {
-            return Err(Error::Timeout("Failed to acquire loop device".into()));
+            return Err(Error::Timeout("failed to acquire loop device".into()));
         }
     };
 
@@ -252,7 +252,7 @@ fn mount(
                 loop_device
                     .detach()
                     .map_err(Error::LoopDevice)
-                    .expect("Failed to detach loopback device");
+                    .expect("failed to detach loopback device");
 
                 return Err(Error::Npk("Missing verity information in NPK"));
             }
@@ -274,7 +274,7 @@ fn mount(
         if Path::new("/sys/fs/selinux/enforce").exists() {
             Some(format!("{}{}", "context=", selinux.context.as_str()))
         } else {
-            warn!("Failed to determine SELinux status of host system. SELinux will not be used for container.");
+            warn!("failed to determine SELinux status of host system. SELinux will not be used for container.");
             None
         }
     } else {
@@ -284,7 +284,7 @@ fn mount(
     let mount_result = nix::mount::mount(source, target, fstype, flags, data).map_err(Error::Os);
 
     if let Err(ref e) = mount_result {
-        warn!("Failed to mount: {}", e);
+        warn!("failed to mount: {}", e);
     }
 
     // Set the device to auto-remove. If the above mount operation failed the verity device is removed.
@@ -295,7 +295,7 @@ fn mount(
             &DevId::Name(DmName::new(dm_name).unwrap()),
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )
-        .expect("Failed to enable deferred removal");
+        .expect("failed to enable deferred removal");
     }
 
     Ok(())
@@ -372,10 +372,10 @@ fn dmsetup(
     let device = match load() {
         Ok(device) => device,
         Err(e) => {
-            warn!("Failed to setup {}", name);
+            warn!("failed to setup {}", name);
             debug!("Trying to remove device {}", name);
             if let Err(e) = dm.device_remove(&id, DmOptions::default()) {
-                warn!("Failed to remove {} with {}", name, e);
+                warn!("failed to remove {} with {}", name, e);
             }
             return Err(e);
         }

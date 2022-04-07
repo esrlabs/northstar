@@ -15,7 +15,7 @@ async fn connect_none() -> Result<api::client::Client<UnixStream>> {
     let io = UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?;
     api::client::Client::new(io, None, Duration::from_secs(10))
         .await
-        .context("Failed to connect to the runtime")
+        .context("failed to connect to the runtime")
 }
 
 // Verify that the client() reject a version mismatch in Connect

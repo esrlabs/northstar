@@ -101,15 +101,15 @@ impl Strace {
             )
             .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to spawn strace")?;
+            .context("failed to spawn strace")?;
         debug!("Attached strace to PID {}", &pid.to_string());
 
         let token = CancellationToken::new();
-        let stderr = child.stderr.take().expect("Failed to get stderr of strace");
+        let stderr = child.stderr.take().expect("failed to get stderr of strace");
 
         // Wait for strace to inform us that it's attached.
         let mut stderr = io::BufReader::new(stderr).lines();
-        stderr.next_line().await.context("Reading strace stderr")?;
+        stderr.next_line().await.context("reading strace stderr")?;
 
         let task = {
             let token = token.clone();
@@ -145,7 +145,7 @@ impl Strace {
                         let mut file = match fs::File::create(&filename).await {
                             Ok(file) => file,
                             Err(e) => {
-                                error!("Failed to write strace output: {}", e);
+                                error!("failed to write strace output: {}", e);
                                 return;
                             }
                         };
@@ -154,7 +154,7 @@ impl Strace {
                             _ = token.cancelled() => (),
                             result = tokio::io::copy_buf(&mut stderr, &mut file) => {
                                 if let Err(e) = result {
-                                    error!("Failed to write strace output: {}", e);
+                                    error!("failed to write strace output: {}", e);
                                 }
                             }
                         }
@@ -167,7 +167,7 @@ impl Strace {
                                     Ok(Some(line)) => debug!("{}: {}", name, line),
                                     Ok(None) => break,
                                     Err(e) => {
-                                        error!("Failed to forward strace output: {}", e);
+                                        error!("failed to forward strace output: {}", e);
                                         break;
                                     }
                                 }
@@ -190,7 +190,7 @@ impl Strace {
         let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
         debug!("Joining strace pid {}", pid);
-        self.child.wait().await.context("Failed to join strace")?;
+        self.child.wait().await.context("failed to join strace")?;
 
         Ok(())
     }
@@ -236,7 +236,7 @@ impl Perf {
                     .split_whitespace(),
             )
             .spawn()
-            .context("Failed to spawn strace")?;
+            .context("failed to spawn strace")?;
         Ok(Perf { child })
     }
 
@@ -244,7 +244,7 @@ impl Perf {
         let pid = self.child.id().unwrap();
         self.child.kill().await.ok();
         debug!("Joining perf pid {}", pid);
-        self.child.wait().await.context("Failed to join perf")?;
+        self.child.wait().await.context("failed to join perf")?;
 
         Ok(())
     }

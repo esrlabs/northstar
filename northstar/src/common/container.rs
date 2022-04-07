@@ -42,11 +42,11 @@ impl Container {
 pub enum Error {
     #[error("Missing container name")]
     MissingName,
-    #[error("Invalid container name")]
+    #[error("invalid container name")]
     InvalidName(InvalidNameChar),
     #[error("Missing container version")]
     MissingVersion,
-    #[error("Invalid container version")]
+    #[error("invalid container version")]
     InvalidVersion,
 }
 

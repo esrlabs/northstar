@@ -47,9 +47,9 @@ struct InitProcess {
 pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
     let mut notifications: AsyncMessage<UnixStream> = notifications
         .try_into()
-        .expect("Failed to create async message");
+        .expect("failed to create async message");
     let mut stream: AsyncMessage<UnixStream> =
-        stream.try_into().expect("Failed to create async message");
+        stream.try_into().expect("failed to create async message");
     let mut inits = Inits::new();
     let mut exits = FuturesUnordered::new();
 
@@ -69,9 +69,9 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
                     }
                 }
                 exit = exits.next(), if !exits.is_empty() => {
-                    let (container, exit_status) = exit.expect("Invalid exit status");
+                    let (container, exit_status) = exit.expect("invalid exit status");
                     debug!("Forwarding exit status notification of {}: {}", container, exit_status);
-                    notifications.send(Notification::Exit { container, exit_status }).await.expect("Failed to send exit notification");
+                    notifications.send(Notification::Exit { container, exit_status }).await.expect("failed to send exit notification");
                 }
             }
         }
@@ -85,27 +85,27 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
                         let container = init.container.clone();
 
                         if inits.contains_key(&container) {
-                            let error = format!("Container {} already created", container);
+                            let error = format!("container {} already created", container);
                             log::warn!("{}", error);
-                            stream.send(Message::Failure(error)).await.expect("Failed to send response");
+                            stream.send(Message::Failure(error)).await.expect("failed to send response");
                             continue;
                         }
 
                         debug!("Creating init process for {}", init.container);
                         let (pid, init_process) = create(init, console).await;
                         inits.insert(container, init_process);
-                        stream.send(Message::CreateResult { init: pid }).await.expect("Failed to send response");
+                        stream.send(Message::CreateResult { init: pid }).await.expect("failed to send response");
                     }
                     Some(Message::ExecRequest { container, path, args, env, io }) => {
                         let io = io.unwrap();
                         if let Some(init) = inits.remove(&container) {
                             let (response, exit) = exec(init, container, path, args, env, io).await;
                             tx.send(exit).await.ok();
-                            stream.send(response).await.expect("Failed to send response");
+                            stream.send(response).await.expect("failed to send response");
                         } else {
                             let error = format!("Container {} not created", container);
                             log::warn!("{}", error);
-                            stream.send(Message::Failure(error)).await.expect("Failed to send response");
+                            stream.send(Message::Failure(error)).await.expect("failed to send response");
                         }
                     }
                     Some(_) => unreachable!("Unexpected message"),
@@ -123,7 +123,7 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
 async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
     let container = init.container.clone();
     debug!("Creating container {}", container);
-    let mut stream = socket_pair().expect("Failed to create socket pair");
+    let mut stream = socket_pair().expect("failed to create socket pair");
 
     let trampoline_pid = fork(|| {
         set_log_target("northstar::forker-trampoline".into());
@@ -132,7 +132,7 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
         // Create pid namespace
         debug!("Creating pid namespace");
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWPID)
-            .expect("Failed to create pid namespace");
+            .expect("failed to create pid namespace");
 
         // Work around the borrow checker and fork
         let stream = stream.second().into_raw_fd();
@@ -145,29 +145,29 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
             let stream = IpcMessage::from(stream);
             init.run(stream, console);
         })
-        .expect("Failed to fork init");
+        .expect("failed to fork init");
 
         let stream = unsafe { StdUnixStream::from_raw_fd(stream) };
 
         // Send the pid of init to the forker process
         let mut stream = ipc::Message::from(stream);
-        stream.send(init_pid).expect("Failed to send init pid");
+        stream.send(init_pid).expect("failed to send init pid");
 
         debug!("Exiting trampoline");
         Ok(())
     })
-    .expect("Failed to fork trampoline process");
+    .expect("failed to fork trampoline process");
 
     let mut stream: AsyncMessage<UnixStream> = stream
         .first_async()
         .map(Into::into)
-        .expect("Failed to turn socket into async UnixStream");
+        .expect("failed to turn socket into async UnixStream");
 
     debug!("Waiting for init pid of container {}", container);
     let pid = stream
         .recv()
         .await
-        .expect("Failed to receive init pid")
+        .expect("failed to receive init pid")
         .unwrap();
 
     // Reap the trampoline process
@@ -175,7 +175,7 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
     let trampoline_pid = unistd::Pid::from_raw(trampoline_pid as i32);
     match waitpid(Some(trampoline_pid), None) {
         Ok(_) | Err(Errno::ECHILD) => (), // Ok - or reaped by the reaper thread
-        Err(e) => panic!("Failed to wait for the trampoline process: {}", e),
+        Err(e) => panic!("failed to wait for the trampoline process: {}", e),
     }
 
     debug!("Created container {} with pid {}", container, pid);
@@ -205,13 +205,13 @@ async fn exec(
     init.stream
         .send(message)
         .await
-        .expect("Failed to send exec to init");
+        .expect("failed to send exec to init");
 
     // Send io file descriptors
-    init.stream.send_fds(&io).await.expect("Failed to send fd");
+    init.stream.send_fds(&io).await.expect("failed to send fd");
     drop(io);
 
-    match init.stream.recv().await.expect("Failed to receive") {
+    match init.stream.recv().await.expect("failed to receive") {
         Some(init::Message::Forked { .. }) => (),
         _ => panic!("Unexpected init message"),
     }
@@ -227,14 +227,14 @@ async fn exec(
                 // Reap init process
                 debug!("Reaping init process of {} ({})", container, init.pid);
                 waitpid(unistd::Pid::from_raw(init.pid as i32), None)
-                    .expect("Failed to reap init process");
+                    .expect("failed to reap init process");
                 (container, exit_status)
             }
             Ok(None) | Err(_) => {
                 // Reap init process
                 debug!("Reaping init process of {} ({})", container, init.pid);
                 waitpid(unistd::Pid::from_raw(init.pid as i32), None)
-                    .expect("Failed to reap init process");
+                    .expect("failed to reap init process");
                 (container, ExitStatus::Exit(-1))
             }
             Ok(_) => panic!("Unexpected message from init"),
@@ -259,7 +259,7 @@ async fn recv(stream: &mut AsyncMessage<UnixStream>) -> Option<Message> {
                 let console = stream
                     .recv_fds::<RawFd, 1>()
                     .await
-                    .expect("Failed to receive console fd");
+                    .expect("failed to receive console fd");
                 let console = unsafe { OwnedFd::from_raw_fd(console[0]) };
                 Some(console)
             } else {
@@ -277,7 +277,7 @@ async fn recv(stream: &mut AsyncMessage<UnixStream>) -> Option<Message> {
             let io = stream
                 .recv_fds::<OwnedFd, 3>()
                 .await
-                .expect("Failed to receive io");
+                .expect("failed to receive io");
             Some(Message::ExecRequest {
                 container,
                 path,

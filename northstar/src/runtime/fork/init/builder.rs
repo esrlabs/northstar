@@ -198,7 +198,7 @@ async fn persist(
         log::debug!("Creating {}", source.display());
         fs::create_dir_all(&source)
             .await
-            .context(format!("Failed to create {}", source.display()))?;
+            .context(format!("failed to create {}", source.display()))?;
     }
 
     log::debug!("Chowning {} to {}:{}", source.display(), uid, gid);
@@ -208,7 +208,7 @@ async fn persist(
         Some(unistd::Gid::from_raw(gid.into())),
     )
     .context(format!(
-        "Failed to chown {} to {}:{}",
+        "failed to chown {} to {}:{}",
         source.display(),
         uid,
         gid

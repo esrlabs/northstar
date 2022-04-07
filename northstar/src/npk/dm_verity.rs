@@ -18,17 +18,17 @@ pub type Salt = Sha256Digest;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Invalid verity header")]
+    #[error("invalid verity header")]
     InvalidHeader,
-    #[error("Unsupported verity version {0}")]
+    #[error("unsupported verity version {0}")]
     UnsupportedVersion(u32),
-    #[error("Unsupported verity algorithm")]
+    #[error("unsupported verity algorithm")]
     UnsupportedAlgorithm(),
-    #[error("Error generating hash tree: {0}")]
+    #[error("error generating hash tree: {0}")]
     HashTree(String),
-    #[error("Error creating valid uuid")]
+    #[error("error creating valid uuid")]
     Uuid,
-    #[error("OS error: {context}")]
+    #[error("os error: {context}")]
     Os {
         context: String,
         #[source]
@@ -108,7 +108,7 @@ impl VerityHeader {
             })
         }()
         .map_err(|e| Error::Os {
-            context: "Failed to read verity header".to_string(),
+            context: "failed to read verity header".to_string(),
             error: e,
         })
     }
@@ -213,7 +213,7 @@ fn gen_hash_tree(
     let mut hash_tree = vec![0_u8; tree_size];
 
     if image_size % BLOCK_SIZE as u64 != 0 {
-        return Err(Error::HashTree(format!("Failed to generate verity has tree. The image size {} is not a multiple of the block size {}",
+        return Err(Error::HashTree(format!("failed to generate verity has tree. The image size {} is not a multiple of the block size {}",
             image_size,
             BLOCK_SIZE)
         ));
@@ -244,11 +244,11 @@ fn gen_hash_tree(
                 let offset = level_size - rem_size;
                 let mut data = vec![0_u8; BLOCK_SIZE];
                 fsimg.seek(Start(offset)).map_err(|e| Error::Os {
-                    context: "Failed to seek in fs-image".to_string(),
+                    context: "failed to seek in fs-image".to_string(),
                     error: e,
                 })?;
                 fsimg.read_exact(&mut data).map_err(|e| Error::Os {
-                    context: "Failed to read from fs-image".to_string(),
+                    context: "failed to read from fs-image".to_string(),
                     error: e,
                 })?;
                 sha256.update(&data);
@@ -311,11 +311,11 @@ fn append_superblock_and_hashtree(
     let data_blocks = fsimg_size / BLOCK_SIZE as u64;
     let header = VerityHeader::new(&uuid, data_blocks, SHA256_SIZE as u16, salt).to_bytes();
     fsimg.write_all(&header).map_err(|e| Error::Os {
-        context: "Failed to write verity header".to_string(),
+        context: "failed to write verity header".to_string(),
         error: e,
     })?;
     fsimg.write_all(hash_tree).map_err(|e| Error::Os {
-        context: "Failed to write verity hash tree".to_string(),
+        context: "failed to write verity hash tree".to_string(),
         error: e,
     })?;
     Ok(())

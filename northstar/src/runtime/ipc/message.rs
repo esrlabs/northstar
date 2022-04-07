@@ -271,14 +271,14 @@ fn recv_control_msg<T: FromRawFd, const N: usize>(
         Some(message) => Err(io::Error::new(
             io::ErrorKind::Other,
             format!(
-                "Failed to receive fd: unexpected control message: {:?}",
+                "failed to receive fd: unexpected control message: {:?}",
                 message
             ),
         )),
         None => Err(io::Error::new(
             io::ErrorKind::Other,
             format!(
-                "Failed to receive fd: missing control message: {:?}",
+                "failed to receive fd: missing control message: {:?}",
                 message
             ),
         )),

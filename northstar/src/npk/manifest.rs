@@ -98,7 +98,7 @@ impl Manifest {
         if let Some(init) = &self.init {
             if NonNullString::try_from(init.display().to_string()).is_err() {
                 return Err(Error::Invalid(
-                    "Init path must be a string without zero bytes".to_string(),
+                    "init path must be a string without zero bytes".to_string(),
                 ));
             }
         } else if self.args.is_some()
@@ -110,7 +110,7 @@ impl Manifest {
             || self.suppl_groups.is_some()
         {
             return Err(Error::Invalid(
-                "Resource containers must not define any of the following manifest entries:\
+                "resource containers must not define any of the following manifest entries:\
                     args, env, autostart, cgroups, seccomp, capabilities, suppl_groups, io"
                     .to_string(),
             ));
@@ -118,10 +118,10 @@ impl Manifest {
 
         // Check for invalid uid or gid of 0
         if self.uid == 0 {
-            return Err(Error::Invalid("Invalid uid of 0".to_string()));
+            return Err(Error::Invalid("invalid uid of 0".to_string()));
         }
         if self.gid == 0 {
-            return Err(Error::Invalid("Invalid gid of 0".to_string()));
+            return Err(Error::Invalid("invalid gid of 0".to_string()));
         }
 
         // Check for reserved env variable names
@@ -129,7 +129,7 @@ impl Manifest {
             for name in ["NAME", "VERSION", "NORTHSTAR_CONSOLE"] {
                 if env.keys().any(|k| name == k.as_str()) {
                     return Err(Error::Invalid(format!(
-                        "Invalid env: resevered variable {}",
+                        "invalid env: resevered variable {}",
                         name
                     )));
                 }
@@ -146,7 +146,7 @@ impl Manifest {
             .try_for_each(|p| {
                 if p.is_relative() {
                     return Err(Error::Invalid(
-                        "Mount points must not be relative".to_string(),
+                        "mount points must not be relative".to_string(),
                     ));
                 }
                 // Check for overlapping bind mount paths by checking if one path is the prefix of the next one
@@ -156,7 +156,7 @@ impl Manifest {
 
                 if !prev_too_short && !prev_too_long && prev_comps == curr_comps[..prev_comps.len()]
                 {
-                    return Err(Error::Invalid("Mount points must not overlap".to_string()));
+                    return Err(Error::Invalid("mount points must not overlap".to_string()));
                 }
                 prev_comps = curr_comps;
                 Ok(())
@@ -171,7 +171,7 @@ impl Manifest {
                 Mount::Resource(m) => {
                     if m.options.contains(&MountOption::Rec) {
                         Err(Error::Invalid(
-                            "Non bind mounts must not be recursive".to_string(),
+                            "non bind mounts must not be recursive".to_string(),
                         ))
                     } else {
                         Ok(())
@@ -265,9 +265,9 @@ impl ToString for Manifest {
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error("Invalid manifest: {0}")]
+    #[error("invalid manifest: {0}")]
     Invalid(String),
-    #[error("Failed to parse: {0}")]
+    #[error("failed to parse: {0}")]
     SerdeYaml(#[from] serde_yaml::Error),
 }
 

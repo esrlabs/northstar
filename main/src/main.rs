@@ -46,20 +46,20 @@ fn main() -> Result<(), Error> {
         .enable_all()
         .thread_name("northstar")
         .build()
-        .context("Failed to create runtime")?
+        .context("failed to create runtime")?
         .block_on(run(northstar))
 }
 
 fn init() -> Result<Config, Error> {
     let opt = Opt::parse();
     let config = read_to_string(&opt.config)
-        .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
+        .with_context(|| format!("failed to read configuration file {}", opt.config.display()))?;
     let config: Config = toml::from_str(&config)
-        .with_context(|| format!("Failed to read configuration file {}", opt.config.display()))?;
+        .with_context(|| format!("failed to read configuration file {}", opt.config.display()))?;
 
-    fs::create_dir_all(&config.run_dir).context("Failed to create run_dir")?;
-    fs::create_dir_all(&config.data_dir).context("Failed to create data_dir")?;
-    fs::create_dir_all(&config.log_dir).context("Failed to create log dir")?;
+    fs::create_dir_all(&config.run_dir).context("failed to create run_dir")?;
+    fs::create_dir_all(&config.data_dir).context("failed to create data_dir")?;
+    fs::create_dir_all(&config.log_dir).context("failed to create log dir")?;
 
     // Skip mount namespace setup in case it's disabled for debugging purposes
     if !opt.disable_mount_namespace {
@@ -74,7 +74,7 @@ fn init() -> Result<Config, Error> {
         let root = Path::new("/");
         let none = Option::<&str>::None;
         nix::mount::mount(Some(root), root, none, flags, none)
-            .map_err(|_| anyhow!("Failed to remount root"))?;
+            .map_err(|_| anyhow!("failed to remount root"))?;
     } else {
         debug!("Mount namespace is disabled");
     }
@@ -86,14 +86,14 @@ async fn run(northstar: Northstar) -> Result<(), Error> {
     let mut runtime = northstar
         .start()
         .await
-        .context("Failed to start Northstar")?;
+        .context("failed to start Northstar")?;
 
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())
-        .context("Failed to install sigint handler")?;
+        .context("failed to install sigint handler")?;
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
-        .context("Failed to install sigterm handler")?;
+        .context("failed to install sigterm handler")?;
     let mut sighup = tokio::signal::unix::signal(SignalKind::hangup())
-        .context("Failed to install sighup handler")?;
+        .context("failed to install sighup handler")?;
 
     let status = select! {
         _ = sigint.recv() => {

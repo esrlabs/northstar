@@ -62,11 +62,11 @@ pub(crate) struct Console {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Protocol error: {0}")]
+    #[error("protocol error: {0}")]
     Protocol(String),
-    #[error("IO error: {0} ({1})")]
+    #[error("iO error: {0} ({1})")]
     Io(String, #[source] io::Error),
-    #[error("Shutting down")]
+    #[error("shutting down")]
     Shutdown,
 }
 
@@ -100,7 +100,7 @@ impl Console {
         );
         let task = match Listener::new(url)
             .await
-            .map_err(|e| Error::Io("Failed start console listener".into(), e))?
+            .map_err(|e| Error::Io("failed start console listener".into(), e))?
         {
             Listener::Tcp(listener) => task::spawn(async move {
                 serve(
@@ -281,7 +281,7 @@ impl Console {
                         let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
                             Ok(response) => response,
                             Err(e) => {
-                                warn!("Failed to process request: {}", e);
+                                warn!("failed to process request: {}", e);
                                 break;
                             }
                         };

@@ -29,7 +29,7 @@ impl From<&str> for Io {
         match s {
             "stdout" => Io::Stdout,
             "stderr" => Io::Stderr,
-            _ => panic!("Invalid io: {}", s),
+            _ => panic!("invalid io: {}", s),
         }
     }
 }
@@ -98,12 +98,12 @@ fn dump(file: &str) {
 
 fn cat(path: &Path) -> Result<()> {
     let mut input =
-        fs::File::open(&path).with_context(|| format!("Failed to open {}", path.display()))?;
+        fs::File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut output = std::io::stdout();
     io::copy(&mut input, &mut output)
         .map(drop)
-        .with_context(|| format!("Failed to cat {}", path.display()))?;
-    writeln!(output).context("Failed to write to stdout")
+        .with_context(|| format!("failed to cat {}", path.display()))?;
+    writeln!(output).context("failed to write to stdout")
 }
 
 fn crash() {
@@ -123,7 +123,7 @@ fn exit(code: i32) {
 
 fn write(input: &str, path: &Path) -> Result<()> {
     fs::write(path, input)
-        .with_context(|| format!("Failed to write \"{}\" to {}", input, path.display()))
+        .with_context(|| format!("failed to write \"{}\" to {}", input, path.display()))
 }
 
 fn touch(path: &Path) -> Result<()> {
@@ -175,7 +175,7 @@ fn inspect() {
         println!(
             "caps {}: {:?}",
             format!("{:?}", set).as_str().to_lowercase(),
-            caps::read(None, *set).expect("Failed to read caps")
+            caps::read(None, *set).expect("failed to read caps")
         );
     }
 

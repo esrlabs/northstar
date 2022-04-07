@@ -36,7 +36,7 @@ impl FromStr for Model {
         match s {
             "api" => Ok(Model::Api),
             "manifest" => Ok(Model::Manifest),
-            _ => Err(anyhow::anyhow!("Invalid model: {}", s)),
+            _ => Err(anyhow::anyhow!("invalid model: {}", s)),
         }
     }
 }
@@ -98,7 +98,7 @@ fn main() -> Result<()> {
     let schema = serde_json::to_string_pretty(&spec)?;
     match opt.output {
         Some(path) => {
-            write(path, schema.as_bytes()).context("Failed to write")?;
+            write(path, schema.as_bytes()).context("failed to write")?;
         }
         None => println!("{}", schema),
     }

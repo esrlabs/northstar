@@ -40,7 +40,7 @@ pub fn init() {
             let level = buf.default_styled_level(record.metadata().level());
 
             let tx = &QUEUE.0;
-            tx.send(record.args().to_string()).expect("Channel error");
+            tx.send(record.args().to_string()).expect("channel error");
 
             if let Some(module_path) = record
                 .module_path()
@@ -64,7 +64,7 @@ pub fn init() {
 /// Assume the runtime to log a line matching `pattern` within `timeout` seconds.
 pub async fn assume<T: ToString + fmt::Display>(pattern: T, timeout: u64) -> Result<()> {
     time::timeout(Duration::from_secs(timeout), async {
-        let regex = Regex::new(&pattern.to_string()).context("Invalid regex")?;
+        let regex = Regex::new(&pattern.to_string()).context("invalid regex")?;
         let mut rx = QUEUE.1.lock().await;
         loop {
             match rx.recv().await {

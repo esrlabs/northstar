@@ -82,7 +82,7 @@ impl DirRepository {
                     file.display(),
                     if key.is_some() { " [verified]" } else { "" }
                 );
-                let reader = std::fs::File::open(&file).context("Failed to open npk")?;
+                let reader = std::fs::File::open(&file).context("failed to open npk")?;
                 let reader = std::io::BufReader::new(reader);
                 let npk = NpkNpk::from_reader(reader, key.as_ref())
                     .map_err(|e| Error::Npk(file.display().to_string(), e))?;
@@ -123,11 +123,11 @@ impl<'a> Repository for DirRepository {
         let dest = self.dir.join(format!("{}.npk", nanoid!()));
         let mut file = fs::File::create(&dest)
             .await
-            .context("Failed create npk in repository")?;
+            .context("failed create npk in repository")?;
         while let Some(r) = rx.recv().await {
-            file.write_all(&r).await.context("Failed to write npk")?;
+            file.write_all(&r).await.context("failed to write npk")?;
         }
-        file.flush().await.context("Failed to flush npk")?;
+        file.flush().await.context("failed to flush npk")?;
         drop(file);
 
         debug!("Loading temporary npk {}", dest.display());
@@ -175,7 +175,7 @@ impl<'a> Repository for DirRepository {
         drop(npk);
         fs::remove_file(path)
             .await
-            .context("Failed to remove npk")
+            .context("failed to remove npk")
             .map(drop)
     }
 
@@ -221,18 +221,18 @@ impl<'a> Repository for MemRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);
-        let fd = opts.create(nanoid!()).context("Failed to create memfd")?;
+        let fd = opts.create(nanoid!()).context("failed to create memfd")?;
 
         // Write buffer to the memfd
         let mut file = unsafe { fs::File::from_raw_fd(fd.as_raw_fd()) };
         file.set_nonblocking(true)
-            .context("Failed to set nonblocking")?;
+            .context("failed to set nonblocking")?;
 
         while let Some(r) = rx.recv().await {
-            file.write_all(&r).await.context("Failed stream npk")?;
+            file.write_all(&r).await.context("failed stream npk")?;
         }
 
-        file.seek(SeekFrom::Start(0)).await.context("Failed seek")?;
+        file.seek(SeekFrom::Start(0)).await.context("failed seek")?;
 
         // Seal the memfd
         let seals = memfd::SealsHashSet::from_iter([
@@ -242,19 +242,19 @@ impl<'a> Repository for MemRepository {
         ]);
         fd.add_seals(&seals)
             .and_then(|_| fd.add_seal(memfd::FileSeal::SealSeal))
-            .context("Failed to add memfd seals")?;
+            .context("failed to add memfd seals")?;
 
         // Forget fd - it's owned by file
         fd.into_raw_fd();
 
         file.set_nonblocking(false)
-            .context("Failed to set blocking")?;
+            .context("failed to set blocking")?;
         let file = BufReader::new(file.into_std().await);
 
         // Load npk
         debug!("Loading memfd as npk");
         let npk = NpkNpk::from_reader(file, self.key.as_ref())
-            .map_err(|e| Error::Npk("Memory".into(), e))?;
+            .map_err(|e| Error::Npk("memory".into(), e))?;
         let container = npk.manifest().container();
         info!("Loaded {} from memfd", container);
 

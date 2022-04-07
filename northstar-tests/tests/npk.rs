@@ -26,7 +26,7 @@ env:
 ";
 
 fn tmpdir() -> TempDir {
-    TempDir::new().expect("Create tmp dir")
+    TempDir::new().expect("failed to create tempdir")
 }
 
 fn create(dest: &Path, manifest_name: Option<&str>) {
@@ -76,7 +76,7 @@ fn pack_missing_manifest() {
     let key_dir = tmpdir();
     let manifest = Path::new("invalid");
     let (_pub_key, prv_key) = generate_test_key(key_dir.path());
-    npk::pack(manifest, src.path(), dest.path(), Some(&prv_key)).expect_err("Invalid manifest");
+    npk::pack(manifest, src.path(), dest.path(), Some(&prv_key)).expect_err("invalid manifest");
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn pack_invalid_key() {
     let dest = tmpdir();
     let manifest = create_test_manifest(src.path(), None);
     let private = Path::new("invalid");
-    npk::pack(&manifest, src.path(), dest.path(), Some(private)).expect_err("Invalid key dir");
+    npk::pack(&manifest, src.path(), dest.path(), Some(private)).expect_err("invalid key dir");
 }
 
 #[test]
@@ -105,7 +105,7 @@ fn unpack() {
     npk::unpack(&npk, unpack_dest.path()).expect("Unpack NPK");
     let manifest = unpack_dest.path().join("manifest").with_extension("yaml");
     assert!(manifest.exists());
-    let manifest = fs::read_to_string(&manifest).expect("Failed to parse manifest");
+    let manifest = fs::read_to_string(&manifest).expect("failed to parse manifest");
 
     assert_eq!(TEST_MANIFEST_UNPACKED, manifest);
 }
@@ -118,7 +118,7 @@ fn generate_key_pair() {
 
 #[test]
 fn generate_key_pair_no_dest() {
-    npk::generate_key(TEST_KEY_NAME, Path::new("invalid")).expect_err("Invalid key dir");
+    npk::generate_key(TEST_KEY_NAME, Path::new("invalid")).expect_err("invalid key dir");
 }
 
 #[test]

@@ -285,7 +285,7 @@ async fn run(
                 }
                 Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => (),
                 Err(nix::Error::EINTR) => (),
-                e => panic!("Failed to waitpid on {}: {:?}", pid, e),
+                e => panic!("failed to waitpid on {}: {:?}", pid, e),
             }
         }
     });
@@ -319,7 +319,7 @@ async fn run(
         let forker = fork::Forker::new(stream);
         let exit_notifications: AsyncMessage<_> = notifications
             .try_into()
-            .expect("Failed to convert exit notification handle");
+            .expect("failed to convert exit notification handle");
         (forker, exit_notifications)
     };
 
@@ -346,7 +346,7 @@ async fn run(
     loop {
         tokio::select! {
             // External shutdown event via the token
-            _ = token.cancelled() => event_tx.send(Event::Shutdown).await.expect("Failed to send shutdown event"),
+            _ = token.cancelled() => event_tx.send(Event::Shutdown).await.expect("failed to send shutdown event"),
             // Process events
             event = event_rx.next() => {
                 if let Err(e) = match event.unwrap() {
@@ -374,7 +374,7 @@ async fn run(
     // Terminate forker process
     debug!("Joining forker with pid {}", forker_pid);
     // signal::kill(forker_pid, Some(SIGTERM)).ok();
-    join_forker.await.expect("Failed to join forker");
+    join_forker.await.expect("failed to join forker");
 
     // Shutdown cgroups
     cgroups::shutdown(&cgroup).await?;

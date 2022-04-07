@@ -106,7 +106,7 @@ impl ContainerContext {
         self.debug
             .destroy()
             .await
-            .expect("Failed to destroy debug utilities");
+            .expect("failed to destroy debug utilities");
 
         self.cgroups.destroy().await;
     }
@@ -125,7 +125,7 @@ impl State {
         let mount_control = Arc::new(
             MountControl::new()
                 .await
-                .expect("Failed to initialize mount control"),
+                .expect("failed to initialize mount control"),
         );
 
         let mut state = State {
@@ -263,10 +263,10 @@ impl State {
                 if let Err(e) = self.start(&container, None, None).await {
                     match autostart {
                         Autostart::Relaxed => {
-                            warn!("Failed to autostart relaxed {}: {}", container, e);
+                            warn!("failed to autostart relaxed {}: {}", container, e);
                         }
                         Autostart::Critical => {
-                            error!("Failed to autostart critical {}: {}", container, e);
+                            error!("failed to autostart critical {}: {}", container, e);
                             return Err(e);
                         }
                     }
@@ -399,7 +399,7 @@ impl State {
             for mount in self.mount_all(&Vec::from_iter(need_mount)).await {
                 // Abort if at least one container failed to mount
                 if let Err(e) = mount {
-                    warn!("Failed to mount: {}", e);
+                    warn!("failed to mount: {}", e);
                     return Err(e);
                 }
             }
@@ -418,13 +418,13 @@ impl State {
         let console_fd = if !manifest.console.is_empty() {
             let peer = Peer::Container(container.clone());
             let (runtime_stream, container_stream) =
-                StdUnixStream::pair().expect("Failed to create socketpair");
+                StdUnixStream::pair().expect("failed to create socketpair");
             let container_fd: OwnedFd = container_stream.into();
 
             let runtime = runtime_stream
                 .set_nonblocking(true)
                 .and_then(|_| UnixStream::from_std(runtime_stream))
-                .expect("Failed to set socket into nonblocking mode");
+                .expect("failed to set socket into nonblocking mode");
 
             let notifications = self.notification_tx.subscribe();
             let events_tx = self.events_tx.clone();
@@ -465,7 +465,7 @@ impl State {
             // Creating a cgroup is a northstar internal thing. If it fails it's not recoverable.
             cgroups::CGroups::new(&self.config.cgroup, events_tx, container, &config, pid)
                 .await
-                .expect("Failed to create cgroup")
+                .expect("failed to create cgroup")
         };
 
         // Open a file handle for stdin, stdout and stderr according to the manifest
@@ -505,14 +505,14 @@ impl State {
             .exec(container.clone(), path, args, env, io)
             .await
         {
-            warn!("Failed to exec {} ({}): {}", container, pid, e);
+            warn!("failed to exec {} ({}): {}", container, pid, e);
 
             stop.cancel();
 
             if let Some(log_task) = log_task {
                 drop(log_task.await);
             }
-            debug.destroy().await.expect("Failed to destroy debug");
+            debug.destroy().await.expect("failed to destroy debug");
             cgroups.destroy().await;
             return Err(e);
         }
@@ -838,7 +838,7 @@ impl State {
                         match self.start(container, args, env).await {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
-                                warn!("Failed to start {}: {}", container, e);
+                                warn!("failed to start {}: {}", container, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -848,7 +848,7 @@ impl State {
                         match self.kill(container, signal).await {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
-                                error!("Failed to kill {} with {}: {}", container, signal, e);
+                                error!("failed to kill {} with {}: {}", container, signal, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -857,7 +857,7 @@ impl State {
                         match self.uninstall(container).await {
                             Ok(_) => api::model::Response::Ok,
                             Err(e) => {
-                                warn!("Failed to uninstall {}: {}", container, e);
+                                warn!("failed to uninstall {}: {}", container, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -869,7 +869,7 @@ impl State {
                                 stats,
                             },
                             Err(e) => {
-                                warn!("Failed to gather stats for {}: {}", container, e);
+                                warn!("failed to gather stats for {}: {}", container, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -928,7 +928,7 @@ impl State {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("Failed to mount {}: {}", container, e);
+                    warn!("failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }
@@ -1026,7 +1026,7 @@ impl State {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("Failed to mount {}: {}", container, e);
+                    warn!("failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }

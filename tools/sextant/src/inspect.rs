@@ -50,10 +50,10 @@ pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
     // print manifest
     let mut man = zip
         .by_name(MANIFEST_NAME)
-        .context("Failed to find manifest in NPK")?;
+        .context("failed to find manifest in NPK")?;
     println!("{}", format!("## {}", MANIFEST_NAME).green());
     man.read_to_string(&mut print_buf)
-        .with_context(|| "Failed to read manifest")?;
+        .with_context(|| "failed to read manifest")?;
     println!("{}", &print_buf);
     print!("\n\n");
     print_buf.clear();
@@ -64,7 +64,7 @@ pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
         Ok(mut sig) => {
             println!("{}", format!("## {}", SIGNATURE_NAME).green());
             sig.read_to_string(&mut print_buf)
-                .with_context(|| "Failed to read signature")?;
+                .with_context(|| "failed to read signature")?;
             println!("{}", &print_buf);
             print!("\n\n");
             print_buf.clear();
@@ -75,10 +75,10 @@ pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
 
     // print squashfs listing
     println!("{}", "## SquashFS listing".green());
-    let mut dest_fsimage = tempfile::NamedTempFile::new().context("Failed to create tmp file")?;
+    let mut dest_fsimage = tempfile::NamedTempFile::new().context("failed to create tmp file")?;
     let mut src_fsimage = zip
         .by_name(FS_IMG_NAME)
-        .context("Failed to find filesystem image in NPK")?;
+        .context("failed to find filesystem image in NPK")?;
     io::copy(&mut src_fsimage, &mut dest_fsimage)?;
     let path = dest_fsimage.path();
     print_squashfs(path)?;
@@ -87,14 +87,14 @@ pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
 }
 
 fn print_squashfs(fsimg_path: &Path) -> Result<()> {
-    which::which(&UNSQUASHFS).with_context(|| anyhow!("Failed to find '{}'", &UNSQUASHFS))?;
+    which::which(&UNSQUASHFS).with_context(|| anyhow!("failed to find '{}'", &UNSQUASHFS))?;
 
     let mut cmd = Command::new(&UNSQUASHFS);
     cmd.arg("-ll").arg(fsimg_path.display().to_string());
 
     let output = cmd
         .output()
-        .with_context(|| format!("Failed to execute '{}'", &UNSQUASHFS))?;
+        .with_context(|| format!("failed to execute '{}'", &UNSQUASHFS))?;
 
     println!("{}", String::from_utf8_lossy(&output.stdout));
 
@@ -174,7 +174,7 @@ mounts:
 
     #[test]
     fn inspect_npk_no_file() {
-        inspect(Path::new("invalid"), true).expect_err("Invalid NPK");
-        inspect(Path::new("invalid"), false).expect_err("Invalid NPK");
+        inspect(Path::new("invalid"), true).expect_err("invalid NPK");
+        inspect(Path::new("invalid"), false).expect_err("invalid NPK");
     }
 }

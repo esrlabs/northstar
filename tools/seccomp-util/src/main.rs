@@ -23,7 +23,7 @@ fn main() -> Result<()> {
 
     // Collect syscall names from strace file
     let file =
-        File::open(&path).context(format!("Failed to open strace log: {}", &path.display()))?;
+        File::open(&path).context(format!("failed to open strace log: {}", &path.display()))?;
     let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
     // unwrap(): Creating regex from constant expression will never fail
     let regex = Regex::new(r"^\s*(?:\[[^]]*]|\d+)?\s*([a-zA-Z0-9_]+)\(([^)<]*)").unwrap();

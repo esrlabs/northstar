@@ -41,7 +41,7 @@ impl FromStr for Mode {
             "start-stop-umount" => Ok(Mode::StartStopUmount),
             "mount-start-stop-umount" => Ok(Mode::StartStopUmount),
             "install-uninstall" => Ok(Mode::InstallUninstall),
-            _ => Err("Invalid mode"),
+            _ => Err("invalid mode"),
         }
     }
 }
@@ -99,20 +99,20 @@ async fn io(url: &Url) -> Result<Box<dyn N>> {
             let addresses = url.socket_addrs(|| Some(4200))?;
             let address = addresses
                 .first()
-                .ok_or_else(|| anyhow!("Failed to resolve {}", url))?;
+                .ok_or_else(|| anyhow!("failed to resolve {}", url))?;
             let stream = time::timeout(timeout, TcpStream::connect(address))
                 .await
-                .context("Failed to connect")??;
+                .context("failed to connect")??;
 
             Ok(Box::new(stream) as Box<dyn N>)
         }
         "unix" => {
             let stream = time::timeout(timeout, UnixStream::connect(url.path()))
                 .await
-                .context("Failed to connect")??;
+                .context("failed to connect")??;
             Ok(Box::new(stream) as Box<dyn N>)
         }
-        _ => Err(anyhow!("Invalid url")),
+        _ => Err(anyhow!("invalid url")),
     }
 }
 
@@ -171,7 +171,7 @@ async fn main() -> Result<()> {
                     client
                         .kill(container.clone(), 15)
                         .await
-                        .context("Failed to stop container")?;
+                        .context("failed to stop container")?;
                     info!("{}: waiting for termination", container);
                     let stopped = Notification::Exit {
                         container: container.clone(),
@@ -301,7 +301,7 @@ async fn iteration(
         client
             .kill(container.clone(), 15)
             .await
-            .context("Failed to stop container")?;
+            .context("failed to stop container")?;
 
         info!("{}: waiting for termination", container);
         let stopped = Notification::Exit {
@@ -314,7 +314,7 @@ async fn iteration(
     // Check if we need to umount
     if *mode != Mode::StartStop {
         info!("{}: umounting", container);
-        client.umount(container).await.context("Failed to umount")?;
+        client.umount(container).await.context("failed to umount")?;
     }
 
     Ok(())
@@ -337,7 +337,7 @@ async fn await_notification<T: AsyncRead + AsyncWrite + Unpin>(
         }
     })
     .await
-    .with_context(|| format!("Failed to wait for notification: {:?}", notification))?
+    .with_context(|| format!("failed to wait for notification: {:?}", notification))?
 }
 
 /// Install and uninstall an npk in a loop

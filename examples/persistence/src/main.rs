@@ -7,7 +7,7 @@ fn main() -> io::Result<()> {
 
     loop {
         // Write
-        let mut f = fs::File::create(&file).expect("Failed to create foo");
+        let mut f = fs::File::create(&file).expect("failed to create foo");
         println!("Writing {} to {}", text, file.display());
         f.write_all(text.as_bytes())?;
 

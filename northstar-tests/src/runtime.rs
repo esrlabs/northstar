@@ -156,7 +156,7 @@ impl Client {
         // Connect to the runtime
         let io = UnixStream::connect(console_full().path())
             .await
-            .expect("Failed to connect to console");
+            .expect("failed to connect to console");
         let client = client::Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
         // Wait until a successful connection
         logger::assume("Client .* connected", 5u64).await?;
@@ -168,10 +168,10 @@ impl Client {
     pub async fn client(&self) -> Result<client::Client<UnixStream>> {
         let io = UnixStream::connect(console_full().path())
             .await
-            .context("Failed to connect to console")?;
+            .context("failed to connect to console")?;
         client::Client::new(io, Some(1000), time::Duration::from_secs(30))
             .await
-            .context("Failed to create client")
+            .context("failed to create client")
     }
 
     pub async fn stop(&mut self, container: &str, timeout: u64) -> Result<()> {
@@ -208,11 +208,11 @@ impl Client {
     pub async fn install_test_container(&mut self) -> Result<()> {
         self.install(TEST_CONTAINER_NPK, "mem")
             .await
-            .context("Failed to install test container")?;
+            .context("failed to install test container")?;
 
         self.assume_notification(|n| matches!(n, Notification::Install { .. }), 15)
             .await
-            .context("Failed to wait for test container install notification")
+            .context("failed to wait for test container install notification")
     }
 
     /// Uninstall the test container and wait for the notification
@@ -220,20 +220,20 @@ impl Client {
         self.client
             .uninstall("test-container:0.0.1")
             .await
-            .context("Failed to uninstall test container")?;
+            .context("failed to uninstall test container")?;
         self.assume_notification(|n| matches!(n, Notification::Uninstall { .. }), 15)
             .await
-            .context("Failed to wait for test container uninstall notification")
+            .context("failed to wait for test container uninstall notification")
     }
 
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
         self.install(TEST_RESOURCE_NPK, "mem")
             .await
-            .context("Failed to install test resource")?;
+            .context("failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install { .. }), 15)
             .await
-            .context("Failed to wait for test resource install notification")
+            .context("failed to wait for test resource install notification")
     }
 
     /// Uninstall the test resource and wait for the notification
@@ -241,10 +241,10 @@ impl Client {
         self.client
             .uninstall("test-resource:0.0.1")
             .await
-            .context("Failed to uninstall test resource")?;
+            .context("failed to uninstall test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Uninstall { .. }), 15)
             .await
-            .context("Failed to wait for test resource uninstall notification")
+            .context("failed to wait for test resource uninstall notification")
     }
 
     /// Wait for a notification that matches `pred`. Notifications are buffered in the `Client`.
@@ -257,12 +257,12 @@ impl Client {
 
         loop {
             select! {
-                _ = &mut timeout => break Err(anyhow!("Timeout waiting for notification")),
+                _ = &mut timeout => break Err(anyhow!("timeout waiting for notification")),
                 notification = self.client.next() => {
                     match notification {
                         Some(Ok(n)) if pred(&n) => break Ok(()),
                         Some(_) => continue,
-                        None => break Err(anyhow!("Client connection closed")),
+                        None => break Err(anyhow!("client connection closed")),
                     }
                 }
             }

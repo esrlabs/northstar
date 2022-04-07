@@ -28,9 +28,9 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Io error: {0}: {1:?}")]
+    #[error("io error: {0}: {1:?}")]
     Io(String, io::Error),
-    #[error("CGroups error: {0}")]
+    #[error("cgroups error: {0}")]
     CGroups(String),
 }
 
@@ -153,11 +153,11 @@ impl CGroups {
         // and not of the container
         cgroup
             .add_task(cgroups_rs::CgroupPid::from(pid as u64))
-            .expect("Failed to assign pid");
+            .expect("failed to assign pid");
 
         let memory_controller = cgroup
             .controller_of::<MemController>()
-            .expect("Failed to get memory controller");
+            .expect("failed to get memory controller");
         let memory_path = memory_controller.path();
         let memory_monitor = if cgroup.v2() {
             MemoryMonitor::new_v2(container.clone(), memory_path, tx).await
@@ -178,7 +178,7 @@ impl CGroups {
 
         info!("Destroying cgroup of {}", self.container);
         assert!(self.cgroup.tasks().is_empty());
-        self.cgroup.delete().expect("Failed to remove cgroups");
+        self.cgroup.delete().expect("failed to remove cgroups");
     }
 
     /// Gather statistics from controllers
@@ -224,29 +224,29 @@ impl MemoryMonitor {
         let event_control = path.join(EVENT_CONTROL);
         let token = CancellationToken::new();
 
-        let mut event_fd = EventFd::new(0, false).expect("Failed to create eventfd");
+        let mut event_fd = EventFd::new(0, false).expect("failed to create eventfd");
 
         debug!("Opening oom_control: {}", oom_control.display());
         let oom_control = fs::OpenOptions::new()
             .write(true)
             .open(&oom_control)
             .await
-            .expect("Failed to open oom_control");
+            .expect("failed to open oom_control");
 
         debug!("Opening event_control: {}", event_control.display());
         let mut event_control = fs::OpenOptions::new()
             .write(true)
             .open(&event_control)
             .await
-            .expect("Failed to open event_control");
+            .expect("failed to open event_control");
         event_control
             .write_all(format!("{} {}", event_fd.as_raw_fd(), oom_control.as_raw_fd()).as_bytes())
             .await
-            .expect("Failed to setup event_control");
+            .expect("failed to setup event_control");
         event_control
             .flush()
             .await
-            .expect("Failed to setup oom event fd");
+            .expect("failed to setup oom event fd");
 
         // This task stops when the main loop receiver closes
         let task = {
@@ -298,7 +298,7 @@ impl MemoryMonitor {
 
             inotify
                 .add_watch(&path, WatchMask::MODIFY)
-                .expect("Failed to add file watch");
+                .expect("failed to add file watch");
 
             task::spawn(async move {
                 debug!("Listening for v2 oom events of {}", container);
@@ -306,14 +306,14 @@ impl MemoryMonitor {
                 let mut buffer = [0; 1024];
                 let mut stream = inotify
                     .event_stream(&mut buffer)
-                    .expect("Failed to initialize inotify event stream");
+                    .expect("failed to initialize inotify event stream");
 
                 'outer: loop {
                     select! {
                         _ = stop.cancelled() => break 'outer,
                         _ = tx.closed() => break 'outer,
                         _ = stream.next() => {
-                            let events = fs::read_to_string(&path).await.expect("Failed to read memory events");
+                            let events = fs::read_to_string(&path).await.expect("failed to read memory events");
                             let event = parse_cgroups_event(&events);
                             'inner: loop {
                                 let event = Event::Container(container.clone(), ContainerEvent::CGroup(event.clone()));
@@ -352,7 +352,7 @@ fn parse_cgroups_event(s: &str) -> CGroupEvent {
             Some("max") => event.max = value,
             Some("oom") => event.oom = value,
             Some("oom_kill") => event.oom_kill = value,
-            Some(_) | None => panic!("Invalid content of memory.events"),
+            Some(_) | None => panic!("invalid content of memory.events"),
         }
     }
     CGroupEvent::Memory(event)

@@ -43,43 +43,43 @@ type Zip<R> = ZipArchive<R>;
 #[derive(Error, Debug)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[error("Manifest error: {0}")]
+    #[error("manifest error: {0}")]
     Manifest(String),
-    #[error("IO: {context}")]
+    #[error("io: {context}")]
     Io {
         context: String,
         #[source]
         error: io::Error,
     },
-    #[error("Selinux error: {0}")]
+    #[error("selinux error: {0}")]
     Selinux(String),
-    #[error("Squashfs error: {0}")]
+    #[error("squashfs error: {0}")]
     Squashfs(String),
-    #[error("Archive error: {context}")]
+    #[error("archive error: {context}")]
     Zip {
         context: String,
         #[source]
         error: ZipError,
     },
-    #[error("Verity error")]
+    #[error("verity error")]
     Verity(#[source] VerityError),
-    #[error("Key error: {context}")]
+    #[error("key error: {context}")]
     Key {
         context: String,
         #[source]
         error: SignatureError,
     },
-    #[error("Comment malformed: {0}")]
+    #[error("comment malformed: {0}")]
     MalformedComment(String),
-    #[error("Hashes malformed: {0}")]
+    #[error("hashes malformed: {0}")]
     MalformedHashes(String),
-    #[error("Signature malformed: {0}")]
+    #[error("signature malformed: {0}")]
     MalformedSignature(String),
-    #[error("Invalid signature: {0}")]
+    #[error("invalid signature: {0}")]
     InvalidSignature(String),
-    #[error("Invalid compression algorithm")]
+    #[error("invalid compression algorithm")]
     InvalidCompressionAlgorithm,
-    #[error("Version mismatch {0} vs {1}")]
+    #[error("version mismatch {0} vs {1}")]
     Version(Version, Version),
 }
 
@@ -139,7 +139,7 @@ impl FromStr for Hashes {
         }
 
         let hashes = serde_yaml::from_str::<SerdeHashes>(s)
-            .map_err(|e| Error::MalformedHashes(format!("Problem deserializing hashes: {}", e)))?;
+            .map_err(|e| Error::MalformedHashes(format!("failed to parse hashes: {}", e)))?;
 
         Ok(Hashes {
             manifest_hash: hashes.manifest.hash,
@@ -166,7 +166,7 @@ impl<R: Read + Seek> Npk<R> {
     /// Read a npk from `reader`
     pub fn from_reader(reader: R, key: Option<&PublicKey>) -> Result<Self, Error> {
         let mut zip = Zip::new(reader).map_err(|error| Error::Zip {
-            context: "Failed to open NPK".to_string(),
+            context: "failed to open NPK".to_string(),
             error,
         })?;
 
@@ -180,7 +180,7 @@ impl<R: Read + Seek> Npk<R> {
         let manifest = manifest(&mut zip, hashes.as_ref())?;
         let (fs_img_offset, fs_img_size) = {
             let fs_img = &zip.by_name(FS_IMG_NAME).map_err(|e| Error::Zip {
-                context: format!("Failed to locate {} in ZIP file", &FS_IMG_NAME),
+                context: format!("failed to locate {} in ZIP file", &FS_IMG_NAME),
                 error: e,
             })?;
             (fs_img.data_start(), fs_img.size())
@@ -282,7 +282,7 @@ fn hashes<R: Read + Seek>(
             let signature_string = sections.next().unwrap_or_default();
             let signature = decode_signature(signature_string)?;
             k.verify_strict(hashes_string.as_bytes(), &signature)
-                .map_err(|_e| Error::InvalidSignature("Invalid signature".to_string()))?;
+                .map_err(|_e| Error::InvalidSignature("invalid signature".to_string()))?;
             Ok(Some(Hashes::from_str(hashes_string)?))
         }
         None => Ok(None),
@@ -293,28 +293,28 @@ fn manifest<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result
     let content = read_to_string(zip, MANIFEST_NAME)?;
     if let Some(Hashes { manifest_hash, .. }) = &hashes {
         let expected_hash = hex::decode(manifest_hash)
-            .map_err(|e| Error::Manifest(format!("Failed to parse manifest hash {}", e)))?;
+            .map_err(|e| Error::Manifest(format!("failed to parse manifest hash {}", e)))?;
         let actual_hash = Sha256::digest(content.as_bytes());
         if expected_hash != actual_hash.as_slice() {
             return Err(Error::Manifest(format!(
-                "Invalid manifest hash (expected={} actual={})",
+                "invalid manifest hash (expected={} actual={})",
                 manifest_hash,
                 hex::encode(actual_hash)
             )));
         }
     }
     Manifest::from_str(&content)
-        .map_err(|e| Error::Manifest(format!("Failed to parse manifest: {}", e)))
+        .map_err(|e| Error::Manifest(format!("failed to parse manifest: {}", e)))
 }
 
 fn read_to_string<R: Read + Seek>(zip: &mut Zip<R>, name: &str) -> Result<String, Error> {
     let mut file = zip.by_name(name).map_err(|error| Error::Zip {
-        context: format!("Failed to locate {} in ZIP file", name),
+        context: format!("failed to locate {} in ZIP file", name),
         error,
     })?;
     let mut content = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut content).map_err(|e| Error::Io {
-        context: format!("Failed to read from {}", name),
+        context: format!("failed to read from {}", name),
         error: e,
     })?;
     Ok(content)
@@ -329,15 +329,15 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature, Error> {
     }
 
     let de: SerdeSignature = serde_yaml::from_str::<SerdeSignature>(s).map_err(|e| {
-        Error::MalformedSignature(format!("Failed to parse signature YAML format: {}", e))
+        Error::MalformedSignature(format!("failed to parse signature YAML format: {}", e))
     })?;
 
     let signature = base64::decode(de.signature).map_err(|e| {
-        Error::MalformedSignature(format!("Failed to decode signature base 64 format: {}", e))
+        Error::MalformedSignature(format!("failed to decode signature base 64 format: {}", e))
     })?;
 
     ed25519_dalek::Signature::from_bytes(&signature).map_err(|e| {
-        Error::MalformedSignature(format!("Failed to parse signature ed25519 format: {}", e))
+        Error::MalformedSignature(format!("failed to parse signature ed25519 format: {}", e))
     })
 }
 
@@ -371,7 +371,7 @@ impl Builder {
     fn build<W: Write + Seek>(&self, writer: W) -> Result<(), Error> {
         // Create squashfs image
         let tmp = tempfile::TempDir::new().map_err(|e| Error::Io {
-            context: "Failed to create temporary directory".to_string(),
+            context: "failed to create temporary directory".to_string(),
             error: e,
         })?;
         let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
@@ -511,7 +511,7 @@ pub fn pack_with(
         dest.set_extension(&NPK_EXT);
     }
     let npk = fs::File::create(&dest).map_err(|e| Error::Io {
-        context: format!("Failed to create NPK: '{}'", &dest.display()),
+        context: format!("failed to create NPK: '{}'", &dest.display()),
         error: e,
     })?;
     builder.build(npk)
@@ -521,7 +521,7 @@ pub fn pack_with(
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
     let mut zip = open(npk)?;
     zip.extract(&out).map_err(|e| Error::Zip {
-        context: format!("Failed to extract NPK to '{}'", &out.display()),
+        context: format!("failed to extract NPK to '{}'", &out.display()),
         error: e,
     })?;
     let fsimg = out.join(&FS_IMG_NAME);
@@ -543,11 +543,11 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
 
     fn write(data: &[u8], path: &Path) -> Result<(), Error> {
         let mut file = fs::File::create(&path).map_err(|e| Error::Io {
-            context: format!("Failed to create '{}'", &path.display()),
+            context: format!("failed to create '{}'", &path.display()),
             error: e,
         })?;
         file.write_all(data).map_err(|e| Error::Io {
-            context: format!("Failed to write to '{}'", &path.display()),
+            context: format!("failed to write to '{}'", &path.display()),
             error: e,
         })?;
         Ok(())
@@ -557,7 +557,7 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     OsRng.fill_bytes(&mut secret_key_bytes);
     let secret_key: SecretKey =
         SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
-            context: "Failed to create secret key".to_string(),
+            context: "failed to create secret key".to_string(),
             error: e,
         })?;
     let public_key = ed25519_dalek::PublicKey::from(&secret_key);
@@ -576,22 +576,22 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
 
 fn read_manifest(path: &Path) -> Result<Manifest, Error> {
     let file = fs::File::open(&path)
-        .map_err(|e| Error::io(format!("Failed to open '{}'", &path.display()), e))?;
+        .map_err(|e| Error::io(format!("failed to open '{}'", &path.display()), e))?;
     Manifest::from_reader(&file)
-        .map_err(|e| Error::Manifest(format!("Failed to parse '{}': {}", &path.display(), e)))
+        .map_err(|e| Error::Manifest(format!("failed to parse '{}': {}", &path.display(), e)))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     fs::File::open(&key_file)
-        .map_err(|e| Error::io(format!("Failed to open '{}'", &key_file.display()), e))?
+        .map_err(|e| Error::io(format!("failed to open '{}'", &key_file.display()), e))?
         .read_exact(&mut secret_key_bytes)
         .map_err(|e| Error::Io {
-            context: format!("Failed to read key data from '{}'", &key_file.display()),
+            context: format!("failed to read key data from '{}'", &key_file.display()),
             error: e,
         })?;
     let secret_key = SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
-        context: format!("Failed to derive secret key from '{}'", &key_file.display()),
+        context: format!("failed to derive secret key from '{}'", &key_file.display()),
         error: e,
     })?;
 
@@ -615,9 +615,9 @@ fn gen_hashes_yaml(
     let manifest_hash = sha256.finalize();
     let mut sha256 = Sha256::new();
     let mut fsimg = fs::File::open(&fsimg)
-        .map_err(|e| Error::io(format!("Failed to open '{}'", &fsimg.display()), e))?;
+        .map_err(|e| Error::io(format!("failed to open '{}'", &fsimg.display()), e))?;
     io::copy(&mut fsimg, &mut sha256).map_err(|e| Error::Io {
-        context: "Failed to read fs image".to_string(),
+        context: "failed to read fs image".to_string(),
         error: e,
     })?;
 
@@ -639,7 +639,7 @@ fn gen_hashes_yaml(
 fn sign_npk(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
     let fsimg_size = fs::metadata(&fsimg)
         .map_err(|e| Error::Io {
-            context: format!("Failed to read file size: '{}'", &fsimg.display()),
+            context: format!("failed to read file size: '{}'", &fsimg.display()),
             error: e,
         })?
         .len();
@@ -738,11 +738,11 @@ fn gen_pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
         .collect::<Vec<String>>();
 
     let mut pseudo_file_entries = NamedTempFile::new()
-        .map_err(|error| Error::io("Failed to create temporary file", error))?;
+        .map_err(|error| Error::io("failed to create temporary file", error))?;
 
     pseudos.iter().try_for_each(|l| {
         writeln!(pseudo_file_entries, "{}", l)
-            .map_err(|e| Error::io("Failed to create pseudo files", e))
+            .map_err(|e| Error::io("failed to create pseudo files", e))
     })?;
 
     Ok(pseudo_file_entries)
@@ -768,7 +768,7 @@ fn create_squashfs_img(
 
     // Locate mksquashfs
     which::which(&MKSQUASHFS)
-        .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &MKSQUASHFS)))?;
+        .map_err(|_| Error::Squashfs(format!("failed to locate '{}'", &MKSQUASHFS)))?;
     if !root.exists() {
         return Err(Error::Squashfs(format!(
             "Root directory '{}' does not exist",
@@ -781,10 +781,10 @@ fn create_squashfs_img(
         Command::new(&MKSQUASHFS)
             .arg("-version")
             .output()
-            .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS, e)))?
+            .map_err(|e| Error::Squashfs(format!("failed to execute '{}': {}", &MKSQUASHFS, e)))?
             .stdout,
     )
-    .map_err(|e| Error::Squashfs(format!("Failed to parse mksquashfs output: {}", e)))?;
+    .map_err(|e| Error::Squashfs(format!("failed to parse mksquashfs output: {}", e)))?;
     let first_line = stdout.lines().next().unwrap_or_default();
     let mut major_minor = first_line.split(' ').nth(2).unwrap_or_default().split('.');
     let major = major_minor
@@ -833,7 +833,7 @@ fn create_squashfs_img(
         cmd.arg("-b").arg(format!("{}", block_size));
     }
     cmd.output()
-        .map_err(|e| Error::Squashfs(format!("Failed to execute '{}': {}", &MKSQUASHFS, e)))?;
+        .map_err(|e| Error::Squashfs(format!("failed to execute '{}': {}", &MKSQUASHFS, e)))?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "'{}' failed to create '{}'",
@@ -849,7 +849,7 @@ fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
     let squashfs_root = out.join("squashfs-root");
 
     which::which(&UNSQUASHFS)
-        .map_err(|_| Error::Squashfs(format!("Failed to locate '{}'", &UNSQUASHFS)))?;
+        .map_err(|_| Error::Squashfs(format!("failed to locate '{}'", &UNSQUASHFS)))?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "Squashfs image '{}' does not exist",
@@ -873,11 +873,11 @@ fn write_npk<W: Write + Seek>(
     signature: Option<&str>,
 ) -> Result<(), Error> {
     let mut fsimg = fs::File::open(&fsimg)
-        .map_err(|e| Error::io(format!("Failed to open '{}'", &fsimg.display()), e))?;
+        .map_err(|e| Error::io(format!("failed to open '{}'", &fsimg.display()), e))?;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string = serde_yaml::to_string(&manifest)
-        .map_err(|e| Error::Manifest(format!("Failed to serialize manifest: {}", e)))?;
+        .map_err(|e| Error::Manifest(format!("failed to serialize manifest: {}", e)))?;
 
     let mut zip = zip::ZipWriter::new(npk);
     zip.set_comment(serde_yaml::to_string(&Meta { version: VERSION }).unwrap());
@@ -888,19 +888,19 @@ fn write_npk<W: Write + Seek>(
             zip.write_all(signature.as_bytes())
         }()
         .map_err(|e| Error::Io {
-            context: "Failed to write signature to NPK".to_string(),
+            context: "failed to write signature to NPK".to_string(),
             error: e,
         })?;
     }
 
     zip.start_file(MANIFEST_NAME, options)
         .map_err(|e| Error::Zip {
-            context: "Failed to write manifest to NPK".to_string(),
+            context: "failed to write manifest to NPK".to_string(),
             error: e,
         })?;
     zip.write_all(manifest_string.as_bytes())
         .map_err(|e| Error::Io {
-            context: "Failed to convert manifest to NPK".to_string(),
+            context: "failed to convert manifest to NPK".to_string(),
             error: e,
         })?;
 
@@ -915,7 +915,7 @@ fn write_npk<W: Write + Seek>(
         })?;
     io::copy(&mut fsimg, &mut zip)
         .map_err(|e| Error::Io {
-            context: "Failed to write the filesystem image to the archive".to_string(),
+            context: "failed to write the filesystem image to the archive".to_string(),
             error: e,
         })
         .map(drop)
@@ -924,9 +924,9 @@ fn write_npk<W: Write + Seek>(
 /// Open a Zip file
 pub fn open(path: &Path) -> Result<Zip<BufReader<fs::File>>, Error> {
     let file = fs::File::open(&path)
-        .map_err(|e| Error::io(format!("Failed to open '{}'", &path.display()), e))?;
+        .map_err(|e| Error::io(format!("failed to open '{}'", &path.display()), e))?;
     zip::ZipArchive::new(BufReader::new(file)).map_err(|error| Error::Zip {
-        context: format!("Failed to parse ZIP format: '{}'", &path.display()),
+        context: format!("failed to parse ZIP format: '{}'", &path.display()),
         error,
     })
 }

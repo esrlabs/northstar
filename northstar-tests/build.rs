@@ -45,15 +45,15 @@ fn main() {
                 .target(env::var("TARGET").unwrap())
                 .target_dir(Path::new("target").join("tests")) // Cannot reuse target because it's in use
                 .run()
-                .expect("Failed to build")
+                .expect("failed to build")
                 .path()
                 .to_owned();
 
             println!("Binary is {}", bin.display());
-            let tmpdir = tempfile::TempDir::new().expect("Failed to create tmpdir");
+            let tmpdir = tempfile::TempDir::new().expect("failed to create tmpdir");
             let npk = tmpdir.path().join("npk");
             let root = npk.join("root");
-            fs::create_dir_all(&root).expect("Failed to create npk root");
+            fs::create_dir_all(&root).expect("failed to create npk root");
             fs::copy(&bin, root.join(dir.file_name().unwrap())).expect("failed to copy bin");
             (root, Some(tmpdir))
         } else {
@@ -71,7 +71,7 @@ fn main() {
             out_dir,
             Some(Path::new(KEY)),
         )
-        .expect("Failed to pack npk");
+        .expect("failed to pack npk");
         drop(tmpdir);
     }
 }

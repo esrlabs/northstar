@@ -173,9 +173,9 @@ where
             .collect();
 
         if versions.is_empty() {
-            bail!("No container found with name {}", name);
+            bail!("no container found with name {}", name);
         } else if versions.len() > 1 {
-            bail!("Container {} has multiple versions: {:?}", name, versions);
+            bail!("container {} has multiple versions: {:?}", name, versions);
         } else {
             (name, versions[0].clone())
         }
@@ -219,7 +219,7 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let args = if let Some(args) = args {
                 let mut non_null = Vec::with_capacity(args.len());
                 for arg in args {
-                    non_null.push(NonNullString::try_from(arg.as_str()).context("Invalid arg")?);
+                    non_null.push(NonNullString::try_from(arg.as_str()).context("invalid arg")?);
                 }
                 non_null
             } else {
@@ -233,12 +233,12 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                     let mut split = env.split('=');
                     let key = split
                         .next()
-                        .ok_or_else(|| anyhow!("Invalid env"))
-                        .and_then(|s| NonNullString::try_from(s).context("Invalid key"))?;
+                        .ok_or_else(|| anyhow!("invalid env"))
+                        .and_then(|s| NonNullString::try_from(s).context("invalid key"))?;
                     let value = split
                         .next()
-                        .ok_or_else(|| anyhow!("Invalid env"))
-                        .and_then(|s| NonNullString::try_from(s).context("Invalid value"))?;
+                        .ok_or_else(|| anyhow!("invalid env"))
+                        .and_then(|s| NonNullString::try_from(s).context("invalid value"))?;
                     non_null.insert(key, value);
                 }
                 non_null
@@ -287,7 +287,7 @@ async fn main() -> Result<()> {
                     .write(true)
                     .create(true)
                     .open(&path)
-                    .with_context(|| format!("Failed to open {}", path.display()))?;
+                    .with_context(|| format!("failed to open {}", path.display()))?;
                 Box::new(file)
             }
             None => Box::new(std::io::stdout()),
@@ -308,20 +308,20 @@ async fn main() -> Result<()> {
             let addresses = opt.url.socket_addrs(|| Some(4200))?;
             let address = addresses
                 .first()
-                .ok_or_else(|| anyhow!("Failed to resolve {}", opt.url))?;
+                .ok_or_else(|| anyhow!("failed to resolve {}", opt.url))?;
             let stream = time::timeout(timeout, TcpStream::connect(address))
                 .await
-                .context("Failed to connect")??;
+                .context("failed to connect")??;
 
             Box::new(stream) as Box<dyn N>
         }
         "unix" => {
             let stream = time::timeout(timeout, UnixStream::connect(opt.url.path()))
                 .await
-                .context("Failed to connect")??;
+                .context("failed to connect")??;
             Box::new(stream) as Box<dyn N>
         }
-        _ => return Err(anyhow!("Invalid url")),
+        _ => return Err(anyhow!("invalid url")),
     };
 
     match opt.command {
@@ -330,12 +330,12 @@ async fn main() -> Result<()> {
             if opt.json {
                 let mut framed = Client::new(io, Some(100), opt.timeout)
                     .await
-                    .with_context(|| format!("Failed to connect to {}", opt.url))?
+                    .with_context(|| format!("failed to connect to {}", opt.url))?
                     .framed();
 
                 let mut lines = BufReader::new(framed.get_mut()).lines();
                 for _ in 0..number.unwrap_or(usize::MAX) {
-                    match lines.next_line().await.context("Failed to read stream")? {
+                    match lines.next_line().await.context("failed to read stream")? {
                         Some(line) => println!("{}", line),
                         None => break,
                     }
@@ -343,10 +343,10 @@ async fn main() -> Result<()> {
             } else {
                 let client = Client::new(io, Some(100), opt.timeout)
                     .await
-                    .with_context(|| format!("Failed to connect to {}", opt.url))?;
+                    .with_context(|| format!("failed to connect to {}", opt.url))?;
                 let mut notifications = client.take(number.unwrap_or(usize::MAX));
                 while let Some(notification) = notifications.next().await {
-                    let notification = notification.context("Failed to receive notification")?;
+                    let notification = notification.context("failed to receive notification")?;
                     pretty::notification(&notification);
                 }
                 process::exit(0);
@@ -357,12 +357,12 @@ async fn main() -> Result<()> {
             // Connect
             let mut client = Client::new(io, None, opt.timeout)
                 .await
-                .context("Failed to connect")?;
+                .context("failed to connect")?;
 
             // Convert the subcommand into a request
             let request = command_to_request(command.clone(), &mut client)
                 .await
-                .context("Failed to convert command into request")?;
+                .context("failed to convert command into request")?;
 
             // If the raw json mode is requested nstar needs to operate on the raw stream instead
             // of `Client<T>`
@@ -371,30 +371,30 @@ async fn main() -> Result<()> {
             framed
                 .send(Message::Request { request })
                 .await
-                .context("Failed to send request")?;
+                .context("failed to send request")?;
 
             // Extra file transfer for install hack
             if let Subcommand::Install { npk, .. } = command {
-                framed.flush().await.context("Failed to flush")?;
-                framed.get_mut().flush().await.context("Failed to flush")?;
+                framed.flush().await.context("failed to flush")?;
+                framed.get_mut().flush().await.context("failed to flush")?;
 
                 copy(
-                    &mut fs::File::open(npk).await.context("Failed to open npk")?,
+                    &mut fs::File::open(npk).await.context("failed to open npk")?,
                     &mut framed.get_mut(),
                 )
                 .await
-                .context("Failed to stream npk")?;
+                .context("failed to stream npk")?;
             }
 
-            framed.get_mut().flush().await.context("Failed to flush")?;
+            framed.get_mut().flush().await.context("failed to flush")?;
 
             if opt.json {
                 let response = BufReader::new(framed.get_mut())
                     .lines()
                     .next_line()
                     .await
-                    .context("Failed to receive response")?
-                    .ok_or_else(|| anyhow!("Failed to receive response"))?;
+                    .context("failed to receive response")?
+                    .ok_or_else(|| anyhow!("failed to receive response"))?;
                 println!("{}", response);
                 process::exit(0);
             } else {
@@ -402,7 +402,7 @@ async fn main() -> Result<()> {
                 let exit = match framed
                     .next()
                     .await
-                    .ok_or_else(|| anyhow!("Failed to receive response"))??
+                    .ok_or_else(|| anyhow!("failed to receive response"))??
                 {
                     api::model::Message::Response { response } => pretty::response(&response),
                     _ => unreachable!(),

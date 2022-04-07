@@ -30,8 +30,8 @@ pub struct ForkerChannels {
 
 /// Fork the forker process
 pub fn start() -> Result<(Pid, ForkerChannels), Error> {
-    let mut stream_pair = socket_pair().expect("Failed to open socket pair");
-    let mut notifications = socket_pair().expect("Failed to open socket pair");
+    let mut stream_pair = socket_pair().expect("failed to open socket pair");
+    let mut notifications = socket_pair().expect("failed to open socket pair");
 
     let pid = util::fork(|| {
         set_log_target("northstar::forker".into());
@@ -44,8 +44,8 @@ pub fn start() -> Result<(Pid, ForkerChannels), Error> {
 
         debug!("Setting signal handlers for SIGINT and SIGHUP");
         unsafe {
-            signal(Signal::SIGINT, SigHandler::SigIgn).context("Setting SIGINT handler failed")?;
-            signal(Signal::SIGHUP, SigHandler::SigIgn).context("Setting SIGHUP handler failed")?;
+            signal(Signal::SIGINT, SigHandler::SigIgn).context("setting SIGINT handler failed")?;
+            signal(Signal::SIGHUP, SigHandler::SigIgn).context("setting SIGHUP handler failed")?;
         }
 
         debug!("Starting async runtime");
@@ -54,13 +54,13 @@ pub fn start() -> Result<(Pid, ForkerChannels), Error> {
             .enable_time()
             .enable_io()
             .build()
-            .expect("Failed to start runtime")
+            .expect("failed to start runtime")
             .block_on(async {
                 r#impl::run(stream, notifications).await;
             });
         Ok(())
     })
-    .expect("Failed to start Forker process");
+    .expect("failed to start Forker process");
 
     let forker = ForkerChannels {
         stream: stream_pair.first(),
@@ -80,7 +80,7 @@ pub struct Forker {
 impl Forker {
     /// Create a new forker handle
     pub fn new(stream: StdUnixStream) -> Self {
-        let stream = stream.try_into().expect("Failed to create AsyncMessage");
+        let stream = stream.try_into().expect("failed to create AsyncMessage");
         Self { stream }
     }
 
@@ -100,7 +100,7 @@ impl Forker {
         match self
             .request_response(message)
             .await
-            .expect("Failed to send request")
+            .expect("failed to send request")
         {
             Message::CreateResult { init } => Ok(init),
             Message::Failure(error) => {
@@ -146,14 +146,14 @@ impl Forker {
         self.stream
             .send(request)
             .await
-            .context("Failed to send request")?;
+            .context("failed to send request")?;
 
         // Send fds if any
         if let Some(fds) = fds {
             self.stream
                 .send_fds(&fds)
                 .await
-                .context("Failed to send fd")?;
+                .context("failed to send fd")?;
             drop(fds);
         }
 
@@ -163,7 +163,7 @@ impl Forker {
             .recv()
             .map(|s| s.map(|s| s.unwrap()))
             .await
-            .context("Failed to receive response from forker")?;
+            .context("failed to receive response from forker")?;
 
         Ok(reply)
     }

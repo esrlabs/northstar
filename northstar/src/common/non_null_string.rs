@@ -15,7 +15,7 @@ pub struct NonNullString(String);
 
 /// Null byte error
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[error("Invalid null byte in string")]
+#[error("invalid null byte in string")]
 pub struct InvalidNullChar(usize);
 
 impl Display for NonNullString {
