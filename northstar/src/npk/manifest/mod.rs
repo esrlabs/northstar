@@ -4,25 +4,24 @@ use crate::{
 };
 use itertools::Itertools;
 use schemars::JsonSchema;
-use serde::{
-    de::{Deserializer, Visitor},
-    Deserialize, Serialize, Serializer,
-};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{rust::maps_duplicate_key_is_error, skip_serializing_none};
 use std::{
     collections::{HashMap, HashSet},
-    fmt, io,
+    io,
     path::{Component, Component::RootDir, PathBuf},
     str::FromStr,
 };
 use thiserror::Error;
 
-// Reexport console types
+pub use cgroups::*;
 pub use console::*;
+pub use mount::*;
 
-#[path = "console.rs"]
+mod cgroups;
 mod console;
+mod mount;
 
 /// Northstar package manifest
 #[skip_serializing_none]
@@ -283,184 +282,6 @@ pub enum Autostart {
     Critical,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
-#[allow(missing_docs)]
-/// Mount option
-pub enum MountOption {
-    /// Bind mount
-    #[serde(rename = "rw")]
-    Rw,
-    // Mount noexec
-    #[serde(rename = "noexec")]
-    NoExec,
-    // Mount nosuid
-    #[serde(rename = "nosuid")]
-    NoSuid,
-    // Mount nodev
-    #[serde(rename = "nodev")]
-    NoDev,
-    // Mount recursive
-    #[serde(rename = "rec")]
-    Rec,
-}
-
-impl FromStr for MountOption {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "rw" => Ok(MountOption::Rw),
-            "noexec" => Ok(MountOption::NoExec),
-            "nosuid" => Ok(MountOption::NoSuid),
-            "nodev" => Ok(MountOption::NoDev),
-            "rec" => Ok(MountOption::Rec),
-            _ => Err(format!("invalid mount option {}", s)),
-        }
-    }
-}
-
-impl fmt::Display for MountOption {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MountOption::Rw => write!(f, "rw"),
-            MountOption::NoExec => write!(f, "noexec"),
-            MountOption::NoSuid => write!(f, "nosuid"),
-            MountOption::NoDev => write!(f, "nodev"),
-            MountOption::Rec => write!(f, "rec"),
-        }
-    }
-}
-
-/// Mount option set
-#[derive(Default, Clone, Eq, PartialEq, Debug, JsonSchema)]
-pub struct MountOptions(HashSet<MountOption>);
-
-impl MountOptions {
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl std::ops::Deref for MountOptions {
-    type Target = HashSet<MountOption>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl fmt::Display for MountOptions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.iter().join(","))
-    }
-}
-
-impl Serialize for MountOptions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&self.0.iter().map(ToString::to_string).join(","))
-    }
-}
-
-impl FromIterator<MountOption> for MountOptions {
-    fn from_iter<I: IntoIterator<Item = MountOption>>(iter: I) -> Self {
-        MountOptions(iter.into_iter().collect())
-    }
-}
-
-impl<'de> Deserialize<'de> for MountOptions {
-    fn deserialize<D>(deserializer: D) -> Result<MountOptions, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct MountOptionsVisitor;
-        impl<'de> Visitor<'de> for MountOptionsVisitor {
-            type Value = MountOptions;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("comma seperated mount options")
-            }
-
-            fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<MountOptions, E> {
-                let options = str_data.trim();
-                if !options.is_empty() {
-                    let iter = options.split(',');
-                    let mut result = HashSet::with_capacity(iter.size_hint().0);
-                    for opt in iter {
-                        result.insert(
-                            MountOption::from_str(opt.trim()).map_err(serde::de::Error::custom)?,
-                        );
-                    }
-                    Ok(MountOptions(result))
-                } else {
-                    Ok(MountOptions::default())
-                }
-            }
-        }
-
-        deserializer.deserialize_str(MountOptionsVisitor)
-    }
-}
-
-/// Resource mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Resource {
-    /// Name of the resource container
-    pub name: Name,
-    /// Version of the resource container
-    pub version: Version,
-    /// Directory within the resource container
-    pub dir: PathBuf,
-    /// Mount options
-    #[serde(default, skip_serializing_if = "MountOptions::is_empty")]
-    pub options: MountOptions,
-}
-
-/// Bind mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Bind {
-    /// Path in the host filesystem
-    pub host: PathBuf,
-    /// Mount options
-    #[serde(default, skip_serializing_if = "MountOptions::is_empty")]
-    pub options: MountOptions,
-}
-
-/// Tmpfs configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Tmpfs {
-    /// Size in bytes
-    #[serde(deserialize_with = "deserialize_tmpfs_size")]
-    pub size: u64,
-}
-
-/// Mounts
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type")]
-pub enum Mount {
-    /// Bind mount of a host dir with options
-    #[serde(rename = "bind")]
-    Bind(Bind),
-    /// Use a minimal dev tree
-    #[serde(rename = "dev")]
-    Dev,
-    /// Mount a rw host directory dedicated to this container rw
-    #[serde(rename = "persist")]
-    Persist,
-    /// Mount proc
-    #[serde(rename = "proc")]
-    Proc,
-    /// Mount a directory from a resource
-    #[serde(rename = "resource")]
-    Resource(Resource),
-    /// Mount a tmpfs with size
-    #[serde(rename = "tmpfs")]
-    Tmpfs(Tmpfs),
-}
-
 /// IO configuration for stdin, stdout, stderr
 #[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -663,141 +484,6 @@ pub enum Capability {
     CAP_BPF,
     /// `CAP_CHECKPOINT_RESTORE` (from Linux, >= 5.9).
     CAP_CHECKPOINT_RESTORE,
-}
-
-fn deserialize_tmpfs_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-    struct SizeVisitor;
-
-    impl<'de> Visitor<'de> for SizeVisitor {
-        type Value = u64;
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")
-        }
-
-        fn visit_u64<E>(self, v: u64) -> Result<u64, E> {
-            Ok(v)
-        }
-
-        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<u64, E> {
-            use humanize_rs::bytes::Bytes;
-            v.parse::<Bytes>()
-                .map(|b| b.size() as u64)
-                .map_err(serde::de::Error::custom)
-        }
-    }
-
-    deserializer.deserialize_any(SizeVisitor)
-}
-
-/// CGroups
-pub mod cgroups {
-    use schemars::JsonSchema;
-    use serde::{Deserialize, Serialize};
-    use std::collections::HashMap;
-
-    /// CGroups configuration
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-    pub struct CGroups {
-        /// BlkIo controller
-        pub blkio: Option<BlkIoResources>,
-        /// Cpu controller
-        pub cpu: Option<CpuResources>,
-        /// Memory controller
-        pub memory: Option<MemoryResources>,
-    }
-
-    /// Bkio device resource
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-    pub struct BlkIoDeviceResource {
-        /// The major number of the device.
-        pub major: u64,
-        /// The minor number of the device.
-        pub minor: u64,
-        /// The weight of the device against the descendant nodes.
-        pub weight: Option<u16>,
-        /// The weight of the device against the sibling nodes.
-        pub leaf_weight: Option<u16>,
-    }
-
-    /// Provides the ability to throttle a device (both byte/sec, and IO op/s)
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-    pub struct BlkIoDeviceThrottleResource {
-        /// The major number of the device.
-        pub major: u64,
-        /// The minor number of the device.
-        pub minor: u64,
-        /// The rate.
-        pub rate: u64,
-    }
-
-    /// Blkio controller
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-    pub struct BlkIoResources {
-        /// The weight of the control group against descendant nodes.
-        pub weight: Option<u16>,
-        /// The weight of the control group against sibling nodes.
-        pub leaf_weight: Option<u16>,
-        /// For each device, a separate weight (both normal and leaf) can be provided.
-        pub weight_device: Vec<BlkIoDeviceResource>,
-        /// Throttled read bytes/second can be provided for each device.
-        pub throttle_read_bps_device: Vec<BlkIoDeviceThrottleResource>,
-        /// Throttled read IO operations per second can be provided for each device.
-        pub throttle_read_iops_device: Vec<BlkIoDeviceThrottleResource>,
-        /// Throttled written bytes/second can be provided for each device.
-        pub throttle_write_bps_device: Vec<BlkIoDeviceThrottleResource>,
-        /// Throttled write IO operations per second can be provided for each device.
-        pub throttle_write_iops_device: Vec<BlkIoDeviceThrottleResource>,
-    }
-
-    /// Cpu controller
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-    pub struct CpuResources {
-        // cpuset
-        /// A comma-separated list of CPU IDs where the task in the control group can run. Dashes
-        /// between numbers indicate ranges.
-        pub cpus: Option<String>,
-        /// Same syntax as the `cpus` field of this structure, but applies to memory nodes instead of
-        /// processors.
-        pub mems: Option<String>,
-        // cpu
-        /// Weight of how much of the total CPU time should this control group get. Note that this is
-        /// hierarchical, so this is weighted against the siblings of this control group.
-        pub shares: Option<u64>,
-        /// In one `period`, how much can the tasks run in nanoseconds.
-        pub quota: Option<i64>,
-        /// Period of time in nanoseconds.
-        pub period: Option<u64>,
-        /// This is currently a no-operation.
-        pub realtime_runtime: Option<i64>,
-        /// This is currently a no-operation.
-        pub realtime_period: Option<u64>,
-        /// Customized key-value attributes
-        pub attrs: HashMap<String, String>,
-    }
-
-    /// Memory controller
-    #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-    pub struct MemoryResources {
-        /// How much memory (in bytes) can the kernel consume.
-        pub kernel_memory_limit: Option<i64>,
-        /// Upper limit of memory usage of the control group's tasks.
-        pub memory_hard_limit: Option<i64>,
-        /// How much memory the tasks in the control group can use when the system is under memory
-        /// pressure.
-        pub memory_soft_limit: Option<i64>,
-        /// How much of the kernel's memory (in bytes) can be used for TCP-related buffers.
-        pub kernel_tcp_memory_limit: Option<i64>,
-        /// How much memory and swap together can the tasks in the control group use.
-        pub memory_swap_limit: Option<i64>,
-        /// Controls the tendency of the kernel to swap out parts of the address space of the tasks to
-        /// disk. Lower value implies less likely.
-        ///
-        /// Note, however, that a value of zero does not mean the process is never swapped out. Use the
-        /// traditional `mlock(2)` system call for that purpose.
-        pub swappiness: Option<u64>,
-        /// Customized key-value attributes
-        pub attrs: HashMap<String, String>,
-    }
 }
 
 fn is_default<T: Default + PartialEq>(t: &T) -> bool {
