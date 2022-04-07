@@ -13,16 +13,17 @@ dependencies = [
 
 [[package]]
 name = "android-logd-logger"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53eff4527d2f64c8374a3bbe1d280ce660203e8c83e4a893231037a488639a7b"
+checksum = "3e06600242117e14007bad3bdb60917662ba9ef6bf3b11041dbc79c76214eea6"
 dependencies = [
  "bytes",
- "env_logger 0.8.4",
+ "env_logger",
  "lazy_static",
  "libc",
  "log",
- "redox_syscall 0.2.11",
+ "parking_lot",
+ "redox_syscall 0.2.13",
  "thiserror",
  "time",
  "winapi",
@@ -591,16 +592,6 @@ checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
 
 [[package]]
 name = "env_logger"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a19187fea3ac7e84da7dacf48de0c45d63c6a76f9490dae389aead16c243fce3"
-dependencies = [
- "log",
- "regex",
-]
-
-[[package]]
-name = "env_logger"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
@@ -667,7 +658,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9515ec2dd9606ec230f6b2d1f25fd9e808a2f2af600143f7efe7e5865505b7aa"
 dependencies = [
- "smallvec",
+ "smallvec 0.4.5",
  "textwrap 0.13.4",
  "unicode-width",
 ]
@@ -1013,6 +1004,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5284f00d480e1c39af34e72f8ad60b94f47007e3481cd3b731c1d67190ddc7b7"
 
 [[package]]
+name = "lock_api"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "327fa5b6a6940e4699ec49a9beae1ea4845c6bab9314e4f84ac68742139d8c53"
+dependencies = [
+ "autocfg",
+ "scopeguard",
+]
+
+[[package]]
 name = "log"
 version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1040,7 +1041,7 @@ dependencies = [
  "android-logd-logger",
  "anyhow",
  "clap",
- "env_logger 0.9.0",
+ "env_logger",
  "log",
  "nix 0.23.1",
  "northstar",
@@ -1218,7 +1219,7 @@ name = "northstar-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "env_logger 0.9.0",
+ "env_logger",
  "escargot",
  "futures",
  "lazy_static",
@@ -1327,6 +1328,29 @@ name = "parking"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "427c3892f9e783d91cc128285287e70a59e206ca452770ece88a76f7a3eddd72"
+
+[[package]]
+name = "parking_lot"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87f5ec2493a61ac0506c0f4199f99070cbe83857b0337006a30f3e6719b8ef58"
+dependencies = [
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "995f667a6c822200b0433ac218e05582f0e2efa1b922a3fd2fbaadc5f87bab37"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "redox_syscall 0.2.13",
+ "smallvec 1.8.0",
+ "windows-sys",
+]
 
 [[package]]
 name = "peeking_take_while"
@@ -1571,9 +1595,9 @@ checksum = "41cc0f7e4d5d4544e8861606a285bb08d3e70712ccc7d2b84d7c0ccfaf4b05ce"
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8380fe0152551244f0747b1bf41737e0f8a74f97a14ccefd1148187271634f3c"
+checksum = "62f25bc4c7e55e0b0b7a1d43fb893f4fa1361d0abe38b9ce4f323c2adfe6ef42"
 dependencies = [
  "bitflags",
 ]
@@ -1742,6 +1766,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "scopeguard"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
+
+[[package]]
 name = "seccomp"
 version = "0.0.1"
 
@@ -1752,7 +1782,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
- "env_logger 0.9.0",
+ "env_logger",
  "itertools",
  "northstar",
  "regex",
@@ -1878,7 +1908,7 @@ dependencies = [
  "clap",
  "colored",
  "ed25519-dalek",
- "env_logger 0.9.0",
+ "env_logger",
  "log",
  "northstar",
  "tempfile",
@@ -1956,6 +1986,12 @@ name = "smallvec"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f90c5e5fe535e48807ab94fc611d323935f39d4660c52b26b96446a7b33aef10"
+
+[[package]]
+name = "smallvec"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 
 [[package]]
 name = "smawk"
@@ -2037,7 +2073,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "env_logger 0.9.0",
+ "env_logger",
  "futures",
  "humantime",
  "itertools",
@@ -2112,7 +2148,7 @@ dependencies = [
  "cfg-if",
  "fastrand",
  "libc",
- "redox_syscall 0.2.11",
+ "redox_syscall 0.2.13",
  "remove_dir_all",
  "winapi",
 ]
@@ -2532,6 +2568,49 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "windows-sys"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5acdd78cb4ba54c0045ac14f62d8f94a03d10047904ae2a40afa1e99d8f70825"
+dependencies = [
+ "windows_aarch64_msvc",
+ "windows_i686_gnu",
+ "windows_i686_msvc",
+ "windows_x86_64_gnu",
+ "windows_x86_64_msvc",
+]
+
+[[package]]
+name = "windows_aarch64_msvc"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17cffbe740121affb56fad0fc0e421804adf0ae00891205213b5cecd30db881d"
+
+[[package]]
+name = "windows_i686_gnu"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2564fde759adb79129d9b4f54be42b32c89970c18ebf93124ca8870a498688ed"
+
+[[package]]
+name = "windows_i686_msvc"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd9d32ba70453522332c14d38814bceeb747d80b3958676007acadd7e166956"
+
+[[package]]
+name = "windows_x86_64_gnu"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfce6deae227ee8d356d19effc141a509cc503dfd1f850622ec4b0f84428e1f4"
+
+[[package]]
+name = "windows_x86_64_msvc"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d19538ccc21819d01deaf88d6a17eae6596a12e9aafdbb97916fb49896d89de9"
 
 [[package]]
 name = "yaml-rust"
