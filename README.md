@@ -1,4 +1,5 @@
 ![CI Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
+[![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://esrlabs.github.io/northstar/northstar/index.html)
 ![License](https://img.shields.io/github/license/esrlabs/northstar)
 ![Issues](https://img.shields.io/github/issues/esrlabs/northstar)
 ![Top Language](https://img.shields.io/github/languages/top/esrlabs/northstar)
@@ -207,15 +208,43 @@ type = "mem"
 # NPK Repository `default` in `dir`
 [repositories.default]
 # Mount the containers from this repository on runtime start. Default: false
-mount = true
+mount_on_start = true
 key = "examples/northstar.pub"
 type = { fs = { dir = "target/northstar/repository" }}
 ```
 
 ### Repositories
 
-**TODO**: Describe what a repository is and what are the attributes:
-*with/without key/verity, etc...
+A repository is an entity that is able to store NPK's at runtime. Repositories
+are configured at initialization time of the runtime. The repository
+configuration cannot be changed at runtime. Each configured repository has a
+unique identifier
+[id](https://esrlabs.github.io/northstar/northstar/api/model/type.RepositoryId.html).
+Currently two types of repositories exists: `fs` and `mem`.
+
+The `fs` type repositories are backed by file system storage. The configured
+directory (`dir`) is used to store NPK's. If this directory is read only, no
+additional install requests can be performed at runtime. If a `fs` repository
+configuration contains a `key` field, the repository is treated as "verified".
+The configured key is used to verify the signature of the containers manifest
+and it's verity root hash. When the container is mounted, the verity root hash
+is used to configure a device mapper verity devices that is mounted instead of
+the contained Squashfs image.
+
+Repositories without a `key` are treated as trustful sources. No signature
+checks are performed. The root filesystems are mounted *without* verity. A
+possibly present verity root hash with in the NPK is ignored. Trusted
+repositories are should on verified and read only file systems.
+
+Set the `mount_on_start` flag of a `fs` repository to `true` to make the runtime
+mount *all* containers present at startup. The mount operations are done in
+parallel.
+
+The `mem` repositories uses
+[memfd](https://man7.org/linux/man-pages/man2/memfd_create.2.html) for it's
+storage. No data is persistently stored during an installation of a container.
+Obviously it's not possible to have NPK's preinstalled in a `mem` repository at
+runtime startup. The `mem` repositories are mainly used for testing.
 
 ## Console
 
