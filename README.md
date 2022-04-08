@@ -299,7 +299,81 @@ kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
 ### Manifest Format
 
-**TODO**: Link to rustdoc. Link to jsonschema.
+The manifest format is described [here](https://esrlabs.github.io/northstar/northstar/npk/manifest/struct.Manifest.html).
+
+#### Mounts
+
+The options of a mount entry in the manifest are optional. To apply one of the
+mount options `rw`, `noexec`, `nosuid`, `nodev` or `rec` it must be explicitly set.
+
+The default for a `bind` and `tmpfs` mount is *read only*. Mounts that are `rw` are
+usually hard to handle from an integration point of view (SELinux and
+permissions). Nevertheless - here's the example how to mount the host systems
+`/tmp` directory to `/tmp`. The bind mount is *not* remounted `ro`. Note that
+`ro` bind mounts require two mount operations.
+
+```yaml
+/tmp:
+  type: bind
+  host: /tmp
+  options: rw, nosuid, noexec
+```
+
+Resource containers *cannot* be mounted `rw`. The filesystem of resource
+containers is squashfs which is not writeable. Resource containers can be
+mounted without the `noexec` flag in order to provide binaries.
+
+Example resource mount with the executable flag set but `nodev` and `nosuid`
+set (optional):
+
+```yaml
+/bin/java:
+  type: resource
+  name: java13
+  version: 
+  dir: /
+  options: nodev, nosuid
+```
+
+Example `tmpfs` mount. `tmpfs` mounts are never `ro` ;-):
+
+```yaml
+/tmpfs:
+  type: tmpfs
+  size: 20M
+```
+
+Mounts of type `persist` are support from the runtime for containers. The runtime
+takes care to mount a *read* and *writeable* directory into the containers fs. The
+directory is dedicated to this container. The directory is not shared with other
+containers.
+
+TODO: When are the directories removed? See
+[#560](https://github.com/esrlabs/northstar/issues/560)
+
+```yaml
+/data:
+  type: persist
+```
+
+To provide a `minimal` `/dev` file system to the container, add a mount entry of
+type `dev`.
+
+```yaml
+/dev:
+  type: dev
+```
+
+to the manifest. The `/dev` is populated with *only*:
+
+* `full`
+* `null`
+* `random`
+* `tty`
+* `urandom`
+* `zero`
+
+If the container binary needs more devices, bind mount the host systems `/dev`.
 
 ## Roadmap
 
