@@ -54,36 +54,31 @@ pub async fn build(config: &Config, manifest: &Manifest) -> Result<Init, Error> 
 /// must happen before the init `clone` because the group information cannot be gathered
 /// without `/etc` etc...
 fn groups(manifest: &Manifest) -> Vec<u32> {
-    if let Some(groups) = manifest.suppl_groups.as_ref() {
-        let mut result = Vec::with_capacity(groups.len());
-        for group in groups {
-            let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
-            let group_info =
-                unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
-            if group_info == (null::<c_void>() as *mut nix::libc::group) {
-                log::warn!("Skipping invalid supplementary group {}", group);
-            } else {
-                let gid = unsafe { (*group_info).gr_gid };
-                // TODO: Are there gids cannot use?
-                result.push(gid)
-            }
+    let mut result = Vec::with_capacity(manifest.suppl_groups.len());
+    for group in &manifest.suppl_groups {
+        let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+        let group_info =
+            unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
+        if group_info == (null::<c_void>() as *mut nix::libc::group) {
+            log::warn!("Skipping invalid supplementary group {}", group);
+        } else {
+            let gid = unsafe { (*group_info).gr_gid };
+            // TODO: Are there gids cannot use?
+            result.push(gid)
         }
-        result
-    } else {
-        Vec::with_capacity(0)
     }
+    result
 }
 
 /// Generate seccomp filter applied in init
 fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
-    if let Some(seccomp) = manifest.seccomp.as_ref() {
-        return Some(seccomp::seccomp_filter(
+    manifest.seccomp.as_ref().map(|seccomp| {
+        seccomp::seccomp_filter(
             seccomp.profile.as_ref(),
             seccomp.allow.as_ref(),
-            manifest.capabilities.as_ref(),
-        ));
-    }
-    None
+            &manifest.capabilities,
+        )
+    })
 }
 
 /// Iterate the mounts of a container and assemble a list of `mount` calls to be

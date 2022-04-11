@@ -61,8 +61,8 @@ pub struct Init {
     pub gid: u16,
     pub mounts: Vec<Mount>,
     pub groups: Vec<u32>,
-    pub capabilities: Option<HashSet<Capability>>,
-    pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
+    pub capabilities: HashSet<Capability>,
+    pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
     pub console: bool,
 }
@@ -266,35 +266,33 @@ impl Init {
     }
 
     fn set_rlimits(&self) {
-        if let Some(limits) = self.rlimits.as_ref() {
-            debug!("Applying rlimits");
-            for (resource, limit) in limits {
-                let resource = match resource {
-                    RLimitResource::AS => rlimit::Resource::AS,
-                    RLimitResource::CORE => rlimit::Resource::CORE,
-                    RLimitResource::CPU => rlimit::Resource::CPU,
-                    RLimitResource::DATA => rlimit::Resource::DATA,
-                    RLimitResource::FSIZE => rlimit::Resource::FSIZE,
-                    RLimitResource::LOCKS => rlimit::Resource::LOCKS,
-                    RLimitResource::MEMLOCK => rlimit::Resource::MEMLOCK,
-                    RLimitResource::MSGQUEUE => rlimit::Resource::MSGQUEUE,
-                    RLimitResource::NICE => rlimit::Resource::NICE,
-                    RLimitResource::NOFILE => rlimit::Resource::NOFILE,
-                    RLimitResource::NPROC => rlimit::Resource::NPROC,
-                    RLimitResource::RSS => rlimit::Resource::RSS,
-                    RLimitResource::RTPRIO => rlimit::Resource::RTPRIO,
-                    #[cfg(not(target_os = "android"))]
-                    RLimitResource::RTTIME => rlimit::Resource::RTTIME,
-                    RLimitResource::SIGPENDING => rlimit::Resource::SIGPENDING,
-                    RLimitResource::STACK => rlimit::Resource::STACK,
-                };
-                resource
-                    .set(
-                        limit.soft.unwrap_or(rlimit::INFINITY),
-                        limit.hard.unwrap_or(rlimit::INFINITY),
-                    )
-                    .expect("failed to set rlimit");
-            }
+        debug!("Applying rlimits");
+        for (resource, limit) in &self.rlimits {
+            let resource = match resource {
+                RLimitResource::AS => rlimit::Resource::AS,
+                RLimitResource::CORE => rlimit::Resource::CORE,
+                RLimitResource::CPU => rlimit::Resource::CPU,
+                RLimitResource::DATA => rlimit::Resource::DATA,
+                RLimitResource::FSIZE => rlimit::Resource::FSIZE,
+                RLimitResource::LOCKS => rlimit::Resource::LOCKS,
+                RLimitResource::MEMLOCK => rlimit::Resource::MEMLOCK,
+                RLimitResource::MSGQUEUE => rlimit::Resource::MSGQUEUE,
+                RLimitResource::NICE => rlimit::Resource::NICE,
+                RLimitResource::NOFILE => rlimit::Resource::NOFILE,
+                RLimitResource::NPROC => rlimit::Resource::NPROC,
+                RLimitResource::RSS => rlimit::Resource::RSS,
+                RLimitResource::RTPRIO => rlimit::Resource::RTPRIO,
+                #[cfg(not(target_os = "android"))]
+                RLimitResource::RTTIME => rlimit::Resource::RTTIME,
+                RLimitResource::SIGPENDING => rlimit::Resource::SIGPENDING,
+                RLimitResource::STACK => rlimit::Resource::STACK,
+            };
+            resource
+                .set(
+                    limit.soft.unwrap_or(rlimit::INFINITY),
+                    limit.hard.unwrap_or(rlimit::INFINITY),
+                )
+                .expect("failed to set rlimit");
         }
     }
 
@@ -306,9 +304,8 @@ impl Init {
         // Convert the set from the manifest to a set of caps::Capability
         let set = self
             .capabilities
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
+            .iter()
+            .cloned()
             .map(Into::into)
             .collect::<HashSet<caps::Capability>>();
         bounded.retain(|c| !set.contains(c));

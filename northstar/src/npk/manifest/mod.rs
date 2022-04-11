@@ -60,11 +60,14 @@ pub struct Manifest {
     /// SELinux configuration
     pub selinux: Option<Selinux>,
     /// Capabilities
-    pub capabilities: Option<HashSet<Capability>>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub capabilities: HashSet<Capability>,
     /// String containing group names to give to new container
-    pub suppl_groups: Option<Vec<NonNulString>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suppl_groups: Vec<NonNulString>,
     /// Resource limits
-    pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub rlimits: HashMap<RLimitResource, RLimitValue>,
     /// IO configuration
     #[serde(default, skip_serializing_if = "is_default")]
     pub io: Io,
@@ -107,8 +110,8 @@ impl Manifest {
             || self.autostart.is_some()
             || self.cgroups.is_some()
             || self.seccomp.is_some()
-            || self.capabilities.is_some()
-            || self.suppl_groups.is_some()
+            || !self.capabilities.is_empty()
+            || !self.suppl_groups.is_empty()
         {
             return Err(Error::Invalid(
                 "resource containers must not define any of the following manifest entries:\
@@ -616,18 +619,18 @@ cgroups:
 
         assert_eq!(
             manifest.capabilities,
-            Some(HashSet::from_iter(
+            HashSet::from_iter(
                 vec!(
                     Capability::CAP_NET_RAW,
                     Capability::CAP_MKNOD,
                     Capability::CAP_SYS_TIME,
                 )
                 .drain(..)
-            ))
+            )
         );
         assert_eq!(
             manifest.suppl_groups,
-            Some(vec!("inet".try_into()?, "log".try_into()?))
+            vec!("inet".try_into()?, "log".try_into()?)
         );
 
         Ok(())

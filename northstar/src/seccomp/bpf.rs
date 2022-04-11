@@ -49,7 +49,7 @@ pub enum Error {
 pub fn seccomp_filter(
     profile: Option<&Profile>,
     rules: Option<&HashMap<NonNulString, SyscallRule>>,
-    caps: Option<&HashSet<Capability>>,
+    caps: &HashSet<Capability>,
 ) -> AllowList {
     check_platform_requirements();
 
@@ -80,13 +80,13 @@ pub(crate) fn builder_from_rules(rules: &HashMap<NonNulString, SyscallRule>) -> 
 }
 
 /// Create an AllowList Builder from a pre-defined profile
-fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -> Builder {
+fn builder_from_profile(profile: &Profile, caps: &HashSet<Capability>) -> Builder {
     match profile {
         Profile::Default => {
             let mut builder = default::BASE.clone();
 
             // Allow additional syscalls depending on granted capabilities
-            if let Some(caps) = caps {
+            if !caps.is_empty() {
                 let mut cap_sys_admin = false;
                 for cap in caps {
                     match cap {
