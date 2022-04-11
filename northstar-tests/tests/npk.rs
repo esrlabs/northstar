@@ -19,10 +19,10 @@ const TEST_MANIFEST_UNPACKED: &str = "---
 name: hello
 version: 0.0.2
 init: /hello
-uid: 100
-gid: 1
 env:
   HELLO: north
+uid: 100
+gid: 1
 ";
 
 fn tmpdir() -> TempDir {

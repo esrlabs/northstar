@@ -5,7 +5,7 @@ use super::{
     util::fork,
 };
 use crate::{
-    common::container::Container,
+    common::{container::Container, non_nul_string::NonNulString},
     debug,
     runtime::{
         fork::util::{self, set_log_target},
@@ -30,7 +30,6 @@ use std::{
         net::UnixStream as StdUnixStream,
         prelude::{IntoRawFd, RawFd},
     },
-    path::PathBuf,
 };
 use tokio::{net::UnixStream, select, sync::mpsc, task};
 
@@ -187,8 +186,8 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
 async fn exec(
     mut init: InitProcess,
     container: Container,
-    path: PathBuf,
-    args: Vec<String>,
+    path: NonNulString,
+    args: Vec<NonNulString>,
     env: Vec<String>,
     io: [OwnedFd; 3],
 ) -> (Message, impl Future<Output = (Container, ExitStatus)>) {

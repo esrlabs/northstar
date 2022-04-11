@@ -4,7 +4,7 @@ use super::{
     util::{self},
 };
 use crate::{
-    common::container::Container,
+    common::{container::Container, non_nul_string::NonNulString},
     debug,
     npk::manifest::Manifest,
     runtime::{
@@ -17,7 +17,7 @@ use crate::{
 use futures::FutureExt;
 pub use messages::{Message, Notification};
 use nix::sys::signal::{signal, SigHandler, Signal};
-use std::{os::unix::net::UnixStream as StdUnixStream, path::PathBuf};
+use std::os::unix::net::UnixStream as StdUnixStream;
 use tokio::{net::UnixStream, runtime};
 
 mod r#impl;
@@ -114,8 +114,8 @@ impl Forker {
     pub async fn exec(
         &mut self,
         container: Container,
-        path: PathBuf,
-        args: Vec<String>,
+        path: NonNulString,
+        args: Vec<NonNulString>,
         env: Vec<String>,
         io: [OwnedFd; 3],
     ) -> Result<(), Error> {

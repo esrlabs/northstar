@@ -1,5 +1,5 @@
 use crate::{
-    common::container::Container,
+    common::{container::Container, non_nul_string::NonNulString},
     debug, info,
     npk::manifest::{Capability, RLimitResource, RLimitValue},
     runtime::{
@@ -47,8 +47,8 @@ pub enum Message {
     Exit { pid: Pid, exit_status: ExitStatus },
     /// Exec a new process
     Exec {
-        path: PathBuf,
-        args: Vec<String>,
+        path: NonNulString,
+        args: Vec<NonNulString>,
         env: Vec<String>,
     },
 }
@@ -119,7 +119,7 @@ impl Init {
                     args,
                     mut env,
                 })) => {
-                    debug!("Execing {} {}", path.display(), args.iter().join(" "));
+                    debug!("Execing {} {}", path, args.iter().join(" "));
 
                     // The init process got adopted by the forker after the trampoline exited. It is
                     // safe to set the parent death signal now.
@@ -154,11 +154,8 @@ impl Init {
                             filter.apply().expect("failed to apply seccomp filter.");
                         }
 
-                        let path = CString::new(path.to_str().unwrap()).unwrap();
-                        let args = args
-                            .iter()
-                            .map(|s| CString::new(s.as_str()).unwrap())
-                            .collect::<Vec<_>>();
+                        let path = CString::from(path);
+                        let args = args.into_iter().map(Into::into).collect::<Vec<CString>>();
                         let env = env
                             .iter()
                             .map(|s| CString::new(s.as_str()).unwrap())

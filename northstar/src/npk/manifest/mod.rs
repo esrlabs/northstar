@@ -38,7 +38,10 @@ pub struct Manifest {
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
-    pub args: Option<Vec<NonNulString>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<NonNulString>,
+    /// Environment passed to container
+    pub env: Option<HashMap<NonNulString, NonNulString>>,
     /// UID
     pub uid: u16,
     /// GID
@@ -47,8 +50,6 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[serde(deserialize_with = "maps_duplicate_key_is_error::deserialize")]
     pub mounts: HashMap<PathBuf, Mount>,
-    /// Environment passed to container
-    pub env: Option<HashMap<NonNulString, NonNulString>>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup configuration
@@ -100,7 +101,7 @@ impl Manifest {
                     "init path must be a string without zero bytes".to_string(),
                 ));
             }
-        } else if self.args.is_some()
+        } else if !self.args.is_empty()
             || self.env.is_some()
             || self.autostart.is_some()
             || self.cgroups.is_some()
@@ -562,10 +563,9 @@ cgroups:
 
         assert_eq!(manifest.init, Some(PathBuf::from("/binary")));
         assert_eq!(manifest.name.to_string(), "hello");
-        let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
-        assert_eq!(args.len(), 2);
-        assert_eq!(args[0].to_string(), "one");
-        assert_eq!(args[1].to_string(), "two");
+        assert_eq!(manifest.args.len(), 2);
+        assert_eq!(manifest.args[0].to_string(), "one");
+        assert_eq!(manifest.args[1].to_string(), "two");
 
         assert_eq!(manifest.autostart, Some(Autostart::Critical));
         let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;

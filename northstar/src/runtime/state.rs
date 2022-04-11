@@ -51,8 +51,6 @@ use tokio_util::sync::CancellationToken;
 
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
-/// Container start arguments aka argv
-type Args<'a> = Option<&'a Vec<NonNulString>>;
 /// Container environment variables set
 type Env<'a> = Option<&'a HashMap<NonNulString, NonNulString>>;
 
@@ -260,7 +258,7 @@ impl State {
 
             for (container, autostart) in autostarts {
                 info!("Autostarting {} ({:?})", container, autostart);
-                if let Err(e) = self.start(&container, None, None).await {
+                if let Err(e) = self.start(&container, &[], None).await {
                     match autostart {
                         Autostart::Relaxed => {
                             warn!("failed to autostart relaxed {}: {}", container, e);
@@ -316,7 +314,7 @@ impl State {
     pub(super) async fn start(
         &mut self,
         container: &Container,
-        args_extra: Args<'_>,
+        args_extra: &[NonNulString],
         env_extra: Env<'_>,
     ) -> Result<(), Error> {
         let start = time::Instant::now();
@@ -347,10 +345,13 @@ impl State {
         let manifest = self.manifest(container)?.clone();
 
         // Check if the container is not a resource
-        if manifest.init.is_none() {
+        let init = if let Some(ref init) = manifest.init {
+            NonNulString::try_from(init.display().to_string())
+                .map_err(|_| Error::InvalidArguments(init.display().to_string()))?
+        } else {
             warn!("Container {} is a resource", container);
             return Err(Error::StartContainerResource(container.clone()));
-        }
+        };
 
         let mut need_mount = HashSet::new();
 
@@ -473,12 +474,19 @@ impl State {
             .await
             .expect("IO setup error");
 
-        let path = manifest.init.unwrap();
-        let mut args = vec![path.display().to_string()];
-        if let Some(extra_args) = args_extra {
-            args.extend(extra_args.iter().map(ToString::to_string));
-        } else if let Some(manifest_args) = manifest.args {
-            args.extend(manifest_args.iter().map(ToString::to_string));
+        // Binary arguments
+        let mut args = Vec::with_capacity(
+            1 + if args_extra.is_empty() {
+                manifest.args.len()
+            } else {
+                args_extra.len()
+            },
+        );
+        args.push(init.clone());
+        if !args_extra.is_empty() {
+            args.extend(args_extra.iter().cloned());
+        } else {
+            args.extend(manifest.args.iter().cloned());
         };
 
         // Prepare the environment for the container according to the manifest
@@ -495,14 +503,14 @@ impl State {
             .chain(once(format!("{}={}", ENV_VERSION, container.version())))
             .collect::<Vec<_>>();
 
-        debug!("Container {} init is {:?}", container, path.display());
+        debug!("Container {} init is {:?}", container, init);
         debug!("Container {} argv is {}", container, args.iter().join(" "));
         debug!("Container {} env is {}", container, env.iter().join(", "));
 
         // Send exec request to launcher
         if let Err(e) = self
             .launcher
-            .exec(container.clone(), path, args, env, io)
+            .exec(container.clone(), init, args, env, io)
             .await
         {
             warn!("failed to exec {} ({}): {}", container, pid, e);
@@ -833,7 +841,6 @@ impl State {
                         args,
                         env,
                     } => {
-                        let args = (!args.is_empty()).then(|| args);
                         let env = (!env.is_empty()).then(|| env);
                         match self.start(container, args, env).await {
                             Ok(_) => model::Response::Ok,
