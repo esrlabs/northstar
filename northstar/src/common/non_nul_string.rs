@@ -22,6 +22,22 @@ impl NonNulString {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
+
+    /// Wrap a str in a NonNulString without any validation
+    ///
+    /// # Safety
+    /// This is unsafe because the string must not contain nul bytes.
+    pub unsafe fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+
+    /// Wrap a string in a NonNulString without any validation
+    ///
+    /// # Safety
+    /// This is unsafe because the string must not contain nul bytes.
+    pub unsafe fn from_string_unchecked(s: String) -> Self {
+        Self(s)
+    }
 }
 
 /// Null byte error

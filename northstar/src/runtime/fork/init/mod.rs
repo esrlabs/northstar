@@ -49,7 +49,7 @@ pub enum Message {
     Exec {
         path: NonNulString,
         args: Vec<NonNulString>,
-        env: Vec<String>,
+        env: Vec<NonNulString>,
     },
 }
 
@@ -127,7 +127,10 @@ impl Init {
 
                     if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
                         // Add the fd number to the environment of the application
-                        env.push(format!("NORTHSTAR_CONSOLE={}", fd));
+                        let s = unsafe {
+                            NonNulString::from_string_unchecked(format!("NORTHSTAR_CONSOLE={}", fd))
+                        };
+                        env.push(s);
                     }
 
                     let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
@@ -156,10 +159,7 @@ impl Init {
 
                         let path = CString::from(path);
                         let args = args.into_iter().map(Into::into).collect::<Vec<CString>>();
-                        let env = env
-                            .iter()
-                            .map(|s| CString::new(s.as_str()).unwrap())
-                            .collect::<Vec<_>>();
+                        let env = env.into_iter().map(Into::into).collect::<Vec<CString>>();
 
                         panic!(
                             "execve: {:?} {:?}: {:?}",

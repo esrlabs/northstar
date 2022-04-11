@@ -188,7 +188,7 @@ async fn exec(
     container: Container,
     path: NonNulString,
     args: Vec<NonNulString>,
-    env: Vec<String>,
+    env: Vec<NonNulString>,
     io: [OwnedFd; 3],
 ) -> (Message, impl Future<Output = (Container, ExitStatus)>) {
     debug_assert!(io.len() == 3);

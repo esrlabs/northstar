@@ -51,8 +51,6 @@ use tokio_util::sync::CancellationToken;
 
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
-/// Container environment variables set
-type Env<'a> = Option<&'a HashMap<NonNulString, NonNulString>>;
 
 #[derive(Debug)]
 pub(super) struct State {
@@ -258,7 +256,10 @@ impl State {
 
             for (container, autostart) in autostarts {
                 info!("Autostarting {} ({:?})", container, autostart);
-                if let Err(e) = self.start(&container, &[], None).await {
+                if let Err(e) = self
+                    .start(&container, &[], &HashMap::with_capacity(0))
+                    .await
+                {
                     match autostart {
                         Autostart::Relaxed => {
                             warn!("failed to autostart relaxed {}: {}", container, e);
@@ -315,7 +316,7 @@ impl State {
         &mut self,
         container: &Container,
         args_extra: &[NonNulString],
-        env_extra: Env<'_>,
+        env_extra: &HashMap<NonNulString, NonNulString>,
     ) -> Result<(), Error> {
         let start = time::Instant::now();
         info!("Trying to start {}", container);
@@ -328,18 +329,16 @@ impl State {
         }
 
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
-        if let Some(env) = env_extra {
-            if env.keys().any(|k| {
-                k.as_str() == ENV_NAME
-                    || k.as_str() == ENV_VERSION
-                    || k.as_str() == ENV_CONTAINER
-                    || k.as_str() == ENV_CONSOLE
-            }) {
-                return Err(Error::InvalidArguments(format!(
-                    "env contains reserved key {} or {} or {} or {}",
-                    ENV_NAME, ENV_VERSION, ENV_CONTAINER, ENV_CONSOLE
-                )));
-            }
+        if env_extra.keys().any(|k| {
+            k.as_str() == ENV_NAME
+                || k.as_str() == ENV_VERSION
+                || k.as_str() == ENV_CONTAINER
+                || k.as_str() == ENV_CONSOLE
+        }) {
+            return Err(Error::InvalidArguments(format!(
+                "env contains reserved key {} or {} or {} or {}",
+                ENV_NAME, ENV_VERSION, ENV_CONTAINER, ENV_CONSOLE
+            )));
         }
 
         let manifest = self.manifest(container)?.clone();
@@ -490,17 +489,19 @@ impl State {
         };
 
         // Prepare the environment for the container according to the manifest
-        let env = match (env_extra, &manifest.env) {
-            (Some(env), _) => env.clone(),
-            (None, Some(env)) => env.clone(),
-            (None, None) => HashMap::with_capacity(3),
+        let env = if env_extra.is_empty() {
+            &manifest.env
+        } else {
+            env_extra
         };
+
         let env = env
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .chain(once(format!("{}={}", ENV_CONTAINER, container)))
             .chain(once(format!("{}={}", ENV_NAME, container.name())))
             .chain(once(format!("{}={}", ENV_VERSION, container.version())))
+            .map(|s| NonNulString::try_from(s).unwrap())
             .collect::<Vec<_>>();
 
         debug!("Container {} init is {:?}", container, init);
@@ -840,16 +841,13 @@ impl State {
                         container,
                         args,
                         env,
-                    } => {
-                        let env = (!env.is_empty()).then(|| env);
-                        match self.start(container, args, env).await {
-                            Ok(_) => model::Response::Ok,
-                            Err(e) => {
-                                warn!("failed to start {}: {}", container, e);
-                                model::Response::Error { error: e.into() }
-                            }
+                    } => match self.start(container, args, env).await {
+                        Ok(_) => model::Response::Ok,
+                        Err(e) => {
+                            warn!("failed to start {}: {}", container, e);
+                            model::Response::Error { error: e.into() }
                         }
-                    }
+                    },
                     model::Request::Kill { container, signal } => {
                         let signal = Signal::try_from(*signal).unwrap();
                         match self.kill(container, signal).await {

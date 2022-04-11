@@ -116,7 +116,7 @@ impl Forker {
         container: Container,
         path: NonNulString,
         args: Vec<NonNulString>,
-        env: Vec<String>,
+        env: Vec<NonNulString>,
         io: [OwnedFd; 3],
     ) -> Result<(), Error> {
         let message = Message::ExecRequest {

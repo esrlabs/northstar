@@ -10,7 +10,7 @@ use futures::{sink::SinkExt, StreamExt};
 use northstar::{
     api::{
         self,
-        model::{Container, NonNullString, Request},
+        model::{Container, NonNulString, Request},
     },
     common::{name::Name, version::Version},
 };
@@ -214,7 +214,7 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let args = if let Some(args) = args {
                 let mut non_null = Vec::with_capacity(args.len());
                 for arg in args {
-                    non_null.push(NonNullString::try_from(arg.as_str()).context("invalid arg")?);
+                    non_null.push(NonNulString::try_from(arg.as_str()).context("invalid arg")?);
                 }
                 non_null
             } else {
@@ -229,11 +229,11 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                     let key = split
                         .next()
                         .ok_or_else(|| anyhow!("invalid env"))
-                        .and_then(|s| NonNullString::try_from(s).context("invalid key"))?;
+                        .and_then(|s| NonNulString::try_from(s).context("invalid key"))?;
                     let value = split
                         .next()
                         .ok_or_else(|| anyhow!("invalid env"))
-                        .and_then(|s| NonNullString::try_from(s).context("invalid value"))?;
+                        .and_then(|s| NonNulString::try_from(s).context("invalid value"))?;
                     non_null.insert(key, value);
                 }
                 non_null

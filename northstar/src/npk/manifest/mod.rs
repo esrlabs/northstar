@@ -41,7 +41,8 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<NonNulString>,
     /// Environment passed to container
-    pub env: Option<HashMap<NonNulString, NonNulString>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<NonNulString, NonNulString>,
     /// UID
     pub uid: u16,
     /// GID
@@ -102,7 +103,7 @@ impl Manifest {
                 ));
             }
         } else if !self.args.is_empty()
-            || self.env.is_some()
+            || !self.env.is_empty()
             || self.autostart.is_some()
             || self.cgroups.is_some()
             || self.seccomp.is_some()
@@ -125,9 +126,9 @@ impl Manifest {
         }
 
         // Check for reserved env variable names
-        if let Some(env) = &self.env {
+        if self.env.is_empty() {
             for name in ["NAME", "VERSION", "NORTHSTAR_CONSOLE"] {
-                if env.keys().any(|k| name == k.as_str()) {
+                if self.env.keys().any(|k| name == k.as_str()) {
                     return Err(Error::Invalid(format!(
                         "invalid env: resevered variable {}",
                         name
@@ -494,7 +495,7 @@ fn is_default<T: Default + PartialEq>(t: &T) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::npk::manifest::*;
-    use anyhow::{anyhow, Result};
+    use anyhow::Result;
     use std::{
         convert::{TryFrom, TryInto},
         iter::FromIterator,
@@ -568,9 +569,8 @@ cgroups:
         assert_eq!(manifest.args[1].to_string(), "two");
 
         assert_eq!(manifest.autostart, Some(Autostart::Critical));
-        let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
         assert_eq!(
-            env.get(&"LD_LIBRARY_PATH".try_into()?),
+            manifest.env.get(&"LD_LIBRARY_PATH".try_into()?),
             Some("/lib".try_into()?).as_ref()
         );
         assert_eq!(manifest.uid, 1000);
