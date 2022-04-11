@@ -1,5 +1,5 @@
 use super::{Error, RepositoryId};
-use crate::common::non_null_string::NonNullString;
+use crate::common::non_nul_string::NonNulString;
 use nix::{sys::stat, unistd};
 use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use std::{
@@ -32,7 +32,7 @@ pub struct Config {
     /// Directory for logfile
     pub log_dir: PathBuf,
     /// Top level cgroup name
-    pub cgroup: NonNullString,
+    pub cgroup: NonNulString,
     /// Console configuration
     #[serde(deserialize_with = "console")]
     pub consoles: HashMap<Url, Console>,

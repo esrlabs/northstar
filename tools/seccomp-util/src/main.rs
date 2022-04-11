@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use northstar::{
-    common::non_null_string::NonNullString,
+    common::non_nul_string::NonNulString,
     seccomp::{profiles::default::SYSCALLS_BASE, Profile, Seccomp, SyscallRule},
 };
 use regex::Regex;
@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     // Collect syscall names from strace file
     let file =
         File::open(&path).context(format!("failed to open strace log: {}", &path.display()))?;
-    let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
+    let mut syscalls: HashMap<NonNulString, SyscallRule> = HashMap::new();
     // unwrap(): Creating regex from constant expression will never fail
     let regex = Regex::new(r"^\s*(?:\[[^]]*]|\d+)?\s*([a-zA-Z0-9_]+)\(([^)<]*)").unwrap();
     io::BufReader::new(file)
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
             if let Some(caps) = regex.captures(line?.as_str()) {
                 if let Some(m) = caps.get(1) {
                     if no_default_profile || !SYSCALLS_BASE.contains(&m.as_str()) {
-                        syscalls.insert(NonNullString::try_from(m.as_str())?, SyscallRule::Any);
+                        syscalls.insert(NonNulString::try_from(m.as_str())?, SyscallRule::Any);
                     }
                 }
             }

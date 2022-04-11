@@ -1,5 +1,5 @@
 use crate::{
-    common::{container::Container, name::Name, non_null_string::NonNullString, version::Version},
+    common::{container::Container, name::Name, non_nul_string::NonNulString, version::Version},
     seccomp::{Seccomp, Selinux, SyscallRule},
 };
 use itertools::Itertools;
@@ -38,7 +38,7 @@ pub struct Manifest {
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
-    pub args: Option<Vec<NonNullString>>,
+    pub args: Option<Vec<NonNulString>>,
     /// UID
     pub uid: u16,
     /// GID
@@ -48,7 +48,7 @@ pub struct Manifest {
     #[serde(deserialize_with = "maps_duplicate_key_is_error::deserialize")]
     pub mounts: HashMap<PathBuf, Mount>,
     /// Environment passed to container
-    pub env: Option<HashMap<NonNullString, NonNullString>>,
+    pub env: Option<HashMap<NonNulString, NonNulString>>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup configuration
@@ -60,7 +60,7 @@ pub struct Manifest {
     /// Capabilities
     pub capabilities: Option<HashSet<Capability>>,
     /// String containing group names to give to new container
-    pub suppl_groups: Option<Vec<NonNullString>>,
+    pub suppl_groups: Option<Vec<NonNulString>>,
     /// Resource limits
     pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
     /// IO configuration
@@ -95,7 +95,7 @@ impl Manifest {
         // Most optionals in the manifest are not valid for a resource container
 
         if let Some(init) = &self.init {
-            if NonNullString::try_from(init.display().to_string()).is_err() {
+            if NonNulString::try_from(init.display().to_string()).is_err() {
                 return Err(Error::Invalid(
                     "init path must be a string without zero bytes".to_string(),
                 ));
@@ -597,13 +597,13 @@ cgroups:
         mounts.insert(PathBuf::from("/dev"), Mount::Dev);
         assert_eq!(manifest.mounts, mounts);
 
-        let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
+        let mut syscalls: HashMap<NonNulString, SyscallRule> = HashMap::new();
         syscalls.insert(
-            NonNullString::try_from("fork".to_string())?,
+            NonNulString::try_from("fork".to_string())?,
             SyscallRule::Any,
         );
         syscalls.insert(
-            NonNullString::try_from("waitpid".to_string())?,
+            NonNulString::try_from("waitpid".to_string())?,
             SyscallRule::Any,
         );
         assert_eq!(
@@ -847,13 +847,13 @@ custom:
 
     #[test]
     fn valid_non_null_string() -> Result<()> {
-        assert!(NonNullString::try_from("test_non_null.string").is_ok());
+        assert!(NonNulString::try_from("test_non_null.string").is_ok());
         Ok(())
     }
 
     #[test]
     fn invalid_non_null_string() -> Result<()> {
-        assert!(NonNullString::try_from("test_null\0.string").is_err());
+        assert!(NonNulString::try_from("test_null\0.string").is_err());
         Ok(())
     }
 

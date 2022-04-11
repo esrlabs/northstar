@@ -10,7 +10,7 @@ use std::{
 };
 use thiserror::Error;
 
-use super::non_null_string::{InvalidNulChar, NonNullString};
+use super::non_nul_string::{InvalidNulChar, NonNulString};
 
 /// Maximum length allowed for a container name
 const MAX_LENGTH: usize = 1024;
@@ -20,7 +20,7 @@ const MAX_LENGTH: usize = 1024;
 /// allowed in container names: '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'.
 /// The maximum length allowed for a container name is 1024 characters.
 #[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Hash)]
-pub struct Name(NonNullString);
+pub struct Name(NonNulString);
 
 /// Invalid character in name
 #[derive(Error, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -68,7 +68,7 @@ impl TryFrom<String> for Name {
             _ => (),
         }
 
-        let value: NonNullString = value
+        let value: NonNulString = value
             .try_into()
             .map_err(|e: InvalidNulChar| NameError::ContainsNul(e.pos()))?;
 
@@ -91,7 +91,7 @@ impl TryFrom<&str> for Name {
     }
 }
 
-impl From<Name> for NonNullString {
+impl From<Name> for NonNulString {
     fn from(value: Name) -> Self {
         value.0
     }
@@ -102,7 +102,7 @@ impl Serialize for Name {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.as_ref())
+        serializer.serialize_str(self.as_ref())
     }
 }
 

@@ -5,7 +5,7 @@ pub mod container;
 pub mod name;
 
 /// String without null characters
-pub mod non_null_string;
+pub mod non_nul_string;
 
 /// Container version
 pub mod version;

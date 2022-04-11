@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     api::{self, model},
-    common::non_null_string::NonNullString,
+    common::non_nul_string::NonNulString,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{
         console::{Console, Peer},
@@ -52,9 +52,9 @@ use tokio_util::sync::CancellationToken;
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
 /// Container start arguments aka argv
-type Args<'a> = Option<&'a Vec<NonNullString>>;
+type Args<'a> = Option<&'a Vec<NonNulString>>;
 /// Container environment variables set
-type Env<'a> = Option<&'a HashMap<NonNullString, NonNullString>>;
+type Env<'a> = Option<&'a HashMap<NonNulString, NonNulString>>;
 
 #[derive(Debug)]
 pub(super) struct State {

@@ -13,7 +13,7 @@ pub type ExitCode = i32;
 /// Manifest
 pub type Manifest = crate::npk::manifest::Manifest;
 /// String that never contains a null byte
-pub type NonNullString = crate::common::non_null_string::NonNullString;
+pub type NonNullString = crate::common::non_nul_string::NonNulString;
 /// Process id
 pub type Pid = u32;
 /// Repository id

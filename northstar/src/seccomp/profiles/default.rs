@@ -1,5 +1,5 @@
 use crate::{
-    common::non_null_string::NonNullString,
+    common::non_nul_string::NonNulString,
     seccomp::{
         bpf::{builder_from_rules, Builder},
         SyscallArgRule, SyscallRule,
@@ -429,7 +429,7 @@ pub const SYSCALLS_NON_CAP_SYS_ADMIN: &[&str] = &[
 // pre-computed builders
 lazy_static::lazy_static! {
     pub static ref BASE: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_BASE.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_BASE.len());
         for name in SYSCALLS_BASE {
             // Parameter condition: index=0, value={0x00, 0x08, 0x20000, 0x20008, 0xFFFFFFFF}, op=SCMP_CMP_EQ
             // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L414)
@@ -446,91 +446,91 @@ lazy_static::lazy_static! {
         builder_from_rules(&hm)
     };
     pub static ref CAP_DAC_READ_SEARCH: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_DAC_READ_SEARCH.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_DAC_READ_SEARCH.len());
         for name in SYSCALLS_CAP_DAC_READ_SEARCH {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_ADMIN: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_ADMIN.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_ADMIN.len());
         for name in SYSCALLS_CAP_SYS_ADMIN {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_BOOT: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_BOOT.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_BOOT.len());
         for name in SYSCALLS_CAP_SYS_BOOT {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_CHROOT: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_CHROOT.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_CHROOT.len());
         for name in SYSCALLS_CAP_SYS_CHROOT {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_MODULE: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_MODULE.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_MODULE.len());
         for name in SYSCALLS_CAP_SYS_MODULE {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_PACCT: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PACCT.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PACCT.len());
         for name in SYSCALLS_CAP_SYS_PACCT {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_PTRACE: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PTRACE.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PTRACE.len());
         for name in SYSCALLS_CAP_SYS_PTRACE {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_RAWIO: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_RAWIO.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_RAWIO.len());
         for name in SYSCALLS_CAP_SYS_RAWIO {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_TIME: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TIME.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TIME.len());
         for name in SYSCALLS_CAP_SYS_TIME {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_TTY_CONFIG: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TTY_CONFIG.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TTY_CONFIG.len());
         for name in SYSCALLS_CAP_SYS_TTY_CONFIG {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYS_NICE: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_NICE.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_NICE.len());
         for name in SYSCALLS_CAP_SYS_NICE {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref CAP_SYSLOG: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYSLOG.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYSLOG.len());
         for name in SYSCALLS_CAP_SYSLOG {
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
     };
     pub static ref NON_CAP_SYS_ADMIN: Builder = {
-        let mut hm: HashMap<NonNullString, SyscallRule> = HashMap::with_capacity(SYSCALLS_NON_CAP_SYS_ADMIN.len());
+        let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_NON_CAP_SYS_ADMIN.len());
         for name in SYSCALLS_NON_CAP_SYS_ADMIN {
             if *name == "clone" {
                 // Parameter condition: index=0, value=0x7E020000, op=SCMP_CMP_MASKED_EQ
