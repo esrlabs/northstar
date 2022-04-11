@@ -23,6 +23,14 @@ mod cgroups;
 mod console;
 mod mount;
 
+/// Environment varibables used by the runtime and not available to the user.
+const RESERVED_ENV_VARIABLES: &[&str] = &[
+    "NORTHSTAR_NAME",
+    "NORTHSTAR_VERSION",
+    "NORTHSTAR_CONTAINER",
+    "NORTHSTAR_CONSOLE",
+];
+
 /// Northstar package manifest
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
@@ -129,12 +137,17 @@ impl Manifest {
         }
 
         // Check for reserved env variable names
-        if self.env.is_empty() {
-            for name in ["NAME", "VERSION", "NORTHSTAR_CONSOLE"] {
-                if self.env.keys().any(|k| name == k.as_str()) {
+        if !self.env.is_empty() {
+            let keys = self
+                .env
+                .keys()
+                .map(NonNulString::as_str)
+                .collect::<HashSet<_>>();
+            for var in RESERVED_ENV_VARIABLES {
+                if keys.contains(var) {
                     return Err(Error::Invalid(format!(
-                        "invalid env: resevered variable {}",
-                        name
+                        "invalid environment: reserved variable {}",
+                        var
                     )));
                 }
             }
@@ -834,29 +847,35 @@ custom:
         Ok(())
     }
 
+    /// Check reserved env keys
     #[test]
-    fn version() -> Result<()> {
-        let v1 = Version::parse("1.0.0")?;
-        let v2 = Version::parse("2.0.0")?;
-        let v3 = Version::parse("3.0.0")?;
-        assert!(v2 > v1);
-        assert!(v2 < v3);
-        let v1_1 = Version::parse("1.1.0")?;
-        assert!(v1_1 > v1);
-        let v1_1_1 = Version::parse("1.1.1")?;
-        assert!(v1_1_1 > v1_1);
-        Ok(())
-    }
+    fn env() -> Result<()> {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  LD_LIBRARY_PATH: /lib
+  PATH: /bin";
 
-    #[test]
-    fn valid_non_null_string() -> Result<()> {
-        assert!(NonNulString::try_from("test_non_null.string").is_ok());
-        Ok(())
-    }
+        assert!(Manifest::from_str(manifest).is_ok());
 
-    #[test]
-    fn invalid_non_null_string() -> Result<()> {
-        assert!(NonNulString::try_from("test_null\0.string").is_err());
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_CONSOLE: foo";
+        assert!(Manifest::from_str(manifest).is_err());
+
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_NAME: foo";
+        assert!(Manifest::from_str(manifest).is_err());
+
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_CONTAINER: foo";
+        assert!(Manifest::from_str(manifest).is_err());
+
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_VERSION: foo";
+        assert!(Manifest::from_str(manifest).is_err());
         Ok(())
     }
 
