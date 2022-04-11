@@ -7,11 +7,10 @@ use serde::{de::Visitor, Deserialize, Serialize, Serializer};
 use std::{
     convert::{TryFrom, TryInto},
     fmt::{self, Formatter},
-    ops::Deref,
 };
 use thiserror::Error;
 
-use super::non_null_string::{InvalidNullChar, NonNullString};
+use super::non_null_string::{InvalidNulChar, NonNullString};
 
 /// Maximum length allowed for a container name
 const MAX_LENGTH: usize = 1024;
@@ -53,11 +52,9 @@ impl fmt::Display for Name {
     }
 }
 
-impl Deref for Name {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
+impl AsRef<str> for Name {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
@@ -73,7 +70,7 @@ impl TryFrom<String> for Name {
 
         let value: NonNullString = value
             .try_into()
-            .map_err(|e: InvalidNullChar| NameError::ContainsNul(e.0))?;
+            .map_err(|e: InvalidNulChar| NameError::ContainsNul(e.pos()))?;
 
         if let Some(c) = value
             .chars()
@@ -105,7 +102,7 @@ impl Serialize for Name {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.0)
+        serializer.serialize_str(&self.as_ref())
     }
 }
 

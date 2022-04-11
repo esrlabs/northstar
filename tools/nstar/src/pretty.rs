@@ -47,7 +47,7 @@ fn containers(containers: &[ContainerData]) {
         .sorted_by_key(|c| c.manifest.init.is_none())
         .map(|container| {
             [
-                Cell::new(container.container.name()).with_style(Attr::Bold),
+                Cell::new(container.container.name().as_ref()).with_style(Attr::Bold),
                 Cell::new(&container.container.version().to_string()),
                 Cell::new(&container.repository),
                 if container.manifest.init.is_some() {
