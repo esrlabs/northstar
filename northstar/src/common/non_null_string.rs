@@ -9,14 +9,16 @@ use std::{
 use thiserror::Error;
 
 /// String that does not contain null bytes
-#[derive(Clone, Eq, PartialOrd, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(try_from = "String")]
 pub struct NonNullString(String);
 
 /// Null byte error
 #[derive(Error, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[error("invalid null byte in string")]
-pub struct InvalidNullChar(usize);
+pub struct InvalidNullChar(pub usize);
 
 impl Display for NonNullString {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {

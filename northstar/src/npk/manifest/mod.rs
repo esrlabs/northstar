@@ -846,18 +846,6 @@ custom:
     }
 
     #[test]
-    fn valid_container_name() -> Result<()> {
-        assert!(Name::try_from("test-container-name.valid").is_ok());
-        Ok(())
-    }
-
-    #[test]
-    fn invalid_container_name() -> Result<()> {
-        assert!(Name::try_from("test+invalid").is_err());
-        Ok(())
-    }
-
-    #[test]
     fn valid_non_null_string() -> Result<()> {
         assert!(NonNullString::try_from("test_non_null.string").is_ok());
         Ok(())
