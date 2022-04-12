@@ -107,8 +107,8 @@ pub(crate) fn set_log_target(tag: String) {
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)+) => (
-        assert!(unsafe { !crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::debug!(target: unsafe { crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
+        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
+        log::debug!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
     )
 }
 
@@ -117,8 +117,8 @@ macro_rules! debug {
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)+) => (
-        assert!(unsafe { !crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::info!(target: unsafe { crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
+        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
+        log::info!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
     )
 }
 
@@ -127,8 +127,8 @@ macro_rules! info {
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)+) => (
-        assert!(unsafe { !crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::warn!(target: unsafe { crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
+        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
+        log::warn!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
     )
 }
 
@@ -137,7 +137,7 @@ macro_rules! warn {
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)+) => (
-        assert!(unsafe { !crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::error!(target: unsafe { crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
+        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
+        log::error!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
     )
 }
