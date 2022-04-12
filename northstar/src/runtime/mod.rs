@@ -47,6 +47,8 @@ mod mount;
 mod repository;
 mod state;
 pub(crate) mod stats;
+#[allow(unused)]
+mod token;
 
 /// Runtime configuration
 pub mod config;
