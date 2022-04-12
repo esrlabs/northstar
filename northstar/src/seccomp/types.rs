@@ -1,4 +1,4 @@
-use crate::common::non_null_string::NonNullString;
+use crate::common::non_nul_string::NonNulString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,14 +20,14 @@ pub struct Seccomp {
     pub profile: Option<Profile>,
     /// Explicit list of allowed syscalls
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow: Option<HashMap<NonNullString, SyscallRule>>,
+    pub allow: Option<HashMap<NonNulString, SyscallRule>>,
 }
 
 /// SELinux configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Selinux {
     /// Explicit list of allowed syscalls
-    pub context: NonNullString,
+    pub context: NonNulString,
 }
 
 /// Syscall rule

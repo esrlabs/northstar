@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
 use super::init::Init;
 use crate::{
-    common::container::Container,
+    common::{container::Container, non_nul_string::NonNulString},
     runtime::{ipc::owned_fd::OwnedFd, ExitStatus, Pid},
 };
 use serde::{Deserialize, Serialize};
@@ -21,9 +19,9 @@ pub enum Message {
     },
     ExecRequest {
         container: Container,
-        path: PathBuf,
-        args: Vec<String>,
-        env: Vec<String>,
+        path: NonNulString,
+        args: Vec<NonNulString>,
+        env: Vec<NonNulString>,
         #[serde(skip)]
         io: Option<[OwnedFd; 3]>,
     },

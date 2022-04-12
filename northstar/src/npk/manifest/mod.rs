@@ -1,5 +1,5 @@
 use crate::{
-    common::{container::Container, name::Name, non_null_string::NonNullString, version::Version},
+    common::{container::Container, name::Name, non_nul_string::NonNulString, version::Version},
     seccomp::{Seccomp, Selinux, SyscallRule},
 };
 use itertools::Itertools;
@@ -23,6 +23,14 @@ mod cgroups;
 mod console;
 mod mount;
 
+/// Environment varibables used by the runtime and not available to the user.
+const RESERVED_ENV_VARIABLES: &[&str] = &[
+    "NORTHSTAR_NAME",
+    "NORTHSTAR_VERSION",
+    "NORTHSTAR_CONTAINER",
+    "NORTHSTAR_CONSOLE",
+];
+
 /// Northstar package manifest
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
@@ -38,7 +46,11 @@ pub struct Manifest {
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
-    pub args: Option<Vec<NonNullString>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<NonNulString>,
+    /// Environment passed to container
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<NonNulString, NonNulString>,
     /// UID
     pub uid: u16,
     /// GID
@@ -47,8 +59,6 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[serde(deserialize_with = "maps_duplicate_key_is_error::deserialize")]
     pub mounts: HashMap<PathBuf, Mount>,
-    /// Environment passed to container
-    pub env: Option<HashMap<NonNullString, NonNullString>>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup configuration
@@ -58,11 +68,14 @@ pub struct Manifest {
     /// SELinux configuration
     pub selinux: Option<Selinux>,
     /// Capabilities
-    pub capabilities: Option<HashSet<Capability>>,
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    pub capabilities: HashSet<Capability>,
     /// String containing group names to give to new container
-    pub suppl_groups: Option<Vec<NonNullString>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suppl_groups: Vec<NonNulString>,
     /// Resource limits
-    pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub rlimits: HashMap<RLimitResource, RLimitValue>,
     /// IO configuration
     #[serde(default, skip_serializing_if = "is_default")]
     pub io: Io,
@@ -95,18 +108,18 @@ impl Manifest {
         // Most optionals in the manifest are not valid for a resource container
 
         if let Some(init) = &self.init {
-            if NonNullString::try_from(init.display().to_string()).is_err() {
+            if NonNulString::try_from(init.display().to_string()).is_err() {
                 return Err(Error::Invalid(
                     "init path must be a string without zero bytes".to_string(),
                 ));
             }
-        } else if self.args.is_some()
-            || self.env.is_some()
+        } else if !self.args.is_empty()
+            || !self.env.is_empty()
             || self.autostart.is_some()
             || self.cgroups.is_some()
             || self.seccomp.is_some()
-            || self.capabilities.is_some()
-            || self.suppl_groups.is_some()
+            || !self.capabilities.is_empty()
+            || !self.suppl_groups.is_empty()
         {
             return Err(Error::Invalid(
                 "resource containers must not define any of the following manifest entries:\
@@ -124,15 +137,14 @@ impl Manifest {
         }
 
         // Check for reserved env variable names
-        if let Some(env) = &self.env {
-            for name in ["NAME", "VERSION", "NORTHSTAR_CONSOLE"] {
-                if env.keys().any(|k| name == k.as_str()) {
-                    return Err(Error::Invalid(format!(
-                        "invalid env: resevered variable {}",
-                        name
-                    )));
-                }
-            }
+        if RESERVED_ENV_VARIABLES.iter().any(|key| {
+            self.env
+                .contains_key(unsafe { &NonNulString::from_str_unchecked(key) })
+            // safe - constants
+        }) {
+            return Err(Error::Invalid(
+                "invalid environment: reserved variable name".into(),
+            ));
         }
 
         // Check for relative and overlapping bind mounts
@@ -493,7 +505,7 @@ fn is_default<T: Default + PartialEq>(t: &T) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::npk::manifest::*;
-    use anyhow::{anyhow, Result};
+    use anyhow::Result;
     use std::{
         convert::{TryFrom, TryInto},
         iter::FromIterator,
@@ -562,15 +574,13 @@ cgroups:
 
         assert_eq!(manifest.init, Some(PathBuf::from("/binary")));
         assert_eq!(manifest.name.to_string(), "hello");
-        let args = manifest.args.ok_or_else(|| anyhow!("Missing args"))?;
-        assert_eq!(args.len(), 2);
-        assert_eq!(args[0].to_string(), "one");
-        assert_eq!(args[1].to_string(), "two");
+        assert_eq!(manifest.args.len(), 2);
+        assert_eq!(manifest.args[0].to_string(), "one");
+        assert_eq!(manifest.args[1].to_string(), "two");
 
         assert_eq!(manifest.autostart, Some(Autostart::Critical));
-        let env = manifest.env.ok_or_else(|| anyhow!("Missing env"))?;
         assert_eq!(
-            env.get(&"LD_LIBRARY_PATH".try_into()?),
+            manifest.env.get(&"LD_LIBRARY_PATH".try_into()?),
             Some("/lib".try_into()?).as_ref()
         );
         assert_eq!(manifest.uid, 1000);
@@ -597,13 +607,13 @@ cgroups:
         mounts.insert(PathBuf::from("/dev"), Mount::Dev);
         assert_eq!(manifest.mounts, mounts);
 
-        let mut syscalls: HashMap<NonNullString, SyscallRule> = HashMap::new();
+        let mut syscalls: HashMap<NonNulString, SyscallRule> = HashMap::new();
         syscalls.insert(
-            NonNullString::try_from("fork".to_string())?,
+            NonNulString::try_from("fork".to_string())?,
             SyscallRule::Any,
         );
         syscalls.insert(
-            NonNullString::try_from("waitpid".to_string())?,
+            NonNulString::try_from("waitpid".to_string())?,
             SyscallRule::Any,
         );
         assert_eq!(
@@ -616,18 +626,18 @@ cgroups:
 
         assert_eq!(
             manifest.capabilities,
-            Some(HashSet::from_iter(
+            HashSet::from_iter(
                 vec!(
                     Capability::CAP_NET_RAW,
                     Capability::CAP_MKNOD,
                     Capability::CAP_SYS_TIME,
                 )
                 .drain(..)
-            ))
+            )
         );
         assert_eq!(
             manifest.suppl_groups,
-            Some(vec!("inet".try_into()?, "log".try_into()?))
+            vec!("inet".try_into()?, "log".try_into()?)
         );
 
         Ok(())
@@ -831,41 +841,35 @@ custom:
         Ok(())
     }
 
+    /// Check reserved env keys
     #[test]
-    fn version() -> Result<()> {
-        let v1 = Version::parse("1.0.0")?;
-        let v2 = Version::parse("2.0.0")?;
-        let v3 = Version::parse("3.0.0")?;
-        assert!(v2 > v1);
-        assert!(v2 < v3);
-        let v1_1 = Version::parse("1.1.0")?;
-        assert!(v1_1 > v1);
-        let v1_1_1 = Version::parse("1.1.1")?;
-        assert!(v1_1_1 > v1_1);
-        Ok(())
-    }
+    fn env() -> Result<()> {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  LD_LIBRARY_PATH: /lib
+  PATH: /bin";
 
-    #[test]
-    fn valid_container_name() -> Result<()> {
-        assert!(Name::try_from("test-container-name.valid").is_ok());
-        Ok(())
-    }
+        assert!(Manifest::from_str(manifest).is_ok());
 
-    #[test]
-    fn invalid_container_name() -> Result<()> {
-        assert!(Name::try_from("test+invalid").is_err());
-        Ok(())
-    }
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_CONSOLE: foo";
+        assert!(Manifest::from_str(manifest).is_err());
 
-    #[test]
-    fn valid_non_null_string() -> Result<()> {
-        assert!(NonNullString::try_from("test_non_null.string").is_ok());
-        Ok(())
-    }
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_NAME: foo";
+        assert!(Manifest::from_str(manifest).is_err());
 
-    #[test]
-    fn invalid_non_null_string() -> Result<()> {
-        assert!(NonNullString::try_from("test_null\0.string").is_err());
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_CONTAINER: foo";
+        assert!(Manifest::from_str(manifest).is_err());
+
+        let manifest = r"name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001\n
+env:
+  NORTHSTAR_VERSION: foo";
+        assert!(Manifest::from_str(manifest).is_err());
         Ok(())
     }
 

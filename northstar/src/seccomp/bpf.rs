@@ -1,5 +1,5 @@
 use crate::{
-    common::non_null_string::NonNullString,
+    common::non_nul_string::NonNulString,
     npk::manifest::Capability,
     seccomp::{profiles::default, Profile, SyscallArgRule, SyscallRule},
 };
@@ -48,8 +48,8 @@ pub enum Error {
 /// Construct a allowlist syscall filter that is applied post clone.
 pub fn seccomp_filter(
     profile: Option<&Profile>,
-    rules: Option<&HashMap<NonNullString, SyscallRule>>,
-    caps: Option<&HashSet<Capability>>,
+    rules: Option<&HashMap<NonNulString, SyscallRule>>,
+    caps: &HashSet<Capability>,
 ) -> AllowList {
     check_platform_requirements();
 
@@ -64,14 +64,14 @@ pub fn seccomp_filter(
 }
 
 /// Create an AllowList Builder from a list of syscall names
-pub(crate) fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) -> Builder {
+pub(crate) fn builder_from_rules(rules: &HashMap<NonNulString, SyscallRule>) -> Builder {
     let mut builder = Builder::new();
     for (name, call_rule) in rules {
         let arg_rule = match call_rule {
             SyscallRule::Any => None,
             SyscallRule::Args(a) => Some(a),
         };
-        if let Err(e) = builder.allow_syscall_name(&name.to_string(), arg_rule.cloned()) {
+        if let Err(e) = builder.allow_syscall_name(name, arg_rule.cloned()) {
             // Only issue a warning as a missing syscall on the allow list does not lead to insecure behaviour
             trace!("failed to allow syscall {}: {}", &name.to_string(), e);
         }
@@ -80,13 +80,13 @@ pub(crate) fn builder_from_rules(rules: &HashMap<NonNullString, SyscallRule>) ->
 }
 
 /// Create an AllowList Builder from a pre-defined profile
-fn builder_from_profile(profile: &Profile, caps: Option<&HashSet<Capability>>) -> Builder {
+fn builder_from_profile(profile: &Profile, caps: &HashSet<Capability>) -> Builder {
     match profile {
         Profile::Default => {
             let mut builder = default::BASE.clone();
 
             // Allow additional syscalls depending on granted capabilities
-            if let Some(caps) = caps {
+            if !caps.is_empty() {
                 let mut cap_sys_admin = false;
                 for cap in caps {
                     match cap {

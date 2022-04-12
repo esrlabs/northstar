@@ -132,7 +132,7 @@ impl CGroups {
         debug!("Creating cgroups for {}", container);
         let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(
             hierarchy(),
-            Path::new(top_level_dir).join(container.name().as_str()),
+            Path::new(top_level_dir).join(container.name().as_ref()),
         );
 
         let resources = cgroups_rs::Resources {

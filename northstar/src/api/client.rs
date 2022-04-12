@@ -7,7 +7,7 @@ use super::{
 };
 use crate::common::{
     container,
-    non_null_string::{InvalidNullChar, NonNullString},
+    non_nul_string::{InvalidNulChar, NonNulString},
 };
 use futures::{SinkExt, Stream, StreamExt};
 use std::{
@@ -45,7 +45,7 @@ pub enum Error {
     #[error("invalid container {0}")]
     Container(container::Error),
     #[error("invalid string {0}")]
-    String(InvalidNullChar),
+    String(InvalidNulChar),
     #[error("infalliable")]
     Infalliable,
 }
@@ -56,8 +56,8 @@ impl From<container::Error> for Error {
     }
 }
 
-impl From<InvalidNullChar> for Error {
-    fn from(e: InvalidNullChar) -> Self {
+impl From<InvalidNulChar> for Error {
+    fn from(e: InvalidNulChar) -> Self {
         Error::String(e)
     }
 }
@@ -305,7 +305,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn start_with_args(
         &mut self,
         container: impl TryInto<Container, Error = impl Into<Error>>,
-        args: impl IntoIterator<Item = impl TryInto<NonNullString, Error = impl Into<Error>>>,
+        args: impl IntoIterator<Item = impl TryInto<NonNulString, Error = impl Into<Error>>>,
     ) -> Result<(), Error> {
         self.start_with_args_env(container, args, empty::<(&str, &str)>())
             .await
@@ -332,11 +332,11 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn start_with_args_env(
         &mut self,
         container: impl TryInto<Container, Error = impl Into<Error>>,
-        args: impl IntoIterator<Item = impl TryInto<NonNullString, Error = impl Into<Error>>>,
+        args: impl IntoIterator<Item = impl TryInto<NonNulString, Error = impl Into<Error>>>,
         env: impl IntoIterator<
             Item = (
-                impl TryInto<NonNullString, Error = impl Into<Error>>,
-                impl TryInto<NonNullString, Error = impl Into<Error>>,
+                impl TryInto<NonNulString, Error = impl Into<Error>>,
+                impl TryInto<NonNulString, Error = impl Into<Error>>,
             ),
         >,
     ) -> Result<(), Error> {

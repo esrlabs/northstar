@@ -1,5 +1,5 @@
 use crate::{
-    common::container::Container,
+    common::{container::Container, non_nul_string::NonNulString},
     debug, info,
     npk::manifest::{Capability, RLimitResource, RLimitValue},
     runtime::{
@@ -47,9 +47,9 @@ pub enum Message {
     Exit { pid: Pid, exit_status: ExitStatus },
     /// Exec a new process
     Exec {
-        path: PathBuf,
-        args: Vec<String>,
-        env: Vec<String>,
+        path: NonNulString,
+        args: Vec<NonNulString>,
+        env: Vec<NonNulString>,
     },
 }
 
@@ -61,8 +61,8 @@ pub struct Init {
     pub gid: u16,
     pub mounts: Vec<Mount>,
     pub groups: Vec<u32>,
-    pub capabilities: Option<HashSet<Capability>>,
-    pub rlimits: Option<HashMap<RLimitResource, RLimitValue>>,
+    pub capabilities: HashSet<Capability>,
+    pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
     pub console: bool,
 }
@@ -119,7 +119,7 @@ impl Init {
                     args,
                     mut env,
                 })) => {
-                    debug!("Execing {} {}", path.display(), args.iter().join(" "));
+                    debug!("Execing {} {}", path, args.iter().join(" "));
 
                     // The init process got adopted by the forker after the trampoline exited. It is
                     // safe to set the parent death signal now.
@@ -127,7 +127,10 @@ impl Init {
 
                     if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
                         // Add the fd number to the environment of the application
-                        env.push(format!("NORTHSTAR_CONSOLE={}", fd));
+                        let s = unsafe {
+                            NonNulString::from_string_unchecked(format!("NORTHSTAR_CONSOLE={}", fd))
+                        };
+                        env.push(s);
                     }
 
                     let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
@@ -154,15 +157,9 @@ impl Init {
                             filter.apply().expect("failed to apply seccomp filter.");
                         }
 
-                        let path = CString::new(path.to_str().unwrap()).unwrap();
-                        let args = args
-                            .iter()
-                            .map(|s| CString::new(s.as_str()).unwrap())
-                            .collect::<Vec<_>>();
-                        let env = env
-                            .iter()
-                            .map(|s| CString::new(s.as_str()).unwrap())
-                            .collect::<Vec<_>>();
+                        let path = CString::from(path);
+                        let args = args.into_iter().map_into::<CString>().collect_vec();
+                        let env = env.into_iter().map_into::<CString>().collect_vec();
 
                         panic!(
                             "execve: {:?} {:?}: {:?}",
@@ -269,35 +266,33 @@ impl Init {
     }
 
     fn set_rlimits(&self) {
-        if let Some(limits) = self.rlimits.as_ref() {
-            debug!("Applying rlimits");
-            for (resource, limit) in limits {
-                let resource = match resource {
-                    RLimitResource::AS => rlimit::Resource::AS,
-                    RLimitResource::CORE => rlimit::Resource::CORE,
-                    RLimitResource::CPU => rlimit::Resource::CPU,
-                    RLimitResource::DATA => rlimit::Resource::DATA,
-                    RLimitResource::FSIZE => rlimit::Resource::FSIZE,
-                    RLimitResource::LOCKS => rlimit::Resource::LOCKS,
-                    RLimitResource::MEMLOCK => rlimit::Resource::MEMLOCK,
-                    RLimitResource::MSGQUEUE => rlimit::Resource::MSGQUEUE,
-                    RLimitResource::NICE => rlimit::Resource::NICE,
-                    RLimitResource::NOFILE => rlimit::Resource::NOFILE,
-                    RLimitResource::NPROC => rlimit::Resource::NPROC,
-                    RLimitResource::RSS => rlimit::Resource::RSS,
-                    RLimitResource::RTPRIO => rlimit::Resource::RTPRIO,
-                    #[cfg(not(target_os = "android"))]
-                    RLimitResource::RTTIME => rlimit::Resource::RTTIME,
-                    RLimitResource::SIGPENDING => rlimit::Resource::SIGPENDING,
-                    RLimitResource::STACK => rlimit::Resource::STACK,
-                };
-                resource
-                    .set(
-                        limit.soft.unwrap_or(rlimit::INFINITY),
-                        limit.hard.unwrap_or(rlimit::INFINITY),
-                    )
-                    .expect("failed to set rlimit");
-            }
+        debug!("Applying rlimits");
+        for (resource, limit) in &self.rlimits {
+            let resource = match resource {
+                RLimitResource::AS => rlimit::Resource::AS,
+                RLimitResource::CORE => rlimit::Resource::CORE,
+                RLimitResource::CPU => rlimit::Resource::CPU,
+                RLimitResource::DATA => rlimit::Resource::DATA,
+                RLimitResource::FSIZE => rlimit::Resource::FSIZE,
+                RLimitResource::LOCKS => rlimit::Resource::LOCKS,
+                RLimitResource::MEMLOCK => rlimit::Resource::MEMLOCK,
+                RLimitResource::MSGQUEUE => rlimit::Resource::MSGQUEUE,
+                RLimitResource::NICE => rlimit::Resource::NICE,
+                RLimitResource::NOFILE => rlimit::Resource::NOFILE,
+                RLimitResource::NPROC => rlimit::Resource::NPROC,
+                RLimitResource::RSS => rlimit::Resource::RSS,
+                RLimitResource::RTPRIO => rlimit::Resource::RTPRIO,
+                #[cfg(not(target_os = "android"))]
+                RLimitResource::RTTIME => rlimit::Resource::RTTIME,
+                RLimitResource::SIGPENDING => rlimit::Resource::SIGPENDING,
+                RLimitResource::STACK => rlimit::Resource::STACK,
+            };
+            resource
+                .set(
+                    limit.soft.unwrap_or(rlimit::INFINITY),
+                    limit.hard.unwrap_or(rlimit::INFINITY),
+                )
+                .expect("failed to set rlimit");
         }
     }
 
@@ -309,9 +304,8 @@ impl Init {
         // Convert the set from the manifest to a set of caps::Capability
         let set = self
             .capabilities
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
+            .iter()
+            .cloned()
             .map(Into::into)
             .collect::<HashSet<caps::Capability>>();
         bounded.retain(|c| !set.contains(c));

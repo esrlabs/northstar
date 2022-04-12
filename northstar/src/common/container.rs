@@ -1,7 +1,3 @@
-use crate::common::{
-    name::{InvalidNameChar, Name},
-    version::Version,
-};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -10,6 +6,11 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
+
+use super::{
+    name::{Name, NameError},
+    version::Version,
+};
 
 /// Container identification
 #[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash, JsonSchema)]
@@ -40,11 +41,11 @@ impl Container {
 #[allow(missing_docs)]
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Missing container name")]
+    #[error("missing container name")]
     MissingName,
     #[error("invalid container name")]
-    InvalidName(InvalidNameChar),
-    #[error("Missing container version")]
+    InvalidName(NameError),
+    #[error("missing container version")]
     MissingVersion,
     #[error("invalid container version")]
     InvalidVersion,
@@ -56,8 +57,8 @@ impl Display for Container {
     }
 }
 
-impl From<InvalidNameChar> for Error {
-    fn from(e: InvalidNameChar) -> Self {
+impl From<NameError> for Error {
+    fn from(e: NameError) -> Self {
         Error::InvalidName(e)
     }
 }
@@ -128,6 +129,12 @@ fn try_from() {
         Container::new("test".try_into().unwrap(), Version::parse("0.0.1").unwrap()),
         "test:0.0.1".try_into().unwrap()
     );
+}
+
+#[test]
+fn invalid_name() {
+    assert!(Container::try_from("test\0:0.0.1").is_err());
+    assert!(Container::try_from("tes%t:0.0.1").is_err());
 }
 
 #[test]

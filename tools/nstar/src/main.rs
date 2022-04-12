@@ -10,17 +10,11 @@ use futures::{sink::SinkExt, StreamExt};
 use northstar::{
     api::{
         self,
-        model::{Container, NonNullString, Request},
+        model::{Container, NonNulString, Request},
     },
-    common::version::Version,
+    common::{name::Name, version::Version},
 };
-use std::{
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-    path::PathBuf,
-    process,
-    str::FromStr,
-};
+use std::{collections::HashMap, convert::TryFrom, path::PathBuf, process, str::FromStr};
 use tokio::{
     fs,
     io::{copy, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -162,14 +156,15 @@ async fn parse_container<T>(name: &str, client: &mut Client<T>) -> Result<Contai
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    let (name, version) = if let Some((name, version)) = name.split_once(':') {
-        (name, Version::parse(version)?)
+    let (name, version): (Name, Version) = if let Some((name, version)) = name.split_once(':') {
+        (Name::try_from(name)?, Version::parse(version)?)
     } else {
+        let name = Name::try_from(name)?;
         let versions: Vec<Version> = client
             .containers()
             .await?
             .into_iter()
-            .filter_map(|c| (c.manifest.name.as_str() == name).then(|| c.manifest.version))
+            .filter_map(|c| (c.manifest.name == name).then(|| c.manifest.version))
             .collect();
 
         if versions.is_empty() {
@@ -180,7 +175,7 @@ where
             (name, versions[0].clone())
         }
     };
-    Ok(Container::new(name.try_into()?, version))
+    Ok(Container::new(name, version))
 }
 
 async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
@@ -219,7 +214,7 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let args = if let Some(args) = args {
                 let mut non_null = Vec::with_capacity(args.len());
                 for arg in args {
-                    non_null.push(NonNullString::try_from(arg.as_str()).context("invalid arg")?);
+                    non_null.push(NonNulString::try_from(arg.as_str()).context("invalid arg")?);
                 }
                 non_null
             } else {
@@ -234,11 +229,11 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                     let key = split
                         .next()
                         .ok_or_else(|| anyhow!("invalid env"))
-                        .and_then(|s| NonNullString::try_from(s).context("invalid key"))?;
+                        .and_then(|s| NonNulString::try_from(s).context("invalid key"))?;
                     let value = split
                         .next()
                         .ok_or_else(|| anyhow!("invalid env"))
-                        .and_then(|s| NonNullString::try_from(s).context("invalid value"))?;
+                        .and_then(|s| NonNulString::try_from(s).context("invalid value"))?;
                     non_null.insert(key, value);
                 }
                 non_null

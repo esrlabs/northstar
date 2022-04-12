@@ -1194,6 +1194,7 @@ dependencies = [
  "lazy_static",
  "log",
  "loopdev",
+ "memchr",
  "memfd",
  "memoffset",
  "nanoid",

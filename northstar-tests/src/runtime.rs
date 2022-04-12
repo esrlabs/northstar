@@ -9,7 +9,7 @@ use northstar::{
         client,
         model::{Container, ExitStatus, Notification},
     },
-    common::non_null_string::NonNullString,
+    common::non_nul_string::NonNulString,
     runtime::{config, Runtime as Northstar},
 };
 use std::convert::{TryFrom, TryInto};
@@ -97,7 +97,7 @@ impl Runtime {
             data_dir,
             log_dir,
             consoles,
-            cgroup: NonNullString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
+            cgroup: NonNulString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,
             debug: None,
         };

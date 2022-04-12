@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     api::{self, model},
-    common::non_null_string::NonNullString,
+    common::non_nul_string::NonNulString,
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{
         console::{Console, Peer},
@@ -51,10 +51,6 @@ use tokio_util::sync::CancellationToken;
 
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
-/// Container start arguments aka argv
-type Args<'a> = Option<&'a Vec<NonNullString>>;
-/// Container environment variables set
-type Env<'a> = Option<&'a HashMap<NonNullString, NonNullString>>;
 
 #[derive(Debug)]
 pub(super) struct State {
@@ -260,7 +256,10 @@ impl State {
 
             for (container, autostart) in autostarts {
                 info!("Autostarting {} ({:?})", container, autostart);
-                if let Err(e) = self.start(&container, None, None).await {
+                if let Err(e) = self
+                    .start(&container, &[], &HashMap::with_capacity(0))
+                    .await
+                {
                     match autostart {
                         Autostart::Relaxed => {
                             warn!("failed to autostart relaxed {}: {}", container, e);
@@ -316,8 +315,8 @@ impl State {
     pub(super) async fn start(
         &mut self,
         container: &Container,
-        args_extra: Args<'_>,
-        env_extra: Env<'_>,
+        args_extra: &[NonNulString],
+        env_extra: &HashMap<NonNulString, NonNulString>,
     ) -> Result<(), Error> {
         let start = time::Instant::now();
         info!("Trying to start {}", container);
@@ -330,27 +329,28 @@ impl State {
         }
 
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
-        if let Some(env) = env_extra {
-            if env.keys().any(|k| {
-                k.as_str() == ENV_NAME
-                    || k.as_str() == ENV_VERSION
-                    || k.as_str() == ENV_CONTAINER
-                    || k.as_str() == ENV_CONSOLE
-            }) {
-                return Err(Error::InvalidArguments(format!(
-                    "env contains reserved key {} or {} or {} or {}",
-                    ENV_NAME, ENV_VERSION, ENV_CONTAINER, ENV_CONSOLE
-                )));
-            }
+        if env_extra.keys().any(|k| {
+            k.as_str() == ENV_NAME
+                || k.as_str() == ENV_VERSION
+                || k.as_str() == ENV_CONTAINER
+                || k.as_str() == ENV_CONSOLE
+        }) {
+            return Err(Error::InvalidArguments(format!(
+                "env contains reserved key {} or {} or {} or {}",
+                ENV_NAME, ENV_VERSION, ENV_CONTAINER, ENV_CONSOLE
+            )));
         }
 
         let manifest = self.manifest(container)?.clone();
 
         // Check if the container is not a resource
-        if manifest.init.is_none() {
+        let init = if let Some(ref init) = manifest.init {
+            NonNulString::try_from(init.display().to_string())
+                .map_err(|_| Error::InvalidArguments(init.display().to_string()))?
+        } else {
             warn!("Container {} is a resource", container);
             return Err(Error::StartContainerResource(container.clone()));
-        }
+        };
 
         let mut need_mount = HashSet::new();
 
@@ -473,36 +473,46 @@ impl State {
             .await
             .expect("IO setup error");
 
-        let path = manifest.init.unwrap();
-        let mut args = vec![path.display().to_string()];
-        if let Some(extra_args) = args_extra {
-            args.extend(extra_args.iter().map(ToString::to_string));
-        } else if let Some(manifest_args) = manifest.args {
-            args.extend(manifest_args.iter().map(ToString::to_string));
+        // Binary arguments
+        let mut args = Vec::with_capacity(
+            1 + if args_extra.is_empty() {
+                manifest.args.len()
+            } else {
+                args_extra.len()
+            },
+        );
+        args.push(init.clone());
+        if !args_extra.is_empty() {
+            args.extend(args_extra.iter().cloned());
+        } else {
+            args.extend(manifest.args.iter().cloned());
         };
 
-        // Prepare the environment for the container according to the manifest
-        let env = match (env_extra, &manifest.env) {
-            (Some(env), _) => env.clone(),
-            (None, Some(env)) => env.clone(),
-            (None, None) => HashMap::with_capacity(3),
+        // Overwrite the env variables from the manifest if variables are provided
+        // with the start command
+        let env = if env_extra.is_empty() {
+            &manifest.env
+        } else {
+            env_extra
         };
+
         let env = env
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .chain(once(format!("{}={}", ENV_CONTAINER, container)))
             .chain(once(format!("{}={}", ENV_NAME, container.name())))
             .chain(once(format!("{}={}", ENV_VERSION, container.version())))
+            .map(|s| NonNulString::try_from(s).unwrap())
             .collect::<Vec<_>>();
 
-        debug!("Container {} init is {:?}", container, path.display());
+        debug!("Container {} init is {:?}", container, init);
         debug!("Container {} argv is {}", container, args.iter().join(" "));
         debug!("Container {} env is {}", container, env.iter().join(", "));
 
         // Send exec request to launcher
         if let Err(e) = self
             .launcher
-            .exec(container.clone(), path, args, env, io)
+            .exec(container.clone(), init, args, env, io)
             .await
         {
             warn!("failed to exec {} ({}): {}", container, pid, e);
@@ -832,17 +842,13 @@ impl State {
                         container,
                         args,
                         env,
-                    } => {
-                        let args = (!args.is_empty()).then(|| args);
-                        let env = (!env.is_empty()).then(|| env);
-                        match self.start(container, args, env).await {
-                            Ok(_) => model::Response::Ok,
-                            Err(e) => {
-                                warn!("failed to start {}: {}", container, e);
-                                model::Response::Error { error: e.into() }
-                            }
+                    } => match self.start(container, args, env).await {
+                        Ok(_) => model::Response::Ok,
+                        Err(e) => {
+                            warn!("failed to start {}: {}", container, e);
+                            model::Response::Error { error: e.into() }
                         }
-                    }
+                    },
                     model::Request::Kill { container, signal } => {
                         let signal = Signal::try_from(*signal).unwrap();
                         match self.kill(container, signal).await {
