@@ -228,7 +228,7 @@ impl State {
         for container in self.containers.keys() {
             if let Some(autostart) = self
                 .manifest(container)
-                .expect("Internal error")
+                .expect("internal error")
                 .autostart
                 .as_ref()
             {
@@ -263,10 +263,10 @@ impl State {
                 if let Err(e) = self.start(&container, None, None).await {
                     match autostart {
                         Autostart::Relaxed => {
-                            warn!("failed to autostart relaxed {}: {}", container, e);
+                            warn!("Failed to autostart relaxed {}: {}", container, e);
                         }
                         Autostart::Critical => {
-                            error!("failed to autostart critical {}: {}", container, e);
+                            error!("Failed to autostart critical {}: {}", container, e);
                             return Err(e);
                         }
                     }
@@ -284,9 +284,9 @@ impl State {
         let repository = self
             .repositories
             .get(&container_state.repository)
-            .expect("Internal error");
+            .expect("internal error");
         let key = repository.key().cloned();
-        let npk = self.npk(container).expect("Internal error");
+        let npk = self.npk(container).expect("internal error");
         let root = self.config.run_dir.join(container.to_string());
         let mount_control = self.mount_control.clone();
         mount_control
@@ -399,7 +399,7 @@ impl State {
             for mount in self.mount_all(&Vec::from_iter(need_mount)).await {
                 // Abort if at least one container failed to mount
                 if let Err(e) = mount {
-                    warn!("failed to mount: {}", e);
+                    warn!("Failed to mount: {}", e);
                     return Err(e);
                 }
             }
@@ -505,7 +505,7 @@ impl State {
             .exec(container.clone(), path, args, env, io)
             .await
         {
-            warn!("failed to exec {} ({}): {}", container, pid, e);
+            warn!("Failed to exec {} ({}): {}", container, pid, e);
 
             stop.cancel();
 
@@ -825,7 +825,7 @@ impl State {
                         self.events_tx
                             .send(Event::Shutdown)
                             .await
-                            .expect("Internal channel error on main");
+                            .expect("internal channel error on main");
                         model::Response::Ok
                     }
                     model::Request::Start {
@@ -838,7 +838,7 @@ impl State {
                         match self.start(container, args, env).await {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
-                                warn!("failed to start {}: {}", container, e);
+                                warn!("Failed to start {}: {}", container, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -848,7 +848,7 @@ impl State {
                         match self.kill(container, signal).await {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
-                                error!("failed to kill {} with {}: {}", container, signal, e);
+                                error!("Failed to kill {} with {}: {}", container, signal, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -857,7 +857,7 @@ impl State {
                         match self.uninstall(container).await {
                             Ok(_) => api::model::Response::Ok,
                             Err(e) => {
-                                warn!("failed to uninstall {}: {}", container, e);
+                                warn!("Failed to uninstall {}: {}", container, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -869,7 +869,7 @@ impl State {
                                 stats,
                             },
                             Err(e) => {
-                                warn!("failed to gather stats for {}: {}", container, e);
+                                warn!("Failed to gather stats for {}: {}", container, e);
                                 model::Response::Error { error: e.into() }
                             }
                         }
@@ -922,13 +922,20 @@ impl State {
         for (container, mount_result) in containers.iter().zip(join_all(mounts).await) {
             match mount_result {
                 Ok(root) => {
-                    let state = self.state_mut(container).expect("Internal error");
+                    let npk = self.npk(container).expect("internal error");
+                    let date = npk.metadata().date.clone();
+                    let author = npk.metadata().author.clone();
+                    let state = self.state_mut(container).expect("internal error");
                     state.root = Some(root);
-                    info!("Mounted {}", container);
+                    if let Some(author) = author {
+                        info!("Mounted {} (packed {} by {})", container, date, author);
+                    } else {
+                        info!("Mounted {} (packed {})", container, date);
+                    }
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("failed to mount {}: {}", container, e);
+                    warn!("Failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }
@@ -1026,7 +1033,7 @@ impl State {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("failed to mount {}: {}", container, e);
+                    warn!("Failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }

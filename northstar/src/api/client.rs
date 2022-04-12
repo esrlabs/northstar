@@ -139,7 +139,7 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
 
     match connect {
         Connect::Ack { .. } => Ok(connection),
-        Connect::Nack { error } => match dbg!(error) {
+        Connect::Nack { error } => match error {
             ConnectNack::InvalidProtocolVersion { .. } => Err(Error::Io(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "Protocol version unsupported",

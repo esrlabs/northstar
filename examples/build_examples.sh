@@ -163,7 +163,7 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "${KEY}" --comp "${COMPRESSION_ALGORITHM}"
+  exe cargo run --bin sextant -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "${KEY}" --author "${USER}" --comp "${COMPRESSION_ALGORITHM}"
 }
 
 main() {

@@ -34,6 +34,9 @@ enum Opt {
         /// Block size used by squashfs (default 128 KiB)
         #[clap(short, long)]
         block_size: Option<u32>,
+        // Author meta information
+        #[clap(short, long)]
+        author: Option<String>,
         /// Create n clones of the container
         #[clap(long)]
         clones: Option<u32>,
@@ -75,6 +78,7 @@ fn main() -> Result<()> {
             key,
             comp,
             block_size,
+            author,
             clones,
         } => pack::pack(
             &manifest,
@@ -83,6 +87,7 @@ fn main() -> Result<()> {
             key.as_deref(),
             comp,
             block_size,
+            author.as_deref(),
             clones,
         )?,
         Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
