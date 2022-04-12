@@ -158,8 +158,8 @@ impl Init {
                         }
 
                         let path = CString::from(path);
-                        let args = args.into_iter().map(Into::into).collect::<Vec<CString>>();
-                        let env = env.into_iter().map(Into::into).collect::<Vec<CString>>();
+                        let args = args.into_iter().map_into::<CString>().collect_vec();
+                        let env = env.into_iter().map_into::<CString>().collect_vec();
 
                         panic!(
                             "execve: {:?} {:?}: {:?}",

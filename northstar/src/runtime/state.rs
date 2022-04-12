@@ -488,7 +488,8 @@ impl State {
             args.extend(manifest.args.iter().cloned());
         };
 
-        // Prepare the environment for the container according to the manifest
+        // Overwrite the env variables from the manifest if variables are provided
+        // with the start command
         let env = if env_extra.is_empty() {
             &manifest.env
         } else {
