@@ -5,7 +5,7 @@ authors = ["ESRLabs"]
 edition = "2021"
 build = "build.rs"
 license = "Apache-2.0"
-rust-version = "1.57.0"
+rust-version = "1.59.0"
 
 [dependencies]
 async-stream = { version = "0.3.3", optional = true }
