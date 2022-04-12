@@ -166,7 +166,7 @@ mounts:
     #[test]
     fn inspect_npk() {
         let dest = create_tmp_dir();
-        let npk = create_test_npk(&dest.path().to_path_buf());
+        let npk = create_test_npk(dest.path());
         assert!(npk.exists());
         inspect(&npk, true).expect("Inspect NPK");
         inspect(&npk, false).expect("Inspect NPK");
