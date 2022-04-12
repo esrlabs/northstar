@@ -137,20 +137,14 @@ impl Manifest {
         }
 
         // Check for reserved env variable names
-        if !self.env.is_empty() {
-            let keys = self
-                .env
-                .keys()
-                .map(NonNulString::as_str)
-                .collect::<HashSet<_>>();
-            for var in RESERVED_ENV_VARIABLES {
-                if keys.contains(var) {
-                    return Err(Error::Invalid(format!(
-                        "invalid environment: reserved variable {}",
-                        var
-                    )));
-                }
-            }
+        if RESERVED_ENV_VARIABLES.iter().any(|key| {
+            self.env
+                .contains_key(unsafe { &NonNulString::from_str_unchecked(key) })
+            // safe - constants
+        }) {
+            return Err(Error::Invalid(
+                "invalid environment: reserved variable name".into(),
+            ));
         }
 
         // Check for relative and overlapping bind mounts
