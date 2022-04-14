@@ -1,7 +1,7 @@
 name: token
 version: 0.0.1
 init: /token
-console: [token]
+console: [ident, token]
 uid: 1000
 gid: 1000
 io:
@@ -10,8 +10,6 @@ io:
 mounts:
   /dev:
     type: dev
-  /proc:
-    type: proc
   /lib:
     type: bind
     host: /lib

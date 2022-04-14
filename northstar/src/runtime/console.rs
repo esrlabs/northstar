@@ -334,6 +334,7 @@ where
     let required_permission = match &request {
         model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
         model::Request::Containers => Permission::Containers,
+        model::Request::Ident { .. } => Permission::Ident,
         model::Request::Install { .. } => Permission::Install,
         model::Request::Kill { .. } => Permission::Kill,
         model::Request::Mount { .. } => Permission::Mount,
@@ -357,6 +358,14 @@ where
 
     let (reply_tx, reply_rx) = oneshot::channel();
     match request {
+        model::Request::Ident => {
+            let ident = match peer {
+                Peer::Extern(_) => Container::try_from("remote:0.0.0").unwrap(),
+                Peer::Container(container) => container.clone(),
+            };
+            let response = api::model::Response::Ident(ident);
+            reply_tx.send(response).ok();
+        }
         model::Request::Install(repository, mut size) => {
             debug!(
                 "{}: Received installation request with size {}",
@@ -394,23 +403,36 @@ where
                 tx.send(buf).await.ok();
             }
         }
-        model::Request::TokenCreate(shared) => {
+        model::Request::TokenCreate(target, shared) => {
+            let user = match peer {
+                Peer::Extern(_) => "extern",
+                Peer::Container(container) => container.name().as_ref(),
+            };
             info!(
-                "Creating token for {} with {} bytes shared info",
-                peer,
-                shared.len()
+                "Creating token for user \"{}\" and target \"{}\" with shared \"{}\"",
+                hex::encode(&user),
+                hex::encode(&target),
+                hex::encode(&shared)
             );
-            let token: [u8; 40] = Token::new(shared).into();
+            let token: [u8; 40] = Token::new(user, target, shared).into();
             let token = api::model::Token::from(token);
             let response = api::model::Response::Token(token);
             reply_tx.send(response).ok();
         }
-        model::Request::TokenVerify(token, shared) => {
+        model::Request::TokenVerify(token, user, shared) => {
+            let target = match peer {
+                Peer::Extern(_) => "extern",
+                Peer::Container(container) => container.name().as_ref(),
+            };
+            info!(
+                "Verifiying token for user \"{}\" and target \"{}\" with shared \"{}\"",
+                hex::encode(&user),
+                hex::encode(&target),
+                hex::encode(&shared)
+            );
             let token: [u8; 40] = token.into();
             let token = Token::from(token);
-            let result = token.verify(&shared);
-            debug!("Verification result for {} is {:?}", peer, result);
-            let result = result.into();
+            let result = token.verify(user, target, &shared).into();
             let response = api::model::Response::TokenVerification(result);
             reply_tx.send(response).ok();
         }
@@ -530,7 +552,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
 }
 
 pub enum Peer {
-    Remote(Url),
+    Extern(Url),
     Container(Container),
 }
 
@@ -539,7 +561,7 @@ impl From<std::net::SocketAddr> for Peer {
         let mut url = Url::parse("tcp://").unwrap();
         url.set_ip_host(socket.ip()).unwrap();
         url.set_port(Some(socket.port())).unwrap();
-        Peer::Remote(url)
+        Peer::Extern(url)
     }
 }
 
@@ -550,14 +572,14 @@ impl From<tokio::net::unix::SocketAddr> for Peer {
             .unwrap_or_else(|| Path::new("unnamed"))
             .display();
         let url = Url::parse(&format!("unix://{}", path)).unwrap();
-        Peer::Remote(url)
+        Peer::Extern(url)
     }
 }
 
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Peer::Remote(url) => write!(f, "Remote({})", url),
+            Peer::Extern(url) => write!(f, "Remote({})", url),
             Peer::Container(container) => write!(f, "Container({})", container),
         }
     }

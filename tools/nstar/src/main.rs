@@ -118,6 +118,8 @@ enum Subcommand {
     },
     /// Create a token
     Token {
+        /// Token target
+        target: String,
         /// Shared info
         shared: String,
     },
@@ -125,9 +127,13 @@ enum Subcommand {
     VerifyToken {
         /// Token
         token: String,
+        /// User
+        user: String,
         /// Shared info
         shared: String,
     },
+    /// Identification
+    Ident,
 }
 
 /// CLI
@@ -195,6 +201,7 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
     client: &mut Client<T>,
 ) -> Result<Request> {
     match command {
+        Subcommand::Ident => Ok(Request::Ident),
         Subcommand::Containers => Ok(Request::Containers),
         Subcommand::Repositories => Ok(Request::Repositories),
         Subcommand::Mount { containers } => {
@@ -268,15 +275,21 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let container = parse_container(&container, client).await?;
             Ok(Request::ContainerStats(container))
         }
-        Subcommand::Token { shared } => {
+        Subcommand::Token { target, shared } => {
+            let target = target.as_bytes().to_vec();
             let shared = shared.as_bytes().to_vec();
-            Ok(Request::TokenCreate(shared))
+            Ok(Request::TokenCreate(target, shared))
         }
-        Subcommand::VerifyToken { token, shared } => {
+        Subcommand::VerifyToken {
+            token,
+            user,
+            shared,
+        } => {
+            let user = user.as_bytes().to_vec();
             let shared = shared.as_bytes().to_vec();
             let token = hex::decode(token.as_bytes()).context("invalid token")?;
-            let token: [u8; 40] = token.try_into().unwrap();
-            Ok(Request::TokenVerify(token.into(), shared))
+            let token: [u8; 40] = token.try_into().map_err(|_| anyhow!("invalid token"))?;
+            Ok(Request::TokenVerify(token.into(), user, shared))
         }
         Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }

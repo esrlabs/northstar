@@ -58,6 +58,12 @@ impl AsRef<str> for Name {
     }
 }
 
+impl AsRef<[u8]> for Name {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 impl TryFrom<String> for Name {
     type Error = NameError;
 

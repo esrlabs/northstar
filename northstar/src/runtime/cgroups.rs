@@ -130,10 +130,9 @@ impl CGroups {
         pid: Pid,
     ) -> Result<CGroups, Error> {
         debug!("Creating cgroups for {}", container);
-        let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(
-            hierarchy(),
-            Path::new(top_level_dir).join(container.name().as_ref()),
-        );
+        let name: &str = container.name().as_ref();
+        let cgroup: cgroups_rs::Cgroup =
+            cgroups_rs::Cgroup::new(hierarchy(), Path::new(top_level_dir).join(name));
 
         let resources = cgroups_rs::Resources {
             memory: config.memory.clone().map(Into::into).unwrap_or_default(),
