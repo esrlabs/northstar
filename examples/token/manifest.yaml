@@ -1,0 +1,23 @@
+name: token
+version: 0.0.1
+init: /token
+console: [token]
+uid: 1000
+gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+  /system:
+    type: bind
+    host: /system
