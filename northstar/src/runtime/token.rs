@@ -7,7 +7,7 @@ use rand_core::{OsRng, RngCore};
 use sha2::Sha256;
 use std::{
     fmt,
-    time::{self, Instant},
+    time::{self},
 };
 
 use crate::api;
@@ -21,8 +21,6 @@ lazy_static! {
         OsRng.fill_bytes(&mut key);
         key
     };
-    /// Use Instant as a monotonic clock source
-    static ref START_TIMESTAMP: Instant = Instant::now();
 }
 
 type HmacSha256 = hmac::Hmac<Sha256>;
@@ -31,11 +29,13 @@ type Hmac = CtOutput<HmacSha256>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum VerificationResult {
     /// Verification succeeded
-    Valid,
+    Ok,
     /// Verification failed
     Invalid,
     /// Token is expired
     Expired,
+    /// Token time is in the future
+    Future,
 }
 
 /// Token instance
@@ -47,37 +47,49 @@ pub(crate) struct Token {
 
 impl Token {
     /// Create a new token
-    pub fn new<T: AsRef<[u8]>>(usage: T) -> Token {
+    pub fn new<T: AsRef<[u8]>>(shared: T) -> Token {
         let now = now();
-        let hmac = calculate_hmac(&now, usage);
+        let hmac = calculate_hmac(&now, shared);
         Token { time: now, hmac }
     }
 
-    /// Verify that `usage` matches the token
-    pub fn verify<T: AsRef<[u8]>>(&self, usage: T) -> VerificationResult {
-        if now()
-            .checked_sub(self.time)
-            .map_or(true, |age| age > TOKEN_EXPIRED_THRESHOLD)
-        {
+    /// Verify that `shared` matches the token
+    pub fn verify<T: AsRef<[u8]>>(&self, shared: T) -> VerificationResult {
+        let now = now();
+
+        if now < self.time {
+            VerificationResult::Future
+        } else if now - self.time > TOKEN_EXPIRED_THRESHOLD {
             VerificationResult::Expired
-        } else if calculate_hmac(&self.time, usage) == self.hmac {
-            VerificationResult::Valid
+        } else if calculate_hmac(&self.time, shared) == self.hmac {
+            VerificationResult::Ok
         } else {
             VerificationResult::Invalid
         }
     }
 }
 
+#[cfg(not(test))]
 fn now() -> time::Duration {
-    let now = Instant::now().duration_since(*START_TIMESTAMP);
-    time::Duration::from_secs(now.as_secs()) // round to seconds
+    time::Duration::from_secs(time::Instant::now().elapsed().as_secs())
 }
 
-fn calculate_hmac<T: AsRef<[u8]>>(time: &time::Duration, usage: T) -> Hmac {
+/// Special now impl for tests that need now in the past
+#[cfg(test)]
+fn now() -> time::Duration {
+    time::Duration::from_secs(
+        time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+}
+
+fn calculate_hmac<T: AsRef<[u8]>>(time: &time::Duration, shared: T) -> Hmac {
     let mut hasher =
         HmacSha256::new_from_slice(MAC_KEY.as_slice()).expect("Failed to create SHA-256 hasher");
     hasher.update(&time.as_millis().to_be_bytes());
-    hasher.update(usage.as_ref());
+    hasher.update(shared.as_ref());
     hasher.finalize()
 }
 
@@ -112,9 +124,10 @@ impl fmt::Debug for Token {
 impl From<VerificationResult> for api::model::VerificationResult {
     fn from(result: VerificationResult) -> Self {
         match result {
-            VerificationResult::Valid => api::model::VerificationResult::Valid,
+            VerificationResult::Ok => api::model::VerificationResult::Ok,
             VerificationResult::Invalid => api::model::VerificationResult::Invalid,
             VerificationResult::Expired => api::model::VerificationResult::Expired,
+            VerificationResult::Future => api::model::VerificationResult::Future,
         }
     }
 }
@@ -123,67 +136,58 @@ impl From<VerificationResult> for api::model::VerificationResult {
 mod test {
     use super::*;
 
-    const USAGE: &str = "hello";
+    const SHARED: &str = "hello";
 
     #[test]
-    fn verify_new_token() {
-        assert_eq!(Token::new(USAGE).verify(USAGE), VerificationResult::Valid);
+    fn verify_new() {
+        assert_eq!(Token::new(SHARED).verify(SHARED), VerificationResult::Ok);
     }
 
     #[test]
-    fn verify_recent_token() {
-        let mut recent_token = Token::new(USAGE);
-        recent_token.time = recent_token
-            .time
-            .checked_sub(time::Duration::from_secs(10)) // 10 seconds into the past
-            .expect("Failed to create future timestamp");
-        recent_token.hmac = calculate_hmac(&recent_token.time, USAGE); // Fix HMAC for changed timestamp
-        assert_eq!(recent_token.verify(USAGE), VerificationResult::Valid);
+    fn verify_recent() {
+        let mut recent_token = Token::new(SHARED);
+        recent_token.time = now() - TOKEN_EXPIRED_THRESHOLD / 2;
+        recent_token.hmac = calculate_hmac(&recent_token.time, SHARED); // Fix HMAC for changed timestamp
+        assert_eq!(recent_token.verify(SHARED), VerificationResult::Ok);
     }
 
     #[test]
-    fn verify_old_token() {
-        let mut old_token = Token::new(USAGE);
-        old_token.time = old_token
-            .time
-            .checked_sub(time::Duration::from_secs(3600)) // 1 hour into the past
-            .expect("Failed to create future timestamp");
-        old_token.hmac = calculate_hmac(&old_token.time, USAGE); // Fix HMAC for changed timestamp
-        assert_eq!(old_token.verify(USAGE), VerificationResult::Expired);
+    fn verify_expired() {
+        let mut old_token = Token::new(SHARED);
+        old_token.time = time::Duration::from_secs(0);
+        old_token.hmac = calculate_hmac(&old_token.time, SHARED); // Fix HMAC for changed timestamp
+        assert_eq!(old_token.verify(SHARED), VerificationResult::Expired);
     }
 
     #[test]
-    fn verify_future_token() {
-        let mut future_token = Token::new(USAGE);
-        future_token.time = future_token
-            .time
-            .checked_add(time::Duration::from_millis(1))
-            .expect("Failed to create future timestamp");
-        assert_eq!(future_token.verify(USAGE), VerificationResult::Expired);
+    fn verify_future() {
+        let mut future_token = Token::new(SHARED);
+        future_token.time = now() + time::Duration::from_secs(3600);
+        assert_eq!(future_token.verify(SHARED), VerificationResult::Future);
     }
 
     #[test]
     fn verify_broken_mac() {
-        let mut broken_token = Token::new(USAGE);
+        let mut broken_token = Token::new(SHARED);
         let mut broken_mac = broken_token.hmac.clone().into_bytes().to_vec();
         broken_mac[0] = broken_mac[0].overflowing_add(1).0;
         let broken_mac: [u8; 32] = broken_mac.try_into().unwrap();
         broken_token.hmac =
             CtOutput::<HmacSha256>::new(GenericArray::clone_from_slice(&broken_mac));
-        assert_eq!(broken_token.verify(USAGE), VerificationResult::Invalid);
+        assert_eq!(broken_token.verify(SHARED), VerificationResult::Invalid);
     }
 
     #[test]
-    fn verify_wrong_usage() {
+    fn verify_wrong_shared() {
         assert_eq!(
-            Token::new(USAGE).verify("XMPP"),
+            Token::new(SHARED).verify("XMPP"),
             VerificationResult::Invalid
         );
     }
 
     #[test]
     fn byte_array_roundtrip() {
-        let original = Token::new(USAGE);
+        let original = Token::new(SHARED);
         let bytes: [u8; 40] = original.clone().into();
         let token: Token = bytes.into();
         assert_eq!(original, token);

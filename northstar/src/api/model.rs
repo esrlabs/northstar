@@ -162,11 +162,13 @@ impl From<[u8; 40]> for Token {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum VerificationResult {
     /// Verification succeeded
-    Valid,
+    Ok,
     /// Verification failed
     Invalid,
     /// Token is expired
     Expired,
+    /// Token time is in the future
+    Future,
 }
 
 /// Container information

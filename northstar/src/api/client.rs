@@ -633,9 +633,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// println!("{:?}", client.create_token("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
-    pub async fn create_token<U: AsRef<[u8]>>(&mut self, usage: U) -> Result<Token, Error> {
+    pub async fn create_token<U: AsRef<[u8]>>(&mut self, shared: U) -> Result<Token, Error> {
         match self
-            .request(Request::TokenCreate(usage.as_ref().to_vec()))
+            .request(Request::TokenCreate(shared.as_ref().to_vec()))
             .await?
         {
             Response::Token(token) => Ok(token),
@@ -662,11 +662,11 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn verify_token<U: AsRef<[u8]>>(
         &mut self,
         token: &Token,
-        usage: U,
+        shared: U,
     ) -> Result<VerificationResult, Error> {
         let token = token.clone();
-        let usage = usage.as_ref().to_vec();
-        match self.request(Request::TokenVerify(token, usage)).await? {
+        let shared = shared.as_ref().to_vec();
+        match self.request(Request::TokenVerify(token, shared)).await? {
             Response::TokenVerification(result) => Ok(result),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on token verification should be a token verification"),

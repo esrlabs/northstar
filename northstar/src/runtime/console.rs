@@ -394,21 +394,21 @@ where
                 tx.send(buf).await.ok();
             }
         }
-        model::Request::TokenCreate(usage) => {
+        model::Request::TokenCreate(shared) => {
             info!(
-                "Creating token for {} with {} bytes usage",
+                "Creating token for {} with {} bytes shared info",
                 peer,
-                usage.len()
+                shared.len()
             );
-            let token: [u8; 40] = Token::new(usage).into();
+            let token: [u8; 40] = Token::new(shared).into();
             let token = api::model::Token::from(token);
             let response = api::model::Response::Token(token);
             reply_tx.send(response).ok();
         }
-        model::Request::TokenVerify(token, usage) => {
+        model::Request::TokenVerify(token, shared) => {
             let token: [u8; 40] = token.into();
             let token = Token::from(token);
-            let result = token.verify(&usage);
+            let result = token.verify(&shared);
             debug!("Verification result for {} is {:?}", peer, result);
             let result = result.into();
             let response = api::model::Response::TokenVerification(result);
