@@ -875,7 +875,8 @@ impl State {
                             }
                         }
                     }
-                    model::Request::TokenCreate(_) => unreachable!(), // handled in module console
+                    model::Request::Ident => unreachable!(), // handled in module console
+                    model::Request::TokenCreate(..) => unreachable!(), // handled in module console
                     model::Request::TokenVerify(..) => unreachable!(), // handled in module console
                 };
 

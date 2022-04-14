@@ -39,6 +39,8 @@ pub enum Permission {
     Notifications,
     /// Token creation and verification
     Token,
+    /// Identification
+    Ident,
 }
 
 impl fmt::Display for Permission {

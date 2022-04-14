@@ -120,6 +120,7 @@ pub enum ConnectNack {
 pub enum Request {
     ContainerStats(Container),
     Containers,
+    Ident,
     Install(RepositoryId, u64),
     Kill(Container, i32),
     Mount(Vec<Container>),
@@ -130,8 +131,8 @@ pub enum Request {
         Vec<NonNulString>,
         HashMap<NonNulString, NonNulString>,
     ),
-    TokenCreate(Vec<u8>),
-    TokenVerify(Token, Vec<u8>),
+    TokenCreate(Vec<u8>, Vec<u8>),
+    TokenVerify(Token, Vec<u8>, Vec<u8>),
     Umount(Vec<Container>),
     Uninstall(Container),
 }
@@ -221,15 +222,16 @@ pub enum UmountResult {
 #[allow(missing_docs)]
 pub enum Response {
     Ok,
-    Containers(Vec<ContainerData>),
-    Repositories(HashSet<RepositoryId>),
-    Mount(Vec<MountResult>),
-    Umount(Vec<UmountResult>),
+    Error(Error),
     ContainerStats(Container, ContainerStats),
+    Containers(Vec<ContainerData>),
+    Ident(Container),
     Install(Container),
+    Mount(Vec<MountResult>),
+    Repositories(HashSet<RepositoryId>),
     Token(Token),
     TokenVerification(VerificationResult),
-    Error(Error),
+    Umount(Vec<UmountResult>),
 }
 
 /// Container exit status

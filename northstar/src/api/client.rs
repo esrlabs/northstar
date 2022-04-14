@@ -220,6 +220,28 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         }
     }
 
+    /// Request the identificaiton of this container
+    ///
+    /// ```no_run
+    /// # use futures::StreamExt;
+    /// # use tokio::time::Duration;
+    /// # use northstar::api::client::Client;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let ident = client.ident().await.expect("failed to identity");
+    /// println!("{}", ident);
+    /// # }
+    /// ```
+    pub async fn ident(&mut self) -> Result<Container, Error> {
+        match self.request(Request::Ident).await? {
+            Response::Ident(container) => Ok(container),
+            Response::Error(error) => Err(Error::Runtime(error)),
+            _ => unreachable!("response on ident should be ident"),
+        }
+    }
+
     /// Request a list of installed containers
     ///
     /// ```no_run
@@ -623,6 +645,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
     /// Create a token
     ///
+    /// The `target` parameter must be the container name of the container that
+    /// will try to verify the token.
+    ///
     /// ```no_run
     /// # use std::time::Duration;
     /// # use northstar::api::client::Client;
@@ -630,14 +655,17 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// println!("{:?}", client.create_token("hello:0.0.1").await.unwrap());
+    /// println!("{:?}", client.create_token("target", "hello:0.0.1").await.unwrap());
     /// # }
     /// ```
-    pub async fn create_token<U: AsRef<[u8]>>(&mut self, shared: U) -> Result<Token, Error> {
-        match self
-            .request(Request::TokenCreate(shared.as_ref().to_vec()))
-            .await?
-        {
+    pub async fn create_token<R, S>(&mut self, target: R, shared: S) -> Result<Token, Error>
+    where
+        R: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
+        let target = target.as_ref().to_vec();
+        let shared = shared.as_ref().to_vec();
+        match self.request(Request::TokenCreate(target, shared)).await? {
             Response::Token(token) => Ok(token),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on token should be a token reponse created"),
@@ -654,19 +682,28 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let token = client.create_token("hello:0.0.1").await.unwrap();
-    /// assert_eq!(client.verify_token(&token, "hello:0.0.1").await.unwrap(), VerificationResult::Valid);
-    /// assert_eq!(client.verify_token(&token, "#noafd").await.unwrap(), VerificationResult::Valid);
+    /// let token = client.create_token("hello:0.0.1", "target").await.unwrap();
+    /// assert_eq!(client.verify_token(&token, "hello:0.0.1", "target").await.unwrap(), VerificationResult::Ok);
+    /// assert_eq!(client.verify_token(&token, "#noafd", "target").await.unwrap(), VerificationResult::Ok);
     /// # }
     /// ```
-    pub async fn verify_token<U: AsRef<[u8]>>(
+    pub async fn verify_token<R, S>(
         &mut self,
         token: &Token,
-        shared: U,
-    ) -> Result<VerificationResult, Error> {
+        target: R,
+        shared: S,
+    ) -> Result<VerificationResult, Error>
+    where
+        R: AsRef<[u8]>,
+        S: AsRef<[u8]>,
+    {
         let token = token.clone();
         let shared = shared.as_ref().to_vec();
-        match self.request(Request::TokenVerify(token, shared)).await? {
+        let target = target.as_ref().to_vec();
+        match self
+            .request(Request::TokenVerify(token, target, shared))
+            .await?
+        {
             Response::TokenVerification(result) => Ok(result),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on token verification should be a token verification"),

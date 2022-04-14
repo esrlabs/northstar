@@ -120,6 +120,7 @@ fn umounts(mounts: &[UmountResult]) {
 
 pub(crate) fn response(response: &Response) -> i32 {
     match response {
+        Response::Ident(c) => println!("{}", c),
         Response::Containers(c) => containers(c),
         Response::Repositories(r) => repositories(r),
         Response::Mount(result) => mounts(result),

@@ -15,13 +15,12 @@
 use anyhow::Result;
 use northstar::api::client;
 use std::{env, os::unix::prelude::FromRawFd, time::Duration};
-use tokio::net::UnixStream;
+use tokio::{net::UnixStream, time};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Gather fd number from env
     let fd = env::var("NORTHSTAR_CONSOLE")?.parse::<i32>()?;
-
     println!("Console fd is {}", fd);
 
     // Wrap fd in UnixStream which is used as io object for the client
@@ -34,11 +33,17 @@ async fn main() -> Result<()> {
     // Instantiate client and start connect sequence
     let mut client = client::Client::new(io, None, Duration::from_secs(5)).await?;
 
+    // Request the identity of this container
+    let ident = client.ident().await?;
+    println!("We are {}", ident);
+
+    // List repositories
     println!(
         "Listing repositories is denied: {:?}",
         client.repositories().await
     );
 
+    // Iterate containers and print their names and state
     for container in client.containers().await? {
         println!(
             "{} is {}",
@@ -54,7 +59,7 @@ async fn main() -> Result<()> {
     client.kill("console:0.0.1", 15).await?;
 
     // Wait for the sigterm
-    tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
+    time::sleep(time::Duration::from_secs(u64::MAX)).await;
 
     Ok(())
 }
