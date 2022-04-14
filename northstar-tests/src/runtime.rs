@@ -178,12 +178,7 @@ impl Client {
         self.client.kill(container, 15).await?;
         let container: Container = container.try_into()?;
         self.assume_notification(
-            |n| {
-                n == &Notification::Exit {
-                    container: container.clone(),
-                    status: ExitStatus::Signalled { signal: 15 },
-                }
-            },
+            |n| n == &Notification::Exit(container.clone(), ExitStatus::Signalled { signal: 15 }),
             timeout,
         )
         .await?;

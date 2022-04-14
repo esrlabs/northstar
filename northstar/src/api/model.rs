@@ -1,6 +1,13 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use schemars::{
+    gen::SchemaGenerator,
+    schema::{InstanceType, SchemaObject},
+    JsonSchema,
+};
+use serde::{de::Visitor, Deserialize, Serialize, Serializer};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 /// Console configuration
 pub type ConsoleConfiguration = crate::npk::manifest::Console;
@@ -26,7 +33,7 @@ pub type Version = crate::common::version::Version;
 pub type ContainerStats = HashMap<String, serde_json::Value>;
 
 /// API version
-const VERSION: Version = Version::new(0, 2, 3);
+const VERSION: Version = Version::new(0, 3, 0);
 
 /// API version
 pub const fn version() -> Version {
@@ -35,8 +42,8 @@ pub const fn version() -> Version {
 
 /// Message
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
+#[serde(untagged)]
 pub enum Message {
     Connect { connect: Connect },
     Request { request: Request },
@@ -49,24 +56,12 @@ pub enum Message {
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Notification {
-    Started {
-        container: Container,
-    },
-    Exit {
-        container: Container,
-        status: ExitStatus,
-    },
-    Install {
-        container: Container,
-    },
-    Uninstall {
-        container: Container,
-    },
-    CGroup {
-        container: Container,
-        notification: CgroupNotification,
-    },
+    CGroup(Container, CgroupNotification),
+    Exit(Container, ExitStatus),
+    Install(Container),
     Shutdown,
+    Started(Container),
+    Uninstall(Container),
 }
 
 /// Cgroup event
@@ -123,41 +118,55 @@ pub enum ConnectNack {
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Request {
-    /// Runtime shutdown
-    Shutdown,
-    /// Container list
+    ContainerStats(Container),
     Containers,
-    /// Repository list
+    Install(RepositoryId, u64),
+    Kill(Container, i32),
+    Mount(Vec<Container>),
     Repositories,
-    /// Start a contianer
-    Start {
-        /// Container
-        container: Container,
-        /// Optional command line arguments
-        args: Vec<NonNulString>,
-        /// Optional environment variables
-        env: HashMap<NonNulString, NonNulString>,
-    },
-    Kill {
-        container: Container,
-        signal: i32,
-    },
-    Install {
-        repository: RepositoryId,
-        size: u64,
-    },
-    Mount {
-        containers: Vec<Container>,
-    },
-    Umount {
-        containers: Vec<Container>,
-    },
-    Uninstall {
-        container: Container,
-    },
-    ContainerStats {
-        container: Container,
-    },
+    Shutdown,
+    Start(
+        Container,
+        Vec<NonNulString>,
+        HashMap<NonNulString, NonNulString>,
+    ),
+    TokenCreate(Vec<u8>),
+    TokenVerify(Token, Vec<u8>),
+    Umount(Vec<Container>),
+    Uninstall(Container),
+}
+
+/// Token
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Token([u8; 40]);
+
+impl AsRef<[u8]> for Token {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<Token> for [u8; 40] {
+    fn from(value: Token) -> Self {
+        value.0
+    }
+}
+
+impl From<[u8; 40]> for Token {
+    fn from(value: [u8; 40]) -> Self {
+        Self(value)
+    }
+}
+
+/// Token verification result
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum VerificationResult {
+    /// Verification succeeded
+    Valid,
+    /// Verification failed
+    Invalid,
+    /// Token is expired
+    Expired,
 }
 
 /// Container information
@@ -210,28 +219,15 @@ pub enum UmountResult {
 #[allow(missing_docs)]
 pub enum Response {
     Ok,
-    Containers {
-        containers: Vec<ContainerData>,
-    },
-    Repositories {
-        repositories: HashSet<RepositoryId>,
-    },
-    Mount {
-        result: Vec<MountResult>,
-    },
-    Umount {
-        result: Vec<UmountResult>,
-    },
-    ContainerStats {
-        container: Container,
-        stats: ContainerStats,
-    },
-    Install {
-        container: Container,
-    },
-    Error {
-        error: Error,
-    },
+    Containers(Vec<ContainerData>),
+    Repositories(HashSet<RepositoryId>),
+    Mount(Vec<MountResult>),
+    Umount(Vec<UmountResult>),
+    ContainerStats(Container, ContainerStats),
+    Install(Container),
+    Token(Token),
+    TokenVerification(VerificationResult),
+    Error(Error),
 }
 
 /// Container exit status
@@ -310,4 +306,61 @@ pub enum Error {
         module: String,
         error: String,
     },
+}
+
+impl Serialize for Token {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Token {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct TokenVisitor;
+
+        impl<'de> Visitor<'de> for TokenVisitor {
+            type Value = Token;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a 40 byte sequence")
+            }
+
+            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                if v.len() != 40 {
+                    return Err(serde::de::Error::custom("token length is 40 bytes"));
+                }
+                Ok(Token(v.try_into().map_err(|_| {
+                    serde::de::Error::custom("token is not 40 bytes")
+                })?))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut v = [0u8; 40];
+                for b in &mut v {
+                    *b = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::custom("token is not 40 bytes"))?;
+                }
+                Ok(Token(v))
+            }
+        }
+
+        deserializer.deserialize_bytes(TokenVisitor)
+    }
+}
+
+impl JsonSchema for Token {
+    fn schema_name() -> String {
+        "Token".to_string()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::Array.into()),
+            ..Default::default()
+        }
+        .into()
+    }
 }

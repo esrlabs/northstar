@@ -111,6 +111,7 @@ async fn install_uninstall_examples() -> Result<()> {
     client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
     client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
     client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_NPK, "mem").await?;
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
@@ -126,6 +127,7 @@ async fn install_uninstall_examples() -> Result<()> {
     client().uninstall(EXAMPLE_MESSAGE_0_0_2).await?;
     client().uninstall(EXAMPLE_PERSISTENCE).await?;
     client().uninstall(EXAMPLE_SECCOMP).await?;
+    client().uninstall(EXAMPLE_TOKEN).await?;
     client().uninstall(TEST_CONTAINER).await?;
     client().uninstall(TEST_RESOURCE).await?;
     Ok(())
@@ -146,6 +148,7 @@ async fn mount_umount() -> Result<()> {
     client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
     client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
     client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_NPK, "mem").await?;
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
@@ -250,16 +253,8 @@ async fn container_crash_exit() -> Result<()> {
         client().start_with_args(TEST_CONTAINER, ["crash"]).await?;
         client()
             .assume_notification(
-                |n| {
-                    matches!(
-                        n,
-                        Notification::Exit {
-                            status: ExitStatus::Exit { code: 101 },
-                            ..
-                        }
-                    )
-                },
-                15,
+                |n| matches!(n, status: ExitStatus::Exit { code: 101 }, ..),
+                5,
             )
             .await?;
     }
@@ -484,10 +479,10 @@ async fn seccomp_allowed_syscall_with_prohibited_arg() -> Result<()> {
 
     let n = |n: &Notification| {
         matches!(n,
-        Notification::Exit {
-            status: ExitStatus::Signalled { signal },
-            ..
-        } if signal == &31)
+        Notification::Exit (
+            _,
+            ExitStatus::Signalled { signal },
+        ) if signal == &31)
     };
     client().assume_notification(n, 5).await
 }
@@ -502,10 +497,10 @@ async fn exit_codes() -> Result<()> {
             .start_with_args(TEST_CONTAINER, ["exit".to_string(), c.to_string()])
             .await?;
         let n = |n: &Notification| {
-            matches!(n, Notification::Exit {
-                status: ExitStatus::Exit { code },
-                ..
-            } if code == c)
+            matches!(n, Notification::Exit (
+                _,
+                ExitStatus::Exit { code },
+            ) if code == c)
         };
         client().assume_notification(n, 5).await?;
     }

@@ -791,11 +791,11 @@ impl State {
         match request {
             Request::Request(ref request) => {
                 let response = match request {
-                    model::Request::Containers => model::Response::Containers {
-                        containers: self.list_containers(),
-                    },
+                    model::Request::Containers => {
+                        model::Response::Containers(self.list_containers())
+                    }
                     model::Request::Install { .. } => unreachable!(),
-                    model::Request::Mount { containers } => {
+                    model::Request::Mount(containers) => {
                         let result = self
                             .mount_all(containers)
                             .await
@@ -809,9 +809,9 @@ impl State {
                                 },
                             })
                             .collect();
-                        model::Response::Mount { result }
+                        model::Response::Mount(result)
                     }
-                    model::Request::Umount { containers } => {
+                    model::Request::Umount(containers) => {
                         let result = self
                             .umount_all(containers)
                             .await
@@ -825,11 +825,11 @@ impl State {
                                 },
                             })
                             .collect();
-                        model::Response::Umount { result }
+                        model::Response::Umount(result)
                     }
                     model::Request::Repositories => {
                         let repositories = self.repositories.keys().cloned().collect();
-                        model::Response::Repositories { repositories }
+                        model::Response::Repositories(repositories)
                     }
                     model::Request::Shutdown => {
                         self.events_tx
@@ -838,48 +838,45 @@ impl State {
                             .expect("Internal channel error on main");
                         model::Response::Ok
                     }
-                    model::Request::Start {
-                        container,
-                        args,
-                        env,
-                    } => match self.start(container, args, env).await {
-                        Ok(_) => model::Response::Ok,
-                        Err(e) => {
-                            warn!("failed to start {}: {}", container, e);
-                            model::Response::Error { error: e.into() }
+                    model::Request::Start(container, args, env) => {
+                        match self.start(container, args, env).await {
+                            Ok(_) => model::Response::Ok,
+                            Err(e) => {
+                                warn!("failed to start {}: {}", container, e);
+                                model::Response::Error(e.into())
+                            }
                         }
-                    },
-                    model::Request::Kill { container, signal } => {
+                    }
+                    model::Request::Kill(container, signal) => {
                         let signal = Signal::try_from(*signal).unwrap();
                         match self.kill(container, signal).await {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
                                 error!("failed to kill {} with {}: {}", container, signal, e);
-                                model::Response::Error { error: e.into() }
+                                model::Response::Error(e.into())
                             }
                         }
                     }
-                    model::Request::Uninstall { container } => {
-                        match self.uninstall(container).await {
-                            Ok(_) => api::model::Response::Ok,
-                            Err(e) => {
-                                warn!("failed to uninstall {}: {}", container, e);
-                                model::Response::Error { error: e.into() }
-                            }
+                    model::Request::Uninstall(container) => match self.uninstall(container).await {
+                        Ok(_) => api::model::Response::Ok,
+                        Err(e) => {
+                            warn!("failed to uninstall {}: {}", container, e);
+                            model::Response::Error(e.into())
                         }
-                    }
-                    model::Request::ContainerStats { container } => {
+                    },
+                    model::Request::ContainerStats(container) => {
                         match self.container_stats(container).await {
-                            Ok(stats) => api::model::Response::ContainerStats {
-                                container: container.clone(),
-                                stats,
-                            },
+                            Ok(stats) => {
+                                api::model::Response::ContainerStats(container.clone(), stats)
+                            }
                             Err(e) => {
                                 warn!("failed to gather stats for {}: {}", container, e);
-                                model::Response::Error { error: e.into() }
+                                model::Response::Error(e.into())
                             }
                         }
                     }
+                    model::Request::TokenCreate(_) => unreachable!(), // handled in module console
+                    model::Request::TokenVerify(..) => unreachable!(), // handled in module console
                 };
 
                 // A error on the response_tx means that the connection
@@ -888,8 +885,8 @@ impl State {
             }
             Request::Install(repository, mut rx) => {
                 let payload = match self.install(&repository, &mut rx).await {
-                    Ok(container) => model::Response::Install { container },
-                    Err(e) => model::Response::Error { error: e.into() },
+                    Ok(container) => model::Response::Install(container),
+                    Err(e) => model::Response::Error(e.into()),
                 };
 
                 // A error on the response_tx means that the connection

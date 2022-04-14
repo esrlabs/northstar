@@ -37,6 +37,8 @@ pub enum Permission {
     ContainerStatistics,
     /// Notifications
     Notifications,
+    /// Token creation and verification
+    Token,
 }
 
 impl fmt::Display for Permission {

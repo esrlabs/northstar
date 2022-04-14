@@ -2,7 +2,7 @@ use super::{
     codec,
     model::{
         self, Connect, ConnectNack, Container, ContainerData, ContainerStats, Message, MountResult,
-        Notification, RepositoryId, Request, Response, UmountResult,
+        Notification, RepositoryId, Request, Response, Token, UmountResult, VerificationResult,
     },
 };
 use crate::common::{
@@ -236,8 +236,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```
     pub async fn containers(&mut self) -> Result<Vec<ContainerData>, Error> {
         match self.request(Request::Containers).await? {
-            Response::Containers { containers } => Ok(containers),
-            Response::Error { error } => Err(Error::Runtime(error)),
+            Response::Containers(containers) => Ok(containers),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on containers should be containers"),
         }
     }
@@ -258,8 +258,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```
     pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, Error> {
         match self.request(Request::Repositories).await? {
-            Response::Repositories { repositories } => Ok(repositories),
-            Response::Error { error } => Err(Error::Runtime(error)),
+            Response::Repositories(repositories) => Ok(repositories),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on repositories should be ok or error"),
         }
     }
@@ -356,15 +356,11 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
         let args = args_converted;
         let env = env_converted;
-        let request = Request::Start {
-            container,
-            args,
-            env,
-        };
+        let request = Request::Start(container, args, env);
 
         match self.request(request).await? {
             Response::Ok => Ok(()),
-            Response::Error { error } => Err(Error::Runtime(error)),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on start should be ok or error"),
         }
     }
@@ -390,9 +386,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         signal: i32,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Kill { container, signal }).await? {
+        match self.request(Request::Kill(container, signal)).await? {
             Response::Ok => Ok(()),
-            Response::Error { error } => Err(Error::Runtime(error)),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on kill should be ok or error"),
         }
     }
@@ -415,10 +411,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         self.fused()?;
         let file = fs::File::open(npk).await.map_err(Error::Io)?;
         let size = file.metadata().await.unwrap().len();
-        let request = Request::Install {
-            repository: repository.into(),
-            size,
-        };
+        let request = Request::Install(repository.into(), size);
         let message = Message::Request { request };
         self.connection.send(message).await.map_err(|_| {
             self.fuse();
@@ -439,8 +432,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             match self.connection.next().await {
                 Some(Ok(message)) => match message {
                     Message::Response { response } => match response {
-                        Response::Install { container } => break Ok(container),
-                        Response::Error { error } => break Err(Error::Runtime(error)),
+                        Response::Install(container) => break Ok(container),
+                        Response::Error(error) => break Err(Error::Runtime(error)),
                         _ => unreachable!("response on install should be container or error"),
                     },
                     Message::Notification { notification } => {
@@ -466,8 +459,6 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use northstar::common::version::Version;
-    /// # use std::path::Path;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -482,9 +473,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<(), Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Uninstall { container }).await? {
+        match self.request(Request::Uninstall(container)).await? {
             Response::Ok => Ok(()),
-            Response::Error { error } => Err(Error::Runtime(error)),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on uninstall should be ok or error"),
         }
     }
@@ -498,8 +489,6 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use northstar::api::client::Client;
     /// # use std::time::Duration;
-    /// # use northstar::common::version::Version;
-    /// # use std::path::Path;
     /// # use std::convert::TryInto;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
@@ -545,9 +534,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             result.push(container);
         }
 
-        match self.request(Request::Mount { containers: result }).await? {
-            Response::Mount { result } => Ok(result),
-            Response::Error { error } => Err(Error::Runtime(error)),
+        match self.request(Request::Mount(result)).await? {
+            Response::Mount(result) => Ok(result),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on umount_all should be mount"),
         }
     }
@@ -556,9 +545,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use std::path::Path;
     /// # use northstar::api::client::Client;
-    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -580,9 +567,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use std::path::Path;
     /// # use northstar::api::client::Client;
-    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -605,9 +590,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             result.push(container);
         }
 
-        match self.request(Request::Umount { containers: result }).await? {
-            Response::Umount { result } => Ok(result),
-            Response::Error { error } => Err(Error::Runtime(error)),
+        match self.request(Request::Umount(result)).await? {
+            Response::Umount(result) => Ok(result),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on umount should be umount"),
         }
     }
@@ -616,9 +601,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use std::path::Path;
     /// # use northstar::api::client::Client;
-    /// # use northstar::common::version::Version;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
@@ -631,10 +614,62 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<ContainerStats, Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::ContainerStats { container }).await? {
-            Response::ContainerStats { stats, .. } => Ok(stats),
-            Response::Error { error } => Err(Error::Runtime(error)),
+        match self.request(Request::ContainerStats(container)).await? {
+            Response::ContainerStats(_, stats) => Ok(stats),
+            Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on container_stats should be a container_stats"),
+        }
+    }
+
+    /// Create a token
+    ///
+    /// ```no_run
+    /// # use std::time::Duration;
+    /// # use northstar::api::client::Client;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// println!("{:?}", client.create_token("hello:0.0.1").await.unwrap());
+    /// # }
+    /// ```
+    pub async fn create_token<U: AsRef<[u8]>>(&mut self, usage: U) -> Result<Token, Error> {
+        match self
+            .request(Request::TokenCreate(usage.as_ref().to_vec()))
+            .await?
+        {
+            Response::Token(token) => Ok(token),
+            Response::Error(error) => Err(Error::Runtime(error)),
+            _ => unreachable!("response on token should be a token reponse created"),
+        }
+    }
+
+    /// Verify a slice of bytes with a token
+    ///
+    /// ```no_run
+    /// # use std::time::Duration;
+    /// # use northstar::api::client::Client;
+    /// # use northstar::api::model::VerificationResult;
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let token = client.create_token("hello:0.0.1").await.unwrap();
+    /// assert_eq!(client.verify_token(&token, "hello:0.0.1").await.unwrap(), VerificationResult::Valid);
+    /// assert_eq!(client.verify_token(&token, "#noafd").await.unwrap(), VerificationResult::Valid);
+    /// # }
+    /// ```
+    pub async fn verify_token<U: AsRef<[u8]>>(
+        &mut self,
+        token: &Token,
+        usage: U,
+    ) -> Result<VerificationResult, Error> {
+        let token = token.clone();
+        let usage = usage.as_ref().to_vec();
+        match self.request(Request::TokenVerify(token, usage)).await? {
+            Response::TokenVerification(result) => Ok(result),
+            Response::Error(error) => Err(Error::Runtime(error)),
+            _ => unreachable!("response on token verification should be a token verification"),
         }
     }
 

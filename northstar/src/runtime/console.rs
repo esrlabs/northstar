@@ -6,7 +6,7 @@ use crate::{
     api::{self, codec::Framed},
     common::container::Container,
     npk::manifest::{self, Permission},
-    runtime::{EventTx, ExitStatus},
+    runtime::{token::Token, EventTx, ExitStatus},
 };
 use api::model;
 use async_stream::stream;
@@ -276,24 +276,32 @@ impl Console {
                     }
                 }
                 item = network_stream.next() => {
-                    if let Some(Ok(model::Message::Request { request })) = item {
-                        trace!("{}: --> {:?}", peer, request);
-                        let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
-                            Ok(response) => response,
-                            Err(e) => {
-                                warn!("failed to process request: {}", e);
+                    match item {
+                        Some(Ok(model::Message::Request { request })) => {
+                            trace!("{}: --> {:?}", peer, request);
+                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
+                                Ok(response) => response,
+                                Err(e) => {
+                                    warn!("failed to process request: {}", e);
+                                    break;
+                                }
+                            };
+                            trace!("{}: <-- {:?}", peer, response);
+
+                            if let Err(e) = network_stream.send(response).await {
+                                warn!("{}: Connection error: {}", peer, e);
                                 break;
                             }
-                        };
-                        trace!("{}: <-- {:?}", peer, response);
-
-                        if let Err(e) = network_stream.send(response).await {
-                            warn!("{}: Connection error: {}", peer, e);
+                        }
+                        Some(Ok(message)) => {
+                            warn!("{}: Unexpected message: {:?}. Disconnecting...", peer, message);
                             break;
                         }
-                    } else {
-                        warn!("{}: Unexpected message: {:?}. Disconnecting...", peer, item);
-                        break;
+                        Some(Err(e)) => {
+                            warn!("{}: Connection error: {:?}. Disconnecting...", peer, e);
+                            break;
+                        }
+                        None => break,
                     }
                 }
             }
@@ -313,7 +321,7 @@ impl Console {
 /// If the event loop is closed due to shutdown, this function will return `Error::EventLoopClosed`.
 ///
 async fn process_request<S>(
-    client_id: &Peer,
+    peer: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
     configuration: &manifest::Console,
@@ -324,75 +332,94 @@ where
     S: AsyncRead + Unpin,
 {
     let required_permission = match &request {
-        model::Request::Shutdown => Permission::Shutdown,
+        model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
         model::Request::Containers => Permission::Containers,
-        model::Request::Repositories => Permission::Repositories,
-        model::Request::Start { .. } => Permission::Start,
-        model::Request::Kill { .. } => Permission::Kill,
         model::Request::Install { .. } => Permission::Install,
+        model::Request::Kill { .. } => Permission::Kill,
         model::Request::Mount { .. } => Permission::Mount,
+        model::Request::Repositories => Permission::Repositories,
+        model::Request::Shutdown => Permission::Shutdown,
+        model::Request::Start { .. } => Permission::Start,
+        model::Request::TokenCreate { .. } => Permission::Token,
+        model::Request::TokenVerify { .. } => Permission::Token,
         model::Request::Umount { .. } => Permission::Umount,
         model::Request::Uninstall { .. } => Permission::Uninstall,
-        model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
     };
 
     if !configuration.contains(&required_permission) {
         return Ok(model::Message::Response {
-            response: model::Response::Error {
-                error: model::Error::PermissionDenied {
-                    permissions: configuration.iter().cloned().collect(),
-                    required: required_permission,
-                },
-            },
+            response: model::Response::Error(model::Error::PermissionDenied {
+                permissions: configuration.iter().cloned().collect(),
+                required: required_permission,
+            }),
         });
     }
 
     let (reply_tx, reply_rx) = oneshot::channel();
-    if let model::Request::Install {
-        repository,
-        mut size,
-    } = request
-    {
-        debug!(
-            "{}: Received installation request with size {}",
-            client_id,
-            bytesize::ByteSize::b(size)
-        );
+    match request {
+        model::Request::Install(repository, mut size) => {
+            debug!(
+                "{}: Received installation request with size {}",
+                peer,
+                bytesize::ByteSize::b(size)
+            );
 
-        info!("{}: Using repository \"{}\"", client_id, repository);
+            info!("{}: Using repository \"{}\"", peer, repository);
 
-        // Send a Receiver<Bytes> to the runtime and forward n bytes to this channel
-        let (tx, rx) = mpsc::channel(10);
-        let request = Request::Install(repository, rx);
-        trace!("    {:?} -> event loop", request);
-        let event = Event::Console(request, reply_tx);
-        event_loop.send(event).map_err(|_| Error::Shutdown).await?;
+            // Send a Receiver<Bytes> to the runtime and forward n bytes to this channel
+            let (tx, rx) = mpsc::channel(10);
+            let request = Request::Install(repository, rx);
+            trace!("    {:?} -> event loop", request);
+            let event = Event::Console(request, reply_tx);
+            event_loop.send(event).map_err(|_| Error::Shutdown).await?;
 
-        // The codec might have pulled bytes in the the read buffer of the connection.
-        if !stream.read_buffer().is_empty() {
-            let read_buffer = stream.read_buffer_mut().split();
+            // The codec might have pulled bytes in the the read buffer of the connection.
+            if !stream.read_buffer().is_empty() {
+                let read_buffer = stream.read_buffer_mut().split();
 
-            // TODO: handle this case. The connected entity pushed the install file
-            // and a subsequent request. If the codec pulls in the *full* install blob
-            // and some bytes from the following command the logic is screwed up.
-            assert!(read_buffer.len() as u64 <= size);
+                // TODO: handle this case. The connected entity pushed the install file
+                // and a subsequent request. If the codec pulls in the *full* install blob
+                // and some bytes from the following command the logic is screwed up.
+                assert!(read_buffer.len() as u64 <= size);
 
-            size -= read_buffer.len() as u64;
-            tx.send(read_buffer.freeze()).await.ok();
+                size -= read_buffer.len() as u64;
+                tx.send(read_buffer.freeze()).await.ok();
+            }
+
+            // If the connections breaks: just break. If the receiver is dropped: just break.
+            let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
+            while let Some(buf) = take.next().await {
+                let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
+                // Ignore any sending error because the stream needs to be drained for `size` bytes.
+                tx.send(buf).await.ok();
+            }
         }
-
-        // If the connections breaks: just break. If the receiver is dropped: just break.
-        let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-        while let Some(buf) = take.next().await {
-            let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
-            // Ignore any sending error because the stream needs to be drained for `size` bytes.
-            tx.send(buf).await.ok();
+        model::Request::TokenCreate(usage) => {
+            info!(
+                "Creating token for {} with {} bytes usage",
+                peer,
+                usage.len()
+            );
+            let token: [u8; 40] = Token::new(usage).into();
+            let token = api::model::Token::from(token);
+            let response = api::model::Response::Token(token);
+            reply_tx.send(response).ok();
         }
-    } else {
-        let message = Request::Request(request);
-        trace!("    {:?} -> event loop", message);
-        let event = Event::Console(message, reply_tx);
-        event_loop.send(event).map_err(|_| Error::Shutdown).await?;
+        model::Request::TokenVerify(token, usage) => {
+            let token: [u8; 40] = token.into();
+            let token = Token::from(token);
+            let result = token.verify(&usage);
+            debug!("Verification result for {} is {:?}", peer, result);
+            let result = result.into();
+            let response = api::model::Response::TokenVerification(result);
+            reply_tx.send(response).ok();
+        }
+        request => {
+            let message = Request::Request(request);
+            trace!("    {:?} -> event loop", message);
+            let event = Event::Console(message, reply_tx);
+            event_loop.send(event).map_err(|_| Error::Shutdown).await?;
+        }
     }
 
     (select! {
@@ -551,26 +578,23 @@ impl From<(Container, ContainerEvent)> for model::Notification {
     fn from(p: (Container, ContainerEvent)) -> model::Notification {
         let container = p.0.clone();
         match p.1 {
-            ContainerEvent::Started => api::model::Notification::Started { container },
-            ContainerEvent::Exit(status) => api::model::Notification::Exit {
-                container,
-                status: status.into(),
-            },
-            ContainerEvent::Installed => api::model::Notification::Install { container },
-            ContainerEvent::Uninstalled => api::model::Notification::Uninstall { container },
+            ContainerEvent::Started => api::model::Notification::Started(container),
+            ContainerEvent::Exit(status) => {
+                api::model::Notification::Exit(container, status.into())
+            }
+            ContainerEvent::Installed => api::model::Notification::Install(container),
+            ContainerEvent::Uninstalled => api::model::Notification::Uninstall(container),
             ContainerEvent::CGroup(event) => match event {
-                super::CGroupEvent::Memory(memory) => api::model::Notification::CGroup {
+                super::CGroupEvent::Memory(memory) => api::model::Notification::CGroup(
                     container,
-                    notification: api::model::CgroupNotification::Memory(
-                        api::model::MemoryNotification {
-                            low: memory.low,
-                            high: memory.high,
-                            max: memory.max,
-                            oom: memory.oom,
-                            oom_kill: memory.oom_kill,
-                        },
-                    ),
-                },
+                    api::model::CgroupNotification::Memory(api::model::MemoryNotification {
+                        low: memory.low,
+                        high: memory.high,
+                        max: memory.max,
+                        oom: memory.oom,
+                        oom_kill: memory.oom_kill,
+                    }),
+                ),
             },
         }
     }

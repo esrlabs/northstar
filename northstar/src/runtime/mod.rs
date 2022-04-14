@@ -46,8 +46,7 @@ mod key;
 mod mount;
 mod repository;
 mod state;
-pub(crate) mod stats;
-#[allow(unused)]
+mod stats;
 mod token;
 
 /// Runtime configuration
