@@ -56,15 +56,7 @@ fn hello_ferris() -> Result<()> {
     // will try to shutdown the application which is already exited.
     client()
         .assume_notification(
-            |n| {
-                matches!(
-                    n,
-                    Notification::Exit {
-                        status: ExitStatus::Exit { code: 0 },
-                        ..
-                    }
-                )
-            },
+            |n| matches!(n, Notification::Exit(_, ExitStatus::Exit { code: 0 },)),
             15,
         )
         .await

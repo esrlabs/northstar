@@ -79,12 +79,8 @@ impl Encoder<model::Message> for Codec {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use super::*;
-    use crate::api::model::{
-        CgroupNotification, MemoryNotification, Message, Notification, Request, Response,
-    };
+    use crate::api::model::{Message, Notification, Request, Response};
     use bytes::BytesMut;
     use proptest::{prelude::Just, prop_oneof, proptest, strategy::Strategy};
 
@@ -114,25 +110,13 @@ mod tests {
                 request: Request::Shutdown
             }),
             Just(Message::Request {
-                request: Request::Mount { containers: vec!() }
+                request: Request::Mount(vec!())
             }),
             Just(Message::Response {
                 response: Response::Ok
             }),
             Just(Message::Notification {
                 notification: Notification::Shutdown
-            }),
-            Just(Message::Notification {
-                notification: Notification::CGroup {
-                    container: "test:0.0.1".try_into().unwrap(),
-                    notification: CgroupNotification::Memory(MemoryNotification {
-                        low: None,
-                        high: Some(10),
-                        max: Some(12),
-                        oom: None,
-                        oom_kill: Some(99),
-                    })
-                }
             }),
         ]
     }

@@ -24,6 +24,7 @@ fn main() {
         "../examples/redis-client",
         "../examples/persistence",
         "../examples/seccomp",
+        "../examples/token",
         "test-container",
         "test-resource",
     ] {
