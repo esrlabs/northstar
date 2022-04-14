@@ -9,13 +9,10 @@ use tokio::time;
 
 pub(crate) fn notification(notification: &Notification) {
     match notification {
-        Notification::CGroup {
-            container,
-            notification,
-        } => {
+        Notification::CGroup(container, notification) => {
             println!("container {} memory event {:?}", container, notification)
         }
-        Notification::Exit { container, status } => println!(
+        Notification::Exit(container, status) => println!(
             "container {} exited with status {}",
             container,
             match status {
@@ -23,9 +20,9 @@ pub(crate) fn notification(notification: &Notification) {
                 ExitStatus::Signalled { signal } => format!("signalled {}", signal),
             }
         ),
-        Notification::Install { container } => println!("installed {}", container),
-        Notification::Uninstall { container } => println!("uninstalled {}", container),
-        Notification::Started { container } => println!("started {}", container),
+        Notification::Install(container) => println!("installed {}", container),
+        Notification::Uninstall(container) => println!("uninstalled {}", container),
+        Notification::Started(container) => println!("started {}", container),
         Notification::Shutdown => println!("shutting down"),
     }
 }
@@ -123,39 +120,30 @@ fn umounts(mounts: &[UmountResult]) {
 
 pub(crate) fn response(response: &Response) -> i32 {
     match response {
-        Response::Containers { containers: c } => {
-            containers(c);
-            0
-        }
-        Response::Repositories { repositories: r } => {
-            repositories(r);
-            0
-        }
-        Response::Mount { result } => {
-            mounts(result);
-            0
-        }
-        Response::Umount { result } => {
-            umounts(result);
-            0
-        }
-        Response::Ok => {
-            println!("ok");
-            0
-        }
-        Response::Install { container } => {
-            println!("installed {}", container);
-            0
-        }
-        Response::ContainerStats { container, stats } => {
+        Response::Containers(c) => containers(c),
+        Response::Repositories(r) => repositories(r),
+        Response::Mount(result) => mounts(result),
+        Response::Umount(result) => umounts(result),
+        Response::Ok => println!("ok"),
+        Response::Install(container) => println!("installed {}", container),
+        Response::ContainerStats(container, stats) => {
             println!("{}:", container);
             println!("{}", serde_json::to_string_pretty(&stats).unwrap());
-            0
         }
-        Response::Error { error } => {
+        Response::Token(token) => {
+            println!("created: {}", hex::encode(token.as_ref()));
+        }
+        Response::TokenVerification(result) => {
+            println!("verification result: {:?}", result);
+        }
+        Response::Error(error) => {
             eprintln!("{}", format_err(error));
-            1
         }
+    }
+    if let Response::Error(_) = response {
+        1
+    } else {
+        0
     }
 }
 

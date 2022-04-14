@@ -173,10 +173,8 @@ async fn main() -> Result<()> {
                         .await
                         .context("failed to stop container")?;
                     info!("{}: waiting for termination", container);
-                    let stopped = Notification::Exit {
-                        container: container.clone(),
-                        status: ExitStatus::Signalled { signal: 15 },
-                    };
+                    let stopped =
+                        Notification::Exit(container.clone(), ExitStatus::Signalled { signal: 15 });
                     await_notification(&mut client, stopped, opt.timeout).await?;
                 }
 
@@ -285,9 +283,7 @@ async fn iteration(
     if *mode != Mode::MountUmount {
         info!("{}: start", container);
         client.start(container).await?;
-        let started = Notification::Started {
-            container: container.clone(),
-        };
+        let started = Notification::Started(container.clone());
         await_notification(client, started, timeout).await?;
     }
 
@@ -304,10 +300,7 @@ async fn iteration(
             .context("failed to stop container")?;
 
         info!("{}: waiting for termination", container);
-        let stopped = Notification::Exit {
-            container: container.clone(),
-            status: ExitStatus::Signalled { signal: 15 },
-        };
+        let stopped = Notification::Exit(container.clone(), ExitStatus::Signalled { signal: 15 });
         await_notification(client, stopped, timeout).await?;
     }
 
@@ -368,10 +361,10 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
             _ = &mut timeout => break Ok(()),
             n = client.next() => {
                 match n {
-                    Some(Ok(model::Notification::Install { container })) => {
+                    Some(Ok(model::Notification::Install ( container ))) => {
                         client.uninstall(container).await?;
                     }
-                    Some(Ok(model::Notification::Uninstall{ .. })) => {
+                    Some(Ok(model::Notification::Uninstall( _ ))) => {
                         client.install(npk, repository).await?;
                     }
                     Some(Ok(_)) => continue,
