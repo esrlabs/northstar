@@ -26,6 +26,8 @@ EXAMPLES=(
   "./examples/message-0.0.1"
   "./examples/message-0.0.2"
   "./examples/persistence"
+  "./examples/redis"
+  "./examples/redis-client"
   "./examples/seccomp"
 )
 

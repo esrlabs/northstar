@@ -120,3 +120,15 @@ fn seccomp() -> Result<()> {
     client().start(EXAMPLE_SECCOMP).await?;
     Ok(())
 }
+
+// Redis
+#[runtime_test]
+fn redis() -> Result<()> {
+    client().install(EXAMPLE_REDIS_NPK, "mem").await?;
+    client().install(EXAMPLE_REDIS_CLIENT_NPK, "mem").await?;
+    client().start(EXAMPLE_REDIS).await?;
+    client().start(EXAMPLE_REDIS_CLIENT).await?;
+    assume("Starting...", 5).await?;
+    assume("Received: b\"#StandWithUkraine\"", 5).await?;
+    Ok(())
+}

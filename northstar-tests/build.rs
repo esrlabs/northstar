@@ -20,6 +20,8 @@ fn main() {
         "../examples/memeater",
         "../examples/message-0.0.1",
         "../examples/message-0.0.2",
+        "../examples/redis",
+        "../examples/redis-client",
         "../examples/persistence",
         "../examples/seccomp",
         "test-container",
