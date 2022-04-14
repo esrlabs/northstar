@@ -35,7 +35,9 @@ notice = "warn"
 # output a note when they are encountered.
 ignore = [
     # safe: Use of outdated smallvec in ferris-says crate. Used only in a example
-    "RUSTSEC-2018-0018"
+    "RUSTSEC-2018-0018",
+    # safe: Used only in a example
+    "RUSTSEC-2020-0159"
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories

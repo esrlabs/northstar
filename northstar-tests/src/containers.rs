@@ -9,6 +9,8 @@ pub const EXAMPLE_MEMEATER: &str = "memeater:0.0.1";
 pub const EXAMPLE_MESSAGE_0_0_1: &str = "message:0.0.1";
 pub const EXAMPLE_MESSAGE_0_0_2: &str = "message:0.0.2";
 pub const EXAMPLE_PERSISTENCE: &str = "persistence:0.0.1";
+pub const EXAMPLE_REDIS: &str = "redis:0.0.1";
+pub const EXAMPLE_REDIS_CLIENT: &str = "redis-client:0.0.1";
 pub const EXAMPLE_SECCOMP: &str = "seccomp:0.0.1";
 pub const EXAMPLE_SELINUX: &str = "selinux:0.0.1";
 pub const TEST_CONTAINER: &str = "test-container:0.0.1";
@@ -36,6 +38,9 @@ pub static EXAMPLE_MESSAGE_0_0_2_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.2.npk"));
 pub static EXAMPLE_PERSISTENCE_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/persistence-0.0.1.npk"));
+pub static EXAMPLE_REDIS_NPK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/redis-0.0.1.npk"));
+pub static EXAMPLE_REDIS_CLIENT_NPK: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/redis-client-0.0.1.npk"));
 pub static EXAMPLE_SECCOMP_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/seccomp-0.0.1.npk"));
 pub static TEST_CONTAINER_NPK: &[u8] =

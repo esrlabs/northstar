@@ -9,6 +9,8 @@ members = [
     "examples/inspect",
     "examples/memeater",
     "examples/persistence",
+    "examples/redis",
+    "examples/redis-client",
     "examples/seccomp",
     "main",
     "northstar",

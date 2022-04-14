@@ -1,0 +1,25 @@
+name: redis-client
+version: 0.0.1
+init: /redis-client
+uid: 1000
+gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /etc:
+    type: bind
+    host: /etc
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+  /system:
+    type: bind
+    host: /system
