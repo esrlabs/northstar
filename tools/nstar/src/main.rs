@@ -118,15 +118,15 @@ enum Subcommand {
     },
     /// Create a token
     Token {
-        /// Token string
-        usage: String,
+        /// Shared info
+        shared: String,
     },
     /// Create a token
     VerifyToken {
         /// Token
         token: String,
-        /// Token string
-        usage: String,
+        /// Shared info
+        shared: String,
     },
 }
 
@@ -268,15 +268,15 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let container = parse_container(&container, client).await?;
             Ok(Request::ContainerStats(container))
         }
-        Subcommand::Token { usage } => {
-            let usage = usage.as_bytes().to_vec();
-            Ok(Request::TokenCreate(usage))
+        Subcommand::Token { shared } => {
+            let shared = shared.as_bytes().to_vec();
+            Ok(Request::TokenCreate(shared))
         }
-        Subcommand::VerifyToken { token, usage } => {
-            let usage = usage.as_bytes().to_vec();
+        Subcommand::VerifyToken { token, shared } => {
+            let shared = shared.as_bytes().to_vec();
             let token = hex::decode(token.as_bytes()).context("invalid token")?;
             let token: [u8; 40] = token.try_into().unwrap();
-            Ok(Request::TokenVerify(token.into(), usage))
+            Ok(Request::TokenVerify(token.into(), shared))
         }
         Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }
