@@ -116,6 +116,18 @@ enum Subcommand {
         #[clap(value_name = "name[:version]")]
         container: String,
     },
+    /// Create a token
+    Token {
+        /// Token string
+        usage: String,
+    },
+    /// Create a token
+    VerifyToken {
+        /// Token
+        token: String,
+        /// Token string
+        usage: String,
+    },
 }
 
 /// CLI
@@ -190,18 +202,14 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             for container in containers {
                 converted.push(parse_container(&container, client).await?);
             }
-            Ok(Request::Mount {
-                containers: converted,
-            })
+            Ok(Request::Mount(converted))
         }
         Subcommand::Umount { containers } => {
             let mut converted = Vec::with_capacity(containers.len());
             for container in containers {
                 converted.push(parse_container(&container, client).await?);
             }
-            Ok(Request::Umount {
-                containers: converted,
-            })
+            Ok(Request::Umount(converted))
         }
         Subcommand::Start {
             container,
@@ -241,28 +249,34 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
                 HashMap::with_capacity(0)
             };
 
-            Ok(Request::Start {
-                container,
-                args,
-                env,
-            })
+            Ok(Request::Start(container, args, env))
         }
         Subcommand::Kill { container, signal } => {
             let container = parse_container(&container, client).await?;
             let signal = signal.unwrap_or(15);
-            Ok(Request::Kill { container, signal })
+            Ok(Request::Kill(container, signal))
         }
         Subcommand::Install { npk, repository } => {
             let size = npk.metadata().map(|m| m.len())?;
-            Ok(Request::Install { repository, size })
+            Ok(Request::Install(repository, size))
         }
-        Subcommand::Uninstall { container } => Ok(Request::Uninstall {
-            container: parse_container(&container, client).await?,
-        }),
+        Subcommand::Uninstall { container } => Ok(Request::Uninstall(
+            parse_container(&container, client).await?,
+        )),
         Subcommand::Shutdown => Ok(Request::Shutdown),
         Subcommand::ContainerStats { container } => {
             let container = parse_container(&container, client).await?;
-            Ok(Request::ContainerStats { container })
+            Ok(Request::ContainerStats(container))
+        }
+        Subcommand::Token { usage } => {
+            let usage = usage.as_bytes().to_vec();
+            Ok(Request::TokenCreate(usage))
+        }
+        Subcommand::VerifyToken { token, usage } => {
+            let usage = usage.as_bytes().to_vec();
+            let token = hex::decode(token.as_bytes()).context("invalid token")?;
+            let token: [u8; 40] = token.try_into().unwrap();
+            Ok(Request::TokenVerify(token.into(), usage))
         }
         Subcommand::Notifications { .. } | Subcommand::Completion { .. } => unreachable!(),
     }
