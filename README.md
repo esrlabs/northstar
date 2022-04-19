@@ -378,7 +378,24 @@ If the container binary needs more devices, bind mount the host systems `/dev`.
 ## Roadmap
 
 See the [open issues](https://github.com/esrlabs/northstar/issues) for a list of
-proposed features (and known issues).
+proposed features and known issues).
+
+## Questions and Help
+
+Ask us questions about anything related to Northstar! To add your question,
+[create an issue](https://github.com/esrlabs/northstar/issues) in this
+repository.
+
+Just a few guidelines to remember before you ask a question:
+
+* Ensure your question hasn't already been answered. If it has been answered but
+  do es not satisfy you, feel free to comment in the issue and we will re-open it.
+* Use a succinct title and description. Add as *much* information as possible e.g
+  manifests, npks, applications...
+* If your question has already been asked and answered adequately, please add a
+  thumbs-up (or the emoji of your choice!) to the issue. This helps us in identifying
+  common problems that people usually face.  
+* Lastly, be civil, polite and patient. :)
 
 ## Contributing
 
