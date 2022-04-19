@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.56"
-clap = { version = "3.1.8", features = ["derive"] }
+clap = { version = "3.1.9", features = ["derive"] }
 log = "0.4.16"
 nix = "0.23.1"
 northstar = { path = "../northstar", features = ["runtime"] }
