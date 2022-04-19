@@ -36,6 +36,13 @@ fn main() -> Result<(), Error> {
     // Initialize logging
     logger::init();
 
+    // Install a custom panic hook that aborts the process in case of a panic *anywhere*
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        default_panic(info);
+        exit(1);
+    }));
+
     // Parse command line arguments and prepare the environment
     let config = init()?;
 
