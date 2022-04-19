@@ -31,7 +31,7 @@ use std::{
         prelude::{IntoRawFd, RawFd},
     },
 };
-use tokio::{net::UnixStream, select, sync::mpsc, task};
+use tokio::{net::UnixStream, select};
 
 type Inits = HashMap<Container, InitProcess>;
 
@@ -54,58 +54,30 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
 
     debug!("Entering main loop");
 
-    let (tx, mut rx) = mpsc::channel(1);
-
-    // Separate tasks for notifications and messages
-
-    task::spawn(async move {
-        loop {
-            select! {
-                exit = rx.recv() => {
-                    match exit {
-                        Some(exit) => exits.push(exit),
-                        None => break,
-                    }
-                }
-                exit = exits.next(), if !exits.is_empty() => {
-                    let (container, exit_status) = exit.expect("invalid exit status");
-                    debug!("Forwarding exit status notification of {}: {}", container, exit_status);
-                    notifications.send(Notification::Exit { container, exit_status }).await.expect("failed to send exit notification");
-                }
-            }
-        }
-    });
-
     loop {
         select! {
             request = recv(&mut stream) => {
                 match request {
                     Some(Message::CreateRequest { init, console }) => {
-                        let container = init.container.clone();
-
-                        if inits.contains_key(&container) {
-                            let error = format!("container {} already created", container);
-                            log::warn!("{}", error);
-                            stream.send(Message::Failure(error)).await.expect("failed to send response");
-                            continue;
-                        }
-
                         debug!("Creating init process for {}", init.container);
-                        let (pid, init_process) = create(init, console).await;
-                        inits.insert(container, init_process);
+                        let container = init.container.clone();
+                        let (pid, init) = create(init, console).await;
+                        if inits.insert(container.clone(), init).is_some() {
+                            panic!("duplicate init request for {}", container);
+                        }
                         stream.send(Message::CreateResult { init: pid }).await.expect("failed to send response");
                     }
                     Some(Message::ExecRequest { container, path, args, env, io }) => {
                         let io = io.unwrap();
-                        if let Some(init) = inits.remove(&container) {
-                            let (response, exit) = exec(init, container, path, args, env, io).await;
-                            tx.send(exit).await.ok();
-                            stream.send(response).await.expect("failed to send response");
-                        } else {
-                            let error = format!("Container {} not created", container);
-                            log::warn!("{}", error);
-                            stream.send(Message::Failure(error)).await.expect("failed to send response");
-                        }
+                        let init = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {}", container));
+                        // There's a init - let's exec!
+                        let (response, exit) = exec(init, container, path, args, env, io).await;
+
+                        // Add exit status future of this exec request
+                        exits.push(exit);
+
+                        // Send the result of the exec request to the runtime
+                        stream.send(response).await.expect("failed to send response");
                     }
                     Some(_) => unreachable!("Unexpected message"),
                     None => {
@@ -113,6 +85,11 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
                         std::process::exit(0);
                     }
                 }
+            }
+            exit = exits.next(), if !exits.is_empty() => {
+                let (container, exit_status) = exit.expect("invalid exit status");
+                debug!("Forwarding exit status notification of {}: {}", container, exit_status);
+                notifications.send(Notification::Exit { container, exit_status }).await.expect("failed to send exit notification");
             }
         }
     }
