@@ -209,8 +209,8 @@ jobs:
       - name: Generate manifest jsonschema/html
         run: |
           cargo run --bin schema -- -m manifest -o manifest.json
-          ./openapi-generator-cli generate -i manifest.json -g html -o manifest.html
+          ./openapi-generator-cli generate -i manifest.json -g html -o manifest.html --skip-validate-spec
       - name: Generate api jsonschema/html
         run: |
           cargo run --bin schema -- -m api -o api.json
-          ./openapi-generator-cli generate -i api.json -g html -o api.html
+          ./openapi-generator-cli generate -i api.json -g html -o api.html --skip-validate-spec
