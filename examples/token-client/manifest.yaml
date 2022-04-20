@@ -1,0 +1,24 @@
+name: token-client
+version: 0.0.1
+init: /token-client
+console: [ident, token]
+uid: 1000
+gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /dev:
+    type: dev
+  /etc:
+    type: bind
+    host: /etc
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+  /system:
+    type: bind
+    host: /system

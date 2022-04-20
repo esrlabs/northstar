@@ -29,7 +29,8 @@ EXAMPLES=(
   "./examples/redis"
   "./examples/redis-client"
   "./examples/seccomp"
-  "./examples/token"
+  "./examples/token-client"
+  "./examples/token-server"
 )
 
 usage() {

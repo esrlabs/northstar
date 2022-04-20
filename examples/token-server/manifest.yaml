@@ -1,6 +1,6 @@
-name: token
+name: token-server
 version: 0.0.1
-init: /token
+init: /token-server
 console: [ident, token]
 uid: 1000
 gid: 1000
@@ -10,6 +10,9 @@ io:
 mounts:
   /dev:
     type: dev
+  /etc:
+    type: bind
+    host: /etc
   /lib:
     type: bind
     host: /lib

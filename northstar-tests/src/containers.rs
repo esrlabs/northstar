@@ -12,7 +12,8 @@ pub const EXAMPLE_PERSISTENCE: &str = "persistence:0.0.1";
 pub const EXAMPLE_REDIS: &str = "redis:0.0.1";
 pub const EXAMPLE_REDIS_CLIENT: &str = "redis-client:0.0.1";
 pub const EXAMPLE_SECCOMP: &str = "seccomp:0.0.1";
-pub const EXAMPLE_TOKEN: &str = "token:0.0.1";
+pub const EXAMPLE_TOKEN_CLIENT: &str = "token-client:0.0.1";
+pub const EXAMPLE_TOKEN_SERVER: &str = "token-server:0.0.1";
 pub const TEST_CONTAINER: &str = "test-container:0.0.1";
 pub const TEST_RESOURCE: &str = "test-resource:0.0.1";
 
@@ -43,7 +44,10 @@ pub static EXAMPLE_REDIS_CLIENT_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/redis-client-0.0.1.npk"));
 pub static EXAMPLE_SECCOMP_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/seccomp-0.0.1.npk"));
-pub static EXAMPLE_TOKEN_NPK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/token-0.0.1.npk"));
+pub static EXAMPLE_TOKEN_CLIENT_NPK: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/token-client-0.0.1.npk"));
+pub static EXAMPLE_TOKEN_SERVER_NPK: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/token-server-0.0.1.npk"));
 pub static TEST_CONTAINER_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/test-container-0.0.1.npk"));
 pub static TEST_RESOURCE_NPK: &[u8] =
