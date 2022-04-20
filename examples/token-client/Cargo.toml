@@ -1,0 +1,14 @@
+[package]
+name = "token-client"
+version = "0.1.0"
+authors = ["ESRLabs"]
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0.56"
+futures = "0.3.21"
+hex = "0.4.3"
+northstar = { path = "../../northstar", features = ["api"] }
+tokio = { version = "1.17.0", features = ["macros", "rt", "net"] }
+tokio-util = { version = "0.7.1", features = ["codec"] }

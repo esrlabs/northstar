@@ -111,7 +111,8 @@ async fn install_uninstall_examples() -> Result<()> {
     client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
     client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
     client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
-    client().install(EXAMPLE_TOKEN_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
@@ -127,7 +128,8 @@ async fn install_uninstall_examples() -> Result<()> {
     client().uninstall(EXAMPLE_MESSAGE_0_0_2).await?;
     client().uninstall(EXAMPLE_PERSISTENCE).await?;
     client().uninstall(EXAMPLE_SECCOMP).await?;
-    client().uninstall(EXAMPLE_TOKEN).await?;
+    client().uninstall(EXAMPLE_TOKEN_CLIENT).await?;
+    client().uninstall(EXAMPLE_TOKEN_SERVER).await?;
     client().uninstall(TEST_CONTAINER).await?;
     client().uninstall(TEST_RESOURCE).await?;
     Ok(())
@@ -148,7 +150,8 @@ async fn mount_umount() -> Result<()> {
     client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
     client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
     client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
-    client().install(EXAMPLE_TOKEN_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
@@ -251,12 +254,10 @@ async fn container_crash_exit() -> Result<()> {
 
     for _ in 0..10 {
         client().start_with_args(TEST_CONTAINER, ["crash"]).await?;
-        client()
-            .assume_notification(
-                |n| matches!(n, status: ExitStatus::Exit { code: 101 }, ..),
-                5,
-            )
-            .await?;
+
+        let n =
+            |n: &Notification| matches!(n, Notification::Exit(_, ExitStatus::Exit { code: 101 }));
+        client().assume_notification(n, 5).await?;
     }
 
     client().uninstall_test_container().await?;

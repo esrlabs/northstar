@@ -1,5 +1,5 @@
 [package]
-name = "token"
+name = "token-server"
 version = "0.1.0"
 authors = ["ESRLabs"]
 edition = "2021"
@@ -9,3 +9,4 @@ license = "Apache-2.0"
 anyhow = "1.0.56"
 tokio = { version = "1.17.0", features = ["macros", "rt", "net"] }
 northstar = { path = "../../northstar", features = ["api"] }
+hex = "0.4.3"

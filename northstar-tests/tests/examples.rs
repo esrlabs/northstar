@@ -9,15 +9,7 @@ fn crashing() -> Result<()> {
     client().start(EXAMPLE_CRASHING).await?;
     client()
         .assume_notification(
-            |n| {
-                matches!(
-                    n,
-                    Notification::Exit {
-                        status: ExitStatus::Exit { code: 101 },
-                        ..
-                    }
-                )
-            },
+            |n| matches!(n, Notification::Exit(_, ExitStatus::Exit { code: 101 })),
             20,
         )
         .await
@@ -123,5 +115,19 @@ fn redis() -> Result<()> {
     client().start(EXAMPLE_REDIS_CLIENT).await?;
     assume("Starting...", 5).await?;
     assume("Received: b\"#StandWithUkraine\"", 5).await?;
+    Ok(())
+}
+
+// Redis
+#[runtime_test]
+fn token() -> Result<()> {
+    client().install(EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
+    client().install(EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
+    client().start(EXAMPLE_TOKEN_SERVER).await?;
+    assume("Listening on .*", 5).await?;
+
+    client().start(EXAMPLE_TOKEN_CLIENT).await?;
+
+    assume("Received: yay!", 5).await?;
     Ok(())
 }
