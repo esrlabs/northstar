@@ -41,8 +41,7 @@ pub struct Manifest {
     /// Container version
     pub version: Version,
     /// Pass a console fd number in NORTHSTAR_CONSOLE
-    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub console: Console,
+    pub console: Option<ConsoleConfiguration>,
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
@@ -774,7 +773,8 @@ version: 0.0.0
 init: /binary
 uid: 1000
 gid: 1001
-console: full
+console:
+  permissions: full
 args:
   - one
   - two

@@ -5,9 +5,21 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Serialize, Serializer,
 };
+use serde_with::skip_serializing_none;
 use std::{collections::HashSet, fmt};
 use strum::{EnumCount, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
+
+/// Console Quality of Service
+#[skip_serializing_none]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ConsoleConfiguration {
+    /// Permissions
+    pub permissions: Permissions,
+    /// Limits the number of requests processed per second
+    pub max_requests_per_sec: Option<u32>,
+}
 
 /// Console features. Matches the api request struct and notifications
 #[derive(
@@ -60,56 +72,50 @@ impl fmt::Display for Permission {
 /// console: full
 /// ```
 #[derive(Default, Clone, Eq, PartialEq, Debug, JsonSchema)]
-pub struct Console {
-    /// List of features
-    permissions: HashSet<Permission>,
-}
+pub struct Permissions(HashSet<Permission>);
 
-impl Console {
+impl Permissions {
     /// Create a new `Console` with all permissions given
-    pub fn full() -> Console {
-        let permissions = HashSet::from_iter(Permission::iter());
-        Console { permissions }
+    pub fn full() -> Permissions {
+        Permissions(HashSet::from_iter(Permission::iter()))
     }
 }
 
-impl std::ops::Deref for Console {
+impl std::ops::Deref for Permissions {
     type Target = HashSet<Permission>;
 
     fn deref(&self) -> &Self::Target {
-        &self.permissions
+        &self.0
     }
 }
 
-impl fmt::Display for Console {
+impl fmt::Display for Permissions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.permissions.len() == Permission::COUNT {
+        if self.0.len() == Permission::COUNT {
             write!(f, "full")
         } else {
-            let permissions = self.permissions.iter().format(", ");
+            let permissions = self.0.iter().format(", ");
             write!(f, "{}", permissions)
         }
     }
 }
 
-impl<'de> Deserialize<'de> for Console {
+impl<'de> Deserialize<'de> for Permissions {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         struct PermissionVisitor;
         impl<'de> Visitor<'de> for PermissionVisitor {
-            type Value = Console;
+            type Value = Permissions;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("\"full\" or a permission sequence")
             }
 
-            fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<Console, E> {
+            fn visit_str<E: serde::de::Error>(self, str_data: &str) -> Result<Permissions, E> {
                 match str_data.trim() {
-                    "full" => Ok(Console {
-                        permissions: HashSet::from_iter(Permission::iter()),
-                    }),
+                    "full" => Ok(Permissions(HashSet::from_iter(Permission::iter()))),
                     _ => Err(serde::de::Error::custom(format!(
                         "invalid console permission: {}",
                         str_data
@@ -117,7 +123,7 @@ impl<'de> Deserialize<'de> for Console {
                 }
             }
 
-            fn visit_seq<A>(self, mut seq: A) -> Result<Console, A::Error>
+            fn visit_seq<A>(self, mut seq: A) -> Result<Permissions, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
             {
@@ -125,7 +131,7 @@ impl<'de> Deserialize<'de> for Console {
                 while let Some(permission) = seq.next_element()? {
                     permissions.insert(permission);
                 }
-                Ok(Console { permissions })
+                Ok(Permissions(permissions))
             }
         }
 
@@ -133,16 +139,16 @@ impl<'de> Deserialize<'de> for Console {
     }
 }
 
-impl Serialize for Console {
+impl Serialize for Permissions {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        if self.permissions.len() == Permission::COUNT {
+        if self.0.len() == Permission::COUNT {
             serializer.serialize_str("full")
         } else {
-            let mut seq = serializer.serialize_seq(Some(self.permissions.len()))?;
-            for e in self.permissions.iter() {
+            let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+            for e in self.0.iter() {
                 seq.serialize_element(e)?;
             }
             seq.end()
@@ -161,11 +167,13 @@ mod test {
     #[test]
     fn full() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
-console: full
+console:
+    permissions: full
 ";
         let manifest = Manifest::from_str(manifest).expect("failed to parse");
         for permission in Permission::iter() {
-            assert!(manifest.console.contains(&permission));
+            let console = manifest.console.as_ref().unwrap();
+            assert!(console.permissions.contains(&permission));
         }
         Ok(())
     }
@@ -175,7 +183,7 @@ console: full
     fn none() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001";
         let manifest = Manifest::from_str(manifest).expect("failed to parse");
-        assert!(manifest.console.is_empty());
+        assert!(manifest.console.is_none());
         Ok(())
     }
 
@@ -184,11 +192,13 @@ console: full
     fn list() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
 console:
-  - shutdown
-  - start
+  permissions:
+    - shutdown
+    - start
 ";
         let manifest = Manifest::from_str(manifest).expect("failed to parse");
-        assert!(manifest.console.len() == 2);
+        let console = manifest.console.as_ref().unwrap();
+        assert!(console.permissions.len() == 2);
         Ok(())
     }
 }

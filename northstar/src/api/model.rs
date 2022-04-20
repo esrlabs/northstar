@@ -10,7 +10,7 @@ use std::{
 };
 
 /// Console configuration
-pub type ConsoleConfiguration = crate::npk::manifest::Console;
+pub type ConsoleConfiguration = crate::npk::manifest::ConsoleConfiguration;
 /// Console permission entity
 pub type ConsolePermission = crate::npk::manifest::Permission;
 /// Container identification

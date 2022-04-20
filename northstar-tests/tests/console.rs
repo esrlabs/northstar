@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use api::{client::Error as ClientError, model::Error as ModelError};
-use futures::{SinkExt, StreamExt};
+use futures::SinkExt;
 use northstar::api::{
     self,
     model::{self, ConnectNack},

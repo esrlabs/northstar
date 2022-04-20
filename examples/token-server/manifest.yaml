@@ -1,7 +1,8 @@
 name: token-server
 version: 0.0.1
 init: /token-server
-console: [ident, token]
+console:
+  permissions: [ident, token]
 uid: 1000
 gid: 1000
 io:

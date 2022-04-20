@@ -10,7 +10,10 @@ use northstar::{
         model::{Container, ExitStatus, Notification},
     },
     common::non_nul_string::NonNulString,
-    runtime::{config, Runtime as Northstar},
+    runtime::{
+        config::{self, ConsoleConfiguration},
+        Runtime as Northstar,
+    },
 };
 use std::convert::{TryFrom, TryInto};
 use tempfile::{NamedTempFile, TempDir};
@@ -57,14 +60,16 @@ impl Runtime {
         let consoles = [
             (
                 console_full(),
-                config::Console {
-                    permissions: config::ConsoleConfiguration::full(),
+                ConsoleConfiguration {
+                    permissions: config::Permissions::full(),
+                    max_requests_per_sec: None,
                 },
             ),
             (
                 console_none(),
-                config::Console {
-                    permissions: config::ConsoleConfiguration::default(),
+                ConsoleConfiguration {
+                    permissions: config::Permissions::default(),
+                    max_requests_per_sec: None,
                 },
             ),
         ]

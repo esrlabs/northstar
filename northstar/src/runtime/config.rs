@@ -10,16 +10,9 @@ use std::{
 use tokio::fs;
 use url::Url;
 
+pub use crate::npk::manifest::ConsoleConfiguration;
 /// Console permission configuration
-pub use crate::npk::manifest::Console as ConsoleConfiguration;
-
-/// Console configuration
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Console {
-    /// Console permissions
-    pub permissions: ConsoleConfiguration,
-}
+pub use crate::npk::manifest::Permissions;
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
@@ -35,7 +28,7 @@ pub struct Config {
     pub cgroup: NonNulString,
     /// Console configuration
     #[serde(deserialize_with = "console")]
-    pub consoles: HashMap<Url, Console>,
+    pub consoles: HashMap<Url, ConsoleConfiguration>,
     /// Repositories
     #[serde(default)]
     pub repositories: HashMap<RepositoryId, Repository>,
@@ -188,7 +181,7 @@ async fn is_rw(path: &Path) -> bool {
 }
 
 /// Validate the console configuration that the url schemes are all "tcp" or "unix"
-fn console<'de, D>(deserializer: D) -> Result<HashMap<Url, Console>, D::Error>
+fn console<'de, D>(deserializer: D) -> Result<HashMap<Url, ConsoleConfiguration>, D::Error>
 where
     D: Deserializer<'de>,
 {
