@@ -1,7 +1,4 @@
-use super::{
-    config::ConsoleConfiguration as Configuration, ContainerEvent, Event, NotificationTx,
-    RepositoryId,
-};
+use super::{config::ConsoleConfiguration, ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed},
     common::container::Container,
@@ -30,8 +27,7 @@ use tokio::{
     net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
-    task::{self},
-    time,
+    task, time,
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
@@ -86,7 +82,7 @@ impl Console {
     pub(super) async fn listen(
         &mut self,
         url: &Url,
-        configuration: &Configuration,
+        configuration: &ConsoleConfiguration,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
@@ -95,7 +91,7 @@ impl Console {
         let stop = self.stop.clone();
 
         debug!(
-            "Starting console on {} with permissions \"{}\"",
+            "Starting console on {} with permissions \"{:?}\"",
             url, configuration
         );
         let task = match Listener::new(url)
@@ -142,25 +138,27 @@ impl Console {
         peer: Peer,
         stop: CancellationToken,
         container: Option<Container>,
-        configuration: manifest::Console,
+        configuration: ConsoleConfiguration,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
     ) -> Result<(), Error> {
+        let permissions = &configuration.permissions;
         if let Some(container) = &container {
             debug!(
                 "Container {} connected with permissions {}",
-                container, configuration
+                container, permissions
             );
         } else {
-            debug!(
-                "Client {} connected with permissions {}",
-                peer, configuration
-            );
+            debug!("Client {} connected with permissions {}", peer, permissions);
         }
 
-        // Get a framed stream and sink interface.
         let mut network_stream = api::codec::Framed::with_capacity(stream, BUFFER_SIZE);
+
+        // Get a framed stream and sink interface.
+        if let Some(rate) = configuration.max_requests_per_sec {
+            network_stream.limit_incoming_rate(rate as usize, time::Duration::from_secs(1));
+        }
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
@@ -213,7 +211,7 @@ impl Console {
 
         // Check notification permission if the client want's to subscribe to
         // notifications
-        if notifications && !configuration.contains(&Permission::Notifications) {
+        if notifications && !permissions.contains(&Permission::Notifications) {
             warn!(
                 "{}: Requested notifications without notification permission. Disconnecting...",
                 peer
@@ -279,7 +277,7 @@ impl Console {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
+                            let response = match process_request(&peer, &mut network_stream, &stop, permissions, &event_tx, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("failed to process request: {}", e);
@@ -324,7 +322,7 @@ async fn process_request<S>(
     peer: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
-    configuration: &manifest::Console,
+    configuration: &manifest::Permissions,
     event_loop: &EventTx,
     request: model::Request,
 ) -> Result<model::Message, Error>
@@ -505,7 +503,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     event_tx: EventTx,
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
-    configuration: Configuration,
+    configuration: ConsoleConfiguration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,

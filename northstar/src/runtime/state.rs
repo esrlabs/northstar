@@ -415,7 +415,7 @@ impl State {
         let stop = CancellationToken::new();
 
         // We send the fd to the forker so that it can pass it to the init
-        let console_fd = if !manifest.console.is_empty() {
+        let console_fd = if let Some(console) = manifest.console.clone() {
             let peer = Peer::Container(container.clone());
             let (runtime_stream, container_stream) =
                 StdUnixStream::pair().expect("failed to create socketpair");
@@ -430,13 +430,12 @@ impl State {
             let events_tx = self.events_tx.clone();
             let stop = stop.clone();
             let container = Some(container.clone());
-            let permissions = manifest.console.clone();
             let connection = Console::connection(
                 runtime,
                 peer,
                 stop,
                 container,
-                permissions,
+                console,
                 events_tx,
                 notifications,
                 None,

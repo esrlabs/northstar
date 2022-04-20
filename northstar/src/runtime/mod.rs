@@ -299,7 +299,6 @@ async fn run(
     let console = if !config.consoles.is_empty() {
         let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
         for (url, configuration) in config.consoles.iter() {
-            let configuration = &configuration.permissions;
             console
                 .listen(url, configuration)
                 .await
