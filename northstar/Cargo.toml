@@ -131,11 +131,11 @@ seccomp = [
 ]
 
 [dev-dependencies]
-anyhow = "1.0.56"
+anyhow = "1.0.57"
 proptest = "1.0.0"
 serde_json = "1.0.79"
 toml = "0.5.9"
 
 [build-dependencies]
-anyhow = { version = "1.0.56", optional = true }
+anyhow = { version = "1.0.57", optional = true }
 bindgen = { version = "0.59.2", default-features = false, features = ["runtime"], optional = true }
