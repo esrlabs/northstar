@@ -411,7 +411,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// client.install(&npk, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
     /// # }
     /// ```
-    pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<(), Error> {
+    pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<Container, Error> {
         self.fused()?;
         let file = fs::File::open(npk).await.map_err(Error::Io)?;
         let size = file.metadata().await.unwrap().len();
@@ -439,9 +439,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             match self.connection.next().await {
                 Some(Ok(message)) => match message {
                     Message::Response { response } => match response {
-                        Response::Ok => break Ok(()),
+                        Response::Install { container } => break Ok(container),
                         Response::Error { error } => break Err(Error::Runtime(error)),
-                        _ => unreachable!("response on install should be ok or error"),
+                        _ => unreachable!("response on install should be container or error"),
                     },
                     Message::Notification { notification } => {
                         self.push_notification(notification)?

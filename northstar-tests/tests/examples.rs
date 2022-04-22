@@ -13,7 +13,7 @@ fn crashing() -> Result<()> {
                 matches!(
                     n,
                     Notification::Exit {
-                        status: ExitStatus::Signalled { signal: 6 },
+                        status: ExitStatus::Exit { code: 101 },
                         ..
                     }
                 )

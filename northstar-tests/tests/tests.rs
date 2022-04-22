@@ -237,7 +237,7 @@ async fn container_crash_exit() -> Result<()> {
                     matches!(
                         n,
                         Notification::Exit {
-                            status: ExitStatus::Signalled { signal: 6 },
+                            status: ExitStatus::Exit { code: 101 },
                             ..
                         }
                     )
