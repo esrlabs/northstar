@@ -996,7 +996,7 @@ name = "inspect"
 version = "0.1.0"
 dependencies = [
  "caps",
- "nix 0.23.1",
+ "nix 0.24.0",
 ]
 
 [[package]]
@@ -1115,7 +1115,7 @@ dependencies = [
  "clap 3.1.12",
  "env_logger",
  "log",
- "nix 0.23.1",
+ "nix 0.24.0",
  "northstar",
  "tokio",
  "toml",
@@ -1245,6 +1245,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f6d99b651ff9697d6710f9613a07c5b4e0d655040faf56b3b471af108d55597"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1287,7 +1299,7 @@ dependencies = [
  "memfd",
  "memoffset",
  "nanoid",
- "nix 0.23.1",
+ "nix 0.24.0",
  "proptest",
  "rand_core 0.6.3",
  "rlimit",
@@ -1326,7 +1338,7 @@ dependencies = [
  "log",
  "memfd",
  "nanoid",
- "nix 0.23.1",
+ "nix 0.24.0",
  "northstar",
  "northstar-tests-derive",
  "regex",
@@ -2372,7 +2384,7 @@ dependencies = [
  "anyhow",
  "caps",
  "clap 3.1.12",
- "nix 0.23.1",
+ "nix 0.24.0",
 ]
 
 [[package]]
