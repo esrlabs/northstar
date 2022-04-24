@@ -383,7 +383,8 @@ where
 
         // If the connections breaks: just break. If the receiver is dropped: just break.
         let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-        while let Some(Ok(buf)) = take.next().await {
+        while let Some(buf) = take.next().await {
+            let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
             // Ignore any sending error because the stream needs to be drained for `size` bytes.
             tx.send(buf).await.ok();
         }
