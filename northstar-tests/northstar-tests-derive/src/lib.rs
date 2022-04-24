@@ -41,6 +41,13 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         northstar_tests::logger::init();
         log::set_max_level(log::LevelFilter::Debug);
 
+        // Install a custom panic hook that aborts the process in case of a panic *anywhere*
+        let default_panic = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            default_panic(info);
+            exit(1);
+        }));
+
         // Create a new network namespace
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET).expect("failed to craete network namespace");
         // Up the loopback interface
