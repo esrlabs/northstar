@@ -384,9 +384,8 @@ where
         // If the connections breaks: just break. If the receiver is dropped: just break.
         let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
         while let Some(Ok(buf)) = take.next().await {
-            if tx.send(buf).await.is_err() {
-                break;
-            }
+            // Ignore any sending error because the stream needs to be drained for `size` bytes.
+            tx.send(buf).await.ok();
         }
     } else {
         let message = Request::Request(request);
