@@ -4,14 +4,11 @@ use bytes::{BufMut, BytesMut};
 use lazy_static::lazy_static;
 use nix::{
     cmsg_space,
-    sys::{
-        socket::{self, ControlMessageOwned},
-        uio,
-    },
+    sys::socket::{self, ControlMessageOwned, SockaddrIn6},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    io::{self, ErrorKind, Read, Write},
+    io::{self, ErrorKind, IoSlice, IoSliceMut, Read, Write},
     mem::MaybeUninit,
     os::unix::prelude::{AsRawFd, FromRawFd, RawFd},
 };
@@ -66,12 +63,12 @@ impl Message<std::os::unix::net::UnixStream> {
     #[allow(unused)]
     pub fn send_fds<T: AsRawFd>(&self, fds: &[T]) -> io::Result<()> {
         let buf = &[0u8];
-        let iov = &[uio::IoVec::from_slice(buf)];
+        let iov = &[IoSlice::new(buf)];
         let fds = fds.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();
         let cmsg = [socket::ControlMessage::ScmRights(&fds)];
         const FLAGS: socket::MsgFlags = socket::MsgFlags::empty();
 
-        socket::sendmsg(self.inner.as_raw_fd(), iov, &cmsg, FLAGS, None)
+        socket::sendmsg::<SockaddrIn6>(self.inner.as_raw_fd(), iov, &cmsg, FLAGS, None)
             .map_err(os_err)
             .map(drop)
     }
@@ -79,12 +76,17 @@ impl Message<std::os::unix::net::UnixStream> {
     /// Receive a file descriptor via the socket
     pub fn recv_fds<T: FromRawFd, const N: usize>(&self) -> io::Result<[T; N]> {
         let mut buf = [0u8];
-        let iov = &[uio::IoVec::from_mut_slice(&mut buf)];
+        let iov = &mut [IoSliceMut::new(&mut buf)];
         let mut cmsg_buffer = cmsg_space!([RawFd; N]);
         const FLAGS: socket::MsgFlags = socket::MsgFlags::empty();
 
-        let message = socket::recvmsg(self.inner.as_raw_fd(), iov, Some(&mut cmsg_buffer), FLAGS)
-            .map_err(os_err)?;
+        let message = socket::recvmsg::<SockaddrIn6>(
+            self.inner.as_raw_fd(),
+            iov,
+            Some(&mut cmsg_buffer),
+            FLAGS,
+        )
+        .map_err(os_err)?;
 
         recv_control_msg::<T, N>(message.cmsgs().next())
     }
@@ -183,14 +185,15 @@ impl AsyncMessage<tokio::net::UnixStream> {
 
             match self.inner.try_io(Interest::WRITABLE, || {
                 let buf = [0u8];
-                let iov = &[uio::IoVec::from_slice(&buf)];
+                let iov = &[IoSlice::new(&buf)];
 
                 let fds = fds.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();
                 let cmsg = [socket::ControlMessage::ScmRights(&fds)];
 
                 let flags = socket::MsgFlags::MSG_DONTWAIT;
 
-                socket::sendmsg(self.inner.as_raw_fd(), iov, &cmsg, flags, None).map_err(os_err)
+                socket::sendmsg::<SockaddrIn6>(self.inner.as_raw_fd(), iov, &cmsg, flags, None)
+                    .map_err(os_err)
             }) {
                 Ok(_) => break Ok(()),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
@@ -207,13 +210,18 @@ impl AsyncMessage<tokio::net::UnixStream> {
             self.inner.readable().await?;
 
             let mut buf = [0u8];
-            let iov = &[uio::IoVec::from_mut_slice(&mut buf)];
+            let iov = &mut [IoSliceMut::new(&mut buf)];
             let mut cmsg_buffer = cmsg_space!([RawFd; N]);
             let flags = socket::MsgFlags::MSG_DONTWAIT;
 
             match self.inner.try_io(Interest::READABLE, || {
-                socket::recvmsg(self.inner.as_raw_fd(), iov, Some(&mut cmsg_buffer), flags)
-                    .map_err(os_err)
+                socket::recvmsg::<SockaddrIn6>(
+                    self.inner.as_raw_fd(),
+                    iov,
+                    Some(&mut cmsg_buffer),
+                    flags,
+                )
+                .map_err(os_err)
             }) {
                 Ok(message) => break recv_control_msg::<T, N>(message.cmsgs().next()),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
