@@ -13,7 +13,7 @@ lazy_static = "1.4.0"
 log = "0.4.16"
 memfd = "0.5.1"
 nanoid = "0.4.0"
-nix = "0.23.1"
+nix = "0.24.1"
 northstar = { path = "../northstar", features = ["api", "runtime"] }
 northstar-tests-derive = { path = "northstar-tests-derive" }
 regex = "1.5.5"

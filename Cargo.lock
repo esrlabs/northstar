@@ -996,7 +996,7 @@ name = "inspect"
 version = "0.1.0"
 dependencies = [
  "caps",
- "nix 0.23.1",
+ "nix 0.24.1",
 ]
 
 [[package]]
@@ -1115,7 +1115,7 @@ dependencies = [
  "clap 3.1.12",
  "env_logger",
  "log",
- "nix 0.23.1",
+ "nix 0.24.1",
  "northstar",
  "tokio",
  "toml",
@@ -1338,7 +1338,7 @@ dependencies = [
  "log",
  "memfd",
  "nanoid",
- "nix 0.23.1",
+ "nix 0.24.1",
  "northstar",
  "northstar-tests-derive",
  "regex",
@@ -2384,7 +2384,7 @@ dependencies = [
  "anyhow",
  "caps",
  "clap 3.1.12",
- "nix 0.23.1",
+ "nix 0.24.1",
 ]
 
 [[package]]
