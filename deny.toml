@@ -34,8 +34,6 @@ notice = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    # safe: Use of outdated smallvec in ferris-says crate. Used only in a example
-    "RUSTSEC-2018-0018",
     # safe: Used only in a example
     "RUSTSEC-2020-0159"
 ]

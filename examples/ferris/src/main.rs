@@ -1,9 +1,17 @@
-use std::{env, fs, io};
+const FERRIS: &str = r#"
+        \
+         \
+            _~^~^~_
+        \) /  o o  \ (/
+          '_   -   _'
+          / '-----' \
+"#;
 
-fn main() -> io::Result<()> {
-    for arg in env::args().skip(1) {
-        let greet = fs::read_to_string(&arg).unwrap_or(format!("no such file: {}", arg));
-        ferris_says::say(greet.as_bytes(), 100, &mut std::io::stdout())?;
+fn main() -> std::io::Result<()> {
+    for arg in std::env::args().skip(1) {
+        let greet = std::fs::read_to_string(&arg)?;
+        println!("{}", greet);
+        println!("{}", FERRIS);
     }
     Ok(())
 }
