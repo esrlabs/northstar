@@ -79,6 +79,7 @@ pub struct CpuResources {
     /// This is currently a no-operation.
     pub realtime_period: Option<u64>,
     /// Customized key-value attributes
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub attrs: HashMap<String, String>,
 }
 
@@ -103,5 +104,6 @@ pub struct MemoryResources {
     /// traditional `mlock(2)` system call for that purpose.
     pub swappiness: Option<u64>,
     /// Customized key-value attributes
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub attrs: HashMap<String, String>,
 }
