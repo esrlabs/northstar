@@ -21,6 +21,16 @@ lazy_static! {
         OsRng.fill_bytes(&mut key);
         key
     };
+    static ref START: time::Instant = {
+        #[cfg(test)]
+        {
+            time::Instant::now() - time::Duration::from_secs(120)
+        }
+        #[cfg(not(test))]
+        {
+            time::Instant::now()
+        }
+    };
 }
 
 type HmacSha256 = hmac::Hmac<Sha256>;
@@ -81,20 +91,8 @@ impl Token {
     }
 }
 
-#[cfg(not(test))]
 fn now() -> time::Duration {
-    time::Duration::from_secs(time::Instant::now().elapsed().as_secs())
-}
-
-/// Special now impl for tests that need now in the past
-#[cfg(test)]
-fn now() -> time::Duration {
-    time::Duration::from_secs(
-        time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    )
+    time::Duration::from_secs(START.elapsed().as_secs())
 }
 
 fn calculate_hmac(time: &time::Duration, user: &[u8], target: &[u8], shared: &[u8]) -> Hmac {
