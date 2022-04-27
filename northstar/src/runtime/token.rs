@@ -100,7 +100,11 @@ fn calculate_hmac(time: &time::Duration, user: &[u8], target: &[u8], shared: &[u
         HmacSha256::new_from_slice(MAC_KEY.as_slice()).expect("Failed to create SHA-256 hasher");
     hasher.update(&time.as_millis().to_be_bytes());
     hasher.update(user);
+    // Sperate user and target
+    hasher.update(&MAC_KEY[0..4]);
     hasher.update(target);
+    // Sperate target and shared
+    hasher.update(&MAC_KEY[0..4]);
     hasher.update(shared);
     hasher.finalize()
 }
