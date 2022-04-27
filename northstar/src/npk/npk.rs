@@ -640,7 +640,7 @@ fn signature(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Er
     // Calculate verity root hash
     let fsimg_hash: &[u8] = &append_dm_verity_block(fsimg, fsimg_size).map_err(Error::Verity)?;
 
-    // Format the signutures.yaml
+    // Format the signatures.yaml
     let hashes_yaml = hashes_yaml(&manifest_hash, fsimg_hash, fsimg_size);
 
     let key_pair = read_keypair(key)?;

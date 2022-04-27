@@ -96,17 +96,19 @@ fn now() -> time::Duration {
 }
 
 fn calculate_hmac(time: &time::Duration, user: &[u8], target: &[u8], shared: &[u8]) -> Hmac {
-    let mut hasher =
-        HmacSha256::new_from_slice(MAC_KEY.as_slice()).expect("Failed to create SHA-256 hasher");
-    hasher.update(&time.as_millis().to_be_bytes());
-    hasher.update(user);
-    // Sperate user and target
-    hasher.update(&MAC_KEY[0..4]);
-    hasher.update(target);
-    // Sperate target and shared
-    hasher.update(&MAC_KEY[0..4]);
-    hasher.update(shared);
-    hasher.finalize()
+    let mut hmac = HmacSha256::new_from_slice(MAC_KEY.as_slice())
+        .expect("Failed to create SHA-256 HMAC instance");
+    hmac.update(user);
+    let user = hmac.finalize_reset();
+    hmac.update(target);
+    let target = hmac.finalize_reset();
+    hmac.update(shared);
+    let shared = hmac.finalize_reset();
+    hmac.update(&time.as_millis().to_be_bytes());
+    hmac.update(&user.into_bytes());
+    hmac.update(&target.into_bytes());
+    hmac.update(&shared.into_bytes());
+    hmac.finalize()
 }
 
 impl From<[u8; 40]> for Token {
