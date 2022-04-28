@@ -103,7 +103,7 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     notifications: Option<usize>,
     timeout: time::Duration,
 ) -> Result<Connection<T>, Error> {
-    let mut connection = codec::Framed::with_capacity(io, BUFFER_SIZE);
+    let mut connection = codec::Framed::new(io);
     let subscribe_notifications = notifications.is_some();
     let version = model::version();
 

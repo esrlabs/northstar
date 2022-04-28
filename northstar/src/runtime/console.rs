@@ -32,7 +32,8 @@ use tokio::{
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
-const BUFFER_SIZE: usize = 1024 * 1024;
+/// Max length of a single json request line
+const MAX_LINE_LENGTH: usize = 512 * 1024;
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -153,11 +154,12 @@ impl Console {
             debug!("Client {} connected with permissions {}", peer, permissions);
         }
 
-        let mut network_stream = api::codec::Framed::with_capacity(stream, BUFFER_SIZE);
+        // Get a framed stream and sink interface.
+        let mut network_stream = api::codec::Framed::new_with_max_length(stream, MAX_LINE_LENGTH);
 
         // Get a framed stream and sink interface.
         if let Some(rate) = configuration.max_requests_per_sec {
-            network_stream.limit_incoming_rate(rate as usize, time::Duration::from_secs(1));
+            network_stream.throttle_stream(rate as usize, time::Duration::from_secs(1));
         }
 
         // Wait for a connect message within timeout
