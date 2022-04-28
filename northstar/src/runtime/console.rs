@@ -34,6 +34,8 @@ use url::Url;
 
 /// Max length of a single json request line
 const MAX_LINE_LENGTH: usize = 512 * 1024;
+/// Max NPK size
+const MAX_NPK_SIZE: u64 = 512 * 10u64.pow(6);
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -282,7 +284,7 @@ impl Console {
                             let response = match process_request(&peer, &mut network_stream, &stop, permissions, &event_tx, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
-                                    warn!("failed to process request: {}", e);
+                                    warn!("Failed to process request: {}", e);
                                     break;
                                 }
                             };
@@ -372,6 +374,14 @@ where
                 peer,
                 bytesize::ByteSize::b(size)
             );
+
+            // Check the installation request size
+            if size > MAX_NPK_SIZE {
+                return Err(Error::Io(
+                    "npk size too large".into(),
+                    io::Error::new(io::ErrorKind::InvalidData, "npk size too large"),
+                ));
+            }
 
             info!("{}: Using repository \"{}\"", peer, repository);
 
