@@ -166,6 +166,42 @@ async fn mount_umount() -> Result<()> {
     Ok(())
 }
 
+// Try to mount a unknown container
+#[runtime_test]
+async fn try_to_mount_unknown_container() -> Result<()> {
+    let container = "foo:0.0.1:default";
+    let result = client().mount(container).await?;
+    let container = api::model::Container::try_from(container)?;
+    let error = api::model::Error::InvalidContainer {
+        container: container.clone(),
+    };
+    assert_eq!(result, api::model::MountResult::Error { container, error });
+    Ok(())
+}
+
+// Try to mount a known and unknown container
+#[runtime_test]
+async fn try_to_mount_known_and_unknown_container() -> Result<()> {
+    client().install(TEST_RESOURCE_NPK, "mem").await?;
+    let unknown = "foo:0.0.1:default";
+    let result = client().mount_all([TEST_RESOURCE, unknown]).await?;
+    assert!(result.len() == 2);
+
+    // Check that a mount error for the unknown container is in the result
+    let container = api::model::Container::try_from(unknown)?;
+    let error = api::model::Error::InvalidContainer {
+        container: container.clone(),
+    };
+    let error = api::model::MountResult::Error { container, error };
+
+    assert!(result.contains(&error));
+    assert!(result.contains(&api::model::MountResult::Ok {
+        container: api::model::Container::try_from(TEST_RESOURCE)?
+    }));
+
+    Ok(())
+}
+
 // Try to stop a not started container and expect an Err
 #[runtime_test]
 async fn try_to_stop_unknown_container() -> Result<()> {
