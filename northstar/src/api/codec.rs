@@ -47,7 +47,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Framed<T> {
         }
         item
     }
-
 }
 
 impl<T> std::ops::Deref for Framed<T> {

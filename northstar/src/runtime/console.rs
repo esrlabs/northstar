@@ -3,7 +3,7 @@ use crate::{
     api::{self, codec::Framed},
     common::container::Container,
     npk::manifest::{self, Permission},
-    runtime::{token::Token, EventTx, ExitStatus},
+    runtime::{error::Context, token::Token, EventTx, ExitStatus},
 };
 use api::model;
 use async_stream::stream;
@@ -27,15 +27,20 @@ use tokio::{
     net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
-    task, time,
+    task,
+    time::{self, timeout},
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
 /// Max length of a single json request line
 const MAX_LINE_LENGTH: usize = 512 * 1024;
+
 /// Max NPK size
-const MAX_NPK_SIZE: u64 = 512 * 10u64.pow(6);
+const MAX_NPK_SIZE: u64 = 512 * 1_000_000;
+
+/// Timeout between two npks stream chunks
+const NPK_STREAM_TIMEOUT: time::Duration = time::Duration::from_secs(2);
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -407,7 +412,15 @@ where
 
             // If the connections breaks: just break. If the receiver is dropped: just break.
             let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-            while let Some(buf) = take.next().await {
+            while let Some(buf) = timeout(NPK_STREAM_TIMEOUT, take.next())
+                .await
+                .map_err(|_| {
+                    Error::Io(
+                        "npk stream timeout".into(),
+                        io::Error::new(io::ErrorKind::TimedOut, "timeout"),
+                    )
+                })?
+            {
                 let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
                 // Ignore any sending error because the stream needs to be drained for `size` bytes.
                 tx.send(buf).await.ok();

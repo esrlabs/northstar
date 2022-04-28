@@ -70,18 +70,33 @@ async fn too_long_line() -> Result<()> {
 
 /// Invalid install request
 #[runtime_test]
-async fn invalid_install_request() -> Result<()> {
+async fn npk_size_limit_violation() -> Result<()> {
     let timeout = Duration::from_secs(10);
     let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
     let mut client = api::client::Client::new(io, None, timeout).await?;
 
     match client
-        .request(model::Request::Install("mem".into(), 9999999))
+        .request(model::Request::Install("mem".into(), 999999999))
         .await
     {
         Ok(_) => panic!("expected IO error"),
         Err(_) => Ok(()),
     }
+}
+
+/// Stale install request that shall timeout after some seconds
+#[runtime_test]
+async fn stale_install() -> Result<()> {
+    let timeout = Duration::from_secs(10);
+    let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
+    let mut client = api::client::Client::new(io, None, timeout).await?;
+
+    let response = client
+        .request(model::Request::Install("mem".into(), 100))
+        .await;
+    assert!(response.is_err());
+
+    Ok(())
 }
 
 /// Check that subscribing to notifications is not permitted on the `console_none` url.
