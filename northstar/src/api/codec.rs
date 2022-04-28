@@ -5,7 +5,7 @@ use tokio::{
     io::{self, AsyncRead, AsyncWrite},
     time::Instant,
 };
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder, LinesCodec};
 
 /// Newline delimited json codec for api::Message that on top implements AsyncRead and Write
 pub struct Framed<T> {
@@ -23,19 +23,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Framed<T> {
         }
     }
 
-    /// Provides a [`Stream`] and [`Sink`] interface for reading and writing to this
-    /// I/O object, using [`Decoder`] and [`Encoder`] to read and write the raw data,
-    /// with a specific read buffer initial capacity.
-    /// [`split`]: https://docs.rs/futures/0.3/futures/stream/trait.StreamExt.html#method.split
-    pub fn with_capacity(inner: T, capacity: usize) -> Framed<T> {
+    /// Returns a Framed with a maximum line length limit.
+    pub fn new_with_max_length(inner: T, max_length: usize) -> Framed<T> {
         Framed {
-            inner: tokio_util::codec::Framed::with_capacity(inner, Codec::default(), capacity),
+            inner: tokio_util::codec::Framed::new(inner, Codec::new_with_max_length(max_length)),
             rate_limitter: None,
         }
     }
 
     /// Limit the incoming message rate to a maximum inside a time duration
-    pub fn limit_incoming_rate(&mut self, rate: usize, duration: Duration) {
+    pub fn throttle_stream(&mut self, rate: usize, duration: Duration) {
         self.rate_limitter = Some(TimeWindowCounter::new(rate, duration));
     }
 
@@ -50,6 +47,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Framed<T> {
         }
         item
     }
+
 }
 
 impl<T> std::ops::Deref for Framed<T> {
@@ -69,7 +67,22 @@ impl<T> std::ops::DerefMut for Framed<T> {
 /// Newline delimited json
 #[derive(Default)]
 pub struct Codec {
-    inner: tokio_util::codec::LinesCodec,
+    inner: LinesCodec,
+}
+
+impl Codec {
+    /// Returns a Codec with a maximum line length limit.
+    ///
+    /// If this is set, calls to Codec::decode will return a
+    /// io::Error when a line exceeds the length limit. Subsequent calls
+    /// will discard up to limit bytes from that line until a newline character
+    /// is reached, returning None until the line over the limit has been fully
+    /// discarded. After that point, calls to decode will function as normal.
+    pub fn new_with_max_length(max_length: usize) -> Codec {
+        Codec {
+            inner: LinesCodec::new_with_max_length(max_length),
+        }
+    }
 }
 
 impl Decoder for Codec {
@@ -160,8 +173,8 @@ mod tests {
         ])?;
 
         let cursor = std::io::Cursor::new(buffer.as_mut());
-        let mut stream = Framed::with_capacity(cursor, 2);
-        stream.limit_incoming_rate(2, Duration::from_secs(1));
+        let mut stream = Framed::new(cursor);
+        stream.throttle_stream(2, Duration::from_secs(1));
 
         {
             let mut fut = tokio_test::task::spawn(stream.next());

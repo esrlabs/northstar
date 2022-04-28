@@ -1,11 +1,11 @@
-use std::path::Path;
+use std::{iter, path::Path};
 
 use anyhow::{Context, Result};
 use api::{client::Error as ClientError, model::Error as ModelError};
 use futures::SinkExt;
 use northstar::api::{
     self,
-    model::{self, ConnectNack},
+    model::{self, ConnectNack, Container},
 };
 use northstar_tests::runtime_test;
 use tokio::{net::UnixStream, time::Duration};
@@ -49,6 +49,23 @@ async fn api_version() -> Result<()> {
 
     assert_eq!(connack, expected_message);
     Ok(())
+}
+
+/// Expect the connection to be closed if a request with a too long line is sent.
+#[runtime_test]
+async fn too_long_line() -> Result<()> {
+    let timeout = Duration::from_secs(10);
+    let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
+    let mut client = api::client::Client::new(io, None, timeout).await?;
+
+    // The default json line limit is 512K
+    let container = Container::try_from("hello-world:0.0.1").unwrap();
+    let mount = iter::repeat(container).take(100000).collect();
+
+    match client.request(model::Request::Mount(mount)).await {
+        Ok(_) => panic!("expected IO error"),
+        Err(_) => Ok(()),
+    }
 }
 
 /// Check that subscribing to notifications is not permitted on the `console_none` url.
