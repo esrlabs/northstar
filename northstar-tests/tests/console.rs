@@ -68,6 +68,22 @@ async fn too_long_line() -> Result<()> {
     }
 }
 
+/// Invalid install request
+#[runtime_test]
+async fn invalid_install_request() -> Result<()> {
+    let timeout = Duration::from_secs(10);
+    let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
+    let mut client = api::client::Client::new(io, None, timeout).await?;
+
+    match client
+        .request(model::Request::Install("mem".into(), 9999999))
+        .await
+    {
+        Ok(_) => panic!("expected IO error"),
+        Err(_) => Ok(()),
+    }
+}
+
 /// Check that subscribing to notifications is not permitted on the `console_none` url.
 #[runtime_test]
 async fn notifications() -> Result<()> {
