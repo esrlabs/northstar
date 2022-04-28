@@ -1,3 +1,4 @@
+use crate::common::name::Name;
 use schemars::{
     gen::SchemaGenerator,
     schema::{InstanceType, SchemaObject},
@@ -287,7 +288,8 @@ pub enum Error {
     },
     StartContainerMissingResource {
         container: Container,
-        resource: Container,
+        resource: Name,
+        version: String,
     },
     StartContainerFailed {
         container: Container,

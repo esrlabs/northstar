@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::{
     api::{self},
+    common::name::Name,
     npk,
     runtime::{Container, ExitStatus, RepositoryId},
 };
@@ -24,8 +25,8 @@ pub enum Error {
     StartContainerStarted(Container),
     #[error("container {0} failed to start: Resources failed to mount")]
     StartContainerResource(Container),
-    #[error("container {0} failed to start: Resource {1} is missing")]
-    StartContainerMissingResource(Container, Container),
+    #[error("container {0} failed to start: Resource {1} version {2} is missing")]
+    StartContainerMissingResource(Container, Name, String),
     #[error("container {0} failed to start: {1}")]
     StartContainerFailed(Container, String),
     #[error("container {0} failed to stop")]
@@ -85,10 +86,11 @@ impl From<Error> for api::model::Error {
             Error::StartContainerResource(container) => {
                 api::model::Error::StartContainerResource { container }
             }
-            Error::StartContainerMissingResource(container, resource) => {
+            Error::StartContainerMissingResource(container, resource, version) => {
                 api::model::Error::StartContainerMissingResource {
                     container,
                     resource,
+                    version,
                 }
             }
             Error::StartContainerFailed(container, error) => {

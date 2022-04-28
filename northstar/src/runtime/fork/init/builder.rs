@@ -1,9 +1,9 @@
 use super::{Init, Mount};
 use crate::{
-    common::container::Container,
+    common::container::{find_resource, Container},
     npk::{
         manifest,
-        manifest::{Manifest, MountOption, MountOptions, Resource, Tmpfs},
+        manifest::{Manifest, MountOption, MountOptions, Tmpfs},
     },
     runtime::{
         config::Config,
@@ -23,7 +23,11 @@ trait PathExt {
     fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf;
 }
 
-pub async fn build(config: &Config, manifest: &Manifest) -> Result<Init, Error> {
+pub async fn build(
+    config: &Config,
+    manifest: &Manifest,
+    containers: &(impl Iterator<Item = Container> + Clone),
+) -> Result<Init, Error> {
     let container = manifest.container();
     let root = config.run_dir.join(container.to_string());
 
@@ -31,7 +35,7 @@ pub async fn build(config: &Config, manifest: &Manifest) -> Result<Init, Error> 
     let console = manifest.console.is_some();
     let gid = manifest.gid;
     let groups = groups(manifest);
-    let mounts = prepare_mounts(config, &root, manifest).await?;
+    let mounts = prepare_mounts(config, &root, manifest, containers).await?;
     let rlimits = manifest.rlimits.clone();
     let seccomp = seccomp_filter(manifest);
     let uid = manifest.uid;
@@ -88,11 +92,13 @@ async fn prepare_mounts(
     config: &Config,
     root: &Path,
     manifest: &Manifest,
+    containers: &(impl Iterator<Item = Container> + Clone),
 ) -> Result<Vec<Mount>, Error> {
     let mut mounts = vec![];
     let manifest_mounts = &manifest.mounts;
 
     for (target, mount) in manifest_mounts {
+        let mut containers = containers.clone();
         match mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
                 mounts.extend(bind(root, target, host, options));
@@ -104,11 +110,26 @@ async fn prepare_mounts(
                 mounts.push(persist(root, &source, target, manifest.uid, manifest.gid).await?);
             }
             manifest::Mount::Proc => mounts.push(proc(root, target)),
-            manifest::Mount::Resource(res) => {
+            manifest::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
-                let (mount, remount_ro) = resource(root, target, config, container, res)?;
-                mounts.push(mount);
-                mounts.push(remount_ro);
+                let dependency =
+                    find_resource(&requirement.name, &requirement.version, &mut containers);
+                if let Some(dependency) = dependency {
+                    let (mount, remount_ro) = resource(
+                        root,
+                        target,
+                        config,
+                        container,
+                        dependency,
+                        &requirement.dir,
+                        &requirement.options,
+                    )?;
+                    mounts.push(mount);
+                    mounts.push(remount_ro);
+                } else {
+                    // Already checked in State::start()
+                    panic!("failed to locate required resource container");
+                }
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
             manifest::Mount::Dev => {}
@@ -231,38 +252,39 @@ fn resource(
     target: &Path,
     config: &Config,
     container: Container,
-    resource: &Resource,
+    dependency: Container,
+    src: &Path,
+    options: &MountOptions,
 ) -> Result<(Mount, Mount), Error> {
     let src = {
         // Join the source of the resource container with the mount dir
-        let resource_root = config
-            .run_dir
-            .join(format!("{}:{}", resource.name, resource.version));
-        let dir = resource
-            .dir
+        let resource_root =
+            config
+                .run_dir
+                .join(format!("{}:{}", dependency.name(), dependency.version()));
+        let src = src
             .strip_prefix("/")
             .map(|d| resource_root.join(d))
             .unwrap_or(resource_root);
-
-        if !dir.exists() {
+        if !src.exists() {
             return Err(Error::StartContainerMissingResource(
-                container.clone(),
                 container,
+                dependency.name().clone(),
+                dependency.version().to_string(),
             ));
         }
-
-        dir
+        src
     };
 
     log::debug!(
         "Mounting {} on {} with {}",
         src.display(),
         target.display(),
-        resource.options
+        options
     );
 
     let target = root.join_strip(target);
-    let mut flags = options_to_flags(&resource.options);
+    let mut flags = options_to_flags(options);
     flags |= MsFlags::MS_RDONLY | MsFlags::MS_BIND;
     let mount = Mount::new(Some(src.clone()), target.clone(), None, flags, None);
 

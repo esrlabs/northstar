@@ -32,7 +32,7 @@ pub struct Version {
 }
 
 impl Version {
-    /// Construct a new verion
+    /// Construct a new version
     pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self {
             major,
@@ -44,24 +44,30 @@ impl Version {
     /// Parse a string into a version
     pub fn parse(version: &str) -> Result<Self, ParseError> {
         semver::Version::parse(version)
-            .map(Into::into)
+            .map(|ref version| version.into())
             .map_err(|source| ParseError { source })
     }
 }
 
-impl std::fmt::Display for Version {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 
-impl From<semver::Version> for Version {
-    fn from(version: semver::Version) -> Self {
+impl From<&semver::Version> for Version {
+    fn from(version: &semver::Version) -> Self {
         Self {
             major: version.major,
             minor: version.minor,
             patch: version.patch,
         }
+    }
+}
+
+impl From<&Version> for semver::Version {
+    fn from(version: &Version) -> Self {
+        semver::Version::new(version.major, version.minor, version.patch)
     }
 }
 
@@ -83,7 +89,7 @@ impl FromStr for Version {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         semver::Version::parse(s)
-            .map(Into::into)
+            .map(|ref version| version.into())
             .map_err(|source| ParseError { source })
     }
 }
@@ -145,6 +151,81 @@ impl JsonSchema for Version {
                 min_length: Some(5),
                 max_length: None,
                 pattern: Some("[0-9]+\\.[0-9]+\\.[0-9]+".into()),
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl VersionReq {
+    /// Parse a string into a version requirement
+    pub fn parse(text: &str) -> Result<VersionReq, ParseError> {
+        Ok(VersionReq {
+            inner: semver::VersionReq::parse(text).map_err(|source| ParseError { source })?,
+        })
+    }
+
+    /// Check whether the given version satisfies this requirement
+    pub fn matches(&self, version: &Version) -> bool {
+        self.inner.matches(&semver::Version::from(version))
+    }
+}
+
+/// Container version requirement
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct VersionReq {
+    inner: semver::VersionReq,
+}
+
+impl FromStr for VersionReq {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(VersionReq {
+            inner: semver::VersionReq::from_str(s).map_err(|e| ParseError { source: e })?,
+        })
+    }
+}
+
+impl ToString for VersionReq {
+    fn to_string(&self) -> String {
+        self.inner.to_string()
+    }
+}
+
+impl Serialize for VersionReq {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.inner.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for VersionReq {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        VersionReq::parse(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for VersionReq {
+    fn schema_name() -> String {
+        "VersionReq".to_string()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            string: Some(Box::new(StringValidation {
+                min_length: Some(5),
+                max_length: None,
+                // See https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+                pattern: Some(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$".into()),
             })),
             ..Default::default()
         }

@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     api::{self, model},
-    common::non_nul_string::NonNulString,
+    common::{container::find_resource, non_nul_string::NonNulString},
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{
         console::{Console, Peer},
@@ -240,12 +240,29 @@ impl State {
             .collect::<Vec<_>>();
 
         // Add resources of containers that have the autostart flag set
-        for (container, _) in &autostarts {
+        for (container, autostart) in &autostarts {
             let manifest = self.manifest(container)?;
             for mount in manifest.mounts.values() {
                 if let Mount::Resource(Resource { name, version, .. }) = mount {
-                    let container = Container::new(name.clone(), version.clone());
-                    to_mount.push(container);
+                    if let Some(resource) =
+                        find_resource(name, version, &mut self.containers.keys().cloned())
+                    {
+                        to_mount.push(resource.clone());
+                    } else {
+                        match autostart {
+                            Autostart::Relaxed => {
+                                warn!("failed to autostart relaxed {}: missing resource {} version {}", container, name, version.to_string());
+                            }
+                            Autostart::Critical => {
+                                error!("failed to autostart critical {}: missing resource {} version {}", container, name, version.to_string());
+                                return Err(Error::StartContainerMissingResource(
+                                    container.clone(),
+                                    name.clone(),
+                                    version.to_string(),
+                                ));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -364,28 +381,29 @@ impl State {
             .mounts
             .values()
             .filter_map(|m| match m {
-                Mount::Resource(Resource { name, version, .. }) => {
-                    Some(Container::new(name.clone(), version.clone()))
-                }
+                Mount::Resource(resource) => Some(resource),
                 _ => None,
             })
             .collect::<Vec<_>>();
-
-        // Check if all resources are available
-        for resource in &resources {
-            if !self.containers.contains_key(resource) {
+        for resource in resources {
+            let version_req = &resource.version;
+            if let Some(best_match) = find_resource(
+                &resource.name,
+                version_req,
+                &mut self.containers.keys().cloned(),
+            ) {
+                let state = self
+                    .state(&best_match)
+                    .expect("Failed to determine resource container state");
+                if !state.is_mounted() {
+                    need_mount.insert(best_match);
+                }
+            } else {
                 return Err(Error::StartContainerMissingResource(
                     container.clone(),
-                    resource.clone(),
+                    resource.name.clone(),
+                    resource.version.to_string(),
                 ));
-            }
-        }
-
-        // Add resources to the mount vector
-        for resource in resources {
-            let resource_state = self.state(&resource).expect("Internal error");
-            if !resource_state.is_mounted() {
-                need_mount.insert(resource.clone());
             }
         }
 
@@ -404,9 +422,6 @@ impl State {
                 }
             }
         }
-
-        // Get a mutable reference to the container state in order to update the process field
-        let container_state = self.containers.get_mut(container).expect("Internal error");
 
         // Spawn process
         info!("Creating {}", container);
@@ -451,7 +466,11 @@ impl State {
 
         // Create container
         let config = &self.config;
-        let pid = self.launcher.create(config, &manifest, console_fd).await?;
+        let containers = self.containers.iter().map(|(c, _)| c.clone());
+        let pid = self
+            .launcher
+            .create(config, &manifest, console_fd, &containers)
+            .await?;
 
         // Debug
         let debug = super::debug::Debug::new(&self.config, &manifest, pid).await?;
@@ -525,6 +544,9 @@ impl State {
             cgroups.destroy().await;
             return Err(e);
         }
+
+        // Get a mutable reference to the container state in order to update the process field
+        let container_state = self.containers.get_mut(container).expect("Internal error");
 
         // Add process context to process
         let started = time::Instant::now();
@@ -785,7 +807,7 @@ impl State {
     pub(super) async fn on_request(
         &mut self,
         request: Request,
-        repsponse: oneshot::Sender<model::Response>,
+        sender: oneshot::Sender<model::Response>,
     ) -> Result<(), Error> {
         match request {
             Request::Request(ref request) => {
@@ -881,7 +903,7 @@ impl State {
 
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                repsponse.send(response).ok();
+                sender.send(response).ok();
             }
             Request::Install(repository, mut rx) => {
                 let payload = match self.install(&repository, &mut rx).await {
@@ -891,14 +913,14 @@ impl State {
 
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                repsponse.send(payload).ok();
+                sender.send(payload).ok();
             }
         }
         Ok(())
     }
 
     /// Try to mount all containers in `containers` in parallel and return the results. The parallelism
-    /// is archived by a dedicated thread pool that exectures the blocking mount operations on n threads
+    /// is archived by a dedicated thread pool that executes the blocking mount operations on n threads
     /// as configured in the runtime configuration.
     async fn mount_all(&mut self, containers: &[Container]) -> Vec<Result<Container, Error>> {
         let start = time::Instant::now();
@@ -1002,11 +1024,15 @@ impl State {
 
                     for mount in &manifest.mounts {
                         if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
-                            if container.name() == name && container.version() == version {
-                                warn!("Resource container {} is used by {}", container, c);
-                                let error = Err(Error::MountBusy(c.clone()));
-                                mounts.push(Either::Right(ready(error)));
-                                continue 'outer;
+                            if let Some(resource) =
+                                find_resource(name, version, &mut self.containers.keys().cloned())
+                            {
+                                if container == &resource {
+                                    warn!("Resource container {} is used by {}", container, c);
+                                    let error = Err(Error::MountBusy(c.clone()));
+                                    mounts.push(Either::Right(ready(error)));
+                                    continue 'outer;
+                                }
                             }
                         }
                     }
@@ -1077,7 +1103,7 @@ impl State {
         result
     }
 
-    /// Send a container event to all subriber consoles
+    /// Send a container event to all subscriber consoles
     fn container_event(&self, container: &Container, event: ContainerEvent) {
         // Do not fill the notification channel if there's nobody subscribed
         if self.notification_tx.receiver_count() > 0 {

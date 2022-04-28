@@ -17,7 +17,7 @@ mounts:
   /message:
     type: resource
     name: message
-    version: 0.0.2
+    version: '>=0.0.2'
     dir: /
   /system:
     type: bind

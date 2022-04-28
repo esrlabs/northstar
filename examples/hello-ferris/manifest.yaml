@@ -15,7 +15,7 @@ mounts:
   /bin:
     type: resource
     name: ferris
-    version: 0.0.1
+    version: '>=0.0.1'
     dir: /
     options: nodev,nosuid
   /lib:
@@ -33,7 +33,7 @@ mounts:
   /message:
     type: resource
     name: message
-    version: 0.0.1
+    version: '>=0.0.1'
     dir: /
     options: noexec,nodev,nosuid
 io:

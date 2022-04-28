@@ -61,7 +61,7 @@ pub struct Manifest {
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup configuration
-    pub cgroups: Option<cgroups::CGroups>,
+    pub cgroups: Option<CGroups>,
     /// Seccomp configuration
     pub seccomp: Option<Seccomp>,
     /// SELinux configuration
@@ -503,7 +503,7 @@ fn is_default<T: Default + PartialEq>(t: &T) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::npk::manifest::*;
+    use crate::{common::version::VersionReq, npk::manifest::*};
     use anyhow::Result;
     use std::{
         convert::{TryFrom, TryInto},
@@ -549,7 +549,7 @@ mounts:
   /resource:
     type: resource
     name: bla-blah.foo
-    version: 1.0.0
+    version: '>=1.0.0'
     dir: /bin/foo
     options: noexec
 autostart: critical
@@ -597,7 +597,7 @@ cgroups:
             PathBuf::from("/resource"),
             Mount::Resource(Resource {
                 name: "bla-blah.foo".try_into()?,
-                version: Version::parse("1.0.0")?,
+                version: VersionReq::parse(">=1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
                 options: [MountOption::NoExec].iter().cloned().collect(),
             }),
@@ -758,7 +758,7 @@ mounts:
   /foo:
     type: resource
     name: foo-bar.qwerty12
-    version: 0.0.1
+    version: '>=0.0.1'
     dir: /
     options: rw,noexec,nosuid
 ";
@@ -795,7 +795,7 @@ mounts:
   /resource:
     type: resource
     name: bla-bar.blah1234
-    version: 1.0.0
+    version: '>=1.0.0'
     dir: /bin/foo
     options: rw,nosuid,nodev,noexec
   /tmp:

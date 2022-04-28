@@ -90,10 +90,11 @@ impl Forker {
         config: &Config,
         manifest: &Manifest,
         console: Option<OwnedFd>,
+        containers: &(impl Iterator<Item = Container> + Clone),
     ) -> Result<Pid, Error> {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
-        let init = init::build(config, manifest).await?;
+        let init = init::build(config, manifest, containers).await?;
         let console = console.map(Into::into);
         let message = Message::CreateRequest { init, console };
 

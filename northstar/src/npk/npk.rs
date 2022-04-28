@@ -21,7 +21,7 @@ use thiserror::Error;
 use zip::{result::ZipError, ZipArchive};
 
 /// Manifest version supported by the runtime
-pub const VERSION: Version = semver::Version::new(0, 0, 1);
+pub const VERSION: Version = Version::new(0, 0, 1);
 
 // Binaries
 const MKSQUASHFS: &str = "mksquashfs";
@@ -167,7 +167,6 @@ impl<R: Read + Seek> Npk<R> {
         })?;
 
         let meta = meta(&zip)?;
-        // TODO: Should we do semver comparison here?
         if meta.version != VERSION {
             return Err(Error::Version(meta.version, VERSION));
         }
@@ -358,7 +357,7 @@ impl Builder {
         Builder {
             root: PathBuf::from(root),
             manifest,
-            key: Option::None,
+            key: None,
             squashfs_opts: SquashfsOpts::default(),
         }
     }
@@ -917,7 +916,7 @@ fn write_npk<W: Write + Seek>(
 pub fn open(path: &Path) -> Result<Zip<BufReader<fs::File>>, Error> {
     let file = fs::File::open(&path)
         .map_err(|e| Error::io(format!("failed to open '{}'", &path.display()), e))?;
-    zip::ZipArchive::new(BufReader::new(file)).map_err(|error| Error::Zip {
+    ZipArchive::new(BufReader::new(file)).map_err(|error| Error::Zip {
         context: format!("failed to parse ZIP format: '{}'", &path.display()),
         error,
     })

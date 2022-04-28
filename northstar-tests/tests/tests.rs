@@ -220,7 +220,7 @@ async fn try_to_start_unknown_container() -> Result<()> {
 
 // Try to start a container where a dependency is missing
 #[runtime_test]
-async fn try_to_start_containter_that_misses_a_resource() -> Result<()> {
+async fn try_to_start_container_that_misses_a_resource() -> Result<()> {
     client().install_test_container().await?;
     // The TEST_RESOURCE is not installed.
     assert!(client().start(TEST_CONTAINER).await.is_err());

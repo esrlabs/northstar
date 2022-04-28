@@ -1,3 +1,5 @@
+use crate::common::version::VersionReq;
+use itertools::Itertools;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -123,6 +125,18 @@ struct Inner {
     version: Version,
 }
 
+/// Find the resource container that best matches the given version requirement.
+pub fn find_resource(
+    name: &Name,
+    version_req: &VersionReq,
+    candidates: &mut impl Iterator<Item = Container>,
+) -> Option<Container> {
+    candidates
+        .filter(|c| c.name() == name && version_req.matches(c.version()))
+        .sorted_by(|c1, c2| c1.version().cmp(c2.version()))
+        .next()
+}
+
 #[test]
 fn try_from() {
     assert_eq!(
@@ -140,4 +154,37 @@ fn invalid_name() {
 #[test]
 fn schema() {
     schemars::schema_for!(Container);
+}
+
+#[test]
+fn find_newest_resource() {
+    use std::str::FromStr;
+
+    let old = Container::try_from("test:0.0.1").unwrap();
+    let new = Container::try_from("test:0.0.2").unwrap();
+    let other = Container::try_from("other:1.0.0").unwrap();
+    let containers = [old, new.clone(), other];
+    let resource = find_resource(
+        &Name::try_from("test").unwrap(),
+        &VersionReq::from_str(">=0.0.2").unwrap(),
+        &mut containers.into_iter(),
+    );
+    assert!(resource.is_some());
+    assert_eq!(resource.unwrap(), new);
+}
+
+#[test]
+fn cannot_find_newer_resource() {
+    use std::str::FromStr;
+
+    let old = Container::try_from("test:0.0.1").unwrap();
+    let new = Container::try_from("test:0.0.2").unwrap();
+    let other = Container::try_from("other:1.0.0").unwrap();
+    let containers = [old, new, other];
+    let resource = find_resource(
+        &Name::try_from("test").unwrap(),
+        &VersionReq::from_str(">=0.0.3").unwrap(),
+        &mut containers.into_iter(),
+    );
+    assert!(resource.is_none());
 }
