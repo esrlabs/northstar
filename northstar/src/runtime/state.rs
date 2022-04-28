@@ -906,17 +906,18 @@ impl State {
 
         // Create mount futures
         for container in containers {
-            // Containers cannot be mounted twice. If the container
-            // is already mounted return an error for this entity.
-            let is_mounted = self
-                .state(container)
-                .map(|s| s.is_mounted())
-                .unwrap_or(false);
-            if is_mounted {
-                let error = Err(Error::MountBusy(container.clone()));
-                mounts.push(Either::Right(ready(error)));
-            } else {
-                mounts.push(Either::Left(self.mount(container)))
+            match self.state(container) {
+                // Containers cannot be mounted twice. If the container
+                // is already mounted return an error for this entity.
+                Ok(state) if state.is_mounted() => {
+                    let error = Err(Error::MountBusy(container.clone()));
+                    mounts.push(Either::Right(ready(error)));
+                }
+                Ok(_) => mounts.push(Either::Left(self.mount(container))),
+                Err(_) => {
+                    let error = Err(Error::InvalidContainer(container.clone()));
+                    mounts.push(Either::Right(ready(error)));
+                }
             }
         }
 
