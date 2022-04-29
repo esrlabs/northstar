@@ -14,24 +14,13 @@
 
 use anyhow::Result;
 use northstar::api::client;
-use std::{env, os::unix::prelude::FromRawFd, time::Duration};
-use tokio::{net::UnixStream, time};
+use std::time::Duration;
+use tokio::time;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    // Gather fd number from env
-    let fd = env::var("NORTHSTAR_CONSOLE")?.parse::<i32>()?;
-    println!("Console fd is {}", fd);
-
-    // Wrap fd in UnixStream which is used as io object for the client
-    let std = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
-    std.set_nonblocking(true)?;
-    let io = UnixStream::from_std(std)?;
-
-    println!("Connecting...");
-
     // Instantiate client and start connect sequence
-    let mut client = client::Client::new(io, None, Duration::from_secs(5)).await?;
+    let mut client = client::Client::from_env(None, Duration::from_secs(5)).await?;
 
     // Request the identity of this container
     let ident = client.ident().await?;
@@ -59,7 +48,7 @@ async fn main() -> Result<()> {
     client.kill("console:0.0.1", 15).await?;
 
     // Wait for the sigterm
-    time::sleep(time::Duration::from_secs(u64::MAX)).await;
+    time::sleep(Duration::from_secs(u64::MAX)).await;
 
     Ok(())
 }

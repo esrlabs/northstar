@@ -3,11 +3,10 @@ use northstar::api::{
     client,
     model::{Token, VerificationResult},
 };
-use std::{env, os::unix::prelude::FromRawFd, time::Duration};
+use std::time::Duration;
 use tokio::{
     io,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::UnixStream,
     task,
 };
 
@@ -16,11 +15,7 @@ const SHARED: &str = "hello!";
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Connect to the runtime via NORTHSTAR_CONSOLE...
-    let fd = env::var("NORTHSTAR_CONSOLE")?.parse::<i32>()?;
-    let std = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
-    std.set_nonblocking(true)?;
-    let io = UnixStream::from_std(std)?;
-    let mut client = client::Client::new(io, None, Duration::from_secs(5)).await?;
+    let mut client = client::Client::from_env(None, Duration::from_secs(5)).await?;
 
     // Listen on some random port
     let listener = tokio::net::TcpListener::bind("localhost:6543").await?;
