@@ -7,6 +7,6 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.56"
-tokio = { version = "1.17.0", features = ["macros", "rt", "net"] }
+tokio = { version = "1.18.0", features = ["macros", "rt", "net"] }
 northstar = { path = "../../northstar", features = ["api"] }
 hex = "0.4.3"
