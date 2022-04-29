@@ -14,6 +14,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     convert::{Infallible, TryInto},
     iter::empty,
+    os::unix::prelude::FromRawFd,
     path::Path,
     pin::Pin,
     task::Poll,
@@ -48,6 +49,8 @@ pub enum Error {
     String(InvalidNulChar),
     #[error("infalliable")]
     Infalliable,
+    #[error("invalid file descriptor from env NORTHSTAR_CONSOLE")]
+    FromEnv,
 }
 
 impl From<container::Error> for Error {
@@ -150,6 +153,24 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
             ))),
         },
         _ => unreachable!("expecting connect ack or nack"),
+    }
+}
+
+impl Client<tokio::net::UnixStream> {
+    /// Tries to create a client by accessing `NORTHSTAR_CONSOLE` env variable
+    pub async fn from_env(
+        notifications: Option<usize>,
+        timeout: time::Duration,
+    ) -> Result<Self, Error> {
+        let fd = std::env::var("NORTHSTAR_CONSOLE")
+            .map_err(|_| Error::FromEnv)?
+            .parse::<i32>()
+            .map_err(|_| Error::FromEnv)?;
+
+        let std = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
+        std.set_nonblocking(true)?;
+        let io = tokio::net::UnixStream::from_std(std)?;
+        Client::new(io, notifications, timeout).await
     }
 }
 
