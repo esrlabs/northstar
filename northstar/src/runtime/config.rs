@@ -27,6 +27,10 @@ pub struct Config {
     pub log_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNulString,
+    /// Event loop buffer size
+    pub event_buffer_size: Option<usize>,
+    /// Notification buffer size
+    pub notification_buffer_size: Option<usize>,
     /// Console configuration
     #[serde(deserialize_with = "console")]
     pub consoles: HashMap<Url, ConsoleConfiguration>,
