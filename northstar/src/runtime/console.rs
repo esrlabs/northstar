@@ -349,8 +349,8 @@ where
 {
     let permissions = &configuration.permissions;
     let required_permission = match &request {
-        model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
-        model::Request::Containers => Permission::Containers,
+        model::Request::Containers => Permission::Container,
+        model::Request::Container { .. } => Permission::Container,
         model::Request::Ident { .. } => Permission::Ident,
         model::Request::Install { .. } => Permission::Install,
         model::Request::Kill { .. } => Permission::Kill,

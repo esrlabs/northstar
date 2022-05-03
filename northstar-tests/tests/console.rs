@@ -217,12 +217,9 @@ async fn permissions_umount() -> Result<()> {
 }
 
 #[runtime_test]
-async fn permissions_stats() -> Result<()> {
+async fn permissions_inspect() -> Result<()> {
     assert!(matches!(
-        connect_none()
-            .await?
-            .container_stats("hello_world:0.0.1")
-            .await,
+        connect_none().await?.container("hello_world:0.0.1").await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())

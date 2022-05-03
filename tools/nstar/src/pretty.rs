@@ -127,9 +127,8 @@ pub(crate) fn response(response: &Response) -> i32 {
         Response::Umount(result) => umounts(result),
         Response::Ok => println!("ok"),
         Response::Install(container) => println!("installed {}", container),
-        Response::ContainerStats(container, stats) => {
-            println!("{}:", container);
-            println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+        Response::Container(data) => {
+            println!("{}", serde_json::to_string_pretty(&data).unwrap());
         }
         Response::Token(token) => {
             println!("created: {}", hex::encode(token.as_ref()));

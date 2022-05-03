@@ -1,8 +1,8 @@
 use super::{
     codec,
     model::{
-        self, Connect, ConnectNack, Container, ContainerData, ContainerStats, Message, MountResult,
-        Notification, RepositoryId, Request, Response, Token, UmountResult, VerificationResult,
+        self, Connect, ConnectNack, Container, ContainerData, Message, MountResult, Notification,
+        RepositoryId, Request, Response, Token, UmountResult, VerificationResult,
     },
 };
 use crate::common::{
@@ -674,16 +674,16 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// println!("{:?}", client.container_stats("hello:0.0.1").await.unwrap());
+    /// println!("{:?}", client.container("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
-    pub async fn container_stats(
+    pub async fn container(
         &mut self,
         container: impl TryInto<Container, Error = impl Into<Error>>,
-    ) -> Result<ContainerStats, Error> {
+    ) -> Result<ContainerData, Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::ContainerStats(container)).await? {
-            Response::ContainerStats(_, stats) => Ok(stats),
+        match self.request(Request::Container(container)).await? {
+            Response::Container(stats) => Ok(*stats),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on container_stats should be a container_stats"),
         }

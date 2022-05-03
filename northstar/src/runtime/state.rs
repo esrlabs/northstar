@@ -7,7 +7,6 @@ use super::{
     io,
     mount::MountControl,
     repository::{DirRepository, MemRepository, Npk},
-    stats::ContainerStats,
     Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, RepositoryId,
 };
 use crate::{
@@ -40,7 +39,6 @@ use std::{
     iter::{once, FromIterator},
     os::unix::net::UnixStream as StdUnixStream,
     path::PathBuf,
-    result,
     sync::Arc,
 };
 use tokio::{
@@ -745,23 +743,6 @@ impl State {
         Ok(())
     }
 
-    /// Gather statistics for `container`
-    async fn container_stats(
-        &mut self,
-        container: &Container,
-    ) -> result::Result<ContainerStats, Error> {
-        // Get container state or return if it's unknown
-        let state = self.state(container)?;
-
-        // Gather stats if the container is running
-        if let Some(process) = state.process.as_ref() {
-            info!("Collecting stats of {}", container);
-            Ok(process.cgroups.stats())
-        } else {
-            Err(Error::ContainerNotStarted(container.clone()))
-        }
-    }
-
     /// Handle the exit of a container
     async fn on_exit(
         &mut self,
@@ -923,17 +904,10 @@ impl State {
                             model::Response::Error(e.into())
                         }
                     },
-                    model::Request::ContainerStats(container) => {
-                        match self.container_stats(container).await {
-                            Ok(stats) => {
-                                api::model::Response::ContainerStats(container.clone(), stats)
-                            }
-                            Err(e) => {
-                                warn!("failed to gather stats for {}: {}", container, e);
-                                model::Response::Error(e.into())
-                            }
-                        }
-                    }
+                    model::Request::Container(container) => match self.container_data(container) {
+                        Ok(data) => model::Response::Container(Box::new(data)),
+                        Err(e) => model::Response::Error(e.into()),
+                    },
                     model::Request::Ident => unreachable!(), // handled in module console
                     model::Request::TokenCreate(..) => unreachable!(), // handled in module console
                     model::Request::TokenVerify(..) => unreachable!(), // handled in module console
@@ -1132,6 +1106,33 @@ impl State {
             .next()
     }
 
+    /// Tries to get the ContainerData for the input container
+    fn container_data(&self, container: &Container) -> Result<api::model::ContainerData, Error> {
+        let state = self
+            .containers
+            .get(container)
+            .ok_or_else(|| Error::InvalidContainer(container.clone()))?;
+        let manifest = self.manifest(container)?.clone();
+
+        let runtime_info = state.process.as_ref();
+        let process = runtime_info.map(|context| api::model::Process {
+            pid: context.pid,
+            uptime: context.started.elapsed().as_nanos() as u64,
+        });
+        let repository = state.repository.clone();
+        let mounted = state.is_mounted();
+        let container = container.clone();
+
+        Ok(api::model::ContainerData {
+            container,
+            repository,
+            manifest,
+            process,
+            mounted,
+            stats: runtime_info.map(|p| p.cgroups.stats()),
+        })
+    }
+
     fn list_containers(&self) -> Vec<api::model::ContainerData> {
         let mut result = Vec::with_capacity(self.containers.len());
 
@@ -1150,6 +1151,7 @@ impl State {
                 manifest,
                 process,
                 mounted,
+                stats: None,
             };
             result.push(container_data);
         }

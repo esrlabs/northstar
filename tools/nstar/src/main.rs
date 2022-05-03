@@ -107,8 +107,8 @@ enum Subcommand {
         #[clap(short, long)]
         shell: clap_complete::Shell,
     },
-    /// Request container statistics
-    ContainerStats {
+    /// Display information about the container
+    Container {
         /// Container name and optional version
         #[clap(value_name = "name[:version]")]
         container: String,
@@ -223,37 +223,30 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             let container = parse_container(&container, client).await?;
 
             // Convert args
-            let args = if let Some(args) = args {
-                let mut non_null = Vec::with_capacity(args.len());
-                for arg in args {
-                    non_null.push(NonNulString::try_from(arg.as_str()).context("invalid arg")?);
-                }
-                non_null
-            } else {
-                Vec::with_capacity(0)
-            };
+            let args: Result<Vec<_>, _> = args
+                .unwrap_or_default()
+                .into_iter()
+                .map(NonNulString::try_from)
+                .collect();
 
             // Convert env
-            let env = if let Some(env) = env {
-                let mut non_null = HashMap::with_capacity(env.len());
-                for env in env {
-                    let mut split = env.split('=');
-                    let key = split
-                        .next()
+            let env: Result<HashMap<_, _>, _> = env
+                .unwrap_or_default()
+                .into_iter()
+                .map(|env| {
+                    env.split_once('=')
                         .ok_or_else(|| anyhow!("invalid env"))
-                        .and_then(|s| NonNulString::try_from(s).context("invalid key"))?;
-                    let value = split
-                        .next()
-                        .ok_or_else(|| anyhow!("invalid env"))
-                        .and_then(|s| NonNulString::try_from(s).context("invalid value"))?;
-                    non_null.insert(key, value);
-                }
-                non_null
-            } else {
-                HashMap::with_capacity(0)
-            };
+                        .and_then(|(k, v)| {
+                            match (NonNulString::try_from(k), NonNulString::try_from(v)) {
+                                (Ok(k), Ok(v)) => Ok((k, v)),
+                                (Err(_), _) => Err(anyhow!("invalid key")),
+                                (_, Err(_)) => Err(anyhow!("invalid value")),
+                            }
+                        })
+                })
+                .collect();
 
-            Ok(Request::Start(container, args, env))
+            Ok(Request::Start(container, args?, env?))
         }
         Subcommand::Kill { container, signal } => {
             let container = parse_container(&container, client).await?;
@@ -268,9 +261,9 @@ async fn command_to_request<T: AsyncRead + AsyncWrite + Unpin>(
             parse_container(&container, client).await?,
         )),
         Subcommand::Shutdown => Ok(Request::Shutdown),
-        Subcommand::ContainerStats { container } => {
+        Subcommand::Container { container } => {
             let container = parse_container(&container, client).await?;
-            Ok(Request::ContainerStats(container))
+            Ok(Request::Container(container))
         }
         Subcommand::Token { target, shared } => {
             let target = target.as_bytes().to_vec();

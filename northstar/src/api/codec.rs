@@ -14,8 +14,9 @@ pub struct Framed<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Framed<T> {
-    /// Provides a [`Stream`] and [`Sink`] interface for reading and writing to this
-    /// I/O object, using [`Decoder`] and [`Encoder`] to read and write the raw data.
+    /// Provides a [Stream][`futures::Stream`] and [Sink][`futures::Sink`] interface for reading
+    /// and writing to this I/O object, using [`Decoder`] and [`Encoder`] to read and write the raw
+    /// data.
     pub fn new(inner: T) -> Framed<T> {
         Framed {
             inner: tokio_util::codec::Framed::new(inner, Codec::default()),

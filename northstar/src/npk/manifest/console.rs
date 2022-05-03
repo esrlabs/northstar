@@ -35,8 +35,8 @@ pub struct Configuration {
 pub enum Permission {
     /// Shutdown the runtime
     Shutdown,
-    /// List containers
-    Containers,
+    /// Access information about a containers
+    Container,
     /// List repositories
     Repositories,
     /// Start a container
