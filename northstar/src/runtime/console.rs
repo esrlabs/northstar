@@ -26,22 +26,21 @@ use tokio::{
     net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
-    task,
-    time::{self, timeout},
+    task, time,
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
 pub use crate::npk::manifest::console::{Configuration, Permission, Permissions};
 
-/// Max length of a single json request line
-const MAX_LINE_LENGTH: usize = 512 * 1024;
-
-/// Max NPK size
-const MAX_NPK_SIZE: u64 = 512 * 1_000_000;
-
-/// Timeout between two npks stream chunks
-const NPK_STREAM_TIMEOUT: time::Duration = time::Duration::from_secs(2);
+/// Default maximum requests per second
+const DEFAULT_REQUESTS_PER_SECOND: usize = 1024;
+/// Default maximum length per request
+const DEFAULT_MAX_REQUEST_SIZE: usize = 1024 * 1024;
+/// Default maximum NPK size
+const DEFAULT_MAX_INSTALL_STREAM_SIZE: u64 = 256 * 1_000_000;
+/// Default timeout between two npks stream chunks
+const DEFAULT_NPK_STREAM_TIMEOUT: u64 = 5;
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -163,12 +162,16 @@ impl Console {
         }
 
         // Get a framed stream and sink interface.
-        let mut network_stream = api::codec::Framed::new_with_max_length(stream, MAX_LINE_LENGTH);
+        let max_request_size = configuration
+            .max_request_size
+            .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
+        let mut network_stream = api::codec::Framed::new_with_max_length(stream, max_request_size);
 
         // Get a framed stream and sink interface.
-        if let Some(rate) = configuration.max_requests_per_sec {
-            network_stream.throttle_stream(rate as usize, time::Duration::from_secs(1));
-        }
+        let max_requests_per_sec = configuration
+            .max_requests_per_sec
+            .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
+        network_stream.throttle_stream(max_requests_per_sec, time::Duration::from_secs(1));
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
@@ -287,7 +290,7 @@ impl Console {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, permissions, &event_tx, request).await {
+                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -332,13 +335,14 @@ async fn process_request<S>(
     peer: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
-    permissions: &Permissions,
+    configuration: &Configuration,
     event_loop: &EventTx,
     request: model::Request,
 ) -> Result<model::Message, Error>
 where
     S: AsyncRead + Unpin,
 {
+    let permissions = &configuration.permissions;
     let required_permission = match &request {
         model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
         model::Request::Containers => Permission::Containers,
@@ -383,7 +387,10 @@ where
             );
 
             // Check the installation request size
-            if size > MAX_NPK_SIZE {
+            let max_install_stream_size = configuration
+                .max_install_stream_size
+                .unwrap_or(DEFAULT_MAX_INSTALL_STREAM_SIZE);
+            if size > max_install_stream_size {
                 return Err(Error::Io(
                     "npk size too large".into(),
                     io::Error::new(io::ErrorKind::InvalidData, "npk size too large"),
@@ -414,15 +421,17 @@ where
 
             // If the connections breaks: just break. If the receiver is dropped: just break.
             let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-            while let Some(buf) = timeout(NPK_STREAM_TIMEOUT, take.next())
-                .await
-                .map_err(|_| {
-                    Error::Io(
-                        "npk stream timeout".into(),
-                        io::Error::new(io::ErrorKind::TimedOut, "timeout"),
-                    )
-                })?
-            {
+            let timeout = time::Duration::from_secs(
+                configuration
+                    .npk_stream_timeout
+                    .unwrap_or(DEFAULT_NPK_STREAM_TIMEOUT),
+            );
+            while let Some(buf) = time::timeout(timeout, take.next()).await.map_err(|_| {
+                Error::Io(
+                    "npk stream timeout".into(),
+                    io::Error::new(io::ErrorKind::TimedOut, "timeout"),
+                )
+            })? {
                 let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
                 // Ignore any sending error because the stream needs to be drained for `size` bytes.
                 tx.send(buf).await.ok();

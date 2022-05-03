@@ -62,16 +62,10 @@ impl Runtime {
                 console_full(),
                 ConsoleConfiguration {
                     permissions: config::ConsolePermissions::full(),
-                    max_requests_per_sec: None,
+                    ..Default::default()
                 },
             ),
-            (
-                console_none(),
-                ConsoleConfiguration {
-                    permissions: config::ConsolePermissions::default(),
-                    max_requests_per_sec: None,
-                },
-            ),
+            (console_none(), ConsoleConfiguration::default()),
         ]
         .into();
 
