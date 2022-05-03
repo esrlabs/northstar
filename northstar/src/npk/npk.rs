@@ -1,11 +1,13 @@
-use crate::npk::{
-    dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-    manifest::{Bind, Manifest, Mount, MountOption},
+use crate::{
+    common::version::Version,
+    npk::{
+        dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
+        manifest::{Bind, Manifest, Mount, MountOption},
+    },
 };
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand_core::{OsRng, RngCore};
-use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -21,8 +23,7 @@ use thiserror::Error;
 use zeroize::Zeroize;
 use zip::{result::ZipError, ZipArchive};
 
-/// Manifest version supported by the runtime
-pub const VERSION: Version = Version::new(0, 0, 1);
+use super::VERSION;
 
 /// Default path to mksquashfs
 pub const MKSQUASHFS: &str = "mksquashfs";

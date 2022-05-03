@@ -83,9 +83,6 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Manifest version supported by the runtime
-    pub const VERSION: Version = Version::new(0, 1, 0);
-
     /// Container that is specified in the manifest
     pub fn container(&self) -> Container {
         Container::new(self.name.clone(), self.version.clone())

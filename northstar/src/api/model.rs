@@ -33,14 +33,6 @@ pub type Version = crate::common::version::Version;
 /// Container statistics
 pub type ContainerStats = HashMap<String, serde_json::Value>;
 
-/// API version
-const VERSION: Version = Version::new(0, 3, 0);
-
-/// API version
-pub const fn version() -> Version {
-    VERSION
-}
-
 /// Message
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[allow(missing_docs)]

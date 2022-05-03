@@ -1,6 +1,6 @@
 use super::{config::ConsoleConfiguration, ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
-    api::{self, codec::Framed},
+    api::{self, codec::Framed, VERSION as API_VERSION},
     common::container::Container,
     npk::manifest::{self, Permission},
     runtime::{token::Token, EventTx, ExitStatus},
@@ -203,14 +203,14 @@ impl Console {
         };
 
         // Check protocol version from connect message against local model version
-        if protocol_version != model::version() {
+        if protocol_version != API_VERSION {
             warn!(
                 "{}: Client connected with invalid protocol version {}. Expected {}. Disconnecting...",
-                peer, protocol_version, model::version()
+                peer, protocol_version, API_VERSION
             );
             // Send a ConnectNack and return -> closes the connection
             let error = model::ConnectNack::InvalidProtocolVersion {
-                version: model::version(),
+                version: API_VERSION,
             };
             let connect = model::Connect::Nack { error };
             let message = model::Message::Connect { connect };

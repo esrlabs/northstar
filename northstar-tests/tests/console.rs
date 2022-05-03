@@ -26,8 +26,8 @@ async fn api_version() -> Result<()> {
     );
 
     // Send a connect with an version unequal to the one defined in the model
-    let mut version = api::model::version();
-    version.patch += 1;
+    let mut version = api::VERSION;
+    version.major += 1;
 
     let connect = api::model::Connect::Connect {
         version,
@@ -42,7 +42,7 @@ async fn api_version() -> Result<()> {
     drop(connection);
 
     let error = ConnectNack::InvalidProtocolVersion {
-        version: model::version(),
+        version: api::VERSION,
     };
     let connect = model::Connect::Nack { error };
     let expected_message = model::Message::Connect { connect };
