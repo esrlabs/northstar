@@ -57,8 +57,6 @@ impl Runtime {
         std::fs::create_dir(&test_repository)?;
         let example_key = tmpdir.path().join("key.pub");
         std::fs::write(&example_key, include_bytes!("../../examples/northstar.pub"))?;
-        let event_buffer_size = Some(1024);
-        let notification_buffer_size = Some(1024);
         let consoles = [
             (
                 console_full(),
@@ -97,8 +95,11 @@ impl Runtime {
             run_dir,
             data_dir,
             log_dir,
-            event_buffer_size,
-            notification_buffer_size,
+            event_buffer_size: 128,
+            notification_buffer_size: 128,
+            device_mapper_device_timeout: time::Duration::from_secs(10),
+            loop_device_timeout: time::Duration::from_secs(10),
+            token_validity: time::Duration::from_secs(60),
             consoles,
             cgroup: NonNulString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,

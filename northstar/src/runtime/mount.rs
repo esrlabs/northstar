@@ -28,12 +28,6 @@ const DEVICE_MAPPER_DEV: &str = "/dev/dm-";
 #[cfg(target_os = "android")]
 const DEVICE_MAPPER_DEV: &str = "/dev/block/dm-";
 
-/// Maximum duration to wait for a device mapper device to be removed by the
-/// kernel after umount.
-const DM_DEVICE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
-/// Loop device acquire timeout
-const LOOP_DEVICE_TIMEOUT: time::Duration = time::Duration::from_secs(10);
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("IO error: {0}: {1:?}")]
@@ -53,7 +47,13 @@ pub enum Error {
 }
 
 pub(super) struct MountControl {
+    /// Timeout for dm device setup
+    dm_timeout: time::Duration,
+    /// Timeout for lo device setup
+    lo_timeout: time::Duration,
+    /// Device mapper handle
     dm: Arc<devicemapper::DM>,
+    /// Loop device control
     lc: Arc<loopdev::LoopControl>,
 }
 
@@ -64,7 +64,10 @@ impl std::fmt::Debug for MountControl {
 }
 
 impl MountControl {
-    pub(super) async fn new() -> Result<MountControl, Error> {
+    pub(super) async fn new(
+        dm_timeout: time::Duration,
+        lo_timeout: time::Duration,
+    ) -> Result<MountControl, Error> {
         debug!("Opening loop control");
         let lc = LoopControl::open()?;
         debug!("Opening device mapper control");
@@ -74,6 +77,8 @@ impl MountControl {
         debug!("Device mapper version is {}", dm_version);
 
         Ok(MountControl {
+            dm_timeout,
+            lo_timeout,
             lc: Arc::new(lc),
             dm: Arc::new(dm),
         })
@@ -98,6 +103,8 @@ impl MountControl {
         let verity_header = npk.verity_header().cloned();
         let selinux = npk.manifest().selinux.clone();
         let hashes = npk.hashes().cloned();
+        let dm_timeout = self.dm_timeout;
+        let lo_timeout = self.lo_timeout;
 
         task::spawn_blocking(move || {
             let start = time::Instant::now();
@@ -115,6 +122,8 @@ impl MountControl {
                 hashes,
                 &target,
                 key.is_some(),
+                dm_timeout,
+                lo_timeout,
             )?;
 
             let duration = start.elapsed();
@@ -176,6 +185,8 @@ fn mount(
     hashes: Option<Hashes>,
     target: &Path,
     verity: bool,
+    dm_timeout: time::Duration,
+    lo_timeout: time::Duration,
 ) -> Result<(), Error> {
     // Acquire a loop device and attach the backing file. This operation is racy because
     // getting the next free index and attaching is not atomic. Retry the operation in a
@@ -205,7 +216,7 @@ fn mount(
         {
             break loop_device;
         }
-        if start.elapsed() > LOOP_DEVICE_TIMEOUT {
+        if start.elapsed() > lo_timeout {
             return Err(Error::Timeout("failed to acquire loop device".into()));
         }
     };
@@ -236,6 +247,7 @@ fn mount(
                     &name,
                     hashes.fs_verity_hash.as_str(),
                     hashes.fs_verity_offset,
+                    dm_timeout,
                 )?;
                 verity_device
             }
@@ -312,6 +324,7 @@ fn dmsetup(
     name: &str,
     verity_hash: &str,
     size: u64,
+    timeout: time::Duration,
 ) -> Result<PathBuf, Error> {
     let start = time::Instant::now();
 
@@ -359,7 +372,7 @@ fn dmsetup(
             // This code runs on a dedicated blocking thread
             std::thread::sleep(time::Duration::from_millis(1));
 
-            if start.elapsed() > DM_DEVICE_TIMEOUT {
+            if start.elapsed() > timeout {
                 return Err(Error::Timeout(format!(
                     "Timeout while waiting for verity device {}",
                     device.display(),

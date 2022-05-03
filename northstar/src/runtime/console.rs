@@ -91,6 +91,7 @@ impl Console {
         &mut self,
         url: &Url,
         configuration: &Configuration,
+        token_validity: time::Duration,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
@@ -113,6 +114,7 @@ impl Console {
                     notification_tx,
                     stop,
                     configuration,
+                    token_validity,
                 )
                 .await
             }),
@@ -123,6 +125,7 @@ impl Console {
                     notification_tx,
                     stop,
                     configuration,
+                    token_validity,
                 )
                 .await
             }),
@@ -147,6 +150,7 @@ impl Console {
         stop: CancellationToken,
         container: Option<Container>,
         configuration: Configuration,
+        token_validity: time::Duration,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
@@ -290,7 +294,7 @@ impl Console {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, request).await {
+                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, token_validity, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -337,6 +341,7 @@ async fn process_request<S>(
     stop: &CancellationToken,
     configuration: &Configuration,
     event_loop: &EventTx,
+    token_validity: time::Duration,
     request: model::Request,
 ) -> Result<model::Message, Error>
 where
@@ -448,7 +453,7 @@ where
                 hex::encode(&target),
                 hex::encode(&shared)
             );
-            let token: [u8; 40] = Token::new(user, target, shared).into();
+            let token: [u8; 40] = Token::new(token_validity, user, target, shared).into();
             let token = api::model::Token::from(token);
             let response = api::model::Response::Token(token);
             reply_tx.send(response).ok();
@@ -465,7 +470,7 @@ where
                 hex::encode(&shared)
             );
             let token: [u8; 40] = token.into();
-            let token = Token::from(token);
+            let token = Token::from((token_validity, token));
             let result = token.verify(user, target, &shared).into();
             let response = api::model::Response::TokenVerification(result);
             reply_tx.send(response).ok();
@@ -546,6 +551,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
     configuration: Configuration,
+    token_validity: time::Duration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
@@ -568,6 +574,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
                             stop.clone(),
                             None,
                             configuration.clone(),
+                            token_validity,
                             event_tx.clone(),
                             notification_tx.subscribe(),
                             Some(time::Duration::from_secs(10)),

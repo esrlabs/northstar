@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     os::unix::prelude::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
+    time,
 };
 use tokio::fs;
 use url::Url;
@@ -14,6 +15,26 @@ use url::Url;
 pub use crate::runtime::console::Configuration as ConsoleConfiguration;
 /// Console permission configuration
 pub use crate::runtime::console::Permissions as ConsolePermissions;
+
+const fn default_device_mapper_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+const fn default_loop_device_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+const fn default_event_buffer_size() -> usize {
+    256
+}
+
+const fn default_notification_buffer_size() -> usize {
+    128
+}
+
+const fn default_token_validity() -> time::Duration {
+    time::Duration::from_secs(60)
+}
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
@@ -28,9 +49,20 @@ pub struct Config {
     /// Top level cgroup name
     pub cgroup: NonNulString,
     /// Event loop buffer size
-    pub event_buffer_size: Option<usize>,
+    #[serde(default = "default_event_buffer_size")]
+    pub event_buffer_size: usize,
     /// Notification buffer size
-    pub notification_buffer_size: Option<usize>,
+    #[serde(default = "default_notification_buffer_size")]
+    pub notification_buffer_size: usize,
+    /// Device mapper device timeout
+    #[serde(with = "humantime_serde", default = "default_device_mapper_timeout")]
+    pub device_mapper_device_timeout: time::Duration,
+    /// Token timeout
+    #[serde(with = "humantime_serde", default = "default_token_validity")]
+    pub token_validity: time::Duration,
+    /// Loop device timeout
+    #[serde(with = "humantime_serde", default = "default_loop_device_timeout")]
+    pub loop_device_timeout: time::Duration,
     /// Console configuration
     #[serde(deserialize_with = "console")]
     pub consoles: HashMap<Url, ConsoleConfiguration>,

@@ -126,9 +126,12 @@ impl State {
         let repositories = HashMap::new();
         let containers = HashMap::new();
         let mount_control = Arc::new(
-            MountControl::new()
-                .await
-                .expect("failed to initialize mount control"),
+            MountControl::new(
+                config.device_mapper_device_timeout,
+                config.loop_device_timeout,
+            )
+            .await
+            .expect("failed to initialize mount control"),
         );
 
         let mut state = State {
@@ -455,7 +458,7 @@ impl State {
         let stop = CancellationToken::new();
 
         // We send the fd to the forker so that it can pass it to the init
-        let console_fd = if let Some(console) = manifest.console.clone() {
+        let console_fd = if let Some(configuration) = manifest.console.clone() {
             let peer = Peer::Container(container.clone());
             let (runtime_stream, container_stream) =
                 StdUnixStream::pair().expect("failed to create socketpair");
@@ -475,7 +478,8 @@ impl State {
                 peer,
                 stop,
                 container,
-                console,
+                configuration,
+                self.config.token_validity,
                 events_tx,
                 notifications,
                 None,
