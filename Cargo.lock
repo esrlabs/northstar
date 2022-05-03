@@ -2087,7 +2087,6 @@ dependencies = [
  "log",
  "northstar",
  "tempfile",
- "which",
 ]
 
 [[package]]
@@ -2850,17 +2849,6 @@ name = "wasm-bindgen-shared"
 version = "0.2.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d554b7f530dee5964d9a9468d95c1f8b8acae4f282807e7d27d4b03099a46744"
-
-[[package]]
-name = "which"
-version = "4.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c4fb54e6113b6a8772ee41c3404fb0301ac79604489467e0a9ce1f3e97c24ae"
-dependencies = [
- "either",
- "lazy_static",
- "libc",
-]
 
 [[package]]
 name = "winapi"
