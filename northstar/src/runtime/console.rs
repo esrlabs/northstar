@@ -1,8 +1,7 @@
-use super::{config::ConsoleConfiguration, ContainerEvent, Event, NotificationTx, RepositoryId};
+use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed, VERSION as API_VERSION},
     common::container::Container,
-    npk::manifest::{self, Permission},
     runtime::{token::Token, EventTx, ExitStatus},
 };
 use api::model;
@@ -32,6 +31,8 @@ use tokio::{
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
+
+pub use crate::npk::manifest::console::{Configuration, Permission, Permissions};
 
 /// Max length of a single json request line
 const MAX_LINE_LENGTH: usize = 512 * 1024;
@@ -90,7 +91,7 @@ impl Console {
     pub(super) async fn listen(
         &mut self,
         url: &Url,
-        configuration: &ConsoleConfiguration,
+        configuration: &Configuration,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
@@ -146,7 +147,7 @@ impl Console {
         peer: Peer,
         stop: CancellationToken,
         container: Option<Container>,
-        configuration: ConsoleConfiguration,
+        configuration: Configuration,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
@@ -331,7 +332,7 @@ async fn process_request<S>(
     peer: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
-    configuration: &manifest::Permissions,
+    permissions: &Permissions,
     event_loop: &EventTx,
     request: model::Request,
 ) -> Result<model::Message, Error>
@@ -354,10 +355,10 @@ where
         model::Request::Uninstall { .. } => Permission::Uninstall,
     };
 
-    if !configuration.contains(&required_permission) {
+    if !permissions.contains(&required_permission) {
         return Ok(model::Message::Response {
             response: model::Response::Error(model::Error::PermissionDenied {
-                permissions: configuration.iter().cloned().collect(),
+                permissions: permissions.iter().cloned().collect(),
                 required: required_permission,
             }),
         });
@@ -535,7 +536,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     event_tx: EventTx,
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
-    configuration: ConsoleConfiguration,
+    configuration: Configuration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,

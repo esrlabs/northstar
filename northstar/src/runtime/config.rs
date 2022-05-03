@@ -10,9 +10,10 @@ use std::{
 use tokio::fs;
 use url::Url;
 
-pub use crate::npk::manifest::ConsoleConfiguration;
+/// Console configuration
+pub use crate::runtime::console::Configuration as ConsoleConfiguration;
 /// Console permission configuration
-pub use crate::npk::manifest::Permissions;
+pub use crate::runtime::console::Permissions as ConsolePermissions;
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]

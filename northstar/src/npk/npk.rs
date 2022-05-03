@@ -2,7 +2,10 @@ use crate::{
     common::version::Version,
     npk::{
         dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-        manifest::{Bind, Manifest, Mount, MountOption},
+        manifest::{
+            mount::{Bind, Mount, MountOption},
+            Manifest,
+        },
     },
 };
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};

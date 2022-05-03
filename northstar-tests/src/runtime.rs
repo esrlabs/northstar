@@ -61,14 +61,14 @@ impl Runtime {
             (
                 console_full(),
                 ConsoleConfiguration {
-                    permissions: config::Permissions::full(),
+                    permissions: config::ConsolePermissions::full(),
                     max_requests_per_sec: None,
                 },
             ),
             (
                 console_none(),
                 ConsoleConfiguration {
-                    permissions: config::Permissions::default(),
+                    permissions: config::ConsolePermissions::default(),
                     max_requests_per_sec: None,
                 },
             ),

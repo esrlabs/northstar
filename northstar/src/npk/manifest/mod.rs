@@ -15,13 +15,12 @@ use std::{
 };
 use thiserror::Error;
 
-pub use cgroups::*;
-pub use console::*;
-pub use mount::*;
-
-mod cgroups;
-mod console;
-mod mount;
+/// CGroups configuration
+pub mod cgroups;
+/// Console configuration
+pub mod console;
+/// Mount configuration
+pub mod mount;
 
 /// Environment variables used by the runtime and not available to the user.
 const RESERVED_ENV_VARIABLES: &[&str] = &[
@@ -41,7 +40,7 @@ pub struct Manifest {
     /// Container version
     pub version: Version,
     /// Pass a console fd number in NORTHSTAR_CONSOLE
-    pub console: Option<ConsoleConfiguration>,
+    pub console: Option<console::Configuration>,
     /// Path to init
     pub init: Option<PathBuf>,
     /// Additional arguments for the application invocation
@@ -57,11 +56,11 @@ pub struct Manifest {
     /// List of bind mounts and resources
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[serde(deserialize_with = "maps_duplicate_key_is_error::deserialize")]
-    pub mounts: HashMap<PathBuf, Mount>,
+    pub mounts: HashMap<PathBuf, mount::Mount>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<Autostart>,
     /// CGroup configuration
-    pub cgroups: Option<CGroups>,
+    pub cgroups: Option<cgroups::CGroups>,
     /// Seccomp configuration
     pub seccomp: Option<Seccomp>,
     /// SELinux configuration
@@ -147,7 +146,7 @@ impl Manifest {
         let mut prev_comps = vec![RootDir];
         self.mounts
             .iter()
-            .filter(|(_, m)| matches!(m, Mount::Bind(_)))
+            .filter(|(_, m)| matches!(m, mount::Mount::Bind(_)))
             .map(|(p, _)| p)
             .sorted()
             .try_for_each(|p| {
@@ -175,8 +174,8 @@ impl Manifest {
             .map(|(_, m)| m)
             .try_for_each(|m| match m {
                 // The options field, which must be checked, is available for Mount::Bind and Mount::Resource
-                Mount::Resource(m) => {
-                    if m.options.contains(&MountOption::Rec) {
+                mount::Mount::Resource(m) => {
+                    if m.options.contains(&mount::MountOption::Rec) {
                         Err(Error::Invalid(
                             "non bind mounts must not be recursive".to_string(),
                         ))
@@ -586,23 +585,26 @@ cgroups:
         let mut mounts = HashMap::new();
         mounts.insert(
             PathBuf::from("/lib"),
-            Mount::Bind(Bind {
+            mount::Mount::Bind(mount::Bind {
                 host: PathBuf::from("/lib"),
-                options: [MountOption::Rw].iter().cloned().collect(),
+                options: [mount::MountOption::Rw].iter().cloned().collect(),
             }),
         );
-        mounts.insert(PathBuf::from("/data"), Mount::Persist);
+        mounts.insert(PathBuf::from("/data"), mount::Mount::Persist);
         mounts.insert(
             PathBuf::from("/resource"),
-            Mount::Resource(Resource {
+            mount::Mount::Resource(mount::Resource {
                 name: "bla-blah.foo".try_into()?,
                 version: VersionReq::parse(">=1.0.0")?,
                 dir: PathBuf::from("/bin/foo"),
-                options: [MountOption::NoExec].iter().cloned().collect(),
+                options: [mount::MountOption::NoExec].iter().cloned().collect(),
             }),
         );
-        mounts.insert(PathBuf::from("/tmp"), Mount::Tmpfs(Tmpfs { size: 42 }));
-        mounts.insert(PathBuf::from("/dev"), Mount::Dev);
+        mounts.insert(
+            PathBuf::from("/tmp"),
+            mount::Mount::Tmpfs(mount::Tmpfs { size: 42 }),
+        );
+        mounts.insert(PathBuf::from("/dev"), mount::Mount::Dev);
         assert_eq!(manifest.mounts, mounts);
 
         let mut syscalls: HashMap<NonNulString, SyscallRule> = HashMap::new();
@@ -719,19 +721,19 @@ mounts:
         let manifest = Manifest::from_str(manifest).unwrap();
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/a")),
-            Some(&Mount::Tmpfs(Tmpfs { size: 100 }))
+            Some(&mount::Mount::Tmpfs(mount::Tmpfs { size: 100 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/b")),
-            Some(&Mount::Tmpfs(Tmpfs { size: 100000 }))
+            Some(&mount::Mount::Tmpfs(mount::Tmpfs { size: 100000 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/c")),
-            Some(&Mount::Tmpfs(Tmpfs { size: 100000000 }))
+            Some(&mount::Mount::Tmpfs(mount::Tmpfs { size: 100000000 }))
         );
         assert_eq!(
             manifest.mounts.get(&PathBuf::from("/d")),
-            Some(&Mount::Tmpfs(Tmpfs { size: 100000000000 }))
+            Some(&mount::Mount::Tmpfs(mount::Tmpfs { size: 100000000000 }))
         );
 
         // Test a invalid tmpfs size string

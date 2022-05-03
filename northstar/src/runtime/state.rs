@@ -13,7 +13,10 @@ use super::{
 use crate::{
     api::{self, model},
     common::{name::Name, non_nul_string::NonNulString, version::VersionReq},
-    npk::manifest::{Autostart, Manifest, Mount, Resource},
+    npk::manifest::{
+        mount::{Mount, Resource},
+        Autostart, Manifest,
+    },
     runtime::{
         console::{Console, Peer},
         io::ContainerIo,

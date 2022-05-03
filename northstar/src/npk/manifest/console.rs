@@ -14,7 +14,7 @@ use strum_macros::{EnumCount, EnumIter};
 #[skip_serializing_none]
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ConsoleConfiguration {
+pub struct Configuration {
     /// Permissions
     pub permissions: Permissions,
     /// Limits the number of requests processed per second
