@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use colored::Colorize;
-use northstar::npk::npk::{open, Npk};
+use northstar::npk::npk::{open, Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME};
 use std::{
     fs::File,
     io::{self, BufReader, Read},
@@ -8,16 +8,11 @@ use std::{
     process::Command,
 };
 
-const FS_IMG_NAME: &str = "fs.img";
-const MANIFEST_NAME: &str = "manifest.yaml";
-const SIGNATURE_NAME: &str = "signature.yaml";
-const UNSQUASHFS: &str = "unsquashfs";
-
-pub(crate) fn inspect(npk: &Path, short: bool) -> Result<()> {
+pub(crate) fn inspect(npk: &Path, short: bool, unsquashfs: &Path) -> Result<()> {
     if short {
         inspect_short(npk)
     } else {
-        inspect_long(npk)
+        inspect_long(npk, unsquashfs)
     }
 }
 
@@ -36,7 +31,7 @@ pub(crate) fn inspect_short(npk: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
+pub(crate) fn inspect_long(npk: &Path, unsquashfs: &Path) -> Result<()> {
     let mut zip = open(npk)?;
     let mut print_buf: String = String::new();
     println!(
@@ -81,20 +76,18 @@ pub(crate) fn inspect_long(npk: &Path) -> Result<()> {
         .context("failed to find filesystem image in NPK")?;
     io::copy(&mut src_fsimage, &mut dest_fsimage)?;
     let path = dest_fsimage.path();
-    print_squashfs(path)?;
+    print_squashfs(path, unsquashfs)?;
 
     Ok(())
 }
 
-fn print_squashfs(fsimg_path: &Path) -> Result<()> {
-    which::which(&UNSQUASHFS).with_context(|| anyhow!("failed to find '{}'", &UNSQUASHFS))?;
-
-    let mut cmd = Command::new(&UNSQUASHFS);
+fn print_squashfs(fsimg_path: &Path, unsquashfs: &Path) -> Result<()> {
+    let mut cmd = Command::new(unsquashfs);
     cmd.arg("-ll").arg(fsimg_path.display().to_string());
 
     let output = cmd
         .output()
-        .with_context(|| format!("failed to execute '{}'", &UNSQUASHFS))?;
+        .with_context(|| format!("failed to execute '{}'", unsquashfs.display()))?;
 
     println!("{}", String::from_utf8_lossy(&output.stdout));
 
@@ -168,13 +161,13 @@ mounts:
         let dest = create_tmp_dir();
         let npk = create_test_npk(dest.path());
         assert!(npk.exists());
-        inspect(&npk, true).expect("Inspect NPK");
-        inspect(&npk, false).expect("Inspect NPK");
+        inspect(&npk, true, Path::new("unsquashfs")).expect("Inspect NPK");
+        inspect(&npk, false, Path::new("unsquashfs")).expect("Inspect NPK");
     }
 
     #[test]
     fn inspect_npk_no_file() {
-        inspect(Path::new("invalid"), true).expect_err("invalid NPK");
-        inspect(Path::new("invalid"), false).expect_err("invalid NPK");
+        inspect(Path::new("invalid"), true, Path::new("unsquashfs")).expect_err("invalid NPK");
+        inspect(Path::new("invalid"), false, Path::new("unsquashfs")).expect_err("invalid NPK");
     }
 }

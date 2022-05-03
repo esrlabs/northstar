@@ -5,7 +5,10 @@
 
 use anyhow::Result;
 use clap::Parser;
-use northstar::npk;
+use northstar::npk::{
+    self,
+    npk::{CompressionAlgorithm, SquashfsOptions},
+};
 use std::path::PathBuf;
 
 mod inspect;
@@ -30,7 +33,10 @@ enum Opt {
         out: PathBuf,
         /// Compression algorithm to use in squashfs (default gzip)
         #[clap(short, long, default_value = "gzip")]
-        comp: npk::npk::CompressionAlgorithm,
+        compression_algorithm: CompressionAlgorithm,
+        /// mksqushfs binary
+        #[clap(long, default_value = "mksquashfs")]
+        mksquashfs: PathBuf,
         /// Block size used by squashfs (default 128 KiB)
         #[clap(short, long)]
         block_size: Option<u32>,
@@ -46,6 +52,9 @@ enum Opt {
         /// Output directory
         #[clap(short, long)]
         out: PathBuf,
+        /// unsquashfs binary
+        #[clap(long, default_value = "unsquashfs")]
+        unsquashfs: PathBuf,
     },
     /// Print information about a Northstar container
     Inspect {
@@ -53,6 +62,9 @@ enum Opt {
         short: bool,
         /// NPK to inspect
         npk: PathBuf,
+        /// unsquashfs binary
+        #[clap(long, default_value = "unsquashfs")]
+        unsquashfs: PathBuf,
     },
     GenKey {
         /// Name of key
@@ -73,7 +85,8 @@ fn main() -> Result<()> {
             root,
             out,
             key,
-            comp,
+            compression_algorithm,
+            mksquashfs,
             block_size,
             clones,
         } => pack::pack(
@@ -81,12 +94,23 @@ fn main() -> Result<()> {
             &root,
             &out,
             key.as_deref(),
-            comp,
-            block_size,
+            SquashfsOptions {
+                compression_algorithm,
+                mksquashfs,
+                block_size,
+            },
             clones,
         )?,
-        Opt::Unpack { npk, out } => npk::npk::unpack(&npk, &out)?,
-        Opt::Inspect { npk, short } => inspect::inspect(&npk, short)?,
+        Opt::Unpack {
+            npk,
+            out,
+            unsquashfs,
+        } => npk::npk::unpack_with(&npk, &out, &unsquashfs)?,
+        Opt::Inspect {
+            npk,
+            short,
+            unsquashfs,
+        } => inspect::inspect(&npk, short, &unsquashfs)?,
         Opt::GenKey { name, out } => npk::npk::generate_key(&name, &out)?,
     }
     Ok(())
