@@ -15,6 +15,6 @@ itertools = "0.10.3"
 log = "0.4.16"
 northstar = { path = "../../northstar", features = ["api"], default-features = false }
 rand = "0.8.5"
-tokio = { version = "1.18.0", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+tokio = { version = "1.18.1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-util = "0.7.1"
 url = { version = "2.2.2", features = ["serde"] }
