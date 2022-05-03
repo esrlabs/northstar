@@ -3,7 +3,7 @@ use crate::{
     api::{self, codec::Framed},
     common::container::Container,
     npk::manifest::{self, Permission},
-    runtime::{error::Context, token::Token, EventTx, ExitStatus},
+    runtime::{token::Token, EventTx, ExitStatus},
 };
 use api::model;
 use async_stream::stream;
