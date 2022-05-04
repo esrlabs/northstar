@@ -245,7 +245,7 @@ impl State {
             for mount in manifest.mounts.values() {
                 if let Mount::Resource(Resource { name, version, .. }) = mount {
                     if let Some(resource) =
-                        State::match_container(name, version, &mut self.containers.keys().cloned())
+                        State::match_container(name, version, &self.containers.keys())
                     {
                         to_mount.push(resource.clone());
                     } else {
@@ -387,16 +387,14 @@ impl State {
             .collect::<Vec<_>>();
         for resource in resources {
             let version_req = &resource.version;
-            if let Some(best_match) = State::match_container(
-                &resource.name,
-                version_req,
-                &mut self.containers.keys().cloned(),
-            ) {
+            if let Some(best_match) =
+                State::match_container(&resource.name, version_req, &self.containers.keys())
+            {
                 let state = self
                     .state(&best_match)
                     .expect("Failed to determine resource container state");
                 if !state.is_mounted() {
-                    need_mount.insert(best_match);
+                    need_mount.insert(best_match.clone());
                 }
             } else {
                 return Err(Error::StartContainerMissingResource(
@@ -466,7 +464,7 @@ impl State {
 
         // Create container
         let config = &self.config;
-        let containers = self.containers.iter().map(|(c, _)| c.clone());
+        let containers = self.containers.iter().map(|(c, _)| c);
         let pid = self
             .launcher
             .create(config, &manifest, console_fd, &containers)
@@ -1024,12 +1022,10 @@ impl State {
 
                     for mount in &manifest.mounts {
                         if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
-                            if let Some(resource) = State::match_container(
-                                name,
-                                version,
-                                &mut self.containers.keys().cloned(),
-                            ) {
-                                if container == &resource {
+                            if let Some(resource) =
+                                State::match_container(name, version, &self.containers.keys())
+                            {
+                                if container == resource {
                                     warn!("Resource container {} is used by {}", container, c);
                                     let error = Err(Error::MountBusy(c.clone()));
                                     mounts.push(Either::Right(ready(error)));
@@ -1081,11 +1077,11 @@ impl State {
     }
 
     /// Find a resource container that best matches the given version requirement.
-    pub fn match_container(
+    pub fn match_container<'a>(
         name: &Name,
         version_req: &VersionReq,
-        containers: &(impl Iterator<Item = Container> + Clone),
-    ) -> Option<Container> {
+        containers: &(impl Iterator<Item = &'a Container> + Clone),
+    ) -> Option<&'a Container> {
         containers
             .clone() // Needed to not modify callers iterator
             .filter(|c| c.name() == name && version_req.matches(c.version()))
@@ -1169,10 +1165,10 @@ fn find_newest_resource() {
     let resource = State::match_container(
         &Name::try_from("test").unwrap(),
         &VersionReq::from_str(">=0.0.2").unwrap(),
-        &mut containers.into_iter(),
+        &mut containers.iter(),
     );
     assert!(resource.is_some());
-    assert_eq!(resource.unwrap(), new);
+    assert_eq!(resource.unwrap(), &new);
 }
 
 #[test]
@@ -1186,7 +1182,7 @@ fn cannot_find_newer_resource() {
     let resource = State::match_container(
         &Name::try_from("test").unwrap(),
         &VersionReq::from_str(">=0.0.3").unwrap(),
-        &mut containers.into_iter(),
+        &mut containers.iter(),
     );
     assert!(resource.is_none());
 }

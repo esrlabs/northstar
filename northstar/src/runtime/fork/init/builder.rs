@@ -27,7 +27,7 @@ trait PathExt {
 pub async fn build(
     config: &Config,
     manifest: &Manifest,
-    containers: &(impl Iterator<Item = Container> + Clone),
+    containers: &(impl Iterator<Item = &Container> + Clone),
 ) -> Result<Init, Error> {
     let container = manifest.container();
     let root = config.run_dir.join(container.to_string());
@@ -93,7 +93,7 @@ async fn prepare_mounts(
     config: &Config,
     root: &Path,
     manifest: &Manifest,
-    containers: &(impl Iterator<Item = Container> + Clone),
+    containers: &(impl Iterator<Item = &Container> + Clone),
 ) -> Result<Vec<Mount>, Error> {
     let mut mounts = vec![];
     let manifest_mounts = &manifest.mounts;
@@ -119,7 +119,7 @@ async fn prepare_mounts(
                     root,
                     target,
                     config,
-                    container,
+                    &container,
                     dependency,
                     &requirement.dir,
                     &requirement.options,
@@ -247,8 +247,8 @@ fn resource(
     root: &Path,
     target: &Path,
     config: &Config,
-    container: Container,
-    dependency: Container,
+    container: &Container,
+    dependency: &Container,
     src: &Path,
     options: &MountOptions,
 ) -> Result<(Mount, Mount), Error> {
@@ -264,7 +264,7 @@ fn resource(
             .unwrap_or(resource_root);
         if !src.exists() {
             return Err(Error::StartContainerMissingResource(
-                container,
+                container.clone(),
                 dependency.name().clone(),
                 dependency.version().to_string(),
             ));
