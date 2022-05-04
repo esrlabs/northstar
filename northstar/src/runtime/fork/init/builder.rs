@@ -99,7 +99,6 @@ async fn prepare_mounts(
     let manifest_mounts = &manifest.mounts;
 
     for (target, mount) in manifest_mounts {
-        let mut containers = containers.clone();
         match mount {
             manifest::Mount::Bind(manifest::Bind { host, options }) => {
                 mounts.extend(bind(root, target, host, options));
@@ -113,11 +112,8 @@ async fn prepare_mounts(
             manifest::Mount::Proc => mounts.push(proc(root, target)),
             manifest::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
-                let dependency = State::match_container(
-                    &requirement.name,
-                    &requirement.version,
-                    &mut containers,
-                );
+                let dependency =
+                    State::match_container(&requirement.name, &requirement.version, containers);
                 if let Some(dependency) = dependency {
                     let (mount, remount_ro) = resource(
                         root,

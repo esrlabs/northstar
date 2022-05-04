@@ -1084,9 +1084,10 @@ impl State {
     pub fn match_container(
         name: &Name,
         version_req: &VersionReq,
-        candidates: &mut impl Iterator<Item = Container>,
+        containers: &(impl Iterator<Item = Container> + Clone),
     ) -> Option<Container> {
-        candidates
+        containers
+            .clone() // Needed to not modify callers iterator
             .filter(|c| c.name() == name && version_req.matches(c.version()))
             .sorted_by(|c1, c2| c1.version().cmp(c2.version()))
             .next()
