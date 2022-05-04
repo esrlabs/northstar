@@ -113,23 +113,19 @@ async fn prepare_mounts(
             manifest::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let dependency =
-                    State::match_container(&requirement.name, &requirement.version, containers);
-                if let Some(dependency) = dependency {
-                    let (mount, remount_ro) = resource(
-                        root,
-                        target,
-                        config,
-                        container,
-                        dependency,
-                        &requirement.dir,
-                        &requirement.options,
-                    )?;
-                    mounts.push(mount);
-                    mounts.push(remount_ro);
-                } else {
-                    // Already checked in State::start()
-                    panic!("failed to locate required resource container");
-                }
+                    State::match_container(&requirement.name, &requirement.version, containers)
+                        .expect("failed to locate required resource container"); // Already checked in State::start()
+                let (mount, remount_ro) = resource(
+                    root,
+                    target,
+                    config,
+                    container,
+                    dependency,
+                    &requirement.dir,
+                    &requirement.options,
+                )?;
+                mounts.push(mount);
+                mounts.push(remount_ro);
             }
             manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
             manifest::Mount::Dev => {}
