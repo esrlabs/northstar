@@ -249,19 +249,12 @@ impl State {
                     {
                         to_mount.push(resource.clone());
                     } else {
-                        match autostart {
-                            Autostart::Relaxed => {
-                                warn!("failed to autostart relaxed {}: missing resource {} version {}", container, name, version.to_string());
-                            }
-                            Autostart::Critical => {
-                                error!("failed to autostart critical {}: missing resource {} version {}", container, name, version.to_string());
-                                return Err(Error::StartContainerMissingResource(
-                                    container.clone(),
-                                    name.clone(),
-                                    version.to_string(),
-                                ));
-                            }
-                        }
+                        let error = Error::StartContainerMissingResource(
+                            container.clone(),
+                            name.clone(),
+                            version.to_string(),
+                        );
+                        Self::warn_autostart_failure(container, autostart, error)?
                     }
                 }
             }
@@ -277,20 +270,29 @@ impl State {
                     .start(&container, &[], &HashMap::with_capacity(0))
                     .await
                 {
-                    match autostart {
-                        Autostart::Relaxed => {
-                            warn!("failed to autostart relaxed {}: {}", container, e);
-                        }
-                        Autostart::Critical => {
-                            error!("failed to autostart critical {}: {}", container, e);
-                            return Err(e);
-                        }
-                    }
+                    Self::warn_autostart_failure(&container, &autostart, e)?
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn warn_autostart_failure(
+        container: &Container,
+        autostart: &Autostart,
+        e: Error,
+    ) -> Result<(), Error> {
+        match autostart {
+            Autostart::Relaxed => {
+                warn!("failed to autostart relaxed {}: {}", container, e);
+                Ok(())
+            }
+            Autostart::Critical => {
+                error!("failed to autostart critical {}: {}", container, e);
+                Err(e)
+            }
+        }
     }
 
     /// Create a future that mounts `container`
@@ -391,7 +393,7 @@ impl State {
                 State::match_container(&resource.name, version_req, &self.containers.keys())
             {
                 let state = self
-                    .state(&best_match)
+                    .state(best_match)
                     .expect("Failed to determine resource container state");
                 if !state.is_mounted() {
                     need_mount.insert(best_match.clone());
