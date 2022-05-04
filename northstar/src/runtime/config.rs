@@ -16,26 +16,6 @@ pub use crate::runtime::console::Configuration as ConsoleConfiguration;
 /// Console permission configuration
 pub use crate::runtime::console::Permissions as ConsolePermissions;
 
-const fn default_device_mapper_timeout() -> time::Duration {
-    time::Duration::from_secs(10)
-}
-
-const fn default_loop_device_timeout() -> time::Duration {
-    time::Duration::from_secs(10)
-}
-
-const fn default_event_buffer_size() -> usize {
-    256
-}
-
-const fn default_notification_buffer_size() -> usize {
-    128
-}
-
-const fn default_token_validity() -> time::Duration {
-    time::Duration::from_secs(60)
-}
-
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,12 +37,12 @@ pub struct Config {
     /// Device mapper device timeout
     #[serde(with = "humantime_serde", default = "default_device_mapper_timeout")]
     pub device_mapper_device_timeout: time::Duration,
-    /// Token timeout
-    #[serde(with = "humantime_serde", default = "default_token_validity")]
-    pub token_validity: time::Duration,
     /// Loop device timeout
     #[serde(with = "humantime_serde", default = "default_loop_device_timeout")]
     pub loop_device_timeout: time::Duration,
+    /// Token timeout
+    #[serde(with = "humantime_serde", default = "default_token_validity")]
+    pub token_validity: time::Duration,
     /// Console configuration
     #[serde(deserialize_with = "console")]
     pub consoles: HashMap<Url, ConsoleConfiguration>,
@@ -231,6 +211,26 @@ where
     } else {
         Ok(consoles)
     }
+}
+
+const fn default_device_mapper_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+const fn default_loop_device_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+const fn default_event_buffer_size() -> usize {
+    256
+}
+
+const fn default_notification_buffer_size() -> usize {
+    128
+}
+
+const fn default_token_validity() -> time::Duration {
+    time::Duration::from_secs(60)
 }
 
 #[test]

@@ -173,6 +173,16 @@ data_dir = "target/northstar/data"
 log_dir = "target/northstar/logs"
 # Top level cgroup name
 cgroup = "northstar"
+# Event loop buffer size
+event_buffer_size = 256
+# Notification buffer size
+notification_buffer_size = 64
+# Device mapper device timeout
+device_mapper_device_timeout = "2s"
+# Token timeout
+token_validity = "1m"
+# Loop device timeout
+loop_device_timeout = "2s"
 
 # Debug TCP console on localhost with full access
 [consoles."tcp://localhost:4200"]
