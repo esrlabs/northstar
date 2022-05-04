@@ -1,6 +1,6 @@
 use super::{Init, Mount};
 use crate::{
-    common::container::{find_resource, Container},
+    common::container::Container,
     npk::{
         manifest,
         manifest::{Manifest, MountOption, MountOptions, Tmpfs},
@@ -8,6 +8,7 @@ use crate::{
     runtime::{
         config::Config,
         error::{Context, Error},
+        state::State,
     },
     seccomp,
 };
@@ -112,8 +113,11 @@ async fn prepare_mounts(
             manifest::Mount::Proc => mounts.push(proc(root, target)),
             manifest::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
-                let dependency =
-                    find_resource(&requirement.name, &requirement.version, &mut containers);
+                let dependency = State::match_container(
+                    &requirement.name,
+                    &requirement.version,
+                    &mut containers,
+                );
                 if let Some(dependency) = dependency {
                     let (mount, remount_ro) = resource(
                         root,

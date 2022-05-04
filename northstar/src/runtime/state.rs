@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     api::{self, model},
-    common::{container::find_resource, non_nul_string::NonNulString},
+    common::{name::Name, non_nul_string::NonNulString, version::VersionReq},
     npk::manifest::{Autostart, Manifest, Mount, Resource},
     runtime::{
         console::{Console, Peer},
@@ -245,7 +245,7 @@ impl State {
             for mount in manifest.mounts.values() {
                 if let Mount::Resource(Resource { name, version, .. }) = mount {
                     if let Some(resource) =
-                        find_resource(name, version, &mut self.containers.keys().cloned())
+                        State::match_container(name, version, &mut self.containers.keys().cloned())
                     {
                         to_mount.push(resource.clone());
                     } else {
@@ -387,7 +387,7 @@ impl State {
             .collect::<Vec<_>>();
         for resource in resources {
             let version_req = &resource.version;
-            if let Some(best_match) = find_resource(
+            if let Some(best_match) = State::match_container(
                 &resource.name,
                 version_req,
                 &mut self.containers.keys().cloned(),
@@ -1024,9 +1024,11 @@ impl State {
 
                     for mount in &manifest.mounts {
                         if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
-                            if let Some(resource) =
-                                find_resource(name, version, &mut self.containers.keys().cloned())
-                            {
+                            if let Some(resource) = State::match_container(
+                                name,
+                                version,
+                                &mut self.containers.keys().cloned(),
+                            ) {
                                 if container == &resource {
                                     warn!("Resource container {} is used by {}", container, c);
                                     let error = Err(Error::MountBusy(c.clone()));
@@ -1076,6 +1078,18 @@ impl State {
             );
         }
         result
+    }
+
+    /// Find a resource container that best matches the given version requirement.
+    pub fn match_container(
+        name: &Name,
+        version_req: &VersionReq,
+        candidates: &mut impl Iterator<Item = Container>,
+    ) -> Option<Container> {
+        candidates
+            .filter(|c| c.name() == name && version_req.matches(c.version()))
+            .sorted_by(|c1, c2| c1.version().cmp(c2.version()))
+            .next()
     }
 
     fn list_containers(&self) -> Vec<api::model::ContainerData> {
@@ -1141,4 +1155,37 @@ impl State {
             .get(repository)
             .ok_or_else(|| Error::InvalidRepository(repository.into()))
     }
+}
+
+#[test]
+fn find_newest_resource() {
+    use std::str::FromStr;
+
+    let old = Container::try_from("test:0.0.1").unwrap();
+    let new = Container::try_from("test:0.0.2").unwrap();
+    let other = Container::try_from("other:1.0.0").unwrap();
+    let containers = [old, new.clone(), other];
+    let resource = State::match_container(
+        &Name::try_from("test").unwrap(),
+        &VersionReq::from_str(">=0.0.2").unwrap(),
+        &mut containers.into_iter(),
+    );
+    assert!(resource.is_some());
+    assert_eq!(resource.unwrap(), new);
+}
+
+#[test]
+fn cannot_find_newer_resource() {
+    use std::str::FromStr;
+
+    let old = Container::try_from("test:0.0.1").unwrap();
+    let new = Container::try_from("test:0.0.2").unwrap();
+    let other = Container::try_from("other:1.0.0").unwrap();
+    let containers = [old, new, other];
+    let resource = State::match_container(
+        &Name::try_from("test").unwrap(),
+        &VersionReq::from_str(">=0.0.3").unwrap(),
+        &mut containers.into_iter(),
+    );
+    assert!(resource.is_none());
 }
