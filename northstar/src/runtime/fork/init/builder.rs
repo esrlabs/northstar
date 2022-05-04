@@ -24,10 +24,10 @@ trait PathExt {
     fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf;
 }
 
-pub async fn build(
+pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     config: &Config,
     manifest: &Manifest,
-    containers: &(impl Iterator<Item = &Container> + Clone),
+    containers: I,
 ) -> Result<Init, Error> {
     let container = manifest.container();
     let root = config.run_dir.join(container.to_string());
@@ -89,11 +89,11 @@ fn seccomp_filter(manifest: &Manifest) -> Option<seccomp::AllowList> {
 /// Iterate the mounts of a container and assemble a list of `mount` calls to be
 /// performed by init. Prepare an options persist dir. This fn fails if a resource
 /// is referenced that does not exist.
-async fn prepare_mounts(
+async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
     config: &Config,
     root: &Path,
     manifest: &Manifest,
-    containers: &(impl Iterator<Item = &Container> + Clone),
+    containers: I,
 ) -> Result<Vec<Mount>, Error> {
     let mut mounts = vec![];
     let manifest_mounts = &manifest.mounts;
@@ -112,9 +112,12 @@ async fn prepare_mounts(
             manifest::Mount::Proc => mounts.push(proc(root, target)),
             manifest::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
-                let dependency =
-                    State::match_container(&requirement.name, &requirement.version, containers)
-                        .expect("failed to locate required resource container"); // Already checked in State::start()
+                let dependency = State::match_container(
+                    &requirement.name,
+                    &requirement.version,
+                    containers.clone(),
+                )
+                .expect("failed to locate required resource container"); // Already checked in State::start()
                 let (mount, remount_ro) = resource(
                     root,
                     target,

@@ -245,7 +245,7 @@ impl State {
             for mount in manifest.mounts.values() {
                 if let Mount::Resource(Resource { name, version, .. }) = mount {
                     if let Some(resource) =
-                        State::match_container(name, version, &self.containers.keys())
+                        State::match_container(name, version, self.containers.keys())
                     {
                         to_mount.push(resource.clone());
                     } else {
@@ -390,10 +390,10 @@ impl State {
         for resource in resources {
             let version_req = &resource.version;
             if let Some(best_match) =
-                State::match_container(&resource.name, version_req, &self.containers.keys())
+                State::match_container(&resource.name, version_req, self.containers.keys())
             {
                 let state = self
-                    .state(best_match)
+                    .state(&best_match)
                     .expect("Failed to determine resource container state");
                 if !state.is_mounted() {
                     need_mount.insert(best_match.clone());
@@ -469,7 +469,7 @@ impl State {
         let containers = self.containers.iter().map(|(c, _)| c);
         let pid = self
             .launcher
-            .create(config, &manifest, console_fd, &containers)
+            .create(config, &manifest, console_fd, containers)
             .await?;
 
         // Debug
@@ -1025,7 +1025,7 @@ impl State {
                     for mount in &manifest.mounts {
                         if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
                             if let Some(resource) =
-                                State::match_container(name, version, &self.containers.keys())
+                                State::match_container(name, version, self.containers.keys())
                             {
                                 if container == resource {
                                     warn!("Resource container {} is used by {}", container, c);
@@ -1079,13 +1079,12 @@ impl State {
     }
 
     /// Find a resource container that best matches the given version requirement.
-    pub fn match_container<'a>(
+    pub fn match_container<'a, I: Iterator<Item = &'a Container>>(
         name: &Name,
         version_req: &VersionReq,
-        containers: &(impl Iterator<Item = &'a Container> + Clone),
+        containers: I,
     ) -> Option<&'a Container> {
         containers
-            .clone() // Needed to not modify callers iterator
             .filter(|c| c.name() == name && version_req.matches(c.version()))
             .sorted_by(|c1, c2| c1.version().cmp(c2.version()))
             .next()

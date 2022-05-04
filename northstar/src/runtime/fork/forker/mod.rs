@@ -85,12 +85,12 @@ impl Forker {
     }
 
     /// Send a request to the forker process to create a new container
-    pub async fn create(
+    pub async fn create<'a, I: Iterator<Item = &'a Container> + Clone>(
         &mut self,
         config: &Config,
         manifest: &Manifest,
         console: Option<OwnedFd>,
-        containers: &(impl Iterator<Item = &Container> + Clone),
+        containers: I,
     ) -> Result<Pid, Error> {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
