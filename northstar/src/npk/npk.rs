@@ -18,6 +18,7 @@ use std::{
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
+use zeroize::Zeroize;
 use zip::{result::ZipError, ZipArchive};
 
 /// Manifest version supported by the runtime
@@ -559,11 +560,8 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
 
     let mut secret_key_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut secret_key_bytes);
-    let secret_key: SecretKey =
-        SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
-            context: "failed to create secret key".to_string(),
-            error: e,
-        })?;
+
+    let secret_key = secret_key(secret_key_bytes)?;
     let public_key = ed25519_dalek::PublicKey::from(&secret_key);
 
     let secret_key_file = out.join(name).with_extension("key");
@@ -594,17 +592,24 @@ fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
             context: format!("failed to read key data from '{}'", &key_file.display()),
             error: e,
         })?;
-    let secret_key = SecretKey::from_bytes(&secret_key_bytes).map_err(|e| Error::Key {
-        context: format!("failed to derive secret key from '{}'", &key_file.display()),
-        error: e,
-    })?;
 
+    let secret_key = secret_key(secret_key_bytes)?;
     let public_key = PublicKey::from(&secret_key);
 
     Ok(Keypair {
         secret: secret_key,
         public: public_key,
     })
+}
+
+/// Derive an Ed25519 SecretKey. The provided data is zeroized afterwards.  
+fn secret_key(mut bytes: [u8; SECRET_KEY_LENGTH]) -> Result<SecretKey, Error> {
+    let secret_key = SecretKey::from_bytes(bytes.as_slice()).map_err(|e| Error::Key {
+        context: "failed to read secret key".to_string(),
+        error: e,
+    })?;
+    bytes.zeroize(); // Destroy original private key material
+    Ok(secret_key)
 }
 
 /// Generate the signatures yaml file
@@ -643,10 +648,8 @@ fn signature(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Er
     let hashes_yaml = hashes_yaml(&manifest_hash, fsimg_hash, fsimg_size);
 
     let key_pair = read_keypair(key)?;
-
     let signature = key_pair.sign(hashes_yaml.as_bytes());
     let signature_base64 = base64::encode(signature);
-
     let signature_yaml = { format!("{}---\nsignature: {}", &hashes_yaml, &signature_base64) };
 
     Ok(signature_yaml)
