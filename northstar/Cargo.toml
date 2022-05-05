@@ -56,6 +56,7 @@ url = { version = "2.2.2", features = ["serde"], optional = true }
 uuid = { version = "1.0.0", features = ["v4"], optional = true }
 walkdir = { version = "2.3.2", optional = true }
 which = { version = "4.2.5", optional = true }
+zeroize = { version = "1.5", optional = true }
 zip = { version = "0.6.2", default-features = false, optional = true }
 
 [features]
@@ -87,6 +88,7 @@ npk = [
     "uuid",
     "walkdir",
     "which",
+    "zeroize",
     "zip"
 ]
 runtime = [
