@@ -199,6 +199,7 @@ fn try_from_nul_bytes() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn serialize() {
     assert!(matches!(
         serde_json::to_string(&Name::try_from("a").unwrap()),
@@ -207,6 +208,7 @@ fn serialize() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn deserialize() {
     assert!(matches!(
         serde_json::from_str::<Name>("\"a\""),

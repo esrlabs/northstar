@@ -145,7 +145,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> AsyncMessage<T> {
         }
 
         // Parse the message size
-        let msg_len = u32::from_be_bytes(self.read_buffer[..4].try_into().unwrap()) as usize;
+        let msg_len = u32::from_be_bytes(
+            self.read_buffer[..4]
+                .try_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid message len"))?,
+        ) as usize;
 
         // Read until the read buffer has this length
         let target_buffer_len = msg_len as usize + 4;
@@ -294,6 +298,7 @@ fn recv_control_msg<T: FromRawFd, const N: usize>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use std::{fs::File, io::Seek, process::exit};
 

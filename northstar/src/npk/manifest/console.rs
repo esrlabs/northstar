@@ -55,6 +55,7 @@ pub enum Permission {
     Ident,
 }
 
+#[allow(clippy::unwrap_used)]
 impl fmt::Display for Permission {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", serde_plain::to_string(self).unwrap())
@@ -157,6 +158,7 @@ impl Serialize for Permissions {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use std::str::FromStr;
 

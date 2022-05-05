@@ -367,6 +367,7 @@ where
     match request {
         model::Request::Ident => {
             let ident = match peer {
+                #[allow(clippy::unwrap_used)]
                 Peer::Extern(_) => Container::try_from("remote:0.0.0").unwrap(),
                 Peer::Container(container) => container.clone(),
             };
@@ -488,7 +489,11 @@ impl Listener {
     async fn new(url: &Url) -> io::Result<Listener> {
         let listener = match url.scheme() {
             "tcp" => {
-                let address = url.socket_addrs(|| Some(4200))?.first().unwrap().to_owned();
+                let address = url
+                    .socket_addrs(|| Some(4200))?
+                    .first()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, url.to_string()))?
+                    .to_owned();
                 let listener = TcpListener::bind(&address).await?;
                 debug!("Started console on {}", &address);
 
@@ -581,9 +586,11 @@ pub enum Peer {
 
 impl From<std::net::SocketAddr> for Peer {
     fn from(socket: std::net::SocketAddr) -> Self {
-        let mut url = Url::parse("tcp://").unwrap();
-        url.set_ip_host(socket.ip()).unwrap();
-        url.set_port(Some(socket.port())).unwrap();
+        let url = Url::parse("tcp://")
+            .map_err(drop)
+            .and_then(|mut url| url.set_ip_host(socket.ip()).map(|_| url).map_err(drop))
+            .and_then(|mut url| url.set_port(Some(socket.port())).map(|_| url).map_err(drop))
+            .expect("internal error");
         Peer::Extern(url)
     }
 }
@@ -594,7 +601,7 @@ impl From<tokio::net::unix::SocketAddr> for Peer {
             .as_pathname()
             .unwrap_or_else(|| Path::new("unnamed"))
             .display();
-        let url = Url::parse(&format!("unix://{}", path)).unwrap();
+        let url = Url::parse(&format!("unix://{}", path)).expect("invalid url");
         Peer::Extern(url)
     }
 }

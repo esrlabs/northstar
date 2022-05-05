@@ -349,7 +349,7 @@ async fn run(
             _ = token.cancelled() => event_tx.send(Event::Shutdown).await.expect("failed to send shutdown event"),
             // Process events
             event = event_rx.next() => {
-                if let Err(e) = match event.unwrap() {
+                if let Err(e) = match event.expect("internal error") {
                     // Process console events enqueued by console::Console
                     Event::Console(request, response) => state.on_request(request, response).await,
                     // The runtime os commanded to shut down and exit.

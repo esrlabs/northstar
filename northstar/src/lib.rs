@@ -1,7 +1,12 @@
 //! Northstar container runtime
 
 #![deny(missing_docs)]
-#![deny(clippy::all)]
+#![deny(
+    clippy::all,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::unwrap_used
+)]
 
 /// Common internal types used in Northstar
 pub mod common;

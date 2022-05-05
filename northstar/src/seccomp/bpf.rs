@@ -683,6 +683,7 @@ fn bpf_jump(code: u32, k: u32, jt: u8, jf: u8) -> SockFilter {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use super::SockFilter;
     use proptest::prelude::*;

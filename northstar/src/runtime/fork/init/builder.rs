@@ -61,7 +61,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
 fn groups(manifest: &Manifest) -> Vec<u32> {
     let mut result = Vec::with_capacity(manifest.suppl_groups.len());
     for group in &manifest.suppl_groups {
-        let cgroup = CString::new(group.as_str()).unwrap(); // Check during manifest parsing
+        let cgroup: CString = group.clone().into();
         let group_info =
             unsafe { nix::libc::getgrnam(cgroup.as_ptr() as *const nix::libc::c_char) };
         if group_info == (null::<c_void>() as *mut nix::libc::group) {

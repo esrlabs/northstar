@@ -18,11 +18,13 @@ pub struct SocketPair {
 }
 
 impl SocketPair {
+    #[allow(clippy::unwrap_used)]
     pub fn first(&mut self) -> UnixStream {
         self.second.take().unwrap();
         self.first.take().unwrap()
     }
 
+    #[allow(clippy::unwrap_used)]
     pub fn second(&mut self) -> UnixStream {
         self.first.take().unwrap();
         self.second.take().unwrap()

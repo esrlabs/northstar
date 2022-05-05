@@ -874,7 +874,10 @@ fn write_npk<W: Write + Seek>(
         .map_err(|e| Error::Manifest(format!("failed to serialize manifest: {}", e)))?;
 
     let mut zip = zip::ZipWriter::new(npk);
-    zip.set_comment(serde_yaml::to_string(&Meta { version: VERSION }).unwrap());
+    zip.set_comment(
+        serde_yaml::to_string(&Meta { version: VERSION })
+            .map_err(|_| Error::MalformedComment("failed to serialize meta".into()))?,
+    );
 
     if let Some(signature) = signature {
         || -> Result<(), io::Error> {

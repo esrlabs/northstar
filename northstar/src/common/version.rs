@@ -4,7 +4,7 @@ use schemars::{
     JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt, str::FromStr};
+use std::{cmp::Ordering, fmt, str::FromStr};
 use thiserror::Error;
 
 /// Parsing error
@@ -114,28 +114,42 @@ impl<'de> Deserialize<'de> for Version {
 }
 
 impl PartialOrd for Version {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if self.major > other.major {
-            Some(std::cmp::Ordering::Greater)
+            Some(Ordering::Greater)
         } else if self.major < other.major {
-            Some(std::cmp::Ordering::Less)
+            Some(Ordering::Less)
         } else if self.minor > other.minor {
-            Some(std::cmp::Ordering::Greater)
+            Some(Ordering::Greater)
         } else if self.minor < other.minor {
-            Some(std::cmp::Ordering::Less)
+            Some(Ordering::Less)
         } else if self.patch > other.patch {
-            Some(std::cmp::Ordering::Greater)
+            Some(Ordering::Greater)
         } else if self.patch < other.patch {
-            Some(std::cmp::Ordering::Less)
+            Some(Ordering::Less)
         } else {
-            Some(std::cmp::Ordering::Equal)
+            Some(Ordering::Equal)
         }
     }
 }
 
 impl Ord for Version {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.major > other.major {
+            Ordering::Greater
+        } else if self.major < other.major {
+            Ordering::Less
+        } else if self.minor > other.minor {
+            Ordering::Greater
+        } else if self.minor < other.minor {
+            Ordering::Less
+        } else if self.patch > other.patch {
+            Ordering::Greater
+        } else if self.patch < other.patch {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
     }
 }
 

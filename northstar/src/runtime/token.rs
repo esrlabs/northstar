@@ -151,6 +151,7 @@ impl From<VerificationResult> for api::model::VerificationResult {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
 

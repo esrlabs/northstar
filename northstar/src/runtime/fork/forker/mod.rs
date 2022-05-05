@@ -162,7 +162,7 @@ impl Forker {
         let reply = self
             .stream
             .recv()
-            .map(|s| s.map(|s| s.unwrap()))
+            .map(|s| s.map(|s| s.expect("invalid message")))
             .await
             .context("failed to receive response from forker")?;
 

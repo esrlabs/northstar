@@ -216,12 +216,19 @@ fn mount(
 
     let (device, dm_name) = if !verity {
         // We're done. Use the loop device path e.g. /dev/loop4
-        (loop_device.path().unwrap(), None)
+        let path = loop_device.path().ok_or_else(|| {
+            Error::LoopDevice(io::Error::new(
+                io::ErrorKind::Other,
+                "failed to get loop device path",
+            ))
+        })?;
+        (path, None)
     } else {
         let name = format!("northstar-{}", nanoid::nanoid!());
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
-                let (major, minor) = (loop_device.major().unwrap(), loop_device.minor().unwrap());
+                let major = loop_device.major().map_err(Error::LoopDevice)?;
+                let minor = loop_device.minor().map_err(Error::LoopDevice)?;
                 let loop_device_id = format!("{}:{}", major, minor);
 
                 debug!("Using loop device id {}", loop_device_id);
@@ -245,10 +252,13 @@ fn mount(
                 // The loopdevice has been attached before. Ensure that it is detached in order
                 // to avoid leaking the loop device. If the detach failed something is really
                 // broken and probably best is to propagate the error with a panic.
-                warn!(
-                    "Detaching {} because of failed dmsetup",
-                    loop_device.path().unwrap().display()
-                );
+                let path = loop_device.path().ok_or_else(|| {
+                    Error::LoopDevice(io::Error::new(
+                        io::ErrorKind::Other,
+                        "failed to get loop device path",
+                    ))
+                })?;
+                warn!("Detaching {} because of failed dmsetup", path.display());
                 loop_device
                     .detach()
                     .map_err(Error::LoopDevice)
@@ -292,7 +302,7 @@ fn mount(
     if let Some(ref dm_name) = dm_name {
         debug!("Enabling deferred removal of device {}", dm_name);
         dm.device_remove(
-            &DevId::Name(DmName::new(dm_name).unwrap()),
+            &DevId::Name(DmName::new(dm_name).map_err(Error::DeviceMapper)?),
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )
         .expect("failed to enable deferred removal");
@@ -328,7 +338,7 @@ fn dmsetup(
         hex_salt
     );
     let table = [(0, size / 512, "verity".to_string(), verity_table)];
-    let name = DmName::new(name).unwrap();
+    let name = DmName::new(name).map_err(Error::DeviceMapper)?;
     let id = DevId::Name(name);
 
     debug!("Creating verity device {}", name);

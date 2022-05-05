@@ -263,6 +263,7 @@ impl FromStr for Manifest {
 }
 
 impl ToString for Manifest {
+    #[allow(clippy::unwrap_used)]
     fn to_string(&self) -> String {
         // A `Manifest` is convertible to `String` as long as its implementation of `Serialize` does
         // not return an error. This should never happen for the types that we use in `Manifest` so
@@ -502,6 +503,7 @@ fn is_default<T: Default + PartialEq>(t: &T) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::{common::version::VersionReq, npk::manifest::*};
     use anyhow::Result;
