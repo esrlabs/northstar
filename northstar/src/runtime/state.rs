@@ -87,6 +87,10 @@ pub(super) struct ContainerContext {
     cgroups: cgroups::CGroups,
     stop: CancellationToken,
     log_task: Option<JoinHandle<std::io::Result<()>>>,
+    /// Resources used by this container. This list differs from
+    /// manifest because the manifest just containers version
+    /// requirements and not concrete resources.
+    resources: HashSet<Container>,
 }
 
 impl ContainerContext {
@@ -285,11 +289,11 @@ impl State {
     ) -> Result<(), Error> {
         match autostart {
             Autostart::Relaxed => {
-                warn!("failed to autostart relaxed {}: {}", container, e);
+                warn!("Failed to autostart relaxed {}: {}", container, e);
                 Ok(())
             }
             Autostart::Critical => {
-                error!("failed to autostart critical {}: {}", container, e);
+                error!("Failed to autostart critical {}: {}", container, e);
                 Err(e)
             }
         }
@@ -298,13 +302,13 @@ impl State {
     /// Create a future that mounts `container`
     fn mount(&self, container: &Container) -> impl Future<Output = Result<PathBuf, Error>> {
         // Find the repository that has the container
-        let container_state = self.containers.get(container).expect("Internal error");
+        let container_state = self.containers.get(container).expect("internal error");
         let repository = self
             .repositories
             .get(&container_state.repository)
-            .expect("Internal error");
+            .expect("internal error");
         let key = repository.key().cloned();
-        let npk = self.npk(container).expect("Internal error");
+        let npk = self.npk(container).expect("internal error");
         let root = self.config.run_dir.join(container.to_string());
         let mount_control = self.mount_control.clone();
         mount_control
@@ -316,6 +320,21 @@ impl State {
     /// Create a future that umounts `container`. Return a futures that yield
     /// a busy error if the container is not mounted.
     fn umount(&self, container: &Container) -> impl Future<Output = Result<(), Error>> {
+        // Check if this container is in used by other containers
+        if let Some(user) = self
+            .containers
+            .iter()
+            .filter_map(|(c, state)| state.process.as_ref().map(|process| (c, process)))
+            .find(|(_, process)| process.resources.contains(container))
+            .map(|(c, _)| c)
+        {
+            warn!(
+                "Failed to umount {} because it is used by {}",
+                container, user
+            );
+            return Either::Right(ready(Err(Error::UmountBusy(container.clone()))));
+        }
+
         match self.state(container).and_then(|state| {
             state
                 .root
@@ -371,7 +390,10 @@ impl State {
             return Err(Error::StartContainerResource(container.clone()));
         };
 
+        // Containers that need to be mounted before container can be started
         let mut need_mount = HashSet::new();
+        // Resources use by this container
+        let mut resources = HashSet::new();
 
         // The container to be started
         if !container_state.is_mounted() {
@@ -379,7 +401,7 @@ impl State {
         }
 
         // Collect resources used by container
-        let resources = manifest
+        let required_resources = manifest
             .mounts
             .values()
             .filter_map(|m| match m {
@@ -387,14 +409,17 @@ impl State {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        for resource in resources {
+        for resource in required_resources {
             let version_req = &resource.version;
             if let Some(best_match) =
                 State::match_container(&resource.name, version_req, self.containers.keys())
             {
                 let state = self
-                    .state(&best_match)
+                    .state(best_match)
                     .expect("Failed to determine resource container state");
+
+                resources.insert(best_match.clone());
+
                 if !state.is_mounted() {
                     need_mount.insert(best_match.clone());
                 }
@@ -550,15 +575,15 @@ impl State {
 
         // Add process context to process
         let started = time::Instant::now();
-        let context = ContainerContext {
+        container_state.process = Some(ContainerContext {
             pid,
             started,
             debug,
             cgroups,
             stop,
             log_task,
-        };
-        container_state.process = Some(context);
+            resources,
+        });
 
         let duration = start.elapsed().as_secs_f32();
         info!("Started {} ({}) in {:.03}s", container, pid, duration);
@@ -991,14 +1016,14 @@ impl State {
 
             // Check if container is mounted at all
             if !container_state.is_mounted() {
-                let error = Err(Error::MountBusy(container.clone()));
+                let error = Err(Error::UmountBusy(container.clone()));
                 mounts.push(Either::Right(ready(error)));
                 continue;
             }
 
             // Check if container is started
             if container_state.process.is_some() {
-                let error = Err(Error::MountBusy(container.clone()));
+                let error = Err(Error::UmountBusy(container.clone()));
                 mounts.push(Either::Right(ready(error)));
                 continue;
             }
@@ -1029,7 +1054,7 @@ impl State {
                             {
                                 if container == resource {
                                     warn!("Resource container {} is used by {}", container, c);
-                                    let error = Err(Error::MountBusy(c.clone()));
+                                    let error = Err(Error::UmountBusy(c.clone()));
                                     mounts.push(Either::Right(ready(error)));
                                     continue 'outer;
                                 }
@@ -1056,7 +1081,7 @@ impl State {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("failed to mount {}: {}", container, e);
+                    warn!("failed to umount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }
