@@ -6,7 +6,7 @@ use serde::{
 };
 use std::{collections::HashSet, fmt, path::PathBuf, str::FromStr};
 
-use crate::common::{name::Name, version::Version};
+use crate::common::{name::Name, version::VersionReq};
 
 /// Resource mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
@@ -14,8 +14,8 @@ use crate::common::{name::Name, version::Version};
 pub struct Resource {
     /// Name of the resource container
     pub name: Name,
-    /// Version of the resource container
-    pub version: Version,
+    /// Required version of the resource container
+    pub version: VersionReq,
     /// Directory within the resource container
     pub dir: PathBuf,
     /// Mount options

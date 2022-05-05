@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::{
     api::{self},
+    common::name::Name,
     npk,
     runtime::{Container, ExitStatus, RepositoryId},
 };
@@ -14,18 +15,18 @@ pub enum Error {
     InvalidContainer(Container),
     #[error("invalid arguments {0}")]
     InvalidArguments(String),
-    #[error("container {0} cannot be mounted because it is already mounted")]
+    #[error("container {0} cannot be mounted: busy")]
     MountBusy(Container),
     #[error("duplicate container {0}")]
     DuplicateContainer(Container),
     #[error("container {0} cannot be unmounted: busy")]
     UmountBusy(Container),
-    #[error("container {0} failed to start: Already started")]
+    #[error("container {0} failed to start: already started")]
     StartContainerStarted(Container),
-    #[error("container {0} failed to start: Resources failed to mount")]
+    #[error("container {0} failed to start: resources failed to mount")]
     StartContainerResource(Container),
-    #[error("container {0} failed to start: Resource {1} is missing")]
-    StartContainerMissingResource(Container, Container),
+    #[error("container {0} failed to start: resource {1} version {2} is missing")]
+    StartContainerMissingResource(Container, Name, String),
     #[error("container {0} failed to start: {1}")]
     StartContainerFailed(Container, String),
     #[error("container {0} failed to stop")]
@@ -34,7 +35,7 @@ pub enum Error {
     ContainerNotStarted(Container),
     #[error("invalid repository {0}")]
     InvalidRepository(RepositoryId),
-    #[error("failed to install {0}: Already installed")]
+    #[error("failed to install {0}: already installed")]
     InstallDuplicate(Container),
     #[error("critical container failure")]
     CriticalContainer(Container, ExitStatus),
@@ -85,10 +86,11 @@ impl From<Error> for api::model::Error {
             Error::StartContainerResource(container) => {
                 api::model::Error::StartContainerResource { container }
             }
-            Error::StartContainerMissingResource(container, resource) => {
+            Error::StartContainerMissingResource(container, resource, version) => {
                 api::model::Error::StartContainerMissingResource {
                     container,
                     resource,
+                    version,
                 }
             }
             Error::StartContainerFailed(container, error) => {

@@ -170,10 +170,11 @@ fn format_err(err: &model::Error) -> String {
         model::Error::StartContainerMissingResource {
             container,
             resource,
+            version,
         } => {
             format!(
-                "failed to start container {}: missing resource {}",
-                container, resource
+                "failed to start container {}: missing resource {} version {}",
+                container, resource, version
             )
         }
         model::Error::StartContainerFailed { container, error } => {

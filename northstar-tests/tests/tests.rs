@@ -202,6 +202,37 @@ async fn try_to_mount_known_and_unknown_container() -> Result<()> {
     Ok(())
 }
 
+// Try to mount a unknown container
+#[runtime_test]
+async fn try_to_umount_used_resource() -> Result<()> {
+    client().install_test_container().await?;
+    client().install_test_resource().await?;
+
+    // Start the test container. It uses the resource and the umount
+    // of test-resource should fail with a busy error.
+    client().start_with_args(TEST_CONTAINER, ["sleep"]).await?;
+    assume("Sleeping...", 5u64).await?;
+    let result = client().umount(TEST_RESOURCE).await?;
+    let container: api::model::Container = TEST_CONTAINER.try_into().unwrap();
+    let resource: api::model::Container = TEST_RESOURCE.try_into().unwrap();
+    let error = api::model::Error::UmountBusy { container };
+    let expected_result = api::model::UmountResult::Error {
+        container: resource.clone(),
+        error,
+    };
+    assert_eq!(result, expected_result);
+
+    // Stop the test container and try to umount again
+    client().stop(TEST_CONTAINER, 5).await?;
+    let result = client().umount(TEST_RESOURCE).await?;
+    let expected_result = api::model::UmountResult::Ok {
+        container: resource,
+    };
+    assert_eq!(result, expected_result);
+
+    Ok(())
+}
+
 // Try to stop a not started container and expect an Err
 #[runtime_test]
 async fn try_to_stop_unknown_container() -> Result<()> {
@@ -220,7 +251,7 @@ async fn try_to_start_unknown_container() -> Result<()> {
 
 // Try to start a container where a dependency is missing
 #[runtime_test]
-async fn try_to_start_containter_that_misses_a_resource() -> Result<()> {
+async fn try_to_start_container_that_misses_a_resource() -> Result<()> {
     client().install_test_container().await?;
     // The TEST_RESOURCE is not installed.
     assert!(client().start(TEST_CONTAINER).await.is_err());
