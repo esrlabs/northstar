@@ -410,25 +410,23 @@ impl State {
             })
             .collect::<Vec<_>>();
         for resource in required_resources {
-            let version_req = &resource.version;
-            if let Some(best_match) =
-                State::match_container(&resource.name, version_req, self.containers.keys())
-            {
-                let state = self
-                    .state(best_match)
-                    .expect("Failed to determine resource container state");
+            let best_match =
+                State::match_container(&resource.name, &resource.version, self.containers.keys())
+                    .ok_or_else(|| {
+                    Error::StartContainerMissingResource(
+                        container.clone(),
+                        resource.name.clone(),
+                        resource.version.to_string(),
+                    )
+                })?;
+            let state = self
+                .state(best_match)
+                .expect("Failed to determine resource container state");
 
-                resources.insert(best_match.clone());
+            resources.insert(best_match.clone());
 
-                if !state.is_mounted() {
-                    need_mount.insert(best_match.clone());
-                }
-            } else {
-                return Err(Error::StartContainerMissingResource(
-                    container.clone(),
-                    resource.name.clone(),
-                    resource.version.to_string(),
-                ));
+            if !state.is_mounted() {
+                need_mount.insert(best_match.clone());
             }
         }
 
@@ -832,11 +830,11 @@ impl State {
     pub(super) async fn on_request(
         &mut self,
         request: Request,
-        sender: oneshot::Sender<model::Response>,
+        response: oneshot::Sender<model::Response>,
     ) -> Result<(), Error> {
         match request {
             Request::Request(ref request) => {
-                let response = match request {
+                let payload = match request {
                     model::Request::Containers => {
                         model::Response::Containers(self.list_containers())
                     }
@@ -928,7 +926,7 @@ impl State {
 
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                sender.send(response).ok();
+                response.send(payload).ok();
             }
             Request::Install(repository, mut rx) => {
                 let payload = match self.install(&repository, &mut rx).await {
@@ -938,7 +936,7 @@ impl State {
 
                 // A error on the response_tx means that the connection
                 // was closed in the meantime. Ignore it.
-                sender.send(payload).ok();
+                response.send(payload).ok();
             }
         }
         Ok(())
@@ -1003,44 +1001,44 @@ impl State {
         let mut mounts = Vec::with_capacity(containers.len());
 
         // Create mount futures
-        'outer: for container in containers {
+        'outer: for umount_container in containers {
             // Retrieve container state. If the container is unknown insert a
             // ready future with the corresponding error
-            let container_state = if let Ok(state) = self.state(container) {
+            let container_state = if let Ok(state) = self.state(umount_container) {
                 state
             } else {
-                let error = Err(Error::InvalidContainer(container.clone()));
+                let error = Err(Error::InvalidContainer(umount_container.clone()));
                 mounts.push(Either::Right(ready(error)));
                 continue;
             };
 
             // Check if container is mounted at all
             if !container_state.is_mounted() {
-                let error = Err(Error::UmountBusy(container.clone()));
+                let error = Err(Error::UmountBusy(umount_container.clone()));
                 mounts.push(Either::Right(ready(error)));
                 continue;
             }
 
             // Check if container is started
             if container_state.process.is_some() {
-                let error = Err(Error::UmountBusy(container.clone()));
+                let error = Err(Error::UmountBusy(umount_container.clone()));
                 mounts.push(Either::Right(ready(error)));
                 continue;
             }
 
-            let manifest = self.manifest(container).unwrap(); // safe - checked above
+            let manifest = self.manifest(umount_container).unwrap(); // safe - checked above
 
             // If this container is a resource check all running containers if they
             // depend on `container`
             if manifest.init.is_none() {
-                for (c, state) in &self.containers {
+                for (running_container, state) in &self.containers {
                     // A not started container cannot use `container`
                     if state.process.is_none() {
                         continue;
                     }
 
                     // Get manifest for container in question
-                    let manifest = self.manifest(c).expect("Internal error");
+                    let manifest = self.manifest(running_container).expect("Internal error");
 
                     // Resources cannot have resource dependencies
                     if manifest.init.is_none() {
@@ -1049,15 +1047,17 @@ impl State {
 
                     for mount in &manifest.mounts {
                         if let Mount::Resource(Resource { name, version, .. }) = mount.1 {
-                            if let Some(resource) =
-                                State::match_container(name, version, self.containers.keys())
+                            if State::match_container(name, version, self.containers.keys())
+                                .filter(|resource| &umount_container == resource)
+                                .is_some()
                             {
-                                if container == resource {
-                                    warn!("Resource container {} is used by {}", container, c);
-                                    let error = Err(Error::UmountBusy(c.clone()));
-                                    mounts.push(Either::Right(ready(error)));
-                                    continue 'outer;
-                                }
+                                warn!(
+                                    "Resource container {} is used by {}",
+                                    umount_container, running_container
+                                );
+                                let error = Err(Error::UmountBusy(running_container.clone()));
+                                mounts.push(Either::Right(ready(error)));
+                                continue 'outer;
                             }
                         }
                     }
@@ -1065,7 +1065,7 @@ impl State {
             }
 
             // Hm. Seems that it really needs to be umounted.
-            mounts.push(Either::Left(self.umount(container)));
+            mounts.push(Either::Left(self.umount(umount_container)));
         }
 
         debug_assert_eq!(mounts.len(), containers.len());

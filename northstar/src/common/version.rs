@@ -158,11 +158,17 @@ impl JsonSchema for Version {
     }
 }
 
+/// Container version requirement
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct VersionReq {
+    inner: semver::VersionReq,
+}
+
 impl VersionReq {
     /// Parse a string into a version requirement
     pub fn parse(text: &str) -> Result<VersionReq, ParseError> {
         Ok(VersionReq {
-            inner: semver::VersionReq::parse(text).map_err(|source| ParseError { source })?,
+            inner: semver::VersionReq::parse(text)?,
         })
     }
 
@@ -172,18 +178,12 @@ impl VersionReq {
     }
 }
 
-/// Container version requirement
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct VersionReq {
-    inner: semver::VersionReq,
-}
-
 impl FromStr for VersionReq {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(VersionReq {
-            inner: semver::VersionReq::from_str(s).map_err(|e| ParseError { source: e })?,
+            inner: semver::VersionReq::from_str(s)?,
         })
     }
 }

@@ -81,7 +81,7 @@ fn inspect() -> Result<()> {
     client().stop(EXAMPLE_INSPECT, 5).await
 }
 
-// // Start memeater example
+// Start memeater example
 #[runtime_test]
 async fn memeater() -> Result<()> {
     client().install(&EXAMPLE_MEMEATER_NPK, "mem").await?;
