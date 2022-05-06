@@ -338,9 +338,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.15"
+version = "3.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85a35a599b11c089a7f49105658d089b8f2cf0882993c17daf6de15285c2c35d"
+checksum = "f52d4f8e4a1419219935762e32913b4430f37cb0c0200ad17a89ee18c0188a9f"
 dependencies = [
  "atty",
  "bitflags",
@@ -359,7 +359,7 @@ version = "3.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7ca9141e27e6ebc52e3c378b0c07f3cea52db46ed1cc5861735fb697b56356"
 dependencies = [
- "clap 3.1.15",
+ "clap 3.1.16",
 ]
 
 [[package]]
@@ -1098,7 +1098,7 @@ version = "0.1.0"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "clap 3.1.15",
+ "clap 3.1.16",
  "env_logger",
  "log",
  "nix 0.24.1",
@@ -1350,7 +1350,7 @@ name = "nstar"
 version = "0.4.2"
 dependencies = [
  "anyhow",
- "clap 3.1.15",
+ "clap 3.1.16",
  "clap_complete",
  "futures",
  "hex",
@@ -1882,7 +1882,7 @@ name = "schema"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "clap 3.1.15",
+ "clap 3.1.16",
  "northstar",
  "okapi",
  "schemars",
@@ -1930,7 +1930,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "clap 3.1.15",
+ "clap 3.1.16",
  "env_logger",
  "itertools",
  "northstar",
@@ -2054,7 +2054,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
- "clap 3.1.15",
+ "clap 3.1.16",
  "colored",
  "ed25519-dalek",
  "env_logger",
@@ -2218,7 +2218,7 @@ name = "stress"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.15",
+ "clap 3.1.16",
  "env_logger",
  "futures",
  "humantime",
@@ -2361,7 +2361,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caps",
- "clap 3.1.15",
+ "clap 3.1.16",
  "nix 0.24.1",
 ]
 
