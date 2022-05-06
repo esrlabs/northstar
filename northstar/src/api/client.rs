@@ -453,7 +453,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<Container, Error> {
         self.fused()?;
         let file = fs::File::open(npk).await.map_err(Error::Io)?;
-        let size = file.metadata().await.unwrap().len();
+        let size = file.metadata().await?.len();
         let request = Request::Install(repository.into(), size);
         let message = Message::Request { request };
         self.connection.send(message).await.map_err(|_| {

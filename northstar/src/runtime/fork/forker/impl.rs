@@ -68,7 +68,7 @@ pub async fn run(stream: StdUnixStream, notifications: StdUnixStream) -> ! {
                         stream.send(Message::CreateResult { init: pid }).await.expect("failed to send response");
                     }
                     Some(Message::ExecRequest { container, path, args, env, io }) => {
-                        let io = io.unwrap();
+                        let io = io.expect("exec request without io");
                         let init = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {}", container));
                         // There's a init - let's exec!
                         let (response, exit) = exec(init, container, path, args, env, io).await;
@@ -144,7 +144,7 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
         .recv()
         .await
         .expect("failed to receive init pid")
-        .unwrap();
+        .expect("failed to receive init pid");
 
     // Reap the trampoline process
     debug!("Waiting for trampoline process {} to exit", trampoline_pid);

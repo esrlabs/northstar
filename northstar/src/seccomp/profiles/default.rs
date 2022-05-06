@@ -434,12 +434,14 @@ lazy_static::lazy_static! {
             // Parameter condition: index=0, value={0x00, 0x08, 0x20000, 0x20008, 0xFFFFFFFF}, op=SCMP_CMP_EQ
             // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L414)
             if *name == "personality" {
+                #[allow(clippy::unwrap_used)]
                 hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Args(SyscallArgRule{
                     index: 0,
                     values: Some([0x00, 0x08, 0x20000, 0x20008, 0xFFFFFFFF].to_vec()),
                     mask: None}));
             }
             else {
+                #[allow(clippy::unwrap_used)]
                 hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
             }
         }
@@ -448,6 +450,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_DAC_READ_SEARCH: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_DAC_READ_SEARCH.len());
         for name in SYSCALLS_CAP_DAC_READ_SEARCH {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -455,6 +458,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_ADMIN: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_ADMIN.len());
         for name in SYSCALLS_CAP_SYS_ADMIN {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -462,6 +466,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_BOOT: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_BOOT.len());
         for name in SYSCALLS_CAP_SYS_BOOT {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -469,6 +474,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_CHROOT: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_CHROOT.len());
         for name in SYSCALLS_CAP_SYS_CHROOT {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -476,6 +482,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_MODULE: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_MODULE.len());
         for name in SYSCALLS_CAP_SYS_MODULE {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -483,6 +490,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_PACCT: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PACCT.len());
         for name in SYSCALLS_CAP_SYS_PACCT {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -490,6 +498,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_PTRACE: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_PTRACE.len());
         for name in SYSCALLS_CAP_SYS_PTRACE {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -497,6 +506,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_RAWIO: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_RAWIO.len());
         for name in SYSCALLS_CAP_SYS_RAWIO {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -504,6 +514,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_TIME: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TIME.len());
         for name in SYSCALLS_CAP_SYS_TIME {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -511,6 +522,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_TTY_CONFIG: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_TTY_CONFIG.len());
         for name in SYSCALLS_CAP_SYS_TTY_CONFIG {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -518,6 +530,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYS_NICE: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYS_NICE.len());
         for name in SYSCALLS_CAP_SYS_NICE {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -525,6 +538,7 @@ lazy_static::lazy_static! {
     pub static ref CAP_SYSLOG: Builder = {
         let mut hm: HashMap<NonNulString, SyscallRule> = HashMap::with_capacity(SYSCALLS_CAP_SYSLOG.len());
         for name in SYSCALLS_CAP_SYSLOG {
+            #[allow(clippy::unwrap_used)]
             hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Any);
         }
         builder_from_rules(&hm)
@@ -535,6 +549,7 @@ lazy_static::lazy_static! {
             if *name == "clone" {
                 // Parameter condition: index=0, value=0x7E020000, op=SCMP_CMP_MASKED_EQ
                 // (https://github.com/moby/moby/blob/20.10/profiles/seccomp/default.json#L624)
+                #[allow(clippy::unwrap_used)]
                 hm.insert(name.to_string().try_into().unwrap(), SyscallRule::Args(SyscallArgRule{
                     index: 0,
                     values: None,

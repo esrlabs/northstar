@@ -224,24 +224,23 @@ impl State {
 
     async fn autostart(&mut self) -> Result<(), Error> {
         // List of containers from all repositories with the autostart flag set
-        let mut autostarts = Vec::new();
-        for container in self.containers.keys() {
+        let mut autostarts = Vec::with_capacity(self.containers.len());
+        // List of containers that need to be mounted
+        let mut to_mount = Vec::with_capacity(self.containers.len());
+
+        for (container, state) in self.containers.iter() {
             if let Some(autostart) = self
                 .manifest(container)
-                .expect("Internal error")
+                .expect("internal error")
                 .autostart
                 .as_ref()
             {
-                autostarts.push((container.clone(), autostart.clone()))
+                autostarts.push((container.clone(), autostart.clone()));
+                if !state.is_mounted() {
+                    to_mount.push(container.clone())
+                }
             }
         }
-
-        // Collect list of mounts to be done before starting the containers
-        let mut to_mount = autostarts
-            .iter()
-            .filter(|(c, _)| !self.state(c).unwrap().is_mounted()) // safe - list from above
-            .map(|(c, _)| c.clone())
-            .collect::<Vec<_>>();
 
         // Add resources of containers that have the autostart flag set
         for (container, autostart) in &autostarts {
@@ -543,7 +542,7 @@ impl State {
             .chain(once(format!("{}={}", ENV_CONTAINER, container)))
             .chain(once(format!("{}={}", ENV_NAME, container.name())))
             .chain(once(format!("{}={}", ENV_VERSION, container.version())))
-            .map(|s| NonNulString::try_from(s).unwrap())
+            .map(|s| unsafe { NonNulString::from_string_unchecked(s) })
             .collect::<Vec<_>>();
 
         debug!("Container {} init is {:?}", container, init);
@@ -717,7 +716,10 @@ impl State {
 
         // Umount
         if state.is_mounted() {
-            self.umount_all(&[container.clone()]).await.pop().unwrap()?;
+            self.umount_all(&[container.clone()])
+                .await
+                .pop()
+                .expect("internal error")?;
         }
 
         // Remove from repository
@@ -891,16 +893,22 @@ impl State {
                             }
                         }
                     }
-                    model::Request::Kill(container, signal) => {
-                        let signal = Signal::try_from(*signal).unwrap();
-                        match self.kill(container, signal).await {
+                    model::Request::Kill(container, signal) => match Signal::try_from(*signal) {
+                        Ok(signal) => match self.kill(container, signal).await {
                             Ok(_) => model::Response::Ok,
                             Err(e) => {
                                 error!("failed to kill {} with {}: {}", container, signal, e);
                                 model::Response::Error(e.into())
                             }
+                        },
+                        Err(e) => {
+                            error!("failed to kill {} with {}: {}", container, signal, e);
+                            model::Response::Error(model::Error::Unexpected {
+                                module: "invalid signal".into(),
+                                error: e.to_string(),
+                            })
                         }
-                    }
+                    },
                     model::Request::Uninstall(container) => match self.uninstall(container).await {
                         Ok(_) => api::model::Response::Ok,
                         Err(e) => {
@@ -1004,8 +1012,12 @@ impl State {
         'outer: for umount_container in containers {
             // Retrieve container state. If the container is unknown insert a
             // ready future with the corresponding error
-            let container_state = if let Ok(state) = self.state(umount_container) {
-                state
+            let (container_state, manifest) = if let Ok((state, manifest)) =
+                self.state(umount_container).and_then(|state| {
+                    self.manifest(umount_container)
+                        .map(|manifest| (state, manifest))
+                }) {
+                (state, manifest)
             } else {
                 let error = Err(Error::InvalidContainer(umount_container.clone()));
                 mounts.push(Either::Right(ready(error)));
@@ -1025,8 +1037,6 @@ impl State {
                 mounts.push(Either::Right(ready(error)));
                 continue;
             }
-
-            let manifest = self.manifest(umount_container).unwrap(); // safe - checked above
 
             // If this container is a resource check all running containers if they
             // depend on `container`
@@ -1181,6 +1191,7 @@ impl State {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn find_newest_resource() {
     use std::str::FromStr;
 
@@ -1198,6 +1209,7 @@ fn find_newest_resource() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn cannot_find_newer_resource() {
     use std::str::FromStr;
 

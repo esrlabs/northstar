@@ -124,6 +124,7 @@ struct Inner {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn try_from() {
     assert_eq!(
         Container::new("test".try_into().unwrap(), Version::parse("0.0.1").unwrap()),

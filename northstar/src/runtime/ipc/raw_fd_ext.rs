@@ -34,7 +34,12 @@ impl<T: AsRawFd> RawFdExt for T {
         let flags = fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-        let mut flags = fcntl::FdFlag::from_bits(flags).unwrap();
+        let mut flags = fcntl::FdFlag::from_bits(flags).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "failed to parse file descriptor flags",
+            )
+        })?;
         flags.set(fcntl::FdFlag::FD_CLOEXEC, value);
 
         fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
@@ -44,6 +49,7 @@ impl<T: AsRawFd> RawFdExt for T {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn non_blocking() {
     let (a, b) = nix::unistd::pipe().unwrap();
     nix::unistd::close(b).unwrap();

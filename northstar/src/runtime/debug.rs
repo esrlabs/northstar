@@ -187,7 +187,7 @@ impl Strace {
         self.task.await.context("Join error")?;
 
         // Stop strace - if not already existed - ignore any error
-        let pid = self.child.id().unwrap();
+        let pid = self.child.id().expect("missing process id");
         self.child.kill().await.ok();
         debug!("Joining strace pid {}", pid);
         self.child.wait().await.context("failed to join strace")?;
@@ -241,7 +241,7 @@ impl Perf {
     }
 
     pub async fn destroy(mut self) -> Result<(), Error> {
-        let pid = self.child.id().unwrap();
+        let pid = self.child.id().expect("missing process id");
         self.child.kill().await.ok();
         debug!("Joining perf pid {}", pid);
         self.child.wait().await.context("failed to join perf")?;

@@ -197,6 +197,7 @@ where
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn console_url() {
     let config = r#"
 run_dir = "target/northstar/run"

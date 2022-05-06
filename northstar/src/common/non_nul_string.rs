@@ -181,6 +181,7 @@ fn try_from_with_nul() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn serialize() {
     assert!(matches!(
         serde_json::to_string(&NonNulString::try_from("hello").unwrap()),
@@ -189,6 +190,7 @@ fn serialize() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used)]
 fn deserialize() {
     assert!(matches!(
         serde_json::from_str::<NonNulString>("\"hello\""),

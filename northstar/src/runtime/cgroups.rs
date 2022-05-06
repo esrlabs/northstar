@@ -186,17 +186,26 @@ impl CGroups {
         for c in self.cgroup.subsystems() {
             match c {
                 cgroups_rs::Subsystem::BlkIo(c) => {
-                    stats.insert("blkio".into(), to_value(c.blkio()).unwrap());
+                    stats.insert("blkio".into(), to_value(c.blkio()).unwrap_or_default());
                 }
                 cgroups_rs::Subsystem::Cpu(c) => {
-                    stats.insert("cpu".into(), to_value(c.cpu()).unwrap());
+                    stats.insert("cpu".into(), to_value(c.cpu()).unwrap_or_default());
                 }
                 cgroups_rs::Subsystem::Mem(c) => {
                     let mut memory = HashMap::new();
-                    memory.insert("memory".to_string(), to_value(c.memory_stat()).unwrap());
-                    memory.insert("kmem".to_string(), to_value(c.kmem_stat()).unwrap());
-                    memory.insert("kmem_tcp".to_string(), to_value(c.kmem_tcp_stat()).unwrap());
-                    stats.insert("memory".to_string(), to_value(memory).unwrap());
+                    memory.insert(
+                        "memory".to_string(),
+                        to_value(c.memory_stat()).unwrap_or_default(),
+                    );
+                    memory.insert(
+                        "kmem".to_string(),
+                        to_value(c.kmem_stat()).unwrap_or_default(),
+                    );
+                    memory.insert(
+                        "kmem_tcp".to_string(),
+                        to_value(c.kmem_tcp_stat()).unwrap_or_default(),
+                    );
+                    stats.insert("memory".to_string(), to_value(memory).unwrap_or_default());
                 }
                 _ => (),
             }

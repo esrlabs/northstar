@@ -84,7 +84,7 @@ fn inspect() -> Result<()> {
 // Start memeater example
 #[runtime_test]
 async fn memeater() -> Result<()> {
-    client().install(&EXAMPLE_MEMEATER_NPK, "mem").await?;
+    client().install(EXAMPLE_MEMEATER_NPK, "mem").await?;
     client().start(EXAMPLE_MEMEATER).await?;
     assume("Process memeater:0.0.1 is out of memory", 20).await
 }
