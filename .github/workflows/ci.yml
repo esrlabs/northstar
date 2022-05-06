@@ -92,6 +92,8 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
+    env:
+      NORTHSTAR_FORCE_BUILD: 1
     steps:
       - uses: actions-rs/toolchain@v1
         with:
