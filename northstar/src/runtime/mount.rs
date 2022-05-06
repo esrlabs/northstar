@@ -39,11 +39,11 @@ pub enum Error {
     #[error("IO error: {0}: {1:?}")]
     Io(String, io::Error),
     #[error("Os error: {0}")]
-    Os(nix::Error),
+    Os(#[from] nix::Error),
     #[error("Device mapper error: {0:?}")]
-    DeviceMapper(DmError),
+    DeviceMapper(#[from] DmError),
     #[error("Loop device error: {0:?}")]
-    LoopDevice(io::Error),
+    LoopDevice(#[from] io::Error),
     #[error("NPK error: {0:?}")]
     Npk(&'static str),
     #[error("UTF-8 conversion error: {0:?}")]
@@ -66,14 +66,11 @@ impl std::fmt::Debug for MountControl {
 impl MountControl {
     pub(super) async fn new() -> Result<MountControl, Error> {
         debug!("Opening loop control");
-        let lc = LoopControl::open().map_err(Error::LoopDevice)?;
+        let lc = LoopControl::open()?;
         debug!("Opening device mapper control");
-        let dm = devicemapper::DM::new().map_err(Error::DeviceMapper)?;
+        let dm = devicemapper::DM::new()?;
 
-        let dm_version = dm
-            .version()
-            .map_err(Error::DeviceMapper)
-            .map(Version::from)?;
+        let dm_version = dm.version().map(Version::from)?;
         debug!("Device mapper version is {}", dm_version);
 
         Ok(MountControl {
@@ -144,7 +141,7 @@ impl MountControl {
             let start = time::Instant::now();
 
             debug!("Unmounting {}", target.display());
-            nix::mount::umount(&target).map_err(Error::Os)?;
+            nix::mount::umount(&target)?;
 
             debug!("Removing mountpoint {}", target.display());
             std::fs::remove_dir(&target)
@@ -196,7 +193,7 @@ fn mount(
     }
 
     let loop_device = loop {
-        let loop_device = lc.next_free().map_err(Error::LoopDevice)?;
+        let loop_device = lc.next_free()?;
         if loop_device
             .with()
             .offset(fsimg_offset)
@@ -204,7 +201,6 @@ fn mount(
             .read_only(true)
             .autoclear(true)
             .attach_fd(fd)
-            .map_err(Error::LoopDevice)
             .is_ok()
         {
             break loop_device;
@@ -227,8 +223,8 @@ fn mount(
         let name = format!("northstar-{}", nanoid::nanoid!());
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
-                let major = loop_device.major().map_err(Error::LoopDevice)?;
-                let minor = loop_device.minor().map_err(Error::LoopDevice)?;
+                let major = loop_device.major()?;
+                let minor = loop_device.minor()?;
                 let loop_device_id = format!("{}:{}", major, minor);
 
                 debug!("Using loop device id {}", loop_device_id);
@@ -261,7 +257,6 @@ fn mount(
                 warn!("Detaching {} because of failed dmsetup", path.display());
                 loop_device
                     .detach()
-                    .map_err(Error::LoopDevice)
                     .expect("failed to detach loopback device");
 
                 return Err(Error::Npk("Missing verity information in NPK"));
@@ -304,8 +299,7 @@ fn mount(
         dm.device_remove(
             &DevId::Name(DmName::new(dm_name).map_err(Error::DeviceMapper)?),
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
-        )
-        .expect("failed to enable deferred removal");
+        )?;
     }
 
     Ok(())
@@ -338,31 +332,27 @@ fn dmsetup(
         hex_salt
     );
     let table = [(0, size / 512, "verity".to_string(), verity_table)];
-    let name = DmName::new(name).map_err(Error::DeviceMapper)?;
+    let name = DmName::new(name)?;
     let id = DevId::Name(name);
 
     debug!("Creating verity device {}", name);
-    let dm_device = dm
-        .device_create(
-            name,
-            None,
-            DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
-        )
-        .map_err(Error::DeviceMapper)?;
+    let dm_device = dm.device_create(
+        name,
+        None,
+        DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
+    )?;
 
     let load = || {
         dm.table_load(
             &id,
             &table,
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
-        )
-        .map_err(Error::DeviceMapper)?;
+        )?;
 
         let device = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
 
         debug!("Resuming verity device {}", device.display(),);
-        dm.device_suspend(&id, DmOptions::default())
-            .map_err(Error::DeviceMapper)?;
+        dm.device_suspend(&id, DmOptions::default())?;
 
         debug!("Waiting for verity device {}", device.display(),);
         while !device.exists() {

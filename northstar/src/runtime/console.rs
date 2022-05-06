@@ -492,7 +492,9 @@ impl Listener {
                 let address = url
                     .socket_addrs(|| Some(4200))?
                     .first()
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, url.to_string()))?
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::Other, format!("invalid url: {}", url))
+                    })?
                     .to_owned();
                 let listener = TcpListener::bind(&address).await?;
                 debug!("Started console on {}", &address);
@@ -586,12 +588,9 @@ pub enum Peer {
 
 impl From<std::net::SocketAddr> for Peer {
     fn from(socket: std::net::SocketAddr) -> Self {
-        let url = Url::parse("tcp://")
-            .map_err(drop)
-            .and_then(|mut url| url.set_ip_host(socket.ip()).map(|_| url).map_err(drop))
-            .and_then(|mut url| url.set_port(Some(socket.port())).map(|_| url).map_err(drop))
-            .expect("internal error");
-        Peer::Extern(url)
+        Url::parse(&format!("tcp://{}:{}", socket.ip(), socket.port()))
+            .map(Peer::Extern)
+            .expect("internal error")
     }
 }
 
@@ -601,8 +600,9 @@ impl From<tokio::net::unix::SocketAddr> for Peer {
             .as_pathname()
             .unwrap_or_else(|| Path::new("unnamed"))
             .display();
-        let url = Url::parse(&format!("unix://{}", path)).expect("invalid url");
-        Peer::Extern(url)
+        Url::parse(&format!("unix://{}", path))
+            .map(Peer::Extern)
+            .expect("invalid url")
     }
 }
 

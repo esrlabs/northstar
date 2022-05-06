@@ -231,7 +231,7 @@ impl State {
         for (container, state) in self.containers.iter() {
             if let Some(autostart) = self
                 .manifest(container)
-                .expect("Internal error")
+                .expect("internal error")
                 .autostart
                 .as_ref()
             {
