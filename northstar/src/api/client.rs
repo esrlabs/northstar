@@ -435,7 +435,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         }
     }
 
-    /// Install a npk
+    /// Install a npk from path
     ///
     /// ```no_run
     /// # use northstar::api::client::Client;
@@ -446,13 +446,34 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
     /// let npk = Path::new("test.npk");
-    /// client.install(&npk, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
+    /// client.install_file(npk, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
     /// # }
     /// ```
-    pub async fn install(&mut self, npk: &Path, repository: &str) -> Result<Container, Error> {
-        self.fused()?;
+    pub async fn install_file(&mut self, npk: &Path, repository: &str) -> Result<Container, Error> {
         let file = fs::File::open(npk).await.map_err(Error::Io)?;
         let size = file.metadata().await?.len();
+
+        self.install(file, size, repository).await
+    }
+
+    /// Install a npk
+    ///
+    /// ```no_run
+    /// # use northstar::api::client::Client;
+    /// # use std::time::Duration;
+    /// # use std::path::Path;
+    /// # use tokio::fs;
+    /// #
+    /// # #[tokio::main(flavor = "current_thread")]
+    /// # async fn main() {
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let npk = fs::File::open("test.npk").await?;
+    /// let size = npk.metadata().await.unwrap().len();
+    /// client.install(npk, size, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
+    /// # }
+    /// ```
+    pub async fn install(&mut self, npk: impl AsyncRead + Unpin, size: u64, repository: &str) -> Result<Container, Error> {
+        self.fused()?;
         let request = Request::Install(repository.into(), size);
         let message = Message::Request { request };
         self.connection.send(message).await.map_err(|_| {
@@ -463,7 +484,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         self.connection.flush().await?;
         debug_assert!(self.connection.write_buffer().is_empty());
 
-        let mut reader = io::BufReader::with_capacity(BUFFER_SIZE, file);
+        let mut reader = io::BufReader::with_capacity(BUFFER_SIZE, npk);
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, self.connection.get_mut());
         io::copy_buf(&mut reader, &mut writer).await.map_err(|e| {
             self.fuse();

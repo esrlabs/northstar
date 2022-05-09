@@ -199,7 +199,7 @@ impl Client {
     pub async fn install(&mut self, npk: &[u8], repository: &str) -> Result<()> {
         let f = NamedTempFile::new()?;
         fs::write(&f, npk).await?;
-        self.client.install(f.path(), repository).await?;
+        self.client.install_file(f.path(), repository).await?;
         Ok(())
     }
 
