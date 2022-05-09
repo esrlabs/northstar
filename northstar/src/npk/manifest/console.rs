@@ -21,8 +21,8 @@ pub struct Configuration {
     pub max_requests_per_sec: Option<usize>,
     /// Maximum request size in characters
     pub max_request_size: Option<usize>,
-    /// Maximum npk stream size in bytes
-    pub max_install_stream_size: Option<u64>,
+    /// Maximum npk size in bytes
+    pub max_npk_install_size: Option<u64>,
     /// NPK stream timeout in seconds
     pub npk_stream_timeout: Option<u64>,
 }

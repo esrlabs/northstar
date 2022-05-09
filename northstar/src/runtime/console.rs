@@ -393,7 +393,7 @@ where
 
             // Check the installation request size
             let max_install_stream_size = configuration
-                .max_install_stream_size
+                .max_npk_install_size
                 .unwrap_or(DEFAULT_MAX_INSTALL_STREAM_SIZE);
             if size > max_install_stream_size {
                 return Err(Error::Io(

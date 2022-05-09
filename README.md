@@ -179,7 +179,7 @@ event_buffer_size = 256
 notification_buffer_size = 64
 # Device mapper device timeout
 device_mapper_device_timeout = "2s"
-# Token timeout
+# Token validity
 token_validity = "1m"
 # Loop device timeout
 loop_device_timeout = "2s"

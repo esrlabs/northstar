@@ -48,9 +48,9 @@ pub(crate) enum VerificationResult {
 /// Token instance
 #[derive(Clone, PartialEq)]
 pub(crate) struct Token {
-    /// Duration how long the token is valid once created
+    /// Validity duration after creation
     validity: time::Duration,
-    /// Creatin time
+    /// Creation timestamp
     time: time::Duration,
     /// HMAC
     hmac: Hmac,

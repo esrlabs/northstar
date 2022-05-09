@@ -40,7 +40,7 @@ pub struct Config {
     /// Loop device timeout
     #[serde(with = "humantime_serde", default = "default_loop_device_timeout")]
     pub loop_device_timeout: time::Duration,
-    /// Token timeout
+    /// Token validity
     #[serde(with = "humantime_serde", default = "default_token_validity")]
     pub token_validity: time::Duration,
     /// Console configuration
