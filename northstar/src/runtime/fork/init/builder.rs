@@ -1,10 +1,7 @@
 use super::{Init, Mount};
 use crate::{
     common::container::Container,
-    npk::{
-        manifest,
-        manifest::{Manifest, MountOption, MountOptions, Tmpfs},
-    },
+    npk::manifest::{mount, Manifest},
     runtime::{
         config::Config,
         error::{Context, Error},
@@ -100,17 +97,17 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
 
     for (target, mount) in manifest_mounts {
         match mount {
-            manifest::Mount::Bind(manifest::Bind { host, options }) => {
+            mount::Mount::Bind(mount::Bind { host, options }) => {
                 mounts.extend(bind(root, target, host, options));
             }
-            manifest::Mount::Persist => {
+            mount::Mount::Persist => {
                 // Note that the version is intentionally not part of the path. This allows
                 // upgrades with persistent data migration
                 let source = config.data_dir.join(manifest.name.to_string());
                 mounts.push(persist(root, &source, target, manifest.uid, manifest.gid).await?);
             }
-            manifest::Mount::Proc => mounts.push(proc(root, target)),
-            manifest::Mount::Resource(requirement) => {
+            mount::Mount::Proc => mounts.push(proc(root, target)),
+            mount::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let dependency = State::match_container(
                     &requirement.name,
@@ -130,8 +127,8 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
                 mounts.push(mount);
                 mounts.push(remount_ro);
             }
-            manifest::Mount::Tmpfs(Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
-            manifest::Mount::Dev => {}
+            mount::Mount::Tmpfs(mount::Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
+            mount::Mount::Dev => {}
         }
     }
 
@@ -150,9 +147,9 @@ fn proc(root: &Path, target: &Path) -> Mount {
     Mount::new(Some(source), target, FSTYPE, flags, None)
 }
 
-fn bind(root: &Path, target: &Path, host: &Path, options: &MountOptions) -> Vec<Mount> {
+fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) -> Vec<Mount> {
     if host.exists() {
-        let rw = options.contains(&MountOption::Rw);
+        let rw = options.contains(&mount::MountOption::Rw);
         let mut mounts = Vec::with_capacity(if rw { 2 } else { 1 });
         if options.is_empty() {
             log::debug!(
@@ -253,7 +250,7 @@ fn resource(
     container: &Container,
     dependency: &Container,
     src: &Path,
-    options: &MountOptions,
+    options: &mount::MountOptions,
 ) -> Result<(Mount, Mount), Error> {
     let src = {
         // Join the source of the resource container with the mount dir
@@ -306,15 +303,15 @@ fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
     Mount::new(None, target, Some(fstype), flags, Some(data))
 }
 
-fn options_to_flags(opt: &MountOptions) -> MsFlags {
+fn options_to_flags(opt: &mount::MountOptions) -> MsFlags {
     let mut flags = MsFlags::empty();
     for opt in opt.iter() {
         match opt {
-            MountOption::Rw => {}
-            MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
-            MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
-            MountOption::NoDev => flags |= MsFlags::MS_NODEV,
-            MountOption::Rec => flags |= MsFlags::MS_REC,
+            mount::MountOption::Rw => {}
+            mount::MountOption::NoExec => flags |= MsFlags::MS_NOEXEC,
+            mount::MountOption::NoSuid => flags |= MsFlags::MS_NOSUID,
+            mount::MountOption::NoDev => flags |= MsFlags::MS_NODEV,
+            mount::MountOption::Rec => flags |= MsFlags::MS_REC,
         }
     }
     flags

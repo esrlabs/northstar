@@ -6,13 +6,15 @@ use std::{
     collections::HashMap,
     os::unix::prelude::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
+    time,
 };
 use tokio::fs;
 use url::Url;
 
-pub use crate::npk::manifest::ConsoleConfiguration;
+/// Console configuration
+pub use crate::runtime::console::Configuration as ConsoleConfiguration;
 /// Console permission configuration
-pub use crate::npk::manifest::Permissions;
+pub use crate::runtime::console::Permissions as ConsolePermissions;
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
@@ -26,6 +28,21 @@ pub struct Config {
     pub log_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNulString,
+    /// Event loop buffer size
+    #[serde(default = "default_event_buffer_size")]
+    pub event_buffer_size: usize,
+    /// Notification buffer size
+    #[serde(default = "default_notification_buffer_size")]
+    pub notification_buffer_size: usize,
+    /// Device mapper device timeout
+    #[serde(with = "humantime_serde", default = "default_device_mapper_timeout")]
+    pub device_mapper_device_timeout: time::Duration,
+    /// Loop device timeout
+    #[serde(with = "humantime_serde", default = "default_loop_device_timeout")]
+    pub loop_device_timeout: time::Duration,
+    /// Token validity
+    #[serde(with = "humantime_serde", default = "default_token_validity")]
+    pub token_validity: time::Duration,
     /// Console configuration
     #[serde(deserialize_with = "console")]
     pub consoles: HashMap<Url, ConsoleConfiguration>,
@@ -194,6 +211,26 @@ where
     } else {
         Ok(consoles)
     }
+}
+
+const fn default_device_mapper_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+const fn default_loop_device_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+const fn default_event_buffer_size() -> usize {
+    256
+}
+
+const fn default_notification_buffer_size() -> usize {
+    128
+}
+
+const fn default_token_validity() -> time::Duration {
+    time::Duration::from_secs(60)
 }
 
 #[test]

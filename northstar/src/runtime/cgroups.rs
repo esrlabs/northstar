@@ -126,7 +126,7 @@ impl CGroups {
         top_level_dir: &str,
         tx: EventTx,
         container: &Container,
-        config: &manifest::CGroups,
+        config: &manifest::cgroups::CGroups,
         pid: Pid,
     ) -> Result<CGroups, Error> {
         debug!("Creating cgroups for {}", container);
@@ -366,8 +366,8 @@ fn parse_cgroups_event(s: &str) -> CGroupEvent {
     CGroupEvent::Memory(event)
 }
 
-impl From<manifest::CpuResources> for CpuResources {
-    fn from(v: manifest::CpuResources) -> Self {
+impl From<manifest::cgroups::CpuResources> for CpuResources {
+    fn from(v: manifest::cgroups::CpuResources) -> Self {
         CpuResources {
             cpus: v.cpus,
             mems: v.mems,
@@ -381,8 +381,8 @@ impl From<manifest::CpuResources> for CpuResources {
     }
 }
 
-impl From<manifest::MemoryResources> for MemoryResources {
-    fn from(v: manifest::MemoryResources) -> Self {
+impl From<manifest::cgroups::MemoryResources> for MemoryResources {
+    fn from(v: manifest::cgroups::MemoryResources) -> Self {
         MemoryResources {
             kernel_memory_limit: v.kernel_memory_limit,
             memory_hard_limit: v.memory_hard_limit,
@@ -395,8 +395,8 @@ impl From<manifest::MemoryResources> for MemoryResources {
     }
 }
 
-impl From<manifest::BlkIoResources> for BlkIoResources {
-    fn from(v: manifest::BlkIoResources) -> Self {
+impl From<manifest::cgroups::BlkIoResources> for BlkIoResources {
+    fn from(v: manifest::cgroups::BlkIoResources) -> Self {
         BlkIoResources {
             weight: v.weight,
             leaf_weight: v.leaf_weight,
@@ -425,8 +425,8 @@ impl From<manifest::BlkIoResources> for BlkIoResources {
     }
 }
 
-impl From<manifest::BlkIoDeviceResource> for BlkIoDeviceResource {
-    fn from(v: manifest::BlkIoDeviceResource) -> Self {
+impl From<manifest::cgroups::BlkIoDeviceResource> for BlkIoDeviceResource {
+    fn from(v: manifest::cgroups::BlkIoDeviceResource) -> Self {
         BlkIoDeviceResource {
             major: v.major,
             minor: v.minor,
@@ -436,8 +436,8 @@ impl From<manifest::BlkIoDeviceResource> for BlkIoDeviceResource {
     }
 }
 
-impl From<manifest::BlkIoDeviceThrottleResource> for BlkIoDeviceThrottleResource {
-    fn from(v: manifest::BlkIoDeviceThrottleResource) -> Self {
+impl From<manifest::cgroups::BlkIoDeviceThrottleResource> for BlkIoDeviceThrottleResource {
+    fn from(v: manifest::cgroups::BlkIoDeviceThrottleResource) -> Self {
         BlkIoDeviceThrottleResource {
             major: v.major,
             minor: v.minor,

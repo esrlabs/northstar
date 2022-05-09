@@ -61,17 +61,11 @@ impl Runtime {
             (
                 console_full(),
                 ConsoleConfiguration {
-                    permissions: config::Permissions::full(),
-                    max_requests_per_sec: None,
+                    permissions: config::ConsolePermissions::full(),
+                    ..Default::default()
                 },
             ),
-            (
-                console_none(),
-                ConsoleConfiguration {
-                    permissions: config::Permissions::default(),
-                    max_requests_per_sec: None,
-                },
-            ),
+            (console_none(), ConsoleConfiguration::default()),
         ]
         .into();
 
@@ -101,6 +95,11 @@ impl Runtime {
             run_dir,
             data_dir,
             log_dir,
+            event_buffer_size: 128,
+            notification_buffer_size: 128,
+            device_mapper_device_timeout: time::Duration::from_secs(10),
+            loop_device_timeout: time::Duration::from_secs(10),
+            token_validity: time::Duration::from_secs(60),
             consoles,
             cgroup: NonNulString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,

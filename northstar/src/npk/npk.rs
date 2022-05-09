@@ -1,11 +1,16 @@
-use crate::npk::{
-    dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
-    manifest::{Bind, Manifest, Mount, MountOption},
+use crate::{
+    common::version::Version,
+    npk::{
+        dm_verity::{append_dm_verity_block, Error as VerityError, VerityHeader, BLOCK_SIZE},
+        manifest::{
+            mount::{Bind, Mount, MountOption},
+            Manifest,
+        },
+    },
 };
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, SignatureError, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand_core::{OsRng, RngCore};
-use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -21,22 +26,26 @@ use thiserror::Error;
 use zeroize::Zeroize;
 use zip::{result::ZipError, ZipArchive};
 
-/// Manifest version supported by the runtime
-pub const VERSION: Version = Version::new(0, 0, 1);
+use super::VERSION;
 
-// Binaries
-const MKSQUASHFS: &str = "mksquashfs";
+/// Default path to mksquashfs
+pub const MKSQUASHFS: &str = "mksquashfs";
+/// Default path to unsquashfs
+pub const UNSQUASHFS: &str = "unsquashfs";
+
+/// File system file name
+pub const FS_IMG_NAME: &str = "fs.img";
+/// Manifest file name
+pub const MANIFEST_NAME: &str = "manifest.yaml";
+/// Signature file name
+pub const SIGNATURE_NAME: &str = "signature.yaml";
+/// NPK extension
+pub const NPK_EXT: &str = "npk";
+
+/// Minimum mksquashfs major version supported
 const MKSQUASHFS_MAJOR_VERSION_MIN: u64 = 4;
+/// Minimum mksquashfs minor version supported
 const MKSQUASHFS_MINOR_VERSION_MIN: u64 = 1;
-const UNSQUASHFS: &str = "unsquashfs";
-
-// File name and directory components
-const FS_IMG_NAME: &str = "fs.img";
-const MANIFEST_NAME: &str = "manifest.yaml";
-const SIGNATURE_NAME: &str = "signature.yaml";
-const FS_IMG_BASE: &str = "fs";
-const FS_IMG_EXT: &str = "img";
-const NPK_EXT: &str = "npk";
 
 type Zip<R> = ZipArchive<R>;
 
@@ -350,7 +359,7 @@ struct Builder {
     root: PathBuf,
     manifest: Manifest,
     key: Option<PathBuf>,
-    squashfs_opts: SquashfsOpts,
+    squashfs_options: SquashfsOptions,
 }
 
 impl Builder {
@@ -359,7 +368,7 @@ impl Builder {
             root: PathBuf::from(root),
             manifest,
             key: None,
-            squashfs_opts: SquashfsOpts::default(),
+            squashfs_options: SquashfsOptions::default(),
         }
     }
 
@@ -368,8 +377,8 @@ impl Builder {
         self
     }
 
-    fn squashfs_opts(mut self, opts: &SquashfsOpts) -> Builder {
-        self.squashfs_opts = opts.clone();
+    fn squashfs_opts(mut self, opts: SquashfsOptions) -> Builder {
+        self.squashfs_options = opts;
         self
     }
 
@@ -379,8 +388,8 @@ impl Builder {
             context: "failed to create temporary directory".to_string(),
             error: e,
         })?;
-        let fsimg = tmp.path().join(&FS_IMG_BASE).with_extension(&FS_IMG_EXT);
-        create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_opts)?;
+        let fsimg = tmp.path().join(FS_IMG_NAME);
+        create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_options)?;
 
         // Sign and write NPK
         if let Some(key) = &self.key {
@@ -432,18 +441,21 @@ impl FromStr for CompressionAlgorithm {
 
 /// Squashfs Options
 #[derive(Clone, Debug)]
-pub struct SquashfsOpts {
+pub struct SquashfsOptions {
+    /// Path to mksquashfs executable
+    pub mksquashfs: PathBuf,
     /// The compression algorithm used (default gzip)
-    pub comp: CompressionAlgorithm,
+    pub compression_algorithm: CompressionAlgorithm,
     /// Size of the blocks of data compressed separately
     pub block_size: Option<u32>,
 }
 
-impl Default for SquashfsOpts {
+impl Default for SquashfsOptions {
     fn default() -> Self {
-        SquashfsOpts {
-            comp: CompressionAlgorithm::Gzip,
+        SquashfsOptions {
+            compression_algorithm: CompressionAlgorithm::Gzip,
             block_size: None,
+            mksquashfs: PathBuf::from(MKSQUASHFS),
         }
     }
 }
@@ -468,7 +480,7 @@ impl Default for SquashfsOpts {
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
 pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
-    pack_with(manifest, root, out, key, &SquashfsOpts::default())
+    pack_with(manifest, root, out, key, SquashfsOptions::default())
 }
 
 /// Create an NPK with special `squashfs` options
@@ -498,7 +510,7 @@ pub fn pack_with(
     root: &Path,
     out: &Path,
     key: Option<&Path>,
-    squashfs_opts: &SquashfsOpts,
+    squashfs_opts: SquashfsOptions,
 ) -> Result<(), Error> {
     let manifest = read_manifest(manifest)?;
     let name = manifest.name.clone();
@@ -524,13 +536,18 @@ pub fn pack_with(
 
 /// Extract the npk content to `out`
 pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
+    unpack_with(npk, out, Path::new(UNSQUASHFS))
+}
+
+/// Extract the npk content to `out` with a give unsquashfs binary
+pub fn unpack_with(npk: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
     let mut zip = open(npk)?;
     zip.extract(&out).map_err(|e| Error::Zip {
         context: format!("failed to extract NPK to '{}'", &out.display()),
         error: e,
     })?;
     let fsimg = out.join(&FS_IMG_NAME);
-    unpack_squashfs(&fsimg, out)
+    unpack_squashfs(&fsimg, out, unsquashfs)
 }
 
 /// Generate a keypair suitable for signing and verifying NPKs
@@ -756,13 +773,12 @@ fn create_squashfs_img(
     manifest: &Manifest,
     root: &Path,
     image: &Path,
-    squashfs_opts: &SquashfsOpts,
+    squashfs_opts: &SquashfsOptions,
 ) -> Result<(), Error> {
     let pseudo_files = pseudo_files(manifest)?;
+    let mksquashfs = &squashfs_opts.mksquashfs;
 
-    // Locate mksquashfs
-    which::which(&MKSQUASHFS)
-        .map_err(|_| Error::Squashfs(format!("failed to locate '{}'", &MKSQUASHFS)))?;
+    // Check root
     if !root.exists() {
         return Err(Error::Squashfs(format!(
             "Root directory '{}' does not exist",
@@ -772,10 +788,16 @@ fn create_squashfs_img(
 
     // Check mksquashfs version
     let stdout = String::from_utf8(
-        Command::new(&MKSQUASHFS)
+        Command::new(mksquashfs)
             .arg("-version")
             .output()
-            .map_err(|e| Error::Squashfs(format!("failed to execute '{}': {}", &MKSQUASHFS, e)))?
+            .map_err(|e| {
+                Error::Squashfs(format!(
+                    "failed to execute '{}': {}",
+                    mksquashfs.display(),
+                    e
+                ))
+            })?
             .stdout,
     )
     .map_err(|e| Error::Squashfs(format!("failed to parse mksquashfs output: {}", e)))?;
@@ -810,12 +832,12 @@ fn create_squashfs_img(
     }
 
     // Run mksquashfs to create image
-    let mut cmd = Command::new(&MKSQUASHFS);
+    let mut cmd = Command::new(mksquashfs);
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
         .arg("-no-progress")
         .arg("-comp")
-        .arg(squashfs_opts.comp.to_string())
+        .arg(squashfs_opts.compression_algorithm.to_string())
         .arg("-info")
         .arg("-force-uid")
         .arg(manifest.uid.to_string())
@@ -826,12 +848,17 @@ fn create_squashfs_img(
     if let Some(block_size) = squashfs_opts.block_size {
         cmd.arg("-b").arg(format!("{}", block_size));
     }
-    cmd.output()
-        .map_err(|e| Error::Squashfs(format!("failed to execute '{}': {}", &MKSQUASHFS, e)))?;
+    cmd.output().map_err(|e| {
+        Error::Squashfs(format!(
+            "failed to execute '{}': {}",
+            mksquashfs.display(),
+            e
+        ))
+    })?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "'{}' failed to create '{}'",
-            &MKSQUASHFS,
+            mksquashfs.display(),
             &image.display()
         )));
     }
@@ -839,24 +866,28 @@ fn create_squashfs_img(
     Ok(())
 }
 
-fn unpack_squashfs(image: &Path, out: &Path) -> Result<(), Error> {
+fn unpack_squashfs(image: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
     let squashfs_root = out.join("squashfs-root");
 
-    which::which(&UNSQUASHFS)
-        .map_err(|_| Error::Squashfs(format!("failed to locate '{}'", &UNSQUASHFS)))?;
     if !image.exists() {
         return Err(Error::Squashfs(format!(
             "Squashfs image '{}' does not exist",
             &image.display()
         )));
     }
-    let mut cmd = Command::new(&UNSQUASHFS);
+    let mut cmd = Command::new(unsquashfs);
     cmd.arg("-dest")
         .arg(&squashfs_root.display().to_string())
         .arg(&image.display().to_string());
 
     cmd.output()
-        .map_err(|e| Error::Squashfs(format!("Error while executing '{}': {}", &UNSQUASHFS, e)))
+        .map_err(|e| {
+            Error::Squashfs(format!(
+                "Error while executing '{}': {}",
+                unsquashfs.display(),
+                e
+            ))
+        })
         .map(drop)
 }
 

@@ -1,8 +1,7 @@
-use super::{config::ConsoleConfiguration, ContainerEvent, Event, NotificationTx, RepositoryId};
+use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
-    api::{self, codec::Framed},
+    api::{self, codec::Framed, VERSION as API_VERSION},
     common::container::Container,
-    npk::manifest::{self, Permission},
     runtime::{token::Token, EventTx, ExitStatus},
 };
 use api::model;
@@ -27,20 +26,21 @@ use tokio::{
     net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
-    task,
-    time::{self, timeout},
+    task, time,
 };
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
-/// Max length of a single json request line
-const MAX_LINE_LENGTH: usize = 512 * 1024;
+pub use crate::npk::manifest::console::{Configuration, Permission, Permissions};
 
-/// Max NPK size
-const MAX_NPK_SIZE: u64 = 512 * 1_000_000;
-
-/// Timeout between two npks stream chunks
-const NPK_STREAM_TIMEOUT: time::Duration = time::Duration::from_secs(2);
+/// Default maximum requests per second
+const DEFAULT_REQUESTS_PER_SECOND: usize = 1024;
+/// Default maximum length per request
+const DEFAULT_MAX_REQUEST_SIZE: usize = 1024 * 1024;
+/// Default maximum NPK size
+const DEFAULT_MAX_INSTALL_STREAM_SIZE: u64 = 256 * 1_000_000;
+/// Default timeout between two npks stream chunks
+const DEFAULT_NPK_STREAM_TIMEOUT: u64 = 5;
 
 // Request from the main loop to the console
 #[derive(Debug)]
@@ -90,7 +90,8 @@ impl Console {
     pub(super) async fn listen(
         &mut self,
         url: &Url,
-        configuration: &ConsoleConfiguration,
+        configuration: &Configuration,
+        token_validity: time::Duration,
     ) -> Result<(), Error> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
@@ -113,6 +114,7 @@ impl Console {
                     notification_tx,
                     stop,
                     configuration,
+                    token_validity,
                 )
                 .await
             }),
@@ -123,6 +125,7 @@ impl Console {
                     notification_tx,
                     stop,
                     configuration,
+                    token_validity,
                 )
                 .await
             }),
@@ -146,7 +149,8 @@ impl Console {
         peer: Peer,
         stop: CancellationToken,
         container: Option<Container>,
-        configuration: ConsoleConfiguration,
+        configuration: Configuration,
+        token_validity: time::Duration,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
@@ -162,12 +166,16 @@ impl Console {
         }
 
         // Get a framed stream and sink interface.
-        let mut network_stream = api::codec::Framed::new_with_max_length(stream, MAX_LINE_LENGTH);
+        let max_request_size = configuration
+            .max_request_size
+            .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
+        let mut network_stream = api::codec::Framed::new_with_max_length(stream, max_request_size);
 
         // Get a framed stream and sink interface.
-        if let Some(rate) = configuration.max_requests_per_sec {
-            network_stream.throttle_stream(rate as usize, time::Duration::from_secs(1));
-        }
+        let max_requests_per_sec = configuration
+            .max_requests_per_sec
+            .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
+        network_stream.throttle_stream(max_requests_per_sec, time::Duration::from_secs(1));
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
@@ -203,14 +211,14 @@ impl Console {
         };
 
         // Check protocol version from connect message against local model version
-        if protocol_version != model::version() {
+        if protocol_version != API_VERSION {
             warn!(
                 "{}: Client connected with invalid protocol version {}. Expected {}. Disconnecting...",
-                peer, protocol_version, model::version()
+                peer, protocol_version, API_VERSION
             );
             // Send a ConnectNack and return -> closes the connection
             let error = model::ConnectNack::InvalidProtocolVersion {
-                version: model::version(),
+                version: API_VERSION,
             };
             let connect = model::Connect::Nack { error };
             let message = model::Message::Connect { connect };
@@ -286,7 +294,7 @@ impl Console {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, permissions, &event_tx, request).await {
+                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, token_validity, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -331,13 +339,15 @@ async fn process_request<S>(
     peer: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
-    configuration: &manifest::Permissions,
+    configuration: &Configuration,
     event_loop: &EventTx,
+    token_validity: time::Duration,
     request: model::Request,
 ) -> Result<model::Message, Error>
 where
     S: AsyncRead + Unpin,
 {
+    let permissions = &configuration.permissions;
     let required_permission = match &request {
         model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
         model::Request::Containers => Permission::Containers,
@@ -354,10 +364,10 @@ where
         model::Request::Uninstall { .. } => Permission::Uninstall,
     };
 
-    if !configuration.contains(&required_permission) {
+    if !permissions.contains(&required_permission) {
         return Ok(model::Message::Response {
             response: model::Response::Error(model::Error::PermissionDenied {
-                permissions: configuration.iter().cloned().collect(),
+                permissions: permissions.iter().cloned().collect(),
                 required: required_permission,
             }),
         });
@@ -382,7 +392,10 @@ where
             );
 
             // Check the installation request size
-            if size > MAX_NPK_SIZE {
+            let max_install_stream_size = configuration
+                .max_npk_install_size
+                .unwrap_or(DEFAULT_MAX_INSTALL_STREAM_SIZE);
+            if size > max_install_stream_size {
                 return Err(Error::Io(
                     "npk size too large".into(),
                     io::Error::new(io::ErrorKind::InvalidData, "npk size too large"),
@@ -413,15 +426,17 @@ where
 
             // If the connections breaks: just break. If the receiver is dropped: just break.
             let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-            while let Some(buf) = timeout(NPK_STREAM_TIMEOUT, take.next())
-                .await
-                .map_err(|_| {
-                    Error::Io(
-                        "npk stream timeout".into(),
-                        io::Error::new(io::ErrorKind::TimedOut, "timeout"),
-                    )
-                })?
-            {
+            let timeout = time::Duration::from_secs(
+                configuration
+                    .npk_stream_timeout
+                    .unwrap_or(DEFAULT_NPK_STREAM_TIMEOUT),
+            );
+            while let Some(buf) = time::timeout(timeout, take.next()).await.map_err(|_| {
+                Error::Io(
+                    "npk stream timeout".into(),
+                    io::Error::new(io::ErrorKind::TimedOut, "timeout"),
+                )
+            })? {
                 let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
                 // Ignore any sending error because the stream needs to be drained for `size` bytes.
                 tx.send(buf).await.ok();
@@ -438,7 +453,7 @@ where
                 hex::encode(&target),
                 hex::encode(&shared)
             );
-            let token: [u8; 40] = Token::new(user, target, shared).into();
+            let token: [u8; 40] = Token::new(token_validity, user, target, shared).into();
             let token = api::model::Token::from(token);
             let response = api::model::Response::Token(token);
             reply_tx.send(response).ok();
@@ -455,7 +470,7 @@ where
                 hex::encode(&shared)
             );
             let token: [u8; 40] = token.into();
-            let token = Token::from(token);
+            let token = Token::from((token_validity, token));
             let result = token.verify(user, target, &shared).into();
             let response = api::model::Response::TokenVerification(result);
             reply_tx.send(response).ok();
@@ -535,7 +550,8 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     event_tx: EventTx,
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
-    configuration: ConsoleConfiguration,
+    configuration: Configuration,
+    token_validity: time::Duration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
@@ -558,6 +574,7 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
                             stop.clone(),
                             None,
                             configuration.clone(),
+                            token_validity,
                             event_tx.clone(),
                             notification_tx.subscribe(),
                             Some(time::Duration::from_secs(10)),

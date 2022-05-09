@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use northstar::api;
+use northstar::{api, npk};
 use okapi::openapi3::{Components, Contact, Info};
 use schemars::{gen::SchemaSettings, JsonSchema};
 use std::{fs::write, path::PathBuf, str::FromStr};
@@ -13,8 +13,9 @@ use std::{fs::write, path::PathBuf, str::FromStr};
 /// About string for CLI
 fn about() -> &'static str {
     Box::leak(Box::new(format!(
-        "Northstar schema API version {}",
-        api::model::version()
+        "Northstar schema API version {}, manifest version {}",
+        api::VERSION,
+        npk::VERSION
     )))
 }
 
@@ -59,14 +60,16 @@ fn main() -> Result<()> {
     let settings = SchemaSettings::openapi3();
     let mut gen = settings.into_generator();
 
-    match opt.model {
+    let (description, version) = match opt.model {
         Model::Api => {
             gen.root_schema_for::<Message>();
+            ("Northstar API", api::VERSION)
         }
         Model::Manifest => {
             gen.root_schema_for::<Manifest>();
+            ("Northstar NPK", npk::VERSION)
         }
-    }
+    };
 
     let schemas = gen
         .definitions()
@@ -78,11 +81,11 @@ fn main() -> Result<()> {
         openapi: "3.0.0".into(),
         info: Info {
             title: "Northstar".into(),
-            version: northstar::api::model::version().to_string(),
-            description: Some("Northstar API".into()),
+            version: version.to_string(),
+            description: Some(description.into()),
             contact: Some(Contact {
                 name: Some("ESRLabs".into()),
-                url: Some("http://www.esrlabs.com".into()),
+                url: Some("http://www.github.com/esrlabs/northstar".into()),
                 email: Some("info@esrlabs.com".into()),
                 ..Default::default()
             }),

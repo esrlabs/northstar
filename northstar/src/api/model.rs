@@ -11,9 +11,9 @@ use std::{
 };
 
 /// Console configuration
-pub type ConsoleConfiguration = crate::npk::manifest::ConsoleConfiguration;
+pub type ConsoleConfiguration = crate::npk::manifest::console::Configuration;
 /// Console permission entity
-pub type ConsolePermission = crate::npk::manifest::Permission;
+pub type ConsolePermission = crate::npk::manifest::console::Permission;
 /// Container identification
 pub type Container = crate::common::container::Container;
 /// Container exit code
@@ -32,14 +32,6 @@ pub type Signal = u32;
 pub type Version = crate::common::version::Version;
 /// Container statistics
 pub type ContainerStats = HashMap<String, serde_json::Value>;
-
-/// API version
-const VERSION: Version = Version::new(0, 3, 0);
-
-/// API version
-pub const fn version() -> Version {
-    VERSION
-}
 
 /// Message
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]

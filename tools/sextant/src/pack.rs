@@ -1,24 +1,20 @@
 use anyhow::{Context, Result};
-use northstar::{
-    npk,
-    npk::{
-        manifest::Manifest,
-        npk::{pack_with, CompressionAlgorithm},
-    },
+use northstar::npk::{
+    manifest::Manifest,
+    npk::{pack_with, SquashfsOptions},
 };
 use std::{convert::TryInto, fs, path::Path};
 use tempfile::tempdir;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pack(
     manifest: &Path,
     root: &Path,
     out: &Path,
     key: Option<&Path>,
-    comp: CompressionAlgorithm,
-    block_size: Option<u32>,
+    squashfs_options: SquashfsOptions,
     clones: Option<u32>,
 ) -> Result<()> {
-    let squashfs_opts = npk::npk::SquashfsOpts { comp, block_size };
     // Create npk clones with the number appended to the name
     if let Some(clones) = clones {
         let manifest_file = manifest;
@@ -36,13 +32,13 @@ pub(crate) fn pack(
                     .context("failed to parse name")?;
                 let m = tmp.path().join(n.to_string());
                 fs::write(&m, manifest.to_string()).context("failed to write manifest")?;
-                pack_with(&m, root, out, key, &squashfs_opts)?;
+                pack_with(&m, root, out, key, squashfs_options.clone())?;
             }
         } else {
-            pack_with(manifest_file, root, out, key, &squashfs_opts)?;
+            pack_with(manifest_file, root, out, key, squashfs_options)?;
         }
     } else {
-        pack_with(manifest, root, out, key, &squashfs_opts)?;
+        pack_with(manifest, root, out, key, squashfs_options)?;
     }
 
     Ok(())

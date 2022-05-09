@@ -108,11 +108,10 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
 ) -> Result<Connection<T>, Error> {
     let mut connection = codec::Framed::new(io);
     let subscribe_notifications = notifications.is_some();
-    let version = model::version();
 
     // Send connect message
     let connect = Connect::Connect {
-        version,
+        version: super::VERSION,
         subscribe_notifications,
     };
     connection

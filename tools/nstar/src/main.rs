@@ -32,10 +32,7 @@ const DEFAULT_HOST: &str = "tcp://localhost:4200";
 
 /// About string for CLI
 fn about() -> &'static str {
-    Box::leak(Box::new(format!(
-        "Northstar API version {}",
-        api::model::version()
-    )))
+    Box::leak(Box::new(format!("Northstar API version {}", api::VERSION)))
 }
 
 /// Subcommands

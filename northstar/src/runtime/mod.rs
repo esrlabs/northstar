@@ -58,11 +58,6 @@ type RepositoryId = String;
 type ExitCode = i32;
 type Pid = u32;
 
-/// Buffer size of the main loop channel
-const EVENT_BUFFER_SIZE: usize = 1000;
-/// Buffer size of the notification channel
-const NOTIFICATION_BUFFER_SIZE: usize = 1000;
-
 /// Environment variable name passed to the container with the containers name
 const ENV_NAME: &str = "NORTHSTAR_NAME";
 /// Environment variable name passed to the container with the containers version
@@ -292,15 +287,15 @@ async fn run(
     });
 
     // Northstar runs in a event loop
-    let (event_tx, mut event_rx) = mpsc::channel::<Event>(EVENT_BUFFER_SIZE);
-    let (notification_tx, _) = sync::broadcast::channel(NOTIFICATION_BUFFER_SIZE);
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(config.event_buffer_size);
+    let (notification_tx, _) = sync::broadcast::channel(config.notification_buffer_size);
 
     // Initialize the console if configured
     let console = if !config.consoles.is_empty() {
         let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
         for (url, configuration) in config.consoles.iter() {
             console
-                .listen(url, configuration)
+                .listen(url, configuration, config.token_validity)
                 .await
                 .map_err(Error::Console)?;
         }
