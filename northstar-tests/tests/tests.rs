@@ -51,7 +51,9 @@ async fn install_invalid_repository() -> Result<()> {
     let client: &mut api::client::Client<_> = &mut *client();
     let size = TEST_CONTAINER_NPK.len() as u64;
     match client.install(TEST_CONTAINER_NPK, size, "whooha").await {
-        Err(api::client::Error::Runtime(model::Error::InvalidRepository { .. })) => Ok(()),
+        Err(api::client::error::RequestError::Runtime(model::Error::InvalidRepository {
+            ..
+        })) => Ok(()),
         e => panic!("Unexpected response: {:?}", e),
     }
 }
@@ -162,7 +164,7 @@ async fn mount_umount() -> Result<()> {
 // Try to mount a unknown container
 #[runtime_test]
 async fn try_to_mount_unknown_container() -> Result<()> {
-    let container = "foo:0.0.1:default";
+    let container = "foo:0.0.1";
     let result = client().mount(container).await?;
     let container = api::model::Container::try_from(container)?;
     let error = api::model::Error::InvalidContainer {
@@ -176,7 +178,7 @@ async fn try_to_mount_unknown_container() -> Result<()> {
 #[runtime_test]
 async fn try_to_mount_known_and_unknown_container() -> Result<()> {
     client().install(TEST_RESOURCE_NPK, "mem").await?;
-    let unknown = "foo:0.0.1:default";
+    let unknown = "foo:0.0.1";
     let result = client().mount_all([TEST_RESOURCE, unknown]).await?;
     assert!(result.len() == 2);
 

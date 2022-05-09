@@ -1,10 +1,11 @@
 use std::{iter, path::Path};
 
 use anyhow::{Context, Result};
-use api::{client::Error as ClientError, model::Error as ModelError};
+use api::model::Error as ModelError;
 use futures::SinkExt;
 use northstar::api::{
     self,
+    client::error::RequestError,
     model::{self, ConnectNack, Container},
 };
 use northstar_tests::runtime_test;
@@ -117,7 +118,7 @@ async fn notifications() -> Result<()> {
 async fn permissions_list() -> Result<()> {
     assert!(matches!(
         connect_none().await?.list().await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -126,7 +127,7 @@ async fn permissions_list() -> Result<()> {
 async fn permissions_repositories() -> Result<()> {
     assert!(matches!(
         connect_none().await?.repositories().await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -135,21 +136,21 @@ async fn permissions_repositories() -> Result<()> {
 async fn permissions_start() -> Result<()> {
     assert!(matches!(
         connect_none().await?.start("hello-world:0.0.1").await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     assert!(matches!(
         connect_none()
             .await?
             .start_with_args("hello-world:0.0.1", ["--help"])
             .await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     assert!(matches!(
         connect_none()
             .await?
             .start_with_args_env("hello-world:0.0.1", ["--help"], [("HELLO", "YOU")])
             .await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -158,7 +159,7 @@ async fn permissions_start() -> Result<()> {
 async fn permissions_kill() -> Result<()> {
     assert!(matches!(
         connect_none().await?.kill("hello-world:0.0.1", 15).await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -170,7 +171,7 @@ async fn permissions_install() -> Result<()> {
             .await?
             .install_file(Path::new("/etc/hosts"), "mem")
             .await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -179,7 +180,7 @@ async fn permissions_install() -> Result<()> {
 async fn permissions_uninstall() -> Result<()> {
     assert!(matches!(
         connect_none().await?.uninstall("hello-world:0.0.1").await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Result::<()>::Ok(())
 }
@@ -188,7 +189,7 @@ async fn permissions_uninstall() -> Result<()> {
 async fn permissions_mount() -> Result<()> {
     assert!(matches!(
         connect_none().await?.mount("hello-world:0.0.1").await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
 
     assert!(matches!(
@@ -196,7 +197,7 @@ async fn permissions_mount() -> Result<()> {
             .await?
             .mount_all(["hello-world:0.0.1", "crashing:0.0.1"])
             .await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -205,7 +206,7 @@ async fn permissions_mount() -> Result<()> {
 async fn permissions_umount() -> Result<()> {
     assert!(matches!(
         connect_none().await?.umount("hello-world:0.0.1").await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
 
     assert!(matches!(
@@ -213,7 +214,7 @@ async fn permissions_umount() -> Result<()> {
             .await?
             .umount_all(["hello-world:0.0.1", "crashing:0.0.1"])
             .await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }
@@ -222,7 +223,7 @@ async fn permissions_umount() -> Result<()> {
 async fn permissions_inspect() -> Result<()> {
     assert!(matches!(
         connect_none().await?.inspect("hello_world:0.0.1").await,
-        Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())
 }

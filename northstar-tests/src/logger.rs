@@ -67,16 +67,13 @@ pub async fn assume<T: ToString + fmt::Display>(pattern: T, timeout: u64) -> Res
         let regex = Regex::new(&pattern.to_string()).context("invalid regex")?;
         let mut rx = QUEUE.1.lock().await;
         loop {
-            match rx.recv().await {
-                Some(n) if regex.is_match(&n) => {
-                    debug!("Log assumption \"{}\" success", pattern);
-                    break Ok(());
-                }
-                Some(_) => continue,
-                None => break Err(anyhow!("Internal error")),
+            let n = rx.recv().await.ok_or_else(|| anyhow!("internal error"))?;
+            if regex.is_match(&n) {
+                debug!("Log assumption \"{}\" success", pattern);
+                break Ok(());
             }
         }
     })
     .await
-    .map_err(|_| anyhow!("Timeout waiting for \"{}\"", pattern))?
+    .with_context(|| format!("timeout waiting for \"{}\"", pattern))?
 }

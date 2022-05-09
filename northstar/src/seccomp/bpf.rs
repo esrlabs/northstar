@@ -3,6 +3,7 @@ use crate::{
     npk::manifest::capabilities::Capability,
     seccomp::{profiles::default, Profile, SyscallArgRule, SyscallRule},
 };
+use anyhow::{bail, Result};
 use bindings::{
     seccomp_data, sock_filter, sock_fprog, BPF_ABS, BPF_ALU, BPF_AND, BPF_IMM, BPF_JEQ, BPF_JMP,
     BPF_K, BPF_LD, BPF_MAXINSNS, BPF_MEM, BPF_NEG, BPF_OR, BPF_RET, BPF_ST, BPF_W, SYSCALL_MAP,
@@ -14,7 +15,6 @@ use std::{
     collections::{HashMap, HashSet},
     mem::size_of,
 };
-use thiserror::Error;
 
 #[allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals)]
 mod bindings {
@@ -34,16 +34,6 @@ const REQUIRED_SYSCALLS: &[u32] = &[bindings::SYS_execve];
 const EVAL_NEXT: u8 = 0;
 /// Skip next instruction
 const SKIP_NEXT: u8 = 1;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("Seccomp filter list exceeds maximum number of BPF statements")]
-    ListTooLong,
-    #[error("Unknown system call {0}")]
-    UnknownSyscall(String),
-    #[error("OS error: {0}")]
-    Os(nix::Error),
-}
 
 /// Construct a allowlist syscall filter that is applied post clone.
 pub fn seccomp_filter(
@@ -230,7 +220,7 @@ pub struct AllowList {
 
 impl AllowList {
     /// Apply this seccomp filter settings to the current thread
-    pub fn apply(&self) -> Result<(), Error> {
+    pub fn apply(&self) -> Result<()> {
         #[cfg(target_os = "android")]
         const PR_SET_SECCOMP: nix::libc::c_int = 22;
         #[cfg(target_os = "android")]
@@ -240,7 +230,7 @@ impl AllowList {
         use nix::libc::{PR_SET_SECCOMP, SECCOMP_MODE_FILTER};
 
         if self.list.len() > BPF_MAXINSNS as usize {
-            return Err(Error::ListTooLong);
+            bail!("seccomp filter list exceeds maximum number of BPF statements");
         }
 
         // Convert the list of instructions into the bindings sock_filter
@@ -256,7 +246,8 @@ impl AllowList {
         };
         let sf_prog_ptr = &sf_prog as *const sock_fprog;
         let result = unsafe { nix::libc::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, sf_prog_ptr) };
-        Errno::result(result).map_err(Error::Os).map(drop)
+        Errno::result(result)?;
+        Ok(())
     }
 }
 
@@ -302,10 +293,10 @@ impl Builder {
         &mut self,
         name: &str,
         arg_rule: Option<SyscallArgRule>,
-    ) -> Result<&mut Builder, Error> {
+    ) -> Result<&mut Builder> {
         match translate_syscall(name) {
             Some(nr) => Ok(self.allow_syscall_nr(nr, arg_rule)),
-            None => Err(Error::UnknownSyscall(name.into())),
+            None => bail!("unknown system call {}", name),
         }
     }
 

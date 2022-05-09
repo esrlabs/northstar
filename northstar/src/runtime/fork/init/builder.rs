@@ -5,13 +5,10 @@ use crate::{
         manifest,
         manifest::{mount, Manifest},
     },
-    runtime::{
-        config::Config,
-        error::{Context, Error},
-        state::State,
-    },
+    runtime::{config::Config, error::Error, state::State},
     seccomp,
 };
+use anyhow::Context;
 use nix::{mount::MsFlags, unistd};
 use std::{
     ffi::{c_void, CString},
@@ -217,7 +214,7 @@ async fn persist(
         log::debug!("Creating {}", source.display());
         fs::create_dir_all(&source)
             .await
-            .context(format!("failed to create {}", source.display()))?;
+            .with_context(|| format!("failed to create directory {}", source.display()))?;
     }
 
     log::debug!("Chowning {} to {}:{}", source.display(), uid, gid);

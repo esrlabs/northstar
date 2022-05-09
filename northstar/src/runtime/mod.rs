@@ -1,8 +1,6 @@
 use crate::{api, api::model::Container, runtime::ipc::AsyncMessage};
 use async_stream::stream;
 use config::Config;
-use error::Error;
-use fmt::Debug;
 use futures::{
     future::{ready, Either},
     FutureExt, StreamExt,
@@ -19,13 +17,9 @@ use nix::{
 };
 use serde::{Deserialize, Serialize};
 use state::State;
-use std::{
-    convert::TryFrom,
-    fmt::{self},
-    future::Future,
-    path::Path,
-};
+use std::{convert::TryFrom, future::Future, path::Path};
 use sync::mpsc;
+use thiserror::Error;
 use tokio::{
     pin, select,
     sync::{self, broadcast, oneshot},
@@ -162,8 +156,8 @@ impl ExitStatus {
     }
 }
 
-impl fmt::Display for ExitStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExitStatus::Exit(code) => write!(f, "Exit({})", code),
             ExitStatus::Signalled(signal) => match sys::signal::Signal::try_from(*signal as i32) {
@@ -173,6 +167,11 @@ impl fmt::Display for ExitStatus {
         }
     }
 }
+
+/// Runtime error
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct Error(#[from] anyhow::Error);
 
 /// Runtime handle
 #[allow(clippy::large_enum_variant)]
@@ -191,13 +190,15 @@ pub enum Runtime {
         /// Drop guard to stop the runtime
         guard: DropGuard,
         /// Runtime task
-        task: JoinHandle<Result<(), Error>>,
+        task: JoinHandle<anyhow::Result<()>>,
     },
 }
 
 impl Runtime {
     /// Create new runtime instance
     pub fn new(config: Config) -> Result<Runtime, Error> {
+        config.check()?;
+
         let (forker_pid, forker_channels) = fork::start()?;
         Ok(Runtime::Created {
             config,
@@ -219,8 +220,6 @@ impl Runtime {
             panic!("Runtime::start called on a running runtime");
         };
 
-        config.check().await?;
-
         let token = CancellationToken::new();
         let guard = token.clone().drop_guard();
 
@@ -236,12 +235,12 @@ impl Runtime {
             drop(guard);
             Either::Left({
                 task.then(|n| match n {
-                    Ok(n) => ready(n),
+                    Ok(n) => ready(n.map_err(|e| e.into())),
                     Err(_) => ready(Ok(())),
                 })
             })
         } else {
-            Either::Right(futures::future::ready(Ok(())))
+            Either::Right(ready(Ok(())))
         }
     }
 
@@ -249,7 +248,7 @@ impl Runtime {
     pub async fn stopped(&mut self) -> Result<(), Error> {
         match self {
             Runtime::Running { ref mut task, .. } => match task.await {
-                Ok(r) => r,
+                Ok(r) => r.map_err(|e| e.into()),
                 Err(_) => Ok(()),
             },
             Runtime::Created { .. } => panic!("Stopped called on a stopped runtime"),
@@ -263,7 +262,7 @@ async fn run(
     token: CancellationToken,
     forker_pid: Pid,
     forker_channels: ForkerChannels,
-) -> Result<(), Error> {
+) -> anyhow::Result<()> {
     // Setup root cgroup(s)
     let cgroup = Path::new(config.cgroup.as_str()).to_owned();
     cgroups::init(&cgroup).await?;
@@ -296,8 +295,7 @@ async fn run(
         for (url, configuration) in config.consoles.iter() {
             console
                 .listen(url, configuration, config.token_validity)
-                .await
-                .map_err(Error::Console)?;
+                .await?;
         }
         Some(console)
     } else {
@@ -352,7 +350,7 @@ async fn run(
                         debug!("Shutting down Northstar runtime");
                         if let Some(console) = console {
                             debug!("Shutting down console");
-                            console.shutdown().await.map_err(Error::Console)?;
+                            console.shutdown().await?;
                         }
                         break state.shutdown(event_rx).await;
                     }

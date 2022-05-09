@@ -1,3 +1,4 @@
+use anyhow::{bail, Result};
 use schemars::{
     gen::SchemaGenerator,
     schema::{InstanceType, SchemaObject, StringValidation},
@@ -10,7 +11,7 @@ use std::{
 };
 use thiserror::Error;
 
-use super::non_nul_string::{InvalidNulChar, NonNulString};
+use super::non_nul_string::NonNulString;
 
 /// Maximum length allowed for a container name
 const MAX_LENGTH: usize = 1024;
@@ -21,24 +22,6 @@ const MAX_LENGTH: usize = 1024;
 /// The maximum length allowed for a container name is 1024 characters.
 #[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Hash)]
 pub struct Name(NonNulString);
-
-/// Invalid character in name
-#[derive(Error, Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[error("invalid character(s) in name")]
-pub enum NameError {
-    /// Name is empty
-    #[error("container name cannot be empty")]
-    Empty,
-    #[error("container name cannot longer than 1024 characters")]
-    /// Name exceeds maximum length
-    Length,
-    #[error("container name contains invalid character(s): {0}")]
-    /// Name contains invalid character(s)
-    InvalidChar(char),
-    /// Name contains null byte
-    #[error("container name cannot contain a nul byte at position {0}")]
-    ContainsNul(usize),
-}
 
 impl fmt::Debug for Name {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -64,33 +47,41 @@ impl AsRef<[u8]> for Name {
     }
 }
 
+/// Name parse error
+#[derive(Error, Debug)]
+#[error(transparent)]
+pub struct InvalidNameError(#[from] anyhow::Error);
+
+/// Validate the input string as a container name
+fn validate(name: String) -> Result<Name> {
+    let name = NonNulString::try_from(name)?;
+
+    if name.len() == 0 {
+        bail!("container name is empty");
+    } else if name.len() > MAX_LENGTH {
+        bail!("container name is longer than 1024 characters");
+    }
+
+    if let Some(c) = name
+        .chars()
+        .find(|c| !matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'))
+    {
+        bail!("invalid character: {}", c);
+    }
+
+    Ok(Name(name))
+}
+
 impl TryFrom<String> for Name {
-    type Error = NameError;
+    type Error = InvalidNameError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.len() {
-            0 => return Err(NameError::Empty),
-            n if n > MAX_LENGTH => return Err(NameError::Length),
-            _ => (),
-        }
-
-        let value: NonNulString = value
-            .try_into()
-            .map_err(|e: InvalidNulChar| NameError::ContainsNul(e.pos()))?;
-
-        if let Some(c) = value
-            .chars()
-            .find(|c| !matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '.' | '_' | '-'))
-        {
-            return Err(NameError::InvalidChar(c));
-        }
-
-        Ok(Name(value))
+        Ok(validate(value)?)
     }
 }
 
 impl TryFrom<&str> for Name {
-    type Error = NameError;
+    type Error = InvalidNameError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         value.to_string().try_into()
@@ -158,44 +149,26 @@ impl JsonSchema for Name {
 
 #[test]
 fn try_empty() {
-    assert!(matches!(Name::try_from(""), Err(NameError::Empty)));
+    assert!(Name::try_from("").is_err());
 }
 
 #[test]
 fn try_too_long() {
-    assert!(matches!(Name::try_from("a".repeat(1024)), Ok(_)));
-    assert!(matches!(
-        Name::try_from("a".repeat(2000)),
-        Err(NameError::Length)
-    ));
+    assert!(Name::try_from("a".repeat(1024)).is_ok());
+    assert!(Name::try_from("a".repeat(2000)).is_err());
 }
 
 #[test]
 fn try_invalid_char() {
-    assert!(matches!(
-        Name::try_from("a%"),
-        Err(NameError::InvalidChar('%'))
-    ));
-    assert!(matches!(
-        Name::try_from("^foo"),
-        Err(NameError::InvalidChar('^'))
-    ));
-    assert!(matches!(
-        Name::try_from("test*"),
-        Err(NameError::InvalidChar('*'))
-    ));
+    assert!(Name::try_from("a%").is_err());
+    assert!(Name::try_from("^foo").is_err());
+    assert!(Name::try_from("test*").is_err());
 }
 
 #[test]
 fn try_from_nul_bytes() {
-    assert!(matches!(
-        Name::try_from("\0"),
-        Err(NameError::ContainsNul(0))
-    ));
-    assert!(matches!(
-        Name::try_from("a\0b"),
-        Err(NameError::ContainsNul(1))
-    ));
+    assert!(Name::try_from("\0").is_err());
+    assert!(Name::try_from("a\0b").is_err());
 }
 
 #[test]

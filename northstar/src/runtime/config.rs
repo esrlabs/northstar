@@ -1,15 +1,17 @@
-use super::{Error, RepositoryId};
-use crate::common::non_nul_string::NonNulString;
-use nix::{sys::stat, unistd};
-use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use std::{
     collections::HashMap,
     os::unix::prelude::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
     time,
 };
-use tokio::fs;
+
+use anyhow::{bail, Context};
+use nix::{sys::stat, unistd};
+use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use url::Url;
+
+use super::RepositoryId;
+use crate::common::non_nul_string::NonNulString;
 
 /// Console configuration
 pub use crate::runtime::console::Configuration as ConsoleConfiguration;
@@ -132,53 +134,28 @@ pub mod debug {
 
 impl Config {
     /// Validate the configuration
-    pub(crate) async fn check(&self) -> Result<(), Error> {
-        // Check run_dir for existence and rw
-        if !self.run_dir.exists() {
-            return Err(Error::Configuration(format!(
-                "configured run_dir {} does not exist",
-                self.run_dir.display()
-            )));
-        } else if !is_rw(&self.run_dir).await {
-            return Err(Error::Configuration(format!(
-                "configured run_dir {} is not read and/or writeable",
-                self.run_dir.display()
-            )));
-        }
+    pub(crate) fn check(&self) -> anyhow::Result<()> {
+        check_rw_directory(&self.run_dir).context("checking run_dir")?;
+        check_rw_directory(&self.data_dir).context("checking data_dir")?;
+        check_rw_directory(&self.log_dir).context("checking log_dir")?;
+        Ok(())
+    }
+}
 
-        // Check data_dir for existence and rw
-        if !self.data_dir.exists() {
-            return Err(Error::Configuration(format!(
-                "configured data_dir {} does not exist",
-                self.data_dir.display()
-            )));
-        } else if !is_rw(&self.data_dir).await {
-            return Err(Error::Configuration(format!(
-                "configured data_dir {} is not read and/or writeable",
-                self.data_dir.display()
-            )));
-        }
-
-        // Check log_dir for existence and rw
-        if !self.log_dir.exists() {
-            return Err(Error::Configuration(format!(
-                "configured data_dir {} does not exist",
-                self.log_dir.display()
-            )));
-        } else if !is_rw(&self.log_dir).await {
-            return Err(Error::Configuration(format!(
-                "configured log_dir {} is not read and/or writeable",
-                self.log_dir.display()
-            )));
-        }
-
+/// Checks that the directory exists and that it is readable and writeable
+fn check_rw_directory(path: &Path) -> anyhow::Result<()> {
+    if !path.exists() {
+        bail!("{} does not exist", path.display());
+    } else if !is_rw(path) {
+        bail!("{} is not read and/or writeable", path.display());
+    } else {
         Ok(())
     }
 }
 
 /// Return true if path is read and writeable
-async fn is_rw(path: &Path) -> bool {
-    match fs::metadata(path).await {
+fn is_rw(path: &Path) -> bool {
+    match std::fs::metadata(path) {
         Ok(stat) => {
             let same_uid = stat.uid() == unistd::getuid().as_raw();
             let same_gid = stat.gid() == unistd::getgid().as_raw();

@@ -4,6 +4,7 @@ use crate::{
     common::container::Container,
     runtime::{token::Token, EventTx, ExitStatus},
 };
+use anyhow::{bail, Context, Result};
 use api::model;
 use async_stream::stream;
 use bytes::Bytes;
@@ -11,15 +12,14 @@ use futures::{
     future::join_all,
     sink::SinkExt,
     stream::{self, FuturesUnordered},
-    Future, StreamExt, TryFutureExt,
+    Future, StreamExt,
 };
-use log::{debug, error, info, trace, warn};
+use log::{debug, info, trace, warn};
 use std::{
     fmt,
     path::{Path, PathBuf},
     unreachable,
 };
-use thiserror::Error;
 use tokio::{
     fs,
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
@@ -64,16 +64,6 @@ pub(crate) struct Console {
     tasks: Vec<task::JoinHandle<()>>,
 }
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("protocol error: {0}")]
-    Protocol(String),
-    #[error("iO error: {0} ({1})")]
-    Io(String, #[source] io::Error),
-    #[error("shutting down")]
-    Shutdown,
-}
-
 impl Console {
     /// Construct a new console instance
     pub(super) fn new(event_tx: EventTx, notification_tx: NotificationTx) -> Console {
@@ -92,7 +82,7 @@ impl Console {
         url: &Url,
         configuration: &Configuration,
         token_validity: time::Duration,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
         let configuration = configuration.clone();
@@ -105,7 +95,7 @@ impl Console {
         );
         let task = match Listener::new(url)
             .await
-            .map_err(|e| Error::Io("failed start console listener".into(), e))?
+            .context("failed to start console listener")?
         {
             Listener::Tcp(listener) => task::spawn(async move {
                 serve(
@@ -137,7 +127,7 @@ impl Console {
     }
 
     /// Stop the listeners and wait for their shutdown
-    pub(super) async fn shutdown(self) -> Result<(), Error> {
+    pub(super) async fn shutdown(self) -> Result<()> {
         self.stop.cancel();
         join_all(self.tasks).await;
         Ok(())
@@ -154,7 +144,7 @@ impl Console {
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         let permissions = &configuration.permissions;
         if let Some(container) = &container {
             debug!(
@@ -343,7 +333,7 @@ async fn process_request<S>(
     event_loop: &EventTx,
     token_validity: time::Duration,
     request: model::Request,
-) -> Result<model::Message, Error>
+) -> Result<model::Message>
 where
     S: AsyncRead + Unpin,
 {
@@ -396,10 +386,7 @@ where
                 .max_npk_install_size
                 .unwrap_or(DEFAULT_MAX_INSTALL_STREAM_SIZE);
             if size > max_install_stream_size {
-                return Err(Error::Io(
-                    "npk size too large".into(),
-                    io::Error::new(io::ErrorKind::InvalidData, "npk size too large"),
-                ));
+                bail!("npk size too large");
             }
 
             info!("{}: Using repository \"{}\"", peer, repository);
@@ -409,7 +396,7 @@ where
             let request = Request::Install(repository, rx);
             trace!("    {:?} -> event loop", request);
             let event = Event::Console(request, reply_tx);
-            event_loop.send(event).map_err(|_| Error::Shutdown).await?;
+            event_loop.send(event).await?;
 
             // The codec might have pulled bytes in the the read buffer of the connection.
             if !stream.read_buffer().is_empty() {
@@ -431,13 +418,11 @@ where
                     .npk_stream_timeout
                     .unwrap_or(DEFAULT_NPK_STREAM_TIMEOUT),
             );
-            while let Some(buf) = time::timeout(timeout, take.next()).await.map_err(|_| {
-                Error::Io(
-                    "npk stream timeout".into(),
-                    io::Error::new(io::ErrorKind::TimedOut, "timeout"),
-                )
-            })? {
-                let buf = buf.map_err(|e| Error::Io("npk stream".into(), e))?;
+            while let Some(buf) = time::timeout(timeout, take.next())
+                .await
+                .context("npk stream timeout")?
+            {
+                let buf = buf.context("npk steam")?;
                 // Ignore any sending error because the stream needs to be drained for `size` bytes.
                 tx.send(buf).await.ok();
             }
@@ -479,13 +464,13 @@ where
             let message = Request::Request(request);
             trace!("    {:?} -> event loop", message);
             let event = Event::Console(message, reply_tx);
-            event_loop.send(event).map_err(|_| Error::Shutdown).await?;
+            event_loop.send(event).await?;
         }
     }
 
     (select! {
-        reply = reply_rx => reply.map_err(|_| Error::Shutdown),
-        _ = stop.cancelled() => Err(Error::Shutdown), // There can be a shutdown while we're waiting for an reply
+        reply = reply_rx => reply.context("failed to receive reply"),
+        _ = stop.cancelled() => bail!("shutdown"), // There can be a shutdown while we're waiting for an reply
     })
     .map(|response| {
         trace!("    {:?} <- event loop", response);

@@ -301,7 +301,6 @@ pub enum Error {
         status: ExitStatus,
     },
     Unexpected {
-        module: String,
         error: String,
     },
 }

@@ -302,6 +302,7 @@ async fn main() -> Result<()> {
             let env = env
                 .iter()
                 .map(|s| s.split_once('=').expect("invalid env. use key=value"))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect::<Vec<_>>();
             client.start_with_args_env(&container, args, env).await?;
             if !opt.json {

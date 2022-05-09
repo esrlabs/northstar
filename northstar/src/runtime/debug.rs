@@ -3,7 +3,8 @@ use super::{
     error::Error,
     Pid,
 };
-use crate::{npk::manifest::Manifest, runtime::error::Context};
+use crate::npk::manifest::Manifest;
+use anyhow::Context;
 use futures::future::OptionFuture;
 use log::{debug, error, info};
 use std::{path::Path, process::Stdio};
