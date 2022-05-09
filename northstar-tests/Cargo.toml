@@ -22,6 +22,6 @@ tokio = { version = "1.18.1", features = ["fs", "time"] }
 url = "2.2.2"
 
 [build-dependencies]
-tempfile = "3.3.0"
 escargot = "0.5.7"
-northstar = { path = "../northstar", features = ["api", "npk"] }
+rayon = "1.5.2"
+tempfile = "3.3.0"
