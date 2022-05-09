@@ -450,7 +450,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # }
     /// ```
     pub async fn install_file(&mut self, npk: &Path, repository: &str) -> Result<Container, Error> {
-        let file = fs::File::open(npk).await.map_err(Error::Io)?;
+        let file = fs::File::open(npk).await?;
         let size = file.metadata().await?.len();
 
         self.install(file, size, repository).await
@@ -472,7 +472,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// client.install(npk, size, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
     /// # }
     /// ```
-    pub async fn install(&mut self, npk: impl AsyncRead + Unpin, size: u64, repository: &str) -> Result<Container, Error> {
+    pub async fn install(
+        &mut self,
+        npk: impl AsyncRead + Unpin,
+        size: u64,
+        repository: &str,
+    ) -> Result<Container, Error> {
         self.fused()?;
         let request = Request::Install(repository.into(), size);
         let message = Message::Request { request };
