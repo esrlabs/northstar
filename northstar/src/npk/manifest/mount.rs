@@ -4,9 +4,12 @@ use serde::{
     de::{Deserializer, Visitor},
     Deserialize, Serialize, Serializer,
 };
-use std::{collections::HashSet, fmt, path::PathBuf, str::FromStr};
+use std::{collections::HashSet, fmt, str::FromStr};
 
-use crate::common::{name::Name, version::VersionReq};
+use crate::common::{name::Name, non_nul_string::NonNulString, version::VersionReq};
+
+/// Mount point
+pub type MountPoint = NonNulString;
 
 /// Resource mount configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
@@ -17,7 +20,7 @@ pub struct Resource {
     /// Required version of the resource container
     pub version: VersionReq,
     /// Directory within the resource container
-    pub dir: PathBuf,
+    pub dir: NonNulString,
     /// Mount options
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub options: MountOptions,
@@ -28,7 +31,7 @@ pub struct Resource {
 #[serde(deny_unknown_fields)]
 pub struct Bind {
     /// Path in the host filesystem
-    pub host: PathBuf,
+    pub host: NonNulString,
     /// Mount options
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub options: MountOptions,
@@ -36,6 +39,7 @@ pub struct Bind {
 
 /// Tmpfs configuration
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Tmpfs {
     /// Size in bytes
     #[serde(deserialize_with = "deserialize_tmpfs_size")]

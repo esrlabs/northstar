@@ -1,7 +1,10 @@
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     debug, info,
-    npk::manifest::{Capability, RLimitResource, RLimitValue},
+    npk::manifest::{
+        capabilities::Capability,
+        rlimit::{RLimitResource, RLimitValue},
+    },
     runtime::{
         fork::util::{self, fork, set_child_subreaper, set_log_target, set_process_name},
         ipc::{owned_fd::OwnedFd, Message as IpcMessage},
