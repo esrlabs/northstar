@@ -467,7 +467,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let npk = fs::File::open("test.npk").await?;
+    /// let npk = fs::File::open("test.npk").await.expect("failed to open \"test.npk\"");
     /// let size = npk.metadata().await.unwrap().len();
     /// client.install(npk, size, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
     /// # }
