@@ -16,12 +16,8 @@ use northstar::{
     },
 };
 use std::convert::{TryFrom, TryInto};
-use tempfile::{NamedTempFile, TempDir};
-use tokio::{
-    fs::{self, remove_file},
-    net::UnixStream,
-    pin, select, time,
-};
+use tempfile::TempDir;
+use tokio::{fs::remove_file, net::UnixStream, pin, select, time};
 
 pub static mut CLIENT: Option<Client> = None;
 
@@ -197,9 +193,9 @@ impl Client {
 
     // Install a npk from a buffer
     pub async fn install(&mut self, npk: &[u8], repository: &str) -> Result<()> {
-        let f = NamedTempFile::new()?;
-        fs::write(&f, npk).await?;
-        self.client.install(f.path(), repository).await?;
+        self.client
+            .install(npk, npk.len() as u64, repository)
+            .await?;
         Ok(())
     }
 

@@ -166,7 +166,7 @@ async fn permissions_install() -> Result<()> {
     assert!(matches!(
         connect_none()
             .await?
-            .install(Path::new("/etc/hosts"), "mem")
+            .install_file(Path::new("/etc/hosts"), "mem")
             .await,
         Err(ClientError::Runtime(ModelError::PermissionDenied { .. }))
     ));

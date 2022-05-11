@@ -354,7 +354,7 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
         .ok_or_else(|| anyhow!("Missing repository argument"))?;
 
     // Initial install - everyhing beyond is notification triggered
-    client.install(npk, repository).await?;
+    client.install_file(npk, repository).await?;
 
     loop {
         select! {
@@ -365,7 +365,7 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
                         client.uninstall(container).await?;
                     }
                     Some(Ok(model::Notification::Uninstall( _ ))) => {
-                        client.install(npk, repository).await?;
+                        client.install_file(npk, repository).await?;
                     }
                     Some(Ok(_)) => continue,
                     Some(Err(e)) => break Err(e.into()),
