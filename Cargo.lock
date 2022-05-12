@@ -338,9 +338,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.1.17"
+version = "3.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47582c09be7c8b32c0ab3a6181825ababb713fde6fff20fc573a3870dd45c6a0"
+checksum = "d2dbdf4bdacb33466e854ce889eee8dfd5729abf7ccd7664d0a2d60cd384440b"
 dependencies = [
  "atty",
  "bitflags",
@@ -359,14 +359,14 @@ version = "3.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da92e6facd8d73c22745a5d3cbb59bdf8e46e3235c923e516527d8e81eec14a4"
 dependencies = [
- "clap 3.1.17",
+ "clap 3.1.18",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "3.1.7"
+version = "3.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3aab4734e083b809aaf5794e14e756d1c798d2c69c7f7de7a09a2f5214993c1"
+checksum = "25320346e922cffe59c0bbc5410c8d8784509efb321488971081313cb1e1a33c"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -1143,7 +1143,7 @@ version = "0.1.0"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "clap 3.1.17",
+ "clap 3.1.18",
  "env_logger",
  "log",
  "nix 0.24.1",
@@ -1382,7 +1382,7 @@ name = "nstar"
 version = "0.4.2"
 dependencies = [
  "anyhow",
- "clap 3.1.17",
+ "clap 3.1.18",
  "clap_complete",
  "futures",
  "hex",
@@ -1921,7 +1921,7 @@ name = "schema"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "clap 3.1.17",
+ "clap 3.1.18",
  "northstar",
  "okapi",
  "schemars",
@@ -1969,7 +1969,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "clap 3.1.17",
+ "clap 3.1.18",
  "env_logger",
  "itertools",
  "northstar",
@@ -2093,7 +2093,7 @@ version = "0.2.1"
 dependencies = [
  "anyhow",
  "base64",
- "clap 3.1.17",
+ "clap 3.1.18",
  "colored",
  "ed25519-dalek",
  "env_logger",
@@ -2256,7 +2256,7 @@ name = "stress"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 3.1.17",
+ "clap 3.1.18",
  "env_logger",
  "futures",
  "humantime",
@@ -2399,7 +2399,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caps",
- "clap 3.1.17",
+ "clap 3.1.18",
  "nix 0.24.1",
 ]
 
