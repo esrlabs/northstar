@@ -424,7 +424,7 @@ impl State {
                 })?;
             let state = self
                 .state(best_match)
-                .expect("Failed to determine resource container state");
+                .expect("failed to determine resource container state");
 
             resources.insert(best_match.clone());
 
@@ -825,9 +825,7 @@ impl State {
         match request {
             Request::Request(ref request) => {
                 let payload = match request {
-                    model::Request::Containers => {
-                        model::Response::Containers(self.list_containers())
-                    }
+                    model::Request::List => model::Response::List(self.list_containers()),
                     model::Request::Install { .. } => unreachable!(),
                     model::Request::Mount(containers) => {
                         let result = self
@@ -904,8 +902,8 @@ impl State {
                             model::Response::Error(e.into())
                         }
                     },
-                    model::Request::Container(container) => match self.container_data(container) {
-                        Ok(data) => model::Response::Container(Box::new(data)),
+                    model::Request::Inspect(container) => match self.inspect(container) {
+                        Ok(data) => model::Response::Inspect(Box::new(data)),
                         Err(e) => model::Response::Error(e.into()),
                     },
                     model::Request::Ident => unreachable!(), // handled in module console
@@ -1107,7 +1105,7 @@ impl State {
     }
 
     /// Tries to get the ContainerData for the input container
-    fn container_data(&self, container: &Container) -> Result<api::model::ContainerData, Error> {
+    fn inspect(&self, container: &Container) -> Result<api::model::ContainerData, Error> {
         let state = self
             .containers
             .get(container)
@@ -1118,45 +1116,21 @@ impl State {
         let process = runtime_info.map(|context| api::model::Process {
             pid: context.pid,
             uptime: context.started.elapsed().as_nanos() as u64,
+            statistics: context.cgroups.stats(),
         });
         let repository = state.repository.clone();
         let mounted = state.is_mounted();
-        let container = container.clone();
 
         Ok(api::model::ContainerData {
-            container,
-            repository,
             manifest,
-            process,
+            repository,
             mounted,
-            stats: runtime_info.map(|p| p.cgroups.stats()),
+            process,
         })
     }
 
-    fn list_containers(&self) -> Vec<api::model::ContainerData> {
-        let mut result = Vec::with_capacity(self.containers.len());
-
-        for (container, state) in &self.containers {
-            let manifest = self.manifest(container).expect("Internal error").clone();
-            let process = state.process.as_ref().map(|context| api::model::Process {
-                pid: context.pid,
-                uptime: context.started.elapsed().as_nanos() as u64,
-            });
-            let repository = state.repository.clone();
-            let mounted = state.is_mounted();
-            let container = container.clone();
-            let container_data = api::model::ContainerData {
-                container,
-                repository,
-                manifest,
-                process,
-                mounted,
-                stats: None,
-            };
-            result.push(container_data);
-        }
-
-        result
+    fn list_containers(&self) -> Vec<api::model::Container> {
+        self.containers.keys().cloned().collect()
     }
 
     /// Send a container event to all subscriber consoles

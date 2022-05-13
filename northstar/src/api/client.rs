@@ -272,13 +272,13 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let containers = client.containers().await.expect("failed to request container list");
+    /// let containers = client.list().await.expect("failed to request container list");
     /// println!("{:#?}", containers);
     /// # }
     /// ```
-    pub async fn containers(&mut self) -> Result<Vec<ContainerData>, Error> {
-        match self.request(Request::Containers).await? {
-            Response::Containers(containers) => Ok(containers),
+    pub async fn list(&mut self) -> Result<Vec<Container>, Error> {
+        match self.request(Request::List).await? {
+            Response::List(containers) => Ok(containers),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on containers should be containers"),
         }
@@ -677,13 +677,13 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// println!("{:?}", client.container("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
-    pub async fn container(
+    pub async fn inspect(
         &mut self,
         container: impl TryInto<Container, Error = impl Into<Error>>,
     ) -> Result<ContainerData, Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::Container(container)).await? {
-            Response::Container(stats) => Ok(*stats),
+        match self.request(Request::Inspect(container)).await? {
+            Response::Inspect(container) => Ok(*container),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on container_stats should be a container_stats"),
         }

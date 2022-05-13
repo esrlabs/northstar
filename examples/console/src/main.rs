@@ -33,14 +33,12 @@ async fn main() -> Result<()> {
     );
 
     // Iterate containers and print their names and state
-    for container in client.containers().await? {
+    for container in client.list().await? {
+        let data = client.inspect(&container).await?;
         println!(
             "{} is {}",
-            container.container,
-            container
-                .process
-                .map(|_| "started")
-                .unwrap_or_else(|| "stopped")
+            container,
+            data.process.map(|_| "started").unwrap_or_else(|| "stopped")
         );
     }
 

@@ -291,7 +291,7 @@ fn mount(
         if Path::new("/sys/fs/selinux/enforce").exists() {
             Some(format!("{}{}", "context=", selinux.context.as_str()))
         } else {
-            warn!("failed to determine SELinux status of host system. SELinux will not be used for container.");
+            warn!("Failed to determine SELinux status of host system. SELinux is disabled.");
             None
         }
     } else {

@@ -2,7 +2,7 @@ name: console
 version: 0.0.1
 init: /console
 console:
-  permissions: [ident, notifications, container, kill]
+  permissions: [ident, notifications, inspect, kill, list]
 uid: 1000
 gid: 1000
 io:

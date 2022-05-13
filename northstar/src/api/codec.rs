@@ -162,7 +162,7 @@ mod tests {
     async fn limited_stream_test() -> std::io::Result<()> {
         let mut buffer = encode_messages([
             Message::Request {
-                request: Request::Containers,
+                request: Request::List,
             },
             Message::Request {
                 request: Request::Repositories,
@@ -182,7 +182,7 @@ mod tests {
             assert!(matches!(
                 msg,
                 Some(Ok(model::Message::Request {
-                    request: Request::Containers
+                    request: Request::List
                 }))
             ));
         }
@@ -249,7 +249,7 @@ mod tests {
     fn mk_message() -> impl Strategy<Value = Message> {
         prop_oneof![
             Just(Message::Request {
-                request: Request::Containers
+                request: Request::List
             }),
             Just(Message::Request {
                 request: Request::Shutdown

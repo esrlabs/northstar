@@ -152,14 +152,10 @@ async fn mount_umount() -> Result<()> {
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
-    let containers = client().containers().await?;
-    client()
-        .mount_all(containers.iter().map(|c| &c.container))
-        .await?;
+    let containers = client().list().await?;
+    client().mount_all(&containers).await?;
 
-    client()
-        .umount_all(containers.iter().map(|c| &c.container))
-        .await?;
+    client().umount_all(containers).await?;
     Ok(())
 }
 
