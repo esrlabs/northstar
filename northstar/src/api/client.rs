@@ -202,12 +202,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use northstar::api::model::Request::Containers;
+    /// # use northstar::api::model::Request::List;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let response = client.request(Containers).await.expect("failed to request container list");
+    /// let response = client.request(List).await.expect("failed to request container list");
     /// println!("{:?}", response);
     /// # }
     /// ```
@@ -674,7 +674,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// println!("{:?}", client.container("hello:0.0.1").await.unwrap());
+    /// println!("{:?}", client.inspect("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
     pub async fn inspect(

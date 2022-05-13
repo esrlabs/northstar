@@ -6,7 +6,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use api::client::Client;
 use clap::{self, IntoApp, Parser};
-use futures::{future::Either, StreamExt};
+use futures::StreamExt;
 use northstar::{
     api::{
         self,
@@ -20,11 +20,11 @@ use tokio::{
     net::{TcpStream, UnixStream},
     time,
 };
-
-trait N: AsyncRead + AsyncWrite + Send + Unpin {}
-impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
+use tokio_util::either::Either;
+use trace::Trace;
 
 mod pretty;
+mod trace;
 
 /// Default nstar address
 const DEFAULT_HOST: &str = "tcp://localhost:4200";
@@ -138,6 +138,9 @@ struct Opt {
     /// Northstar address
     #[clap(short, long, default_value = DEFAULT_HOST)]
     pub url: url::Url,
+    /// Output the raw json payload
+    #[clap(short, long)]
+    pub json: bool,
     /// Connect timeout in seconds
     #[clap(short, long, default_value = "10s", parse(try_from_str = humantime::parse_duration))]
     pub timeout: time::Duration,
@@ -222,13 +225,13 @@ async fn main() -> Result<()> {
                 .await
                 .context("failed to connect")??;
 
-            Box::new(stream) as Box<dyn N>
+            Either::Left(stream)
         }
         "unix" => {
             let stream = time::timeout(timeout, UnixStream::connect(opt.url.path()))
                 .await
                 .context("failed to connect")??;
-            Box::new(stream) as Box<dyn N>
+            Either::Right(stream)
         }
         _ => return Err(anyhow!("invalid url")),
     };
@@ -238,6 +241,14 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // Wrap the io in a tracing struct if the json option is set on the cli
+    let io = if opt.json {
+        Either::Left(Trace::new(io, std::io::stdout()))
+    } else {
+        Either::Right(io)
+    };
+
     let mut client = Client::new(io, notifications, opt.timeout).await?;
 
     match opt.command {
@@ -250,11 +261,15 @@ async fn main() -> Result<()> {
                 let inspect = Client::inspect(&mut client, &container).await?;
                 containers.insert(container, inspect);
             }
-            pretty::list(&containers);
+            if !opt.json {
+                pretty::list(&containers);
+            }
         }
         Subcommand::Repositories => {
             let repositories = client.repositories().await?;
-            pretty::repositories(&repositories);
+            if !opt.json {
+                pretty::repositories(&repositories);
+            }
         }
         Subcommand::Mount { containers } => {
             let mut converted = Vec::with_capacity(containers.len());
@@ -262,7 +277,9 @@ async fn main() -> Result<()> {
                 converted.push(resolve_container(&container, &mut client).await?);
             }
             let result = client.mount_all(&converted).await?;
-            pretty::mounts(&result);
+            if !opt.json {
+                pretty::mounts(&result);
+            }
         }
         Subcommand::Umount { containers } => {
             let mut converted = Vec::with_capacity(containers.len());
@@ -270,7 +287,9 @@ async fn main() -> Result<()> {
                 converted.push(resolve_container(&container, &mut client).await?);
             }
             let result = client.umount_all(&converted).await?;
-            pretty::umounts(&result);
+            if !opt.json {
+                pretty::umounts(&result);
+            }
         }
         Subcommand::Start {
             container,
@@ -285,37 +304,51 @@ async fn main() -> Result<()> {
                 .map(|s| s.split_once('=').expect("invalid env. use key=value"))
                 .collect::<Vec<_>>();
             client.start_with_args_env(&container, args, env).await?;
-            println!("started {}", container);
+            if !opt.json {
+                println!("started {}", container);
+            }
         }
         Subcommand::Kill { container, signal } => {
             let container = resolve_container(&container, &mut client).await?;
             let signal = signal.unwrap_or(15);
             client.kill(&container, signal).await?;
-            println!("signalled {} with signal {}", container, signal);
+            if !opt.json {
+                println!("signalled {} with signal {}", container, signal);
+            }
         }
         Subcommand::Install { npk, repository } => {
-            client.install(&npk, &repository).await?;
-            println!("installed {} into {}", npk.display(), repository);
+            client.install_file(&npk, &repository).await?;
+            if !opt.json {
+                println!("installed {} into {}", npk.display(), repository);
+            }
         }
         Subcommand::Uninstall { container } => {
             let container = resolve_container(&container, &mut client).await?;
             client.uninstall(&container).await?;
-            println!("uninstalled {}", container);
+            if !opt.json {
+                println!("uninstalled {}", container);
+            }
         }
         Subcommand::Shutdown => {
             client.shutdown().await;
-            println!("shutdown");
+            if !opt.json {
+                println!("shutdown");
+            }
         }
         Subcommand::Inspect { container } => {
             let container = resolve_container(&container, &mut client).await?;
             let inspect = Client::inspect(&mut client, &container).await?;
-            println!("{}", serde_json::to_string_pretty(&inspect)?);
+            if !opt.json {
+                println!("{}", serde_json::to_string_pretty(&inspect)?);
+            }
         }
         Subcommand::Token { target, shared } => {
             let target = target.as_bytes().to_vec();
             let shared = shared.as_bytes().to_vec();
             let token = client.create_token(&target, &shared).await?;
-            println!("created {}", hex::encode(token))
+            if !opt.json {
+                println!("created {}", hex::encode(token))
+            }
         }
         Subcommand::VerifyToken {
             token,
@@ -328,7 +361,9 @@ async fn main() -> Result<()> {
             let token: [u8; 40] = token.try_into().map_err(|_| anyhow!("invalid token"))?;
             let token: Token = token.into();
             let result = client.verify_token(&token, &target, shared).await?;
-            println!("{:?}", result);
+            if !opt.json {
+                println!("{:?}", result);
+            }
         }
         Subcommand::Notifications { number } => {
             let mut stream = match number {
@@ -337,7 +372,9 @@ async fn main() -> Result<()> {
             };
             while let Some(notification) = stream.next().await {
                 let notification = notification?;
-                pretty::notification(&notification);
+                if !opt.json {
+                    pretty::notification(&notification);
+                }
             }
         }
         Subcommand::Completion { .. } => unreachable!(),
