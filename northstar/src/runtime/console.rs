@@ -605,7 +605,6 @@ pub enum Peer {
 
 impl From<std::net::SocketAddr> for Peer {
     fn from(socket: std::net::SocketAddr) -> Self {
-        dbg!(socket.ip());
         match socket.ip() {
             std::net::IpAddr::V4(ip) => Url::parse(&format!("tcp://{}:{}", ip, socket.port()))
                 .map(Peer::Extern)
