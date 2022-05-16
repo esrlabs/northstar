@@ -14,8 +14,9 @@ pub struct Framed<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Framed<T> {
-    /// Provides a [`Stream`] and [`Sink`] interface for reading and writing to this
-    /// I/O object, using [`Decoder`] and [`Encoder`] to read and write the raw data.
+    /// Provides a [Stream][`futures::Stream`] and [Sink][`futures::Sink`] interface for reading
+    /// and writing to this I/O object, using [`Decoder`] and [`Encoder`] to read and write the raw
+    /// data.
     pub fn new(inner: T) -> Framed<T> {
         Framed {
             inner: tokio_util::codec::Framed::new(inner, Codec::default()),
@@ -161,7 +162,7 @@ mod tests {
     async fn limited_stream_test() -> std::io::Result<()> {
         let mut buffer = encode_messages([
             Message::Request {
-                request: Request::Containers,
+                request: Request::List,
             },
             Message::Request {
                 request: Request::Repositories,
@@ -181,7 +182,7 @@ mod tests {
             assert!(matches!(
                 msg,
                 Some(Ok(model::Message::Request {
-                    request: Request::Containers
+                    request: Request::List
                 }))
             ));
         }
@@ -248,7 +249,7 @@ mod tests {
     fn mk_message() -> impl Strategy<Value = Message> {
         prop_oneof![
             Just(Message::Request {
-                request: Request::Containers
+                request: Request::List
             }),
             Just(Message::Request {
                 request: Request::Shutdown

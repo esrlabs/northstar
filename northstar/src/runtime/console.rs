@@ -349,11 +349,11 @@ where
 {
     let permissions = &configuration.permissions;
     let required_permission = match &request {
-        model::Request::ContainerStats { .. } => Permission::ContainerStatistics,
-        model::Request::Containers => Permission::Containers,
         model::Request::Ident { .. } => Permission::Ident,
+        model::Request::Inspect { .. } => Permission::Inspect,
         model::Request::Install { .. } => Permission::Install,
         model::Request::Kill { .. } => Permission::Kill,
+        model::Request::List => Permission::List,
         model::Request::Mount { .. } => Permission::Mount,
         model::Request::Repositories => Permission::Repositories,
         model::Request::Shutdown => Permission::Shutdown,
@@ -605,9 +605,14 @@ pub enum Peer {
 
 impl From<std::net::SocketAddr> for Peer {
     fn from(socket: std::net::SocketAddr) -> Self {
-        Url::parse(&format!("tcp://{}:{}", socket.ip(), socket.port()))
-            .map(Peer::Extern)
-            .expect("internal error")
+        match socket.ip() {
+            std::net::IpAddr::V4(ip) => Url::parse(&format!("tcp://{}:{}", ip, socket.port()))
+                .map(Peer::Extern)
+                .expect("internal error"),
+            std::net::IpAddr::V6(ip) => Url::parse(&format!("tcp://[{}]:{}", ip, socket.port()))
+                .map(Peer::Extern)
+                .expect("internal error"),
+        }
     }
 }
 

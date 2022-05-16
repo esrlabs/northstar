@@ -1389,9 +1389,11 @@ dependencies = [
  "humantime",
  "itertools",
  "northstar",
+ "pin-project-lite",
  "prettytable-rs",
  "serde_json",
  "tokio",
+ "tokio-util",
  "url",
 ]
 

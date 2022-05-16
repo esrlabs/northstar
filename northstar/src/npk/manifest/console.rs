@@ -33,32 +33,32 @@ pub struct Configuration {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
-    /// Shutdown the runtime
-    Shutdown,
-    /// List containers
-    Containers,
-    /// List repositories
-    Repositories,
-    /// Start a container
-    Start,
-    /// Send a singal to a container
-    Kill,
+    /// Identification
+    Ident,
+    /// Inspect a container
+    Inspect,
     /// Install a container
     Install,
+    /// Send a singal to a container
+    Kill,
+    /// List all containers
+    List,
+    /// Notifications
+    Notifications,
     /// Mount a container
     Mount,
+    /// List repositories
+    Repositories,
+    /// Shutdown the runtime
+    Shutdown,
+    /// Start a container
+    Start,
+    /// Token creation and verification
+    Token,
     /// Umount a container
     Umount,
     /// Uninstall a container
     Uninstall,
-    /// Collect container resource statistics
-    ContainerStatistics,
-    /// Notifications
-    Notifications,
-    /// Token creation and verification
-    Token,
-    /// Identification
-    Ident,
 }
 
 #[allow(clippy::unwrap_used)]

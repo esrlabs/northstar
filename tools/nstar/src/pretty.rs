@@ -1,13 +1,13 @@
 use itertools::Itertools;
 use model::ExitStatus;
 use northstar::api::model::{
-    self, ContainerData, MountResult, Notification, RepositoryId, Response, UmountResult,
+    self, Container, ContainerData, MountResult, Notification, RepositoryId, UmountResult,
 };
 use prettytable::{format, Attr, Cell, Row, Table};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::time;
 
-pub(crate) fn notification(notification: &Notification) {
+pub fn notification(notification: &Notification) {
     match notification {
         Notification::CGroup(container, notification) => {
             println!("container {} memory event {:?}", container, notification)
@@ -27,7 +27,7 @@ pub(crate) fn notification(notification: &Notification) {
     }
 }
 
-fn containers(containers: &[ContainerData]) {
+pub fn list(containers: &HashMap<Container, ContainerData>) {
     let titles = [
         "Name",
         "Version",
@@ -40,26 +40,26 @@ fn containers(containers: &[ContainerData]) {
 
     let rows = containers
         .iter()
-        .sorted_by_key(|c| c.manifest.name.to_string())
-        .sorted_by_key(|c| c.manifest.init.is_none())
-        .map(|container| {
+        .sorted_by_key(|(c, _)| c.name().to_string())
+        .sorted_by_key(|(_, d)| d.manifest.init.is_none())
+        .map(|(container, data)| {
             [
-                Cell::new(container.container.name().as_ref()).with_style(Attr::Bold),
-                Cell::new(&container.container.version().to_string()),
-                Cell::new(&container.repository),
-                if container.manifest.init.is_some() {
+                Cell::new(container.name().as_ref()).with_style(Attr::Bold),
+                Cell::new(&container.version().to_string()),
+                Cell::new(&data.repository),
+                if data.manifest.init.is_some() {
                     Cell::new("app").with_style(Attr::ForegroundColor(prettytable::color::BLUE))
                 } else {
                     Cell::new("resource")
                         .with_style(Attr::ForegroundColor(prettytable::color::GREEN))
                 },
-                if container.mounted {
+                if data.mounted {
                     Cell::new("yes").with_style(Attr::ForegroundColor(prettytable::color::YELLOW))
                 } else {
                     Cell::new("no").with_style(Attr::ForegroundColor(prettytable::color::CYAN))
                 },
                 Cell::new(
-                    &container
+                    &data
                         .process
                         .as_ref()
                         .map(|p| p.pid.to_string())
@@ -67,7 +67,7 @@ fn containers(containers: &[ContainerData]) {
                 )
                 .with_style(Attr::ForegroundColor(prettytable::color::GREEN)),
                 Cell::new(
-                    &container
+                    &data
                         .process
                         .as_ref()
                         .map(|p| {
@@ -82,7 +82,7 @@ fn containers(containers: &[ContainerData]) {
     print_table(titles, rows);
 }
 
-fn repositories(repositories: &HashSet<RepositoryId>) {
+pub fn repositories(repositories: &HashSet<RepositoryId>) {
     let iter = repositories
         .iter()
         .sorted_by_key(|i| (*i).clone())
@@ -90,7 +90,7 @@ fn repositories(repositories: &HashSet<RepositoryId>) {
     print_table(["Name"], iter);
 }
 
-fn mounts(mounts: &[MountResult]) {
+pub fn mounts(mounts: &[MountResult]) {
     let iter = mounts.iter().map(|r| match r {
         MountResult::Ok { container } => [
             Cell::new(&container.to_string()).with_style(Attr::Bold),
@@ -104,7 +104,7 @@ fn mounts(mounts: &[MountResult]) {
     print_table(["Name", "Result"].iter(), iter);
 }
 
-fn umounts(mounts: &[UmountResult]) {
+pub fn umounts(mounts: &[UmountResult]) {
     let iter = mounts.iter().map(|r| match r {
         UmountResult::Ok { container } => [
             Cell::new(&container.to_string()).with_style(Attr::Bold),
@@ -116,36 +116,6 @@ fn umounts(mounts: &[UmountResult]) {
         ],
     });
     print_table(["Name", "Result"], iter);
-}
-
-pub(crate) fn response(response: &Response) -> i32 {
-    match response {
-        Response::Ident(c) => println!("{}", c),
-        Response::Containers(c) => containers(c),
-        Response::Repositories(r) => repositories(r),
-        Response::Mount(result) => mounts(result),
-        Response::Umount(result) => umounts(result),
-        Response::Ok => println!("ok"),
-        Response::Install(container) => println!("installed {}", container),
-        Response::ContainerStats(container, stats) => {
-            println!("{}:", container);
-            println!("{}", serde_json::to_string_pretty(&stats).unwrap());
-        }
-        Response::Token(token) => {
-            println!("created: {}", hex::encode(token.as_ref()));
-        }
-        Response::TokenVerification(result) => {
-            println!("verification result: {:?}", result);
-        }
-        Response::Error(error) => {
-            eprintln!("{}", format_err(error));
-        }
-    }
-    if let Response::Error(_) = response {
-        1
-    } else {
-        0
-    }
 }
 
 fn format_err(err: &model::Error) -> String {

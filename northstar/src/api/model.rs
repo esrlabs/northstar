@@ -111,11 +111,11 @@ pub enum ConnectNack {
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Request {
-    ContainerStats(Container),
-    Containers,
+    Inspect(Container),
     Ident,
     Install(RepositoryId, u64),
     Kill(Container, i32),
+    List,
     Mount(Vec<Container>),
     Repositories,
     Shutdown,
@@ -169,16 +169,14 @@ pub enum VerificationResult {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ContainerData {
-    /// Container name and version
-    pub container: Container,
-    /// Repository in which the container is installed
-    pub repository: RepositoryId,
     /// Container manifest
     pub manifest: Manifest,
-    /// Process if the container is started
-    pub process: Option<Process>,
+    /// Repository in which the container is installed
+    pub repository: RepositoryId,
     /// Mount state
     pub mounted: bool,
+    /// Process if the container is started
+    pub process: Option<Process>,
 }
 
 /// Process information
@@ -189,6 +187,8 @@ pub struct Process {
     pub pid: Pid,
     /// Process uptime in nanoseconds
     pub uptime: u64,
+    /// Container statistics
+    pub statistics: ContainerStats,
 }
 
 /// Result of a mount operation
@@ -216,10 +216,10 @@ pub enum UmountResult {
 pub enum Response {
     Ok,
     Error(Error),
-    ContainerStats(Container, ContainerStats),
-    Containers(Vec<ContainerData>),
     Ident(Container),
+    Inspect(Box<ContainerData>),
     Install(Container),
+    List(Vec<Container>),
     Mount(Vec<MountResult>),
     Repositories(HashSet<RepositoryId>),
     Token(Token),

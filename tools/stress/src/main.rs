@@ -5,7 +5,6 @@ use futures::{
     FutureExt, StreamExt,
 };
 use humantime::parse_duration;
-use itertools::Itertools;
 use log::{debug, info};
 use northstar::api::{
     client::{self, Client},
@@ -137,14 +136,13 @@ async fn main() -> Result<()> {
     debug!("Getting list of startable containers");
     let mut client =
         client::Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
-    let containers = client
-        .containers()
-        .await?
-        .iter()
-        .filter(|c| c.manifest.init.is_some())
-        .map(|c| c.container.clone())
-        .sorted()
-        .collect::<Vec<_>>();
+    let mut containers: Vec<Container> = Vec::new();
+    for container in client.list().await? {
+        let data = Client::inspect(&mut client, &container).await?;
+        if data.manifest.init.is_some() {
+            containers.push(container);
+        }
+    }
     drop(client);
 
     let mut tasks = Vec::new();

@@ -1,8 +1,8 @@
 use super::{
     codec,
     model::{
-        self, Connect, ConnectNack, Container, ContainerData, ContainerStats, Message, MountResult,
-        Notification, RepositoryId, Request, Response, Token, UmountResult, VerificationResult,
+        self, Connect, ConnectNack, Container, ContainerData, Message, MountResult, Notification,
+        RepositoryId, Request, Response, Token, UmountResult, VerificationResult,
     },
 };
 use crate::common::{
@@ -202,12 +202,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
     /// # use northstar::api::client::Client;
-    /// # use northstar::api::model::Request::Containers;
+    /// # use northstar::api::model::Request::List;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let response = client.request(Containers).await.expect("failed to request container list");
+    /// let response = client.request(List).await.expect("failed to request container list");
     /// println!("{:?}", response);
     /// # }
     /// ```
@@ -272,13 +272,13 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let containers = client.containers().await.expect("failed to request container list");
+    /// let containers = client.list().await.expect("failed to request container list");
     /// println!("{:#?}", containers);
     /// # }
     /// ```
-    pub async fn containers(&mut self) -> Result<Vec<ContainerData>, Error> {
-        match self.request(Request::Containers).await? {
-            Response::Containers(containers) => Ok(containers),
+    pub async fn list(&mut self) -> Result<Vec<Container>, Error> {
+        match self.request(Request::List).await? {
+            Response::List(containers) => Ok(containers),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on containers should be containers"),
         }
@@ -674,16 +674,16 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// println!("{:?}", client.container_stats("hello:0.0.1").await.unwrap());
+    /// println!("{:?}", client.inspect("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
-    pub async fn container_stats(
+    pub async fn inspect(
         &mut self,
         container: impl TryInto<Container, Error = impl Into<Error>>,
-    ) -> Result<ContainerStats, Error> {
+    ) -> Result<ContainerData, Error> {
         let container = container.try_into().map_err(Into::into)?;
-        match self.request(Request::ContainerStats(container)).await? {
-            Response::ContainerStats(_, stats) => Ok(stats),
+        match self.request(Request::Inspect(container)).await? {
+            Response::Inspect(container) => Ok(*container),
             Response::Error(error) => Err(Error::Runtime(error)),
             _ => unreachable!("response on container_stats should be a container_stats"),
         }
