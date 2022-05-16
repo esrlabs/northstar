@@ -11,4 +11,4 @@ futures = { version = "0.3.21", default-features = false }
 hex = "0.4.3"
 northstar = { path = "../../northstar", features = ["api"] }
 tokio = { version = "1.18.1", features = ["macros", "rt", "net"] }
-tokio-util = { version = "0.7.1", features = ["codec"] }
+tokio-util = { version = "0.7.2", features = ["codec"] }
