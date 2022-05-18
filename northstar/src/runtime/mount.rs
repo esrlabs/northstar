@@ -1,7 +1,7 @@
 use super::{key::PublicKey, repository::Npk};
 use crate::{
     common::version::Version,
-    npk::{dm_verity::VerityHeader, npk::Hashes},
+    npk::{dm_verity::VerityHeader, manifest::selinux::Selinux, npk::Hashes},
 };
 use devicemapper::{DevId, DmError, DmName, DmOptions};
 use futures::{Future, FutureExt};
@@ -18,7 +18,6 @@ use std::{
 use thiserror::Error;
 use tokio::{task, time};
 
-use crate::seccomp::Selinux;
 pub use nix::mount::MsFlags as MountFlags;
 
 const FS_TYPE: &str = "squashfs";

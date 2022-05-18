@@ -23,13 +23,6 @@ pub struct Seccomp {
     pub allow: Option<HashMap<NonNulString, SyscallRule>>,
 }
 
-/// SELinux configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Selinux {
-    /// Explicit list of allowed syscalls
-    pub context: NonNulString,
-}
-
 /// Syscall rule
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum SyscallRule {

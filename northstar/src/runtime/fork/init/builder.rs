@@ -1,7 +1,10 @@
 use super::{Init, Mount};
 use crate::{
     common::container::Container,
-    npk::manifest::{mount, Manifest},
+    npk::{
+        manifest,
+        manifest::{mount, Manifest},
+    },
     runtime::{
         config::Config,
         error::{Context, Error},
@@ -97,16 +100,18 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
 
     for (target, mount) in manifest_mounts {
         match mount {
-            mount::Mount::Bind(mount::Bind { host, options }) => {
-                mounts.extend(bind(root, target, host, options));
+            mount::Mount::Bind(manifest::mount::Bind { host, options }) => {
+                mounts.extend(bind(root, target.as_ref(), host.as_ref(), options));
             }
             mount::Mount::Persist => {
                 // Note that the version is intentionally not part of the path. This allows
                 // upgrades with persistent data migration
                 let source = config.data_dir.join(manifest.name.to_string());
-                mounts.push(persist(root, &source, target, manifest.uid, manifest.gid).await?);
+                mounts.push(
+                    persist(root, &source, target.as_ref(), manifest.uid, manifest.gid).await?,
+                );
             }
-            mount::Mount::Proc => mounts.push(proc(root, target)),
+            mount::Mount::Proc => mounts.push(proc(root, target.as_ref())),
             mount::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let dependency = State::match_container(
@@ -117,17 +122,19 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
                 .expect("failed to locate required resource container"); // Already checked in State::start()
                 let (mount, remount_ro) = resource(
                     root,
-                    target,
+                    target.as_ref(),
                     config,
                     &container,
                     dependency,
-                    &requirement.dir,
+                    requirement.dir.as_ref(),
                     &requirement.options,
                 )?;
                 mounts.push(mount);
                 mounts.push(remount_ro);
             }
-            mount::Mount::Tmpfs(mount::Tmpfs { size }) => mounts.push(tmpfs(root, target, *size)),
+            mount::Mount::Tmpfs(mount::Tmpfs { size }) => {
+                mounts.push(tmpfs(root, target.as_ref(), *size))
+            }
             mount::Mount::Dev => {}
         }
     }

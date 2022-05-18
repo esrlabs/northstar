@@ -13,8 +13,9 @@ use crate::{
     api::{self, model},
     common::{name::Name, non_nul_string::NonNulString, version::VersionReq},
     npk::manifest::{
+        autostart::Autostart,
         mount::{Mount, Resource},
-        Autostart, Manifest,
+        Manifest,
     },
     runtime::{
         console::{Console, Peer},
@@ -385,13 +386,10 @@ impl State {
         let manifest = self.manifest(container)?.clone();
 
         // Check if the container is not a resource
-        let init = if let Some(ref init) = manifest.init {
-            NonNulString::try_from(init.display().to_string())
-                .map_err(|_| Error::InvalidArguments(init.display().to_string()))?
-        } else {
+        let init = manifest.init.clone().ok_or_else(|| {
             warn!("Container {} is a resource", container);
-            return Err(Error::StartContainerResource(container.clone()));
-        };
+            Error::StartContainerResource(container.clone())
+        })?;
 
         // Containers that need to be mounted before container can be started
         let mut need_mount = HashSet::new();
@@ -514,7 +512,7 @@ impl State {
         };
 
         // Open a file handle for stdin, stdout and stderr according to the manifest
-        let ContainerIo { io, log_task } = io::open(container, &manifest.io)
+        let ContainerIo { io, log_task } = io::open(container, &manifest.io.unwrap_or_default())
             .await
             .expect("IO setup error");
 

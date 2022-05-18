@@ -702,12 +702,12 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                     } else {
                         555
                     };
-                    pseudo_directory(target, mode)
+                    pseudo_directory(target.as_ref(), mode)
                 }
-                Mount::Persist => pseudo_directory(target, 755),
-                Mount::Proc => pseudo_directory(target, 444),
-                Mount::Resource { .. } => pseudo_directory(target, 555),
-                Mount::Tmpfs { .. } => pseudo_directory(target, 755),
+                Mount::Persist => pseudo_directory(target.as_ref(), 755),
+                Mount::Proc => pseudo_directory(target.as_ref(), 444),
+                Mount::Resource { .. } => pseudo_directory(target.as_ref(), 555),
+                Mount::Tmpfs { .. } => pseudo_directory(target.as_ref(), 755),
                 Mount::Dev => {
                     // Create a minimal set of chardevs:
                     // └─ dev
@@ -723,7 +723,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                     //     └── zero
 
                     // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
-                    let mut pseudos = pseudo_directory(target, 755);
+                    let mut pseudos = pseudo_directory(target.as_ref(), 755);
 
                     // Create chardevs
                     for (dev, major, minor) in &[
@@ -734,6 +734,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                         ("urandom", 1, 9),
                         ("zero", 1, 5),
                     ] {
+                        let target: &Path = target.as_ref();
                         let target = target.join(dev).display().to_string();
                         pseudos.push(format!(
                             "{} c {} {} {} {} {}",
@@ -749,6 +750,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                         ("/proc/self/fd/1", "stdout"),
                         ("/proc/self/fd/2", "stderr"),
                     ] {
+                        let target: &Path = target.as_ref();
                         let target = target.join(name).display().to_string();
                         pseudos.push(format!("{} s {} {} {} {}", target, 777, uid, gid, link,));
                     }

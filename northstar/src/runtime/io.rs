@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     common::container::Container,
-    npk::manifest::{self, Output},
+    npk::manifest::{self, io::Output},
 };
 use log::debug;
 use nix::{
@@ -27,7 +27,7 @@ pub struct ContainerIo {
 }
 
 /// Create a new pty handle if configured in the manifest or open /dev/null instead.
-pub async fn open(container: &Container, io: &manifest::Io) -> io::Result<ContainerIo> {
+pub async fn open(container: &Container, io: &manifest::io::Io) -> io::Result<ContainerIo> {
     // Open dev null - needed in any case for stdin
     let dev_null = openrw("/dev/null")?;
 

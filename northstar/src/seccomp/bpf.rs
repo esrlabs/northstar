@@ -1,6 +1,6 @@
 use crate::{
     common::non_nul_string::NonNulString,
-    npk::manifest::Capability,
+    npk::manifest::capabilities::Capability,
     seccomp::{profiles::default, Profile, SyscallArgRule, SyscallRule},
 };
 use bindings::{
