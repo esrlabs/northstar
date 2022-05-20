@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,10 +8,7 @@ use std::{
 };
 use thiserror::Error;
 
-use super::{
-    name::{Name, NameError},
-    version::Version,
-};
+use super::{name::Name, version::Version};
 
 /// Container identification
 #[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash, JsonSchema)]
@@ -37,19 +35,10 @@ impl Container {
     }
 }
 
-/// Container error
-#[allow(missing_docs)]
+/// Parsing error for container identifier
 #[derive(Error, Debug)]
-pub enum Error {
-    #[error("missing container name")]
-    MissingName,
-    #[error("invalid container name")]
-    InvalidName(NameError),
-    #[error("missing container version")]
-    MissingVersion,
-    #[error("invalid container version")]
-    InvalidVersion,
-}
+#[error(transparent)]
+pub struct InvalidContainerError(#[from] anyhow::Error);
 
 impl Display for Container {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -57,43 +46,41 @@ impl Display for Container {
     }
 }
 
-impl From<NameError> for Error {
-    fn from(e: NameError) -> Self {
-        Error::InvalidName(e)
-    }
-}
-
 impl TryFrom<&str> for Container {
-    type Error = Error;
+    type Error = InvalidContainerError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let mut split = value.split(':');
-        let name = split
-            .next()
-            .ok_or(Error::MissingName)?
-            .to_string()
-            .try_into()
-            .map_err(Error::InvalidName)?;
-        let version = split.next().ok_or(Error::MissingVersion)?;
-        let version = Version::parse(version).map_err(|_| Error::InvalidVersion)?;
+        let (name, version) = value
+            .split_once(':')
+            .ok_or_else(|| anyhow!("missing container version"))?;
+        let name = Name::try_from(name).context("invalid name")?;
+        let version = Version::parse(version).context("invalid container version")?;
         Ok(Container::new(name, version))
     }
 }
 
 impl TryFrom<&Container> for Container {
-    type Error = Error;
+    type Error = InvalidContainerError;
 
     fn try_from(container: &Container) -> Result<Self, Self::Error> {
         Ok(container.clone())
     }
 }
 
-impl<E: Into<Error>, N: TryInto<Name, Error = E>, V: ToString> TryFrom<(N, V)> for Container {
-    type Error = Error;
+impl<N, V> TryFrom<(N, V)> for Container
+where
+    N: TryInto<Name>,
+    N::Error: Into<anyhow::Error>,
+    V: ToString,
+{
+    type Error = InvalidContainerError;
 
     fn try_from((name, version): (N, V)) -> Result<Self, Self::Error> {
-        let name = name.try_into().map_err(Into::into)?;
-        let version = Version::parse(&version.to_string()).map_err(|_| Error::InvalidVersion)?;
+        let name = name
+            .try_into()
+            .map_err(Into::into)
+            .context("invalid name")?;
+        let version = Version::parse(&version.to_string()).context("invalid version")?;
         Ok(Container::new(name, version))
     }
 }

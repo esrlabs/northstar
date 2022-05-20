@@ -1,3 +1,4 @@
+use anyhow::{bail, Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use rand_core::{OsRng, RngCore};
 use sha2::{Digest, Sha256};
@@ -7,7 +8,6 @@ use std::{
 };
 
 use std::{io::Seek, path::Path};
-use thiserror::Error;
 use uuid::Uuid;
 
 pub const SHA256_SIZE: usize = 32;
@@ -15,26 +15,6 @@ pub const BLOCK_SIZE: usize = 4096;
 
 pub type Sha256Digest = [u8; SHA256_SIZE];
 pub type Salt = Sha256Digest;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("invalid verity header")]
-    InvalidHeader,
-    #[error("unsupported verity version {0}")]
-    UnsupportedVersion(u32),
-    #[error("unsupported verity algorithm")]
-    UnsupportedAlgorithm(),
-    #[error("error generating hash tree: {0}")]
-    HashTree(String),
-    #[error("error creating valid uuid")]
-    Uuid,
-    #[error("os error: {context}")]
-    Os {
-        context: String,
-        #[source]
-        error: std::io::Error,
-    },
-}
 
 // https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#verity-superblock-format
 #[derive(Debug, Clone)]
@@ -77,39 +57,33 @@ impl VerityHeader {
         }
     }
 
-    pub fn from_bytes<T: Read>(src: &mut T) -> Result<VerityHeader, Error> {
-        || -> Result<VerityHeader, std::io::Error> {
-            let mut header = [0u8; 8];
-            src.read_exact(&mut header)?;
-            let version = src.read_u32::<LittleEndian>()?;
-            let hash_type = src.read_u32::<LittleEndian>()?;
-            let mut uuid = [0u8; 16];
-            src.read_exact(&mut uuid)?;
-            let mut algorithm = [0u8; 32];
-            src.read_exact(&mut algorithm)?;
-            let data_block_size = src.read_u32::<LittleEndian>()?;
-            let hash_block_size = src.read_u32::<LittleEndian>()?;
-            let data_blocks = src.read_u64::<LittleEndian>()?;
-            let salt_size = src.read_u16::<LittleEndian>()?;
-            io::copy(&mut src.take(6), &mut io::sink())?; // skip padding
-            let mut salt = [0u8; 256];
-            src.read_exact(&mut salt)?;
-            Ok(VerityHeader {
-                header,
-                version,
-                hash_type,
-                uuid,
-                algorithm,
-                data_block_size,
-                hash_block_size,
-                data_blocks,
-                salt_size,
-                salt,
-            })
-        }()
-        .map_err(|e| Error::Os {
-            context: "failed to read verity header".to_string(),
-            error: e,
+    pub fn from_bytes<T: Read>(src: &mut T) -> Result<VerityHeader> {
+        let mut header = [0u8; 8];
+        src.read_exact(&mut header)?;
+        let version = src.read_u32::<LittleEndian>()?;
+        let hash_type = src.read_u32::<LittleEndian>()?;
+        let mut uuid = [0u8; 16];
+        src.read_exact(&mut uuid)?;
+        let mut algorithm = [0u8; 32];
+        src.read_exact(&mut algorithm)?;
+        let data_block_size = src.read_u32::<LittleEndian>()?;
+        let hash_block_size = src.read_u32::<LittleEndian>()?;
+        let data_blocks = src.read_u64::<LittleEndian>()?;
+        let salt_size = src.read_u16::<LittleEndian>()?;
+        io::copy(&mut src.take(6), &mut io::sink())?; // skip padding
+        let mut salt = [0u8; 256];
+        src.read_exact(&mut salt)?;
+        Ok(VerityHeader {
+            header,
+            version,
+            hash_type,
+            uuid,
+            algorithm,
+            data_block_size,
+            hash_block_size,
+            data_blocks,
+            salt_size,
+            salt,
         })
     }
 
@@ -130,13 +104,13 @@ impl VerityHeader {
         raw_sb
     }
 
-    pub fn check(&self) -> Result<(), Error> {
+    pub fn check(&self) -> Result<()> {
         if !self.header.starts_with(VerityHeader::HEADER) {
-            Err(Error::InvalidHeader)
+            bail!("invalid verity header")
         } else if self.version != VerityHeader::VERITY_VERSION {
-            Err(Error::UnsupportedVersion(self.version))
+            bail!("unsupported verity version {}", self.version)
         } else if !self.algorithm.starts_with(VerityHeader::ALGORITHM) {
-            Err(Error::UnsupportedAlgorithm())
+            bail!("unsupported verity algorithm")
         } else {
             Ok(())
         }
@@ -148,7 +122,7 @@ impl VerityHeader {
 /// and a dm-verity hash_tree
 /// <https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#hash-tree>
 /// to the given file.
-pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest, Error> {
+pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest> {
     let (level_offsets, tree_size) =
         calculate_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
     let (salt, root_hash, hash_tree) =
@@ -200,24 +174,21 @@ fn generate_hash_tree(
     image_size: u64,
     level_offsets: &[usize],
     tree_size: usize,
-) -> Result<(Salt, Sha256Digest, Vec<u8>), Error> {
+) -> Result<(Salt, Sha256Digest, Vec<u8>)> {
     // For a description of the overall hash tree generation logic see
     // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
-    let mut fsimg = &std::fs::File::open(&fsimg).map_err(|e| Error::Os {
-        context: format!("Cannot open '{}'", &fsimg.display()),
-        error: e,
-    })?;
+    let mut fsimg = &std::fs::File::open(&fsimg)
+        .with_context(|| format!("failed to open {}", &fsimg.display()))?;
     let mut hashes: Vec<[u8; SHA256_SIZE]> = vec![];
     let mut level_num = 0;
     let mut level_size = image_size;
     let mut hash_tree = vec![0_u8; tree_size];
 
     if image_size % BLOCK_SIZE as u64 != 0 {
-        return Err(Error::HashTree(format!("failed to generate verity has tree. The image size {} is not a multiple of the block size {}",
+        bail!("failed to generate verity has tree: the image size {} is not a multiple of the block size {}",
             image_size,
-            BLOCK_SIZE)
-        ));
+            BLOCK_SIZE);
     }
 
     // "1. Choose a random salt (hexadecimal encoding)."
@@ -244,14 +215,12 @@ fn generate_hash_tree(
                 // hash block of original file
                 let offset = level_size - rem_size;
                 let mut data = vec![0_u8; BLOCK_SIZE];
-                fsimg.seek(Start(offset)).map_err(|e| Error::Os {
-                    context: "failed to seek in fs-image".to_string(),
-                    error: e,
-                })?;
-                fsimg.read_exact(&mut data).map_err(|e| Error::Os {
-                    context: "failed to read from fs-image".to_string(),
-                    error: e,
-                })?;
+                fsimg
+                    .seek(Start(offset))
+                    .context("failed to seek in fs-image")?;
+                fsimg
+                    .read_exact(&mut data)
+                    .context("failed to read from fs-image")?;
                 sha256.update(&data);
             } else {
                 // hash block of previous level
@@ -293,32 +262,27 @@ fn append_superblock_and_hashtree(
     fsimg_size: u64,
     salt: &Salt,
     hash_tree: &[u8],
-) -> Result<(), Error> {
+) -> Result<()> {
     let mut fsimg = std::fs::OpenOptions::new()
         .write(true)
         .append(true)
         .open(&fsimg)
-        .map_err(|e| Error::Os {
-            context: format!("Cannot open '{}'", &fsimg.display()),
-            error: e,
-        })?;
+        .with_context(|| format!("failed to open {}", &fsimg.display()))?;
     let mut uuid = [0u8; 16];
     uuid.copy_from_slice(
         hex::decode(Uuid::new_v4().to_string().replace('-', ""))
-            .map_err(|_e| Error::Uuid)?
+            .context("failed to create valid uuid")?
             .as_slice(),
     );
     assert_eq!(fsimg_size % BLOCK_SIZE as u64, 0);
     let data_blocks = fsimg_size / BLOCK_SIZE as u64;
     let header = VerityHeader::new(&uuid, data_blocks, SHA256_SIZE as u16, salt).to_bytes();
-    fsimg.write_all(&header).map_err(|e| Error::Os {
-        context: "failed to write verity header".to_string(),
-        error: e,
-    })?;
-    fsimg.write_all(hash_tree).map_err(|e| Error::Os {
-        context: "failed to write verity hash tree".to_string(),
-        error: e,
-    })?;
+    fsimg
+        .write_all(&header)
+        .context("failed to write verity header")?;
+    fsimg
+        .write_all(hash_tree)
+        .context("failed to write verity hash tree")?;
     Ok(())
 }
 

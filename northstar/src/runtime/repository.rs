@@ -1,9 +1,9 @@
 use super::{
-    error::{Context, Error},
     key::{self, PublicKey},
     Container,
 };
 use crate::{npk::npk::Npk as NpkNpk, runtime::ipc::RawFdExt};
+use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use futures::{future::try_join_all, FutureExt};
 use log::{debug, info, warn};
@@ -30,10 +30,10 @@ pub(super) type Npk = NpkNpk<BufReader<std::fs::File>>;
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {
     /// Stream an npk from `rx` into the repository and load it
-    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error>;
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container>;
 
     /// Add container from repository if present
-    async fn remove(&mut self, container: &Container) -> Result<(), Error>;
+    async fn remove(&mut self, container: &Container) -> Result<()>;
 
     /// Return npk matching container if present
     fn get(&self, container: &Container) -> Option<&Npk>;
@@ -54,7 +54,7 @@ pub(super) struct DirRepository {
 }
 
 impl DirRepository {
-    pub async fn new(dir: &Path, key: Option<&Path>) -> Result<DirRepository, Error> {
+    pub async fn new(dir: &Path, key: Option<&Path>) -> Result<DirRepository> {
         let mut containers = HashMap::new();
 
         // Load key
@@ -64,13 +64,15 @@ impl DirRepository {
                 dir.display(),
                 dir.display()
             );
-            Some(key::load(key).await.map_err(Error::Key)?)
+            Some(key::load(key).await.context("failed to load key")?)
         } else {
             info!("Loading repository {} (unverified)", dir.display());
             None
         };
 
-        let mut readir = fs::read_dir(&dir).await.context("Repository read dir")?;
+        let mut readir = fs::read_dir(&dir)
+            .await
+            .with_context(|| format!("failed to read dir {}", dir.display()))?;
 
         let start = Instant::now();
         let mut tasks = Vec::new();
@@ -82,14 +84,15 @@ impl DirRepository {
                     file.display(),
                     if key.is_some() { " [verified]" } else { "" }
                 );
-                let reader = std::fs::File::open(&file).context("failed to open npk")?;
+                let reader = std::fs::File::open(&file)
+                    .with_context(|| format!("failed to open {}", file.display()))?;
                 let reader = std::io::BufReader::new(reader);
                 let npk = NpkNpk::from_reader(reader, key.as_ref())
-                    .map_err(|e| Error::Npk(file.display().to_string(), e))?;
+                    .with_context(|| format!("failed to read npk {}", file.display()))?;
                 let name = npk.manifest().name.clone();
                 let version = npk.manifest().version.clone();
                 let container = Container::new(name, version);
-                Result::<_, Error>::Ok((container, (file, npk)))
+                Result::<_, anyhow::Error>::Ok((container, (file, npk)))
             })
             .then(|r| ready(r.expect("Task error")));
 
@@ -118,12 +121,12 @@ impl DirRepository {
 }
 
 #[async_trait::async_trait]
-impl<'a> Repository for DirRepository {
-    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
+impl Repository for DirRepository {
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container> {
         let dest = self.dir.join(format!("{}.npk", nanoid!()));
         let mut file = fs::File::create(&dest)
             .await
-            .context("failed create npk in repository")?;
+            .with_context(|| format!("failed create repository {}", dest.display()))?;
         while let Some(r) = rx.recv().await {
             file.write_all(&r).await.context("failed to write npk")?;
         }
@@ -132,13 +135,13 @@ impl<'a> Repository for DirRepository {
 
         debug!("Loading temporary npk {}", dest.display());
         let npk = match Npk::from_path(dest.as_path(), self.key.as_ref())
-            .map_err(|e| Error::Npk(dest.display().to_string(), e))
+            .with_context(|| format!("failed to read npk {}", dest.display()))
         {
             Ok(n) => Ok(n),
             Err(e) => {
                 fs::remove_file(&dest)
                     .await
-                    .context("Remove file from repository")?;
+                    .with_context(|| format!("failed to remove {}", dest.display()))?;
                 Err(e)
             }
         }?;
@@ -150,8 +153,8 @@ impl<'a> Repository for DirRepository {
             warn!("Container {} is already present in repository", container);
             fs::remove_file(&dest)
                 .await
-                .context("Remove file from repository")?;
-            Err(Error::InstallDuplicate(container.clone()))
+                .with_context(|| format!("failed to remove {}", dest.display()))?;
+            bail!("{} already in {}", container, self.dir.display())
         } else {
             let old = dest;
             let new = self.dir.join(format!("{}.npk", container));
@@ -166,17 +169,17 @@ impl<'a> Repository for DirRepository {
         }
     }
 
-    async fn remove(&mut self, container: &Container) -> Result<(), Error> {
+    async fn remove(&mut self, container: &Container) -> Result<()> {
         let (path, npk) = self
             .containers
             .remove(container)
             .expect("Container not found");
         debug!("Removing {}", path.display());
         drop(npk);
-        fs::remove_file(path)
+        fs::remove_file(&path)
             .await
-            .context("failed to remove npk")
-            .map(drop)
+            .with_context(|| format!("failed to remove {}", path.display()))?;
+        Ok(())
     }
 
     fn get(&self, container: &Container) -> Option<&Npk> {
@@ -200,10 +203,10 @@ pub(super) struct MemRepository {
 }
 
 impl MemRepository {
-    pub async fn new(key: Option<&Path>) -> Result<MemRepository, Error> {
+    pub async fn new(key: Option<&Path>) -> Result<MemRepository> {
         let key = if let Some(key) = key {
             info!("Loading memory repository with key {}", key.display());
-            Some(key::load(key).await.map_err(Error::Key)?)
+            Some(key::load(key).await.context("failed to load key")?)
         } else {
             info!("Loading repository (unverified)");
             None
@@ -217,8 +220,8 @@ impl MemRepository {
 }
 
 #[async_trait::async_trait]
-impl<'a> Repository for MemRepository {
-    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container, Error> {
+impl Repository for MemRepository {
+    async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container> {
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);
         let fd = opts.create(nanoid!()).context("failed to create memfd")?;
@@ -253,8 +256,7 @@ impl<'a> Repository for MemRepository {
 
         // Load npk
         debug!("Loading memfd as npk");
-        let npk = NpkNpk::from_reader(file, self.key.as_ref())
-            .map_err(|e| Error::Npk("memory".into(), e))?;
+        let npk = NpkNpk::from_reader(file, self.key.as_ref()).context("failed to read npk")?;
         let container = npk.manifest().container();
         info!("Loaded {} from memfd", container);
 
@@ -263,14 +265,14 @@ impl<'a> Repository for MemRepository {
                 "Container {} is already present in repository. Dropping...",
                 container
             );
-            Err(Error::InstallDuplicate(container))
+            bail!("{} already in repository", container)
         } else {
             self.containers.insert(container.clone(), npk);
             Ok(container)
         }
     }
 
-    async fn remove(&mut self, container: &Container) -> Result<(), Error> {
+    async fn remove(&mut self, container: &Container) -> Result<()> {
         debug_assert!(self.containers.contains_key(container));
         self.containers.remove(container);
         Ok(())

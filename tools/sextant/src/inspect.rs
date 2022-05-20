@@ -1,12 +1,15 @@
-use anyhow::{Context, Result};
-use colored::Colorize;
-use northstar::npk::npk::{open, Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME};
 use std::{
     fs::File,
     io::{self, BufReader, Read},
     path::Path,
     process::Command,
 };
+
+use anyhow::{Context, Result};
+use colored::Colorize;
+
+use northstar::npk::npk::{Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME};
+use zip::ZipArchive;
 
 pub(crate) fn inspect(npk: &Path, short: bool, unsquashfs: &Path) -> Result<()> {
     if short {
@@ -29,6 +32,13 @@ pub(crate) fn inspect_short(npk: &Path) -> Result<()> {
     );
 
     Ok(())
+}
+
+fn open(path: &Path) -> Result<ZipArchive<BufReader<std::fs::File>>> {
+    let file = std::fs::File::open(&path)
+        .with_context(|| format!("failed to open '{}'", &path.display()))?;
+    ZipArchive::new(BufReader::new(file))
+        .with_context(|| format!("failed to parse ZIP format: '{}'", &path.display()))
 }
 
 pub(crate) fn inspect_long(npk: &Path, unsquashfs: &Path) -> Result<()> {

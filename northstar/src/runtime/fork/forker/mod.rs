@@ -9,11 +9,11 @@ use crate::{
     npk::manifest::Manifest,
     runtime::{
         config::Config,
-        error::Context,
         fork::util::set_log_target,
         ipc::{owned_fd::OwnedFd, socket_pair, AsyncMessage},
     },
 };
+use anyhow::{Context, Result};
 use futures::FutureExt;
 pub use messages::{Message, Notification};
 use nix::sys::signal::{signal, SigHandler, Signal};
@@ -29,7 +29,7 @@ pub struct ForkerChannels {
 }
 
 /// Fork the forker process
-pub fn start() -> Result<(Pid, ForkerChannels), Error> {
+pub fn start() -> Result<(Pid, ForkerChannels)> {
     let mut stream_pair = socket_pair().expect("failed to open socket pair");
     let mut notifications = socket_pair().expect("failed to open socket pair");
 

@@ -3,19 +3,17 @@ use crate::{
     common::version::Version,
     npk::{dm_verity::VerityHeader, manifest::selinux::Selinux, npk::Hashes},
 };
-use devicemapper::{DevId, DmError, DmName, DmOptions};
+use anyhow::{anyhow, bail, Context, Result};
+use devicemapper::{DevId, DmName, DmOptions};
 use futures::{Future, FutureExt};
 use humantime::format_duration;
 use log::{debug, warn};
 use loopdev::LoopControl;
 use std::{
-    io,
     os::unix::{io::AsRawFd, prelude::RawFd},
     path::{Path, PathBuf},
-    str::Utf8Error,
     sync::Arc,
 };
-use thiserror::Error;
 use tokio::{task, time};
 
 pub use nix::mount::MsFlags as MountFlags;
@@ -26,24 +24,6 @@ const FS_TYPE: &str = "squashfs";
 const DEVICE_MAPPER_DEV: &str = "/dev/dm-";
 #[cfg(target_os = "android")]
 const DEVICE_MAPPER_DEV: &str = "/dev/block/dm-";
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("IO error: {0}: {1:?}")]
-    Io(String, io::Error),
-    #[error("Os error: {0}")]
-    Os(#[from] nix::Error),
-    #[error("Device mapper error: {0:?}")]
-    DeviceMapper(#[from] DmError),
-    #[error("Loop device error: {0:?}")]
-    LoopDevice(#[from] io::Error),
-    #[error("NPK error: {0:?}")]
-    Npk(&'static str),
-    #[error("UTF-8 conversion error: {0:?}")]
-    Utf8Conversion(Utf8Error),
-    #[error("Timeout error {0}")]
-    Timeout(String),
-}
 
 pub(super) struct MountControl {
     /// Timeout for dm device setup
@@ -66,13 +46,16 @@ impl MountControl {
     pub(super) async fn new(
         dm_timeout: time::Duration,
         lo_timeout: time::Duration,
-    ) -> Result<MountControl, Error> {
+    ) -> Result<MountControl> {
         debug!("Opening loop control");
-        let lc = LoopControl::open()?;
+        let lc = LoopControl::open().context("failed to open loop control")?;
         debug!("Opening device mapper control");
-        let dm = devicemapper::DM::new()?;
+        let dm = devicemapper::DM::new().context("failed to open device mapper")?;
 
-        let dm_version = dm.version().map(Version::from)?;
+        let dm_version = dm
+            .version()
+            .map(Version::from)
+            .context("failed to parse device mapper version")?;
         debug!("Device mapper version is {}", dm_version);
 
         Ok(MountControl {
@@ -89,7 +72,7 @@ impl MountControl {
         npk: &Npk,
         target: &Path,
         key: Option<&PublicKey>,
-    ) -> impl Future<Output = Result<(), Error>> {
+    ) -> impl Future<Output = Result<()>> {
         let dm = self.dm.clone();
         let lc = self.lc.clone();
         let key = key.cloned();
@@ -109,7 +92,7 @@ impl MountControl {
             let start = time::Instant::now();
 
             debug!("Mounting {}:{}", name, version);
-            let device = mount(
+            mount(
                 dm,
                 lc,
                 fd,
@@ -133,7 +116,7 @@ impl MountControl {
                 format_duration(duration)
             );
 
-            Ok(device)
+            Ok(())
         })
         .map(|r| match r {
             Ok(r) => r,
@@ -142,7 +125,7 @@ impl MountControl {
     }
 
     /// Umount target
-    pub(super) fn umount(target: &Path) -> impl Future<Output = Result<(), Error>> {
+    pub(super) fn umount(target: &Path) -> impl Future<Output = Result<()>> {
         let target = target.to_owned();
 
         task::spawn_blocking(move || {
@@ -153,7 +136,7 @@ impl MountControl {
 
             debug!("Removing mountpoint {}", target.display());
             std::fs::remove_dir(&target)
-                .map_err(|e| Error::Io(format!("failed to remove {}", target.display()), e))?;
+                .with_context(|| format!("failed to remove {}", target.display()))?;
 
             let duration = start.elapsed();
             debug!(
@@ -186,7 +169,7 @@ fn mount(
     verity: bool,
     dm_timeout: time::Duration,
     lo_timeout: time::Duration,
-) -> Result<(), Error> {
+) -> Result<()> {
     // Acquire a loop device and attach the backing file. This operation is racy because
     // getting the next free index and attaching is not atomic. Retry the operation in a
     // loop until successful or timeout.
@@ -194,12 +177,8 @@ fn mount(
 
     if !target.exists() {
         debug!("Creating mount point {}", target.display());
-        std::fs::create_dir_all(&target).map_err(|e| {
-            Error::Io(
-                format!("failed to create directory {}", target.display()),
-                e,
-            )
-        })?;
+        std::fs::create_dir_all(&target)
+            .with_context(|| format!("failed to create directory {}", target.display()))?;
     }
 
     let loop_device = loop {
@@ -216,18 +195,15 @@ fn mount(
             break loop_device;
         }
         if start.elapsed() > lo_timeout {
-            return Err(Error::Timeout("failed to acquire loop device".into()));
+            bail!("failed to acquire loop device");
         }
     };
 
     let (device, dm_name) = if !verity {
         // We're done. Use the loop device path e.g. /dev/loop4
-        let path = loop_device.path().ok_or_else(|| {
-            Error::LoopDevice(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to get loop device path",
-            ))
-        })?;
+        let path = loop_device
+            .path()
+            .ok_or_else(|| anyhow!("failed to get loop device path"))?;
         (path, None)
     } else {
         let name = format!("northstar-{}", nanoid::nanoid!());
@@ -259,18 +235,15 @@ fn mount(
                 // The loopdevice has been attached before. Ensure that it is detached in order
                 // to avoid leaking the loop device. If the detach failed something is really
                 // broken and probably best is to propagate the error with a panic.
-                let path = loop_device.path().ok_or_else(|| {
-                    Error::LoopDevice(io::Error::new(
-                        io::ErrorKind::Other,
-                        "failed to get loop device path",
-                    ))
-                })?;
+                let path = loop_device
+                    .path()
+                    .ok_or_else(|| anyhow!("failed to get loop device path"))?;
                 warn!("Detaching {} because of failed dmsetup", path.display());
                 loop_device
                     .detach()
                     .expect("failed to detach loopback device");
 
-                return Err(Error::Npk("Missing verity information in NPK"));
+                bail!("NPK lacks verity information")
             }
         };
         (device, Some(name))
@@ -297,7 +270,7 @@ fn mount(
         None
     };
     let data = data.as_deref();
-    let mount_result = nix::mount::mount(source, target, fstype, flags, data).map_err(Error::Os);
+    let mount_result = nix::mount::mount(source, target, fstype, flags, data);
 
     if let Err(ref e) = mount_result {
         warn!("failed to mount: {}", e);
@@ -308,7 +281,10 @@ fn mount(
     if let Some(ref dm_name) = dm_name {
         debug!("Enabling deferred removal of device {}", dm_name);
         dm.device_remove(
-            &DevId::Name(DmName::new(dm_name).map_err(Error::DeviceMapper)?),
+            &DevId::Name(
+                DmName::new(dm_name)
+                    .with_context(|| format!("failed to create borrowed identifier {}", dm_name))?,
+            ),
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )?;
     }
@@ -324,11 +300,11 @@ fn dmsetup(
     verity_hash: &str,
     size: u64,
     timeout: time::Duration,
-) -> Result<PathBuf, Error> {
+) -> Result<PathBuf> {
     let start = time::Instant::now();
 
     let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
-        .map_err(Error::Utf8Conversion)?;
+        .context("failed to read verity algorithm")?;
     let hex_salt = hex::encode(&verity.salt[..(verity.salt_size as usize)]);
     let verity_table = format!(
         "{} {} {} {} {} {} {} {} {} {}",
@@ -372,10 +348,10 @@ fn dmsetup(
             std::thread::sleep(time::Duration::from_millis(1));
 
             if start.elapsed() > timeout {
-                return Err(Error::Timeout(format!(
-                    "Timeout while waiting for verity device {}",
-                    device.display(),
-                )));
+                bail!(
+                    "timed out while waiting for verity device {}",
+                    device.display()
+                );
             }
         }
         Ok(device)

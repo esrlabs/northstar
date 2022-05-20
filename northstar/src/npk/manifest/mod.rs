@@ -11,7 +11,6 @@ use serde_with::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    io as stdio,
     str::FromStr,
 };
 use thiserror::Error;
@@ -44,6 +43,8 @@ pub enum Error {
     Validation(ValidationErrors),
     #[error("failed to parse: {0}")]
     Yaml(#[from] serde_yaml::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Northstar package manifest
@@ -128,23 +129,24 @@ impl Manifest {
     }
 
     /// Read a manifest from `reader`
-    pub fn from_reader<R: stdio::Read>(reader: R) -> Result<Self, Error> {
-        let manifest: Self = serde_yaml::from_reader(reader).map_err(Error::Yaml)?;
+    pub fn from_reader<R: std::io::Read>(reader: R) -> Result<Self, Error> {
+        let manifest: Self = serde_yaml::from_reader(reader)?;
         manifest.validate().map_err(Error::Validation)?;
         Ok(manifest)
     }
 
     /// Write the manifest to `writer`
-    pub fn to_writer<W: stdio::Write>(&self, writer: W) -> Result<(), Error> {
-        serde_yaml::to_writer(writer, self).map_err(Error::Yaml)
+    pub fn to_writer<W: std::io::Write>(&self, writer: W) -> Result<(), Error> {
+        serde_yaml::to_writer(writer, self)?;
+        Ok(())
     }
 }
 
 impl FromStr for Manifest {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Manifest, Error> {
-        let manifest: Self = serde_yaml::from_str(s).map_err(Error::Yaml)?;
+    fn from_str(s: &str) -> Result<Manifest, Self::Err> {
+        let manifest: Self = serde_yaml::from_str(s)?;
         manifest.validate().map_err(Error::Validation)?;
         Ok(manifest)
     }
@@ -156,7 +158,7 @@ impl ToString for Manifest {
         // A `Manifest` is convertible to `String` as long as its implementation of `Serialize` does
         // not return an error. This should never happen for the types that we use in `Manifest` so
         // we can safely use .unwrap() here.
-        serde_yaml::to_string(self).expect("internal error")
+        serde_yaml::to_string(self).expect("failed to serialize manifest")
     }
 }
 

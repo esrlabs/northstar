@@ -6,6 +6,7 @@ use crate::{
     npk::manifest,
     runtime::{CGroupEvent, ContainerEvent, Event, MemoryEvent},
 };
+use anyhow::{Context, Result};
 use cgroups_rs::{
     memory::MemController, BlkIoDeviceResource, BlkIoDeviceThrottleResource, BlkIoResources,
     Controller, CpuResources, Hierarchy, MemoryResources,
@@ -14,10 +15,9 @@ use futures::stream::StreamExt;
 use inotify::{Inotify, WatchMask};
 use log::{debug, info, warn};
 use std::{collections::HashMap, fmt::Debug, os::unix::io::AsRawFd, path::Path};
-use thiserror::Error;
 use tokio::{
     fs,
-    io::{self, AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     select,
     sync::mpsc::error::TrySendError,
     task::{self, JoinHandle},
@@ -26,14 +26,6 @@ use tokio::{
 use tokio_eventfd::EventFd;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("io error: {0}: {1:?}")]
-    Io(String, io::Error),
-    #[error("cgroups error: {0}")]
-    CGroups(String),
-}
-
 /// Default runtime hierarchy that yields only implemented and supported controllers
 /// instead of the default list.
 fn hierarchy() -> Box<dyn Hierarchy> {
@@ -41,7 +33,7 @@ fn hierarchy() -> Box<dyn Hierarchy> {
 }
 
 /// Create the top level cgroups used by northstar
-pub async fn init(name: &Path) -> Result<(), Error> {
+pub async fn init(name: &Path) -> Result<()> {
     // TODO: Add check for supported controllers
 
     info!("Initializing cgroups with name {}", name.display());
@@ -54,11 +46,11 @@ pub async fn init(name: &Path) -> Result<(), Error> {
 }
 
 /// Shutdown the cgroups config by removing the dir
-pub async fn shutdown(dir: &Path) -> Result<(), Error> {
+pub async fn shutdown(dir: &Path) -> Result<()> {
     info!("Shutting down cgroups");
     cgroups_rs::Cgroup::new(hierarchy(), dir)
         .delete()
-        .map_err(|e| Error::CGroups(e.to_string()))
+        .with_context(|| format!("failed to delete {} cgroup", dir.display()))
 }
 
 /// Implement a custom type for Hierarchy that filters subsystems
@@ -128,7 +120,7 @@ impl CGroups {
         container: &Container,
         config: &manifest::cgroups::CGroups,
         pid: Pid,
-    ) -> Result<CGroups, Error> {
+    ) -> Result<CGroups> {
         debug!("Creating cgroups for {}", container);
         let name: &str = container.name().as_ref();
         let cgroup: cgroups_rs::Cgroup =
@@ -146,7 +138,7 @@ impl CGroups {
 
         cgroup
             .apply(&resources)
-            .map_err(|e| Error::CGroups(e.to_string()))?;
+            .context("failed to configure cgroups")?;
 
         // If adding the task fails it's a fault of the runtime or it's integration
         // and not of the container
