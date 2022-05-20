@@ -14,8 +14,9 @@ use std::path::PathBuf;
 mod inspect;
 mod pack;
 
+/// Northstar package tool
 #[derive(Debug, Parser)]
-#[clap(about = "Northstar CLI")]
+#[clap(author, version, about, long_about = None)]
 enum Opt {
     /// Pack Northstar containers
     Pack {

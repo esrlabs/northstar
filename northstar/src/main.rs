@@ -18,8 +18,9 @@ use tokio::{select, signal::unix::SignalKind};
 
 mod logger;
 
+/// Northstar Runtime
 #[derive(Debug, Parser)]
-#[clap(name = "northstar", about = "Northstar")]
+#[clap(author, version, about, long_about = None)]
 struct Opt {
     /// File that contains the northstar configuration
     #[clap(short, long, default_value = "northstar.toml")]

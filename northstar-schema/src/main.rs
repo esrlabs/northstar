@@ -42,9 +42,9 @@ impl FromStr for Model {
     }
 }
 
-/// CLI
+/// Northstar schema generator
 #[derive(Parser)]
-#[clap(name = "schema", author, about = about())]
+#[clap(author, version, about = about(), long_about = None)]
 struct Opt {
     /// Output destination. Defaults to stdout
     #[clap(short, long)]

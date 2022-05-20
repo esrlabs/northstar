@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Context, Result};
-use northstar_client::model::{Token, VerificationResult};
-use northstar_client::Client;
+use northstar_client::{
+    model::{Token, VerificationResult},
+    Client,
+};
 use std::time::Duration;
 use tokio::{
     io,

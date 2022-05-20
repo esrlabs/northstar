@@ -52,7 +52,7 @@ First, we build the `hello-world` binary from the northstar directory using carg
 
 ```bash
 $ cargo build --release --bin hello-world
-Compiling hello-world v0.1.0 (/home/nori/dev/northstar/examples/hello-world)
+Compiling hello-world v0.0.1 (/home/nori/dev/northstar/examples/hello-world)
 Finished release [optimized] target(s) in 2.77s
 ```
 

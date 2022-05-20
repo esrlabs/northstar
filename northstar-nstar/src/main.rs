@@ -7,10 +7,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::{self, IntoApp, Parser};
 use futures::StreamExt;
 use northstar_client::{
-    VERSION,
-    Client,
     model::{Container, Token},
-    Name,
+    Client, Name, VERSION,
 };
 use std::{collections::HashMap, convert::TryFrom, path::PathBuf, process};
 use tokio::{
@@ -34,7 +32,6 @@ fn about() -> &'static str {
 
 /// Subcommands
 #[derive(Parser, Clone, PartialEq)]
-#[clap(name = "northstar-nstar", author, about = about())]
 enum Subcommand {
     /// List available containers
     #[clap(alias = "ls")]
@@ -130,8 +127,9 @@ enum Subcommand {
     Ident,
 }
 
-/// CLI
+/// Northstar console client
 #[derive(Parser)]
+#[clap(author, version, about = about(), long_about = None)]
 struct Opt {
     /// Northstar address
     #[clap(short, long, default_value = DEFAULT_HOST)]

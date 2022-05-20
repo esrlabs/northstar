@@ -28,9 +28,10 @@ use tokio::{
 
 /// Client errors
 pub mod error;
-pub use northstar_runtime::api::model;
-pub use northstar_runtime::api::VERSION;
-pub use northstar_runtime::common::name::Name;
+pub use northstar_runtime::{
+    api::{model, VERSION},
+    common::name::Name,
+};
 
 /// Default buffer size for installation transfers
 const BUFFER_SIZE: usize = 1024 * 1024;
