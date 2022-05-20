@@ -24,17 +24,14 @@ fn console() -> Result<()> {
     assume("Container console:0.0.1 connected with permissions .*", 5).await?;
     assume("We are console:0.0.1", 5).await?;
     assume("Killing console:0.0.1 with SIGTERM", 5).await?;
-    client()
-        .assume_notification(
-            |n| {
-                matches!(
-                    n,
-                    Notification::Exit(_, ExitStatus::Signalled { signal: 15 })
-                )
-            },
-            20,
-        )
-        .await
+    assume(
+        "Container console:0.0.1 exited with status Signalled\\(SIGTERM\\)",
+        5,
+    )
+    .await?;
+    client().umount("console:0.0.1").await?;
+    assume("Umounted console:0.0.1", 5).await?;
+    Ok(())
 }
 
 // Start cpueater example and assume log message
