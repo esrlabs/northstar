@@ -11,7 +11,7 @@ allow:
 
 ";
     let stdout = String::from_utf8(
-        Command::cargo_bin("seccomp-util")?
+        Command::cargo_bin("northstar-seccomp")?
             .arg("./res/test_strace_data.txt")
             .output()?
             .stdout,
@@ -52,7 +52,7 @@ allow:
 
 ";
     let stdout = String::from_utf8(
-        Command::cargo_bin("seccomp-util")?
+        Command::cargo_bin("northstar-seccomp")?
             .arg("./res/test_strace_data.txt")
             .arg("--no-default-profile")
             .output()?

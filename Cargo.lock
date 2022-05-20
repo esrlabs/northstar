@@ -1374,6 +1374,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "northstar-seccomp"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap 3.1.18",
+ "env_logger",
+ "itertools",
+ "northstar-runtime",
+ "regex",
+ "serde_yaml",
+]
+
+[[package]]
 name = "northstar-sextant"
 version = "0.0.1-pre"
 dependencies = [
@@ -1985,20 +1999,6 @@ checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 [[package]]
 name = "seccomp"
 version = "0.0.1"
-
-[[package]]
-name = "seccomp-util"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap 3.1.18",
- "env_logger",
- "itertools",
- "northstar-runtime",
- "regex",
- "serde_yaml",
-]
 
 [[package]]
 name = "semver"

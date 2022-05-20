@@ -4,18 +4,19 @@ Utility to generate seccomp profiles for Northstar containers.
 
 ## Create a seccomp manifest entry
 
-To enable seccomp for container, a suitable `seccomp` entry is required in the container's manifest 
-file.
-Using `seccomp-util`, such an entry can be created with the following steps:
+To enable seccomp for container, a suitable `seccomp` entry is required in the
+container's manifest file.  Using `northstar-seccomp`, such an entry can be created
+with the following steps:
 
 1. Run the container with strace to generate a syscall log.
-2. Run `seccomp-util` on the syscall log to generate a seccomp manifest entry. 
+2. Run `northstar-seccomp` on the syscall log to generate a seccomp manifest entry.
 3. Optional: Restrict the arguments of syscalls to specific values.
 4. Add the seccomp manifest entry to the container's manifest.
 
 ## Example Usage
 
-An example strace log obtained by running a northstar container with strace could look as follows: 
+An example strace log obtained by running a northstar container with strace
+could look as follows:
 
 ```shell
 $ cat ./target/northstar/logs/strace-259876-seccomp.strace
@@ -31,25 +32,26 @@ $ cat ./target/northstar/logs/strace-259876-seccomp.strace
 [...]
 ```
 
-Running `seccomp-util` on the file gives the following output:
+Running `northstar-seccomp` on the file gives the following output:
 
 ```shell
-$ seccomp-util ./target/northstar/logs/strace-259876-seccomp.strace
+$ northstar-seccomp ./target/northstar/logs/strace-259876-seccomp.strace
 profile: default
 seccomp:
   allow:
     delete_module: any
 ```
 
-Since all syscalls from the trace file except `delete_module` are part of the default profile,
-`seccomp-util` did not explicitly add them to the `allow:` part of the entry.
+Since all syscalls from the trace file except `delete_module` are part of the
+default profile, `northstar-seccomp` did not explicitly add them to the `allow:`
+part of the entry.
 
-If we do not want to use the default profile, we can add the `--no-default-profile` command line
-switch to disable it.
-`seccomp-util` will then list all used syscalls explicitly:
+If we do not want to use the default profile, we can add the
+`--no-default-profile` command line switch to disable it. `northstar-seccomp`
+will then list all used syscalls explicitly:
 
 ```shell
-$ seccomp-util --no-default-profile ./target/northstar/logs/strace-259876-seccomp.strace
+$ northstar-seccomp --no-default-profile ./target/northstar/logs/strace-259876-seccomp.strace
 seccomp:
   allow:
     brk: any
@@ -63,11 +65,11 @@ seccomp:
 [...]
 ```
 
-If we want to restrict the `write` syscall to write to `stdout` only, we need to modify its 
-`seccomp` entry.
-The target file descriptor is passed in the first argument of the `write` syscall 
-and according to POSIX, `stdout` always has a file descriptor value of `1`.
-We can therefore modify the `seccomp` entry as follows:
+If we want to restrict the `write` syscall to write to `stdout` only, we need to
+modify its `seccomp` entry.  The target file descriptor is passed in the first
+argument of the `write` syscall and according to POSIX, `stdout` always has a
+file descriptor value of `1`.  We can therefore modify the `seccomp` entry as
+follows:
 
 ```shell
 seccomp:
@@ -87,8 +89,8 @@ seccomp:
 [...]
 ```
 
-Note that if there are multiple rules for a single syscall, then all rules are evaluated and the
-syscall only fails if none of the rules allow it.
+Note that if there are multiple rules for a single syscall, then all rules are
+evaluated and the syscall only fails if none of the rules allow it.
 
 In particular, consider the following seccomp entry:
 
@@ -105,9 +107,9 @@ seccomp:
         ]
 ```
 
-Since the default profile already allows the `write` syscall without imposing any restrictions on 
-the arguments, the entry for `write` in the `allow:` part of the entry is redundant.
-It is therefore equivalent to the following entry:
+Since the default profile already allows the `write` syscall without imposing
+any restrictions on the arguments, the entry for `write` in the `allow:` part of
+the entry is redundant.  It is therefore equivalent to the following entry:
 
 ```shell
 seccomp:

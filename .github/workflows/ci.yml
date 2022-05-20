@@ -177,16 +177,16 @@ jobs:
         uses: Swatinem/rust-cache@v1
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Install nstar
+      - name: Install northstar-nstar
         run: cargo install --path northstar-nstar
-      - name: Install sextant
+      - name: Install northstar-sextant
         run: cargo install --path northstar-sextant
+      - name: Install northstar-seccomp
+        run: cargo install --path northstar-seccomp
       - name: Install schema
         run: cargo install --path tools/schema
       - name: Install stress
         run: cargo install --path tools/stress
-      - name: Install seccomp-util
-        run: cargo install --path tools/seccomp-util
 
   openapi:
     name: OpenApi
