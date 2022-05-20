@@ -78,7 +78,7 @@ Northstar container contains:
 * Northstar manifest with process configuration and container meta information
 
 Northstar containers can be created with the Northstar utility
-[sextant](tools/sextant/README.md).
+[sextant](northstar-sextant/README.md).
 
 ### Processes
 

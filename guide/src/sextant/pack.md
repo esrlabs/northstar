@@ -8,8 +8,9 @@ The command requires the following input:
 
 ## The Manifest File
 
-The manifest is a YAML file that references all necessary data to mount and execute the container.
-An example `manifest.yaml` of the `hello-world` container (found in `examples/hello-world/manifest.yaml`) looks as follows:
+The manifest is a YAML file that references all necessary data to mount and
+execute the container.  An example `manifest.yaml` of the `hello-world`
+container (found in `examples/hello-world/manifest.yaml`) looks as follows:
 
 ```yaml
 name: hello-world
@@ -38,10 +39,11 @@ More details on the manifest format can be found in the chapter
 
 ## The `root` Folder
 
-The root folder contains all the container data that will be available during runtime.
-This includes executable files as well as additional resources.
-During packing, the contents of the folder will be copied to a squashfs image that is then added to the NPK.
-This image file will be mounted by the northstar runtime when the container is run.
+The root folder contains all the container data that will be available during
+runtime.  This includes executable files as well as additional resources.
+During packing, the contents of the folder will be copied to a squashfs image
+that is then added to the NPK.  This image file will be mounted by the northstar
+runtime when the container is run.
 
 ## Calling `sextant pack`
 
@@ -61,18 +63,19 @@ $ ls target/release/hello-world
 target/release/hello-world
 ```
 
-Next, we can crate the destination directory if it does not already exist.
-We will choose `target/northstar/repository` as our destination as it is the default place where northstar looks for NPKs on startup.
-This default is configured in `northstar.toml`.
+Next, we can crate the destination directory if it does not already exist.  We
+will choose `target/northstar/repository` as our destination as it is the
+default place where northstar looks for NPKs on startup. This default is
+configured in `northstar.toml`.
 
 ```bash
-$ mkdir -p target/northstar/repository
+mkdir -p target/northstar/repository
 ```
 
 Finally, we are able to call `sextant` and create the NPK:
 
 ```bash
-$ target/debug/sextant pack \
+$ target/debug/northstar-sextant pack \
 --manifest examples/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --out target/northstar/repository
@@ -87,9 +90,10 @@ hello-world-0.0.1.npk
 
 ## Signing an NPK
 
-NPKs can be signed using ed25519 signatures.
-If your runtime is configured to check NPK signatures then containers with missing or invalid signatures will not be accepted.
-To create a signed version of our container we have to specify the required private key:
+NPKs can be signed using ed25519 signatures.  If your runtime is configured to
+check NPK signatures then containers with missing or invalid signatures will not
+be accepted.  To create a signed version of our container we have to specify the
+required private key:
 
 ```bash
 $ target/debug/sextant pack \
@@ -99,4 +103,5 @@ $ target/debug/sextant pack \
 --out target/northstar/repository
 ```
 
-Chapter [Generating Repository Keys](gen_repo_keys.md) describes how to generate keys suitable for signing and verifying NPKs.
+Chapter [Generating Repository Keys](gen_repo_keys.md) describes how to generate
+keys suitable for signing and verifying NPKs.

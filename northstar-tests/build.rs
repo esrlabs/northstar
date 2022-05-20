@@ -98,7 +98,7 @@ fn main() {
 fn find_or_build_sextant() -> PathBuf {
     if env::var(ENV_FORCE_BUILD).is_ok() {
         for dir in Path::new(&env::var("OUT_DIR").unwrap()).ancestors() {
-            let sextant = dir.join("sextant");
+            let sextant = dir.join("northstar-sextant");
             if sextant.is_file() {
                 println!("cargo:warning=Using sextant binary {}", sextant.display());
                 return sextant;
@@ -107,8 +107,8 @@ fn find_or_build_sextant() -> PathBuf {
     }
 
     CargoBuild::new()
-        .manifest_path("../tools/sextant/Cargo.toml")
-        .bin("sextant")
+        .manifest_path("../northstar-sextant/Cargo.toml")
+        .bin("northstar-sextant")
         .current_release()
         .target_dir(Path::new("..").join("target").join("northstar-tests")) // Cannot reuse target because it's in use
         .run()

@@ -393,7 +393,7 @@ impl Default for SquashfsOptions {
 }
 
 /// Create an NPK for the northstar runtime.
-/// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
+/// northstar-sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
 /// and packs the results into a zipped NPK file.
 ///
 /// # Arguments
@@ -406,7 +406,7 @@ impl Default for SquashfsOptions {
 ///
 /// To build the 'hello' example container:
 ///
-/// sextant pack \
+/// northstar-sextant pack \
 /// --manifest examples/hello/manifest.yaml \
 /// --root examples/hello/root \
 /// --out target/northstar/repository \
@@ -416,7 +416,7 @@ pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Res
 }
 
 /// Create an NPK with special `squashfs` options
-/// sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
+/// northstar-sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
 /// and packs the results into a zipped NPK file.
 ///
 /// # Arguments
@@ -430,7 +430,7 @@ pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Res
 ///
 /// To build the 'hello' example container:
 ///
-/// sextant pack \
+/// northstar-sextant pack \
 /// --manifest examples/hello/manifest.yaml \
 /// --root examples/hello/root \
 /// --out target/northstar/repository \

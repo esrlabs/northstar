@@ -38,7 +38,7 @@ specified in `CONTAINER_NAME` and `CONTAINER_VERSION` correspondingly.
 For the following snippet, we can create a dummy container called `foo`. First,
 we create a directory layout for he container that looks like this:
 
-```
+```sh
 foo
 ├── manifest.yaml
 └── root
@@ -60,10 +60,10 @@ mounts:
         host: /lib64
 ```
 
-Finally, we use `sextant` to pack the container into a `npk` file.
+Finally, we use `northstar-sextant` to pack the container into a `npk` file.
 
 ```sh
-sextant pack --dir foo --out . --key examples/keys/northstar.key
+northstar-sextant pack --dir foo --out . --key examples/keys/northstar.key
 ```
 
 This will produce a file named `foo-0.0.1.npk` in the current directory. Now we

@@ -4,11 +4,12 @@ Northstar containers are distributed in the NPK file format.
 
 An NPK file contains both the container's application logic and the data files
 necessary to mount and run the container.  To facilitate the creation,
-inspection and modification of NPKs, northstar provides the `sextant` CLI tool.
+inspection and modification of NPKs, northstar provides the `northstar-sextant`
+CLI tool.
 
 ## Packing an unsigned NPK
 
-NPKs are created (packed) using the `pack` command of `sextant`.
+NPKs are created (packed) using the `pack` command of `northstar-sextant`.
 It requires the following input:
 
 1. A manifest file describing the NPK.
@@ -20,13 +21,13 @@ that will be mounted by the northstar runtime when the container is run.
 For example, the following command packs the `hello-world` example container:
 
 ```bash
-$ target/debug/sextant pack \
+$ target/debug/northstar-sextant pack \
 --manifest examples/container/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --out target/northstar/repository
 ```
 
-The output of `sextant pack` is single NPK file:
+The output of `northstar-sextant pack` is single NPK file:
 
 ```bash
 $ ls target/northstar/repository
@@ -41,7 +42,7 @@ invalid signatures will be rejected.  To pack a signed version of the
 `hello-world` example container, a private key has to be provided:
 
 ```bash
-$ target/debug/sextant pack \
+$ target/debug/northstar-sextant pack \
 --manifest examples/container/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --key ./examples/keys/northstar.key \
@@ -50,12 +51,13 @@ $ target/debug/sextant pack \
 
 ## Generating repository keys
 
-To sign NPKs using `sextant` a suitable key pair is needed.  It can be generated
-using the `sextant gen-key` command.  The following call creates a new key pair
-(`repokey.key` and `repokey.pub`) in the current directory:
+To sign NPKs using `northstar-sextant` a suitable key pair is needed.  It can be
+generated using the `northstar-sextant gen-key` command.  The following call
+creates a new key pair (`repokey.key` and `repokey.pub`) in the current
+directory:
 
 ```bash
-target/debug/sextant gen-key --name repokey --out .
+target/debug/northstar-sextant gen-key --name repokey --out .
 ```
 
 The private key `repokey.key` can be used for signing of NPKs while the public
@@ -65,12 +67,13 @@ key `repokey.pub` is used by the northstar runtime to verify NPKs.
 
 NPKs are ZIP files that contain among other things a squashfs image that will be
 mounted at runtime.  To extract both the outer ZIP and the inner image, the
-`unpack` command of `sextant` can be used.
+`unpack` command of `northstar-sextant` can be used.
 
-To unpack the `hello-world` example container, the `sextant unpack` can be used:
+To unpack the `hello-world` example container, the `northstar-sextant unpack`
+can be used:
 
 ```sh
-$ target/debug/sextant unpack \
+$ target/debug/northstar-sextant unpack \
 --npk ./target/northstar/repository/hello-world-0.0.1.npk \
 --out ./hello-world-container
 ```
@@ -95,7 +98,8 @@ in the `manifest.yaml`.
 
 ## Inspecting an NPK
 
-To get information about an already packed NPK `sextant` provides the `inspect` command.
+To get information about an already packed NPK `northstar-sextant` provides the
+`inspect` command.
 
 ### Inspecting an NPK with default settings
 
@@ -110,7 +114,7 @@ Inspecting an NPK without any additional parameters will show the following info
 The `hello-world` example container can be inspected with the following command:
 
 ```sh
-$ sextant inspect target/northstar/repository/hello-0.0.1.npk
+$ northstar-sextant inspect target/northstar/repository/hello-0.0.1.npk
 ...
 ```
 
@@ -129,6 +133,6 @@ Inspecting the `hello-world` example container with the `--short` flag gives the
 following output:
 
 ```markdown
-$ sextant inspect --short target/northstar/repository/hello-world-0.0.1.npk 
+$ northstar-sextant inspect --short hello-world-0.0.1.npk 
 name: hello-world, version: 0.0.1, NPK version: 0.0.2, resource container: no
 ```

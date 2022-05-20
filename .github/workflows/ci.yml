@@ -134,7 +134,7 @@ jobs:
     - name: Lint markdown
       uses: docker://avtodev/markdown-lint:v1
       with:
-        args: './README.md tools/sextant/README.md' 
+        args: './README.md northstar-sextant/README.md' 
 
   cross:
     name: Cross

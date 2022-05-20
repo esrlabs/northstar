@@ -1,11 +1,11 @@
 # Generating Repository Keys
 
-To sign NPKs using `sextant` we first have to have a suitable key pair.
-This can be generated using the `sextant gen-key` command.
+To sign NPKs using `northstar-sextant` we first have to have a suitable key pair.
+This can be generated using the `northstar-sextant gen-key` command.
 The following call creates a new key pair called `repokey` in the current directory:
 
 ```bash
-target/debug/sextant gen-key --name repokey --out .
+target/debug/northstar-sextant gen-key --name repokey --out .
 ```
 
 After the call we can see that two files were created:
