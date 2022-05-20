@@ -145,17 +145,17 @@ The Northstar workspace configuration configures a cargo
 [runner](.cargo/runner-x86_64-unknown-linux-gnu) that invokes the runtimes
 example main binary with super user rights.
 
-Use the [nstar](./tools/nstar/README.md) utility to inspect and modify the
+Use the [nstar](./northstar-nstar/README.md) utility to inspect and modify the
 runtimes state e.g.
 
 ```sh
-cargo build --release --bin nstar 
+cargo build --release --bin northstar-nstar 
 ...
-./target/release/nstar --help 
+./target/release/northstar-nstar --help 
 ...
-> ./target/release/nstar -j start hello-world
+> ./target/release/northstar-nstar -j start hello-world
 {"Response":{"Err":{"StartContainerStarted":{"name":"hello-world","version":"0.0.1"}}}}
-> ./target/release/nstar -j kill hello-world
+> ./target/release/northstar-nstar -j kill hello-world
 {"Response":{"Ok":null}}
 ```
 

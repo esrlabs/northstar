@@ -1294,6 +1294,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "northstar-nstar"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "clap 3.1.18",
+ "clap_complete",
+ "futures",
+ "hex",
+ "humantime",
+ "itertools",
+ "northstar-runtime",
+ "pin-project-lite",
+ "prettytable-rs",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "northstar-runtime"
 version = "0.0.1-pre"
 dependencies = [
@@ -1355,7 +1375,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-sextant"
-version = "0.2.1"
+version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "base64",
@@ -1398,26 +1418,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "nstar"
-version = "0.4.2"
-dependencies = [
- "anyhow",
- "clap 3.1.18",
- "clap_complete",
- "futures",
- "hex",
- "humantime",
- "itertools",
- "northstar-runtime",
- "pin-project-lite",
- "prettytable-rs",
- "serde_json",
- "tokio",
- "tokio-util",
- "url",
 ]
 
 [[package]]

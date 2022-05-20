@@ -36,7 +36,7 @@ fn about() -> &'static str {
 
 /// Subcommands
 #[derive(Parser, Clone, PartialEq)]
-#[clap(name = "nstar", author, about = about())]
+#[clap(name = "northstar-nstar", author, about = about())]
 enum Subcommand {
     /// List available containers
     #[clap(alias = "ls")]

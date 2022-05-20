@@ -178,11 +178,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Install nstar
-        run: cargo install --path tools/nstar
+        run: cargo install --path northstar-nstar
+      - name: Install sextant
+        run: cargo install --path northstar-sextant
       - name: Install schema
         run: cargo install --path tools/schema
-      - name: Install sextant
-        run: cargo install --path tools/sextant
       - name: Install stress
         run: cargo install --path tools/stress
       - name: Install seccomp-util
