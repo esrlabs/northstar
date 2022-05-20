@@ -295,10 +295,10 @@ only. Northstar is tested on the architectures
 
 Northstar cannot be run on 32 bit systems! In order to verify that all needed
 Kernel features are available, either run the
-[check_conf](./tools/check_conf.sh) script or manually compare the target's
+[check_conf](./check_conf.sh) script or manually compare the target's
 kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
-**TODO**: List required `CONFIG_` items here. The check_confi script runs on
+**TODO**: List required `CONFIG_` items here. The check_config script runs on
 *Android only
 
 ## Internals

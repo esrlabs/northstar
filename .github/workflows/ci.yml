@@ -185,8 +185,8 @@ jobs:
         run: cargo install --path northstar-seccomp
       - name: Install northstar-schema
         run: cargo install --path northstar-schema
-      - name: Install stress
-        run: cargo install --path tools/stress
+      - name: Install northstar-stress
+        run: cargo install --path northstar-stress
 
   openapi:
     name: OpenApi

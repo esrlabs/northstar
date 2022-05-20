@@ -20,10 +20,10 @@ members = [
     "northstar-schema",
     "northstar-seccomp",
     "northstar-sextant",
+    "northstar-stress",
     "northstar-tests",
     "northstar-tests/northstar-tests-derive",
     "northstar-tests/test-container",
-    "tools/stress",
 ]
 
 [profile.release]

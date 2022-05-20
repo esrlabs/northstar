@@ -47,7 +47,7 @@ impl FromStr for Mode {
 
 #[derive(Debug, Parser)]
 #[clap(
-    name = "stress",
+    name = "northstar-stress",
     about = "Manual stress test the start and stop of Nortstar containers"
 )]
 struct Opt {
