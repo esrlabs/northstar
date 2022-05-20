@@ -5,7 +5,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum RequestError {
     #[error("runtime error: {0:?}")]
-    Runtime(crate::api::model::Error),
+    Runtime(northstar_runtime::api::model::Error),
     #[error("notification consumer lagged")]
     LaggedNotifications,
     #[error(transparent)]

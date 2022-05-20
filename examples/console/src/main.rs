@@ -13,14 +13,14 @@
 //   limitations under the License.
 
 use anyhow::Result;
-use northstar_runtime::api::client;
+use northstar_client::Client;
 use std::time::Duration;
 use tokio::time;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Instantiate client and start connect sequence
-    let mut client = client::Client::from_env(None, Duration::from_secs(5)).await?;
+    let mut client = Client::from_env(None, Duration::from_secs(5)).await?;
 
     // Request the identity of this container
     let ident = client.ident().await?;

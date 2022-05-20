@@ -8,7 +8,7 @@ pub mod runtime;
 ///
 /// ```rust
 /// # use anyhow::Result;
-/// # use northstar_runtime::api::model::{ExitStatus, Notification};
+/// # use northstar_client::model::{ExitStatus, Notification};
 /// # use northstar_tests::{containers::*, logger::assume, runtime::client, runtime_test};
 /// #[runtime_test]
 /// fn console() -> Result<()> {

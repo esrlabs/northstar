@@ -9,6 +9,6 @@ license = "Apache-2.0"
 anyhow = "1.0.56"
 futures = { version = "0.3.21", default-features = false }
 hex = "0.4.3"
-northstar-runtime = { path = "../../northstar-runtime", features = ["api"] }
+northstar-client= { path = "../../northstar-client" }
 tokio = { version = "1.18.1", features = ["macros", "rt", "net"] }
 tokio-util = { version = "0.7.2", features = ["codec"] }

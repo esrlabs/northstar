@@ -6,10 +6,8 @@ use futures::{
 };
 use humantime::parse_duration;
 use log::{debug, info};
-use northstar_runtime::api::{
-    client::{self, Client},
-    model::{self, Container, ExitStatus, Notification},
-};
+use northstar_client::model::{self, Container, ExitStatus, Notification};
+use northstar_client::Client;
 use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -135,7 +133,7 @@ async fn main() -> Result<()> {
     // Get a list of installed applications
     debug!("Getting list of startable containers");
     let mut client =
-        client::Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
+        Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
     let mut containers: Vec<Container> = Vec::new();
     for container in client.list().await? {
         let data = Client::inspect(&mut client, &container).await?;
@@ -151,7 +149,7 @@ async fn main() -> Result<()> {
     if opt.single {
         let stop = stop.clone();
         let task = task::spawn(async move {
-            let mut client = client::Client::new(
+            let mut client = Client::new(
                 io(&opt.url).await?,
                 Some(containers.len() * 3),
                 time::Duration::from_secs(30),
@@ -206,7 +204,7 @@ async fn main() -> Result<()> {
             debug!("Spawning task for {}", container);
             let task = task::spawn(async move {
                 let mut client =
-                    client::Client::new(io(&url).await?, Some(1000), time::Duration::from_secs(30))
+                    Client::new(io(&url).await?, Some(1000), time::Duration::from_secs(30))
                         .await?;
 
                 if let Some(initial_delay) = initial_random_delay {
@@ -334,7 +332,7 @@ async fn await_notification<T: AsyncRead + AsyncWrite + Unpin>(
 /// Install and uninstall an npk in a loop
 async fn install_uninstall(opt: &Opt) -> Result<()> {
     let timeout = time::Duration::from_secs(30);
-    let mut client = client::Client::new(io(&opt.url).await?, Some(10), timeout).await?;
+    let mut client = Client::new(io(&opt.url).await?, Some(10), timeout).await?;
 
     let timeout = opt
         .duration

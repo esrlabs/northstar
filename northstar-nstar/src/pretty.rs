@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use northstar_runtime::api::model::{
+use northstar_client::model::{
     self, Container, ContainerData, ExitStatus, MountResult, Notification, RepositoryId,
     UmountResult,
 };

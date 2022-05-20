@@ -15,6 +15,7 @@ members = [
     "examples/token-client",
     "examples/token-server",
     "northstar",
+    "northstar-client",
     "northstar-nstar",
     "northstar-runtime",
     "northstar-schema",

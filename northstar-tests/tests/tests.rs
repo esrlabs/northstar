@@ -48,10 +48,10 @@ async fn install_duplicate_other_repository() -> Result<()> {
 // Try to a container into a repository that does not exist
 #[runtime_test]
 async fn install_invalid_repository() -> Result<()> {
-    let client: &mut api::client::Client<_> = &mut *client();
+    let client: &mut northstar_client::Client<_> = &mut *client();
     let size = TEST_CONTAINER_NPK.len() as u64;
     match client.install(TEST_CONTAINER_NPK, size, "whooha").await {
-        Err(api::client::error::RequestError::Runtime(model::Error::InvalidRepository {
+        Err(northstar_client::error::RequestError::Runtime(model::Error::InvalidRepository {
             ..
         })) => Ok(()),
         e => panic!("Unexpected response: {:?}", e),

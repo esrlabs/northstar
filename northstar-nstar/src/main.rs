@@ -6,13 +6,11 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{self, IntoApp, Parser};
 use futures::StreamExt;
-use northstar_runtime::{
-    api::{
-        self,
-        client::Client,
-        model::{Container, Token},
-    },
-    common::name::Name,
+use northstar_client::{
+    VERSION,
+    Client,
+    model::{Container, Token},
+    Name,
 };
 use std::{collections::HashMap, convert::TryFrom, path::PathBuf, process};
 use tokio::{
@@ -31,7 +29,7 @@ const DEFAULT_HOST: &str = "tcp://localhost:4200";
 
 /// About string for CLI
 fn about() -> &'static str {
-    Box::leak(Box::new(format!("Northstar API version {}", api::VERSION)))
+    Box::leak(Box::new(format!("Northstar API version {}", VERSION)))
 }
 
 /// Subcommands

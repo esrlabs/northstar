@@ -3,18 +3,18 @@ use std::{iter, path::Path};
 use anyhow::{Context, Result};
 use api::model::Error as ModelError;
 use futures::SinkExt;
+use northstar_client::error::RequestError;
 use northstar_runtime::api::{
     self,
-    client::error::RequestError,
     model::{self, ConnectNack, Container},
 };
 use northstar_tests::runtime_test;
 use tokio::{net::UnixStream, time::Duration};
 
 /// Connect a client to the runtime console without any permission configured.
-async fn connect_none() -> Result<api::client::Client<UnixStream>> {
+async fn connect_none() -> Result<northstar_client::Client<UnixStream>> {
     let io = UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?;
-    api::client::Client::new(io, None, Duration::from_secs(10))
+    northstar_client::Client::new(io, None, Duration::from_secs(10))
         .await
         .context("failed to connect to the runtime")
 }
@@ -57,7 +57,7 @@ async fn api_version() -> Result<()> {
 async fn too_long_line() -> Result<()> {
     let timeout = Duration::from_secs(10);
     let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
-    let mut client = api::client::Client::new(io, None, timeout).await?;
+    let mut client = northstar_client::Client::new(io, None, timeout).await?;
 
     // The default json line limit is 512K
     let container = Container::try_from("hello-world:0.0.1").unwrap();
@@ -74,7 +74,7 @@ async fn too_long_line() -> Result<()> {
 async fn npk_size_limit_violation() -> Result<()> {
     let timeout = Duration::from_secs(10);
     let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
-    let mut client = api::client::Client::new(io, None, timeout).await?;
+    let mut client = northstar_client::Client::new(io, None, timeout).await?;
 
     match client
         .request(model::Request::Install("mem".into(), 999999999))
@@ -107,7 +107,7 @@ async fn npk_size_limit_violation() -> Result<()> {
 async fn notifications() -> Result<()> {
     let io = UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?;
     assert!(
-        api::client::Client::new(io, Some(10), Duration::from_secs(10))
+        northstar_client::Client::new(io, Some(10), Duration::from_secs(10))
             .await
             .is_err()
     );

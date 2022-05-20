@@ -400,7 +400,7 @@ name = "console"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "northstar-runtime",
+ "northstar-client",
  "tokio",
 ]
 
@@ -1294,6 +1294,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "northstar-client"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "futures",
+ "northstar-runtime",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "northstar-nstar"
 version = "0.0.1-pre"
 dependencies = [
@@ -1304,7 +1315,7 @@ dependencies = [
  "hex",
  "humantime",
  "itertools",
- "northstar-runtime",
+ "northstar-client",
  "pin-project-lite",
  "prettytable-rs",
  "serde_json",
@@ -1426,7 +1437,7 @@ dependencies = [
  "humantime",
  "itertools",
  "log",
- "northstar-runtime",
+ "northstar-client",
  "rand 0.8.5",
  "tokio",
  "tokio-util",
@@ -1446,6 +1457,7 @@ dependencies = [
  "memfd",
  "nanoid",
  "nix 0.24.1",
+ "northstar-client",
  "northstar-runtime",
  "northstar-tests-derive",
  "rayon",
@@ -2515,7 +2527,7 @@ dependencies = [
  "anyhow",
  "futures",
  "hex",
- "northstar-runtime",
+ "northstar-client",
  "tokio",
  "tokio-util",
 ]
@@ -2526,7 +2538,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
- "northstar-runtime",
+ "northstar-client",
  "tokio",
 ]
 
