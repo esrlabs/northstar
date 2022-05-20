@@ -84,20 +84,22 @@ async fn npk_size_limit_violation() -> Result<()> {
     }
 }
 
-/// Stale install request that shall timeout after some seconds
-#[runtime_test]
-async fn stale_install() -> Result<()> {
-    let timeout = Duration::from_secs(10);
-    let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
-    let mut client = api::client::Client::new(io, None, timeout).await?;
+// This tests blocks the test execution for min 5s which is not ideal
+// when running the tests in a loop.
+// /// Stale install request that shall timeout after some seconds
+// #[runtime_test]
+// async fn stale_install() -> Result<()> {
+//     let timeout = Duration::from_secs(10);
+//     let io = UnixStream::connect(&northstar_tests::runtime::console_full().path()).await?;
+//     let mut client = api::client::Client::new(io, None, timeout).await?;
 
-    let response = client
-        .request(model::Request::Install("mem".into(), 100))
-        .await;
-    assert!(response.is_err());
+//     let response = client
+//         .request(model::Request::Install("mem".into(), 100))
+//         .await;
+//     assert!(response.is_err());
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 /// Check that subscribing to notifications is not permitted on the `console_none` url.
 #[runtime_test]
