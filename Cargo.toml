@@ -17,12 +17,12 @@ members = [
     "northstar",
     "northstar-nstar",
     "northstar-runtime",
+    "northstar-schema",
     "northstar-seccomp",
     "northstar-sextant",
     "northstar-tests",
     "northstar-tests/northstar-tests-derive",
     "northstar-tests/test-container",
-    "tools/schema",
     "tools/stress",
 ]
 

@@ -36,12 +36,12 @@ jobs:
 
       - name: Generate manifest jsonschema/html
         run: |
-          cargo run --bin schema -- -m manifest -o manifest.json
+          cargo run --bin northstarschema -- -m manifest -o manifest.json
           ./openapi-generator-cli generate -i manifest.json -g html -o target/doc/manifest
 
       - name: Generate api jsonschema/html
         run: |
-          cargo run --bin schema -- -m api -o api.json
+          cargo run --bin northstar-schema -- -m api -o api.json
           ./openapi-generator-cli generate -i api.json -g html -o target/doc/api
 
       - name: Deploy

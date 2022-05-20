@@ -183,8 +183,8 @@ jobs:
         run: cargo install --path northstar-sextant
       - name: Install northstar-seccomp
         run: cargo install --path northstar-seccomp
-      - name: Install schema
-        run: cargo install --path tools/schema
+      - name: Install northstar-schema
+        run: cargo install --path northstar-schema
       - name: Install stress
         run: cargo install --path tools/stress
 
@@ -209,9 +209,9 @@ jobs:
           ./openapi-generator-cli version
       - name: Generate manifest jsonschema/html
         run: |
-          cargo run --bin schema -- -m manifest -o manifest.json
+          cargo run --bin northstar-schema -- -m manifest -o manifest.json
           ./openapi-generator-cli generate -i manifest.json -g html -o manifest.html --skip-validate-spec
       - name: Generate api jsonschema/html
         run: |
-          cargo run --bin schema -- -m api -o api.json
+          cargo run --bin northstar-schema -- -m api -o api.json
           ./openapi-generator-cli generate -i api.json -g html -o api.html --skip-validate-spec
