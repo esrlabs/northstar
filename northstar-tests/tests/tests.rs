@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use log::debug;
-use northstar::api::{
+use northstar_runtime::api::{
     self,
     model::{self, ExitStatus, Notification},
 };

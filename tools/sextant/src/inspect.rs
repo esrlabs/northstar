@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result};
 use colored::Colorize;
 
-use northstar::npk::npk::{Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME};
+use northstar_runtime::npk::npk::{Npk, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME};
 use zip::ZipArchive;
 
 pub(crate) fn inspect(npk: &Path, short: bool, unsquashfs: &Path) -> Result<()> {
@@ -107,7 +107,7 @@ fn print_squashfs(fsimg_path: &Path, unsquashfs: &Path) -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::inspect;
-    use northstar::npk::npk::{generate_key, pack};
+    use northstar_runtime::npk::npk::{generate_key, pack};
     use std::{
         fs::File,
         io::Write,

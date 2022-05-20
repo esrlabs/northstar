@@ -8,5 +8,5 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = "1.0.56"
 hex = "0.4.3"
-northstar = { path = "../../northstar", features = ["api"] }
+northstar-runtime = { path = "../../northstar-runtime", features = ["api"] }
 tokio = { version = "1.18.1", features = ["macros", "rt", "net"] }

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use futures::{sink::SinkExt, StreamExt};
-use northstar::api::client;
+use northstar_runtime::api::client;
 use tokio::{
     net::TcpStream,
     time::{sleep, Duration},

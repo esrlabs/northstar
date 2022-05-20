@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use northstar::{
+use northstar_runtime::{
     common::non_nul_string::NonNulString,
     seccomp::{profiles::default::SYSCALLS_BASE, Profile, Seccomp, SyscallRule},
 };

@@ -3,7 +3,7 @@ use std::{iter, path::Path};
 use anyhow::{Context, Result};
 use api::model::Error as ModelError;
 use futures::SinkExt;
-use northstar::api::{
+use northstar_runtime::api::{
     self,
     client::error::RequestError,
     model::{self, ConnectNack, Container},

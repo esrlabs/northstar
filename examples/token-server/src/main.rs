@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use northstar::api::{
+use northstar_runtime::api::{
     client,
     model::{Token, VerificationResult},
 };

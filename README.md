@@ -162,7 +162,7 @@ cargo build --release --bin nstar
 ## Configuration
 
 The example executable `northstar` reads a configuration file that represents
-`northstar::runtime::config::Config`.
+`northstar_runtime::runtime::config::Config`.
 
 ```toml
 # Directory where containers are mounted

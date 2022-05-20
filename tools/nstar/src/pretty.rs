@@ -1,7 +1,7 @@
 use itertools::Itertools;
-use model::ExitStatus;
-use northstar::api::model::{
-    self, Container, ContainerData, MountResult, Notification, RepositoryId, UmountResult,
+use northstar_runtime::api::model::{
+    self, Container, ContainerData, ExitStatus, MountResult, Notification, RepositoryId,
+    UmountResult,
 };
 use prettytable::{format, Attr, Cell, Row, Table};
 use std::collections::{HashMap, HashSet};

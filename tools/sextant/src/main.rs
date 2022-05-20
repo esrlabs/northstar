@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use northstar::npk::{
+use northstar_runtime::npk::{
     self,
     npk::{CompressionAlgorithm, SquashfsOptions},
 };

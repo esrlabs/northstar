@@ -10,7 +10,7 @@ anyhow = "1.0.57"
 clap = { version = "3.1.18", features = ["derive"] }
 env_logger = "0.9.0"
 itertools = "0.10.3"
-northstar = { path = "../../northstar", features = ["seccomp"] }
+northstar-runtime = { path = "../../northstar-runtime", features = ["seccomp"] }
 regex = "1.5.5"
 serde_yaml = "0.8.24"
 

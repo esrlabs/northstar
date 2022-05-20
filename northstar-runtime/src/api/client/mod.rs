@@ -36,8 +36,8 @@ const BUFFER_SIZE: usize = 1024 * 1024;
 /// ```no_run
 /// use futures::StreamExt;
 /// use tokio::time::Duration;
-/// use northstar::api::client::Client;
-/// use northstar::common::version::Version;
+/// use northstar_runtime::api::client::Client;
+/// use northstar_runtime::common::version::Version;
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
@@ -182,8 +182,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
-    /// # use northstar::api::client::Client;
-    /// # use northstar::api::model::Request::List;
+    /// # use northstar_runtime::api::client::Client;
+    /// # use northstar_runtime::api::model::Request::List;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -228,7 +228,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -250,7 +250,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -272,7 +272,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -294,7 +294,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -317,7 +317,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// # use std::collections::HashMap;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
@@ -347,7 +347,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// # use std::collections::HashMap;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
@@ -406,7 +406,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use tokio::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -432,7 +432,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Install a npk from path
     ///
     /// ```no_run
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// # use std::time::Duration;
     /// # use std::path::Path;
     /// #
@@ -463,7 +463,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Install a npk
     ///
     /// ```no_run
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// # use std::time::Duration;
     /// # use std::path::Path;
     /// # use tokio::fs;
@@ -538,7 +538,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// ```no_run
     /// # use futures::StreamExt;
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -568,7 +568,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
     /// Mount a container
     /// ```no_run
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// # use std::time::Duration;
     /// # use std::convert::TryInto;
     /// #
@@ -590,9 +590,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
     /// Mount a list of containers
     /// ```no_run
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// # use std::time::Duration;
-    /// # use northstar::common::version::Version;
+    /// # use northstar_runtime::common::version::Version;
     /// # use std::path::Path;
     /// # use std::convert::TryInto;
     /// #
@@ -629,7 +629,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -651,7 +651,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
@@ -688,7 +688,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
@@ -716,7 +716,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
+    /// # use northstar_runtime::api::client::Client;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
@@ -746,8 +746,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use std::time::Duration;
-    /// # use northstar::api::client::Client;
-    /// # use northstar::api::model::VerificationResult;
+    /// # use northstar_runtime::api::client::Client;
+    /// # use northstar_runtime::api::model::VerificationResult;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
@@ -815,7 +815,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 /// ```no_run
 /// use futures::StreamExt;
 /// use std::time::Duration;
-/// use northstar::api::client::Client;
+/// use northstar_runtime::api::client::Client;
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {

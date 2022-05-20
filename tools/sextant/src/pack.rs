@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use northstar::npk::{
+use northstar_runtime::npk::{
     manifest::Manifest,
     npk::{pack_with, SquashfsOptions},
 };

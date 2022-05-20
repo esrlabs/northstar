@@ -13,7 +13,7 @@
 //   limitations under the License.
 
 use anyhow::Result;
-use northstar::api::client;
+use northstar_runtime::api::client;
 use std::time::Duration;
 use tokio::time;
 

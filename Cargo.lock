@@ -400,7 +400,7 @@ name = "console"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "northstar",
+ "northstar-runtime",
  "tokio",
 ]
 
@@ -1144,21 +1144,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "main"
-version = "0.1.0"
-dependencies = [
- "android-logd-logger",
- "anyhow",
- "clap 3.1.18",
- "env_logger",
- "log",
- "nix 0.24.1",
- "northstar",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "matchers"
 version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1295,7 +1280,22 @@ dependencies = [
 
 [[package]]
 name = "northstar"
-version = "0.7.1-dev"
+version = "0.0.1-pre"
+dependencies = [
+ "android-logd-logger",
+ "anyhow",
+ "clap 3.1.18",
+ "env_logger",
+ "log",
+ "nix 0.24.1",
+ "northstar-runtime",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "northstar-runtime"
+version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1366,7 +1366,7 @@ dependencies = [
  "memfd",
  "nanoid",
  "nix 0.24.1",
- "northstar",
+ "northstar-runtime",
  "northstar-tests-derive",
  "rayon",
  "regex",
@@ -1395,7 +1395,7 @@ dependencies = [
  "hex",
  "humantime",
  "itertools",
- "northstar",
+ "northstar-runtime",
  "pin-project-lite",
  "prettytable-rs",
  "serde_json",
@@ -1929,7 +1929,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap 3.1.18",
- "northstar",
+ "northstar-runtime",
  "okapi",
  "schemars",
  "serde_json",
@@ -1979,7 +1979,7 @@ dependencies = [
  "clap 3.1.18",
  "env_logger",
  "itertools",
- "northstar",
+ "northstar-runtime",
  "regex",
  "serde_yaml",
 ]
@@ -2105,7 +2105,7 @@ dependencies = [
  "ed25519-dalek",
  "env_logger",
  "log",
- "northstar",
+ "northstar-runtime",
  "tempfile",
  "zip",
 ]
@@ -2270,7 +2270,7 @@ dependencies = [
  "humantime",
  "itertools",
  "log",
- "northstar",
+ "northstar-runtime",
  "rand 0.8.5",
  "tokio",
  "tokio-util",
@@ -2515,7 +2515,7 @@ dependencies = [
  "anyhow",
  "futures",
  "hex",
- "northstar",
+ "northstar-runtime",
  "tokio",
  "tokio-util",
 ]
@@ -2526,7 +2526,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
- "northstar",
+ "northstar-runtime",
  "tokio",
 ]
 

@@ -4,7 +4,7 @@ use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use nanoid::nanoid;
-use northstar::{
+use northstar_runtime::{
     api::{
         client,
         model::{Container, ExitStatus, Notification},
@@ -133,7 +133,7 @@ impl Runtime {
 
 pub struct Client {
     /// Client instance
-    client: northstar::api::client::Client<UnixStream>,
+    client: northstar_runtime::api::client::Client<UnixStream>,
 }
 
 impl std::ops::Deref for Client {

@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use log::{debug, info, warn};
 use nix::mount::MsFlags;
-use northstar::{runtime, runtime::Runtime as Northstar};
+use northstar_runtime::{runtime, runtime::Runtime as Northstar};
 use runtime::config::Config;
 use std::{
     fs::{self, read_to_string},

@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use northstar::{api, npk};
+use northstar_runtime::{api, npk};
 use okapi::openapi3::{Components, Contact, Info};
 use schemars::{gen::SchemaSettings, JsonSchema};
 use std::{fs::write, path::PathBuf, str::FromStr};
@@ -20,10 +20,10 @@ fn about() -> &'static str {
 }
 
 #[derive(JsonSchema)]
-struct Message(northstar::api::model::Message);
+struct Message(northstar_runtime::api::model::Message);
 
 #[derive(JsonSchema)]
-struct Manifest(northstar::npk::manifest::Manifest);
+struct Manifest(northstar_runtime::npk::manifest::Manifest);
 
 enum Model {
     Api,

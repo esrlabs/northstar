@@ -6,7 +6,7 @@ use futures::{
 };
 use humantime::parse_duration;
 use log::{debug, info};
-use northstar::api::{
+use northstar_runtime::api::{
     client::{self, Client},
     model::{self, Container, ExitStatus, Notification},
 };

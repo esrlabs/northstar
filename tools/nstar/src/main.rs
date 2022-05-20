@@ -4,12 +4,12 @@
 #![deny(missing_docs)]
 
 use anyhow::{anyhow, bail, Context, Result};
-use api::client::Client;
 use clap::{self, IntoApp, Parser};
 use futures::StreamExt;
-use northstar::{
+use northstar_runtime::{
     api::{
         self,
+        client::Client,
         model::{Container, Token},
     },
     common::name::Name,

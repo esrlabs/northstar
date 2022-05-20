@@ -26,7 +26,7 @@ jobs:
           components: rustfmt, rust-src
 
       - name: Build Documentation
-        run: cargo doc -p northstar --all-features --no-deps
+        run: cargo doc -p northstar-runtime --all-features --no-deps
 
       - name: Install OpenApi Generator
         run: |
