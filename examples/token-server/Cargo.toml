@@ -1,6 +1,6 @@
 [package]
 name = "token-server"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["ESRLabs"]
 edition = "2021"
 license = "Apache-2.0"
@@ -8,5 +8,5 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = "1.0.56"
 hex = "0.4.3"
-northstar = { path = "../../northstar", features = ["api"] }
+northstar-client = { path = "../../northstar-client" }
 tokio = { version = "1.18.1", features = ["macros", "rt", "net"] }

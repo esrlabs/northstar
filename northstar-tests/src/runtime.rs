@@ -4,11 +4,8 @@ use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use nanoid::nanoid;
-use northstar::{
-    api::{
-        client,
-        model::{Container, ExitStatus, Notification},
-    },
+use northstar_runtime::{
+    api::model::{Container, ExitStatus, Notification},
     common::non_nul_string::NonNulString,
     runtime::{
         config::{self, ConsoleConfiguration},
@@ -133,11 +130,11 @@ impl Runtime {
 
 pub struct Client {
     /// Client instance
-    client: northstar::api::client::Client<UnixStream>,
+    client: northstar_client::Client<UnixStream>,
 }
 
 impl std::ops::Deref for Client {
-    type Target = client::Client<UnixStream>;
+    type Target = northstar_client::Client<UnixStream>;
 
     fn deref(&self) -> &Self::Target {
         &self.client
@@ -157,7 +154,8 @@ impl Client {
         let io = UnixStream::connect(console_full().path())
             .await
             .expect("failed to connect to console");
-        let client = client::Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
+        let client =
+            northstar_client::Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
         // Wait until a successful connection
         logger::assume("Client .* connected", 5u64).await?;
 
@@ -165,11 +163,11 @@ impl Client {
     }
 
     /// Connect a new client instance to the runtime
-    pub async fn client(&self) -> Result<client::Client<UnixStream>> {
+    pub async fn client(&self) -> Result<northstar_client::Client<UnixStream>> {
         let io = UnixStream::connect(console_full().path())
             .await
             .context("failed to connect to console")?;
-        client::Client::new(io, Some(1000), time::Duration::from_secs(30))
+        northstar_client::Client::new(io, Some(1000), time::Duration::from_secs(30))
             .await
             .context("failed to create client")
     }

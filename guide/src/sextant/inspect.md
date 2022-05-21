@@ -1,6 +1,7 @@
 # Inspecting an NPK
 
-To get information about an already packed NPK `sextant` provides the `inspect` command.
+To get information about an already packed NPK `northstar-sextant` provides the `inspect`
+command.
 
 ## Inspecting an NPK with Default Settings
 
@@ -9,12 +10,13 @@ Inspecting an NPK without any additional parameters will show the following info
 - Listing of files contained in the NPK
 - Contents of manifest.yaml
 - Contents of signature.yaml
-- Listing of files contained in the compressed squashfs image (`fs.img`) within the NPK
+- Listing of files contained in the compressed squashfs image (`fs.img`) within the
+  NPK
 
 For example, inspecting the `hello-world` example container gives the following output:
 
 ```markdown
-$ sextant inspect target/northstar/repository/hello-0.0.1.npk 
+$ northstar-sextant inspect target/northstar/repository/hello-0.0.1.npk 
 # inspection of 'target/northstar/repository/hello-0.0.1.npk'
 ## NPK Content
 signature.yaml
@@ -44,6 +46,7 @@ mounts:
 ```
 
 ## signature.yaml
+
 ```yaml
 manifest.yaml:
   hash: ee5967e740febb3a1e018e189ed21412f8bf71d34bea7b506f709d37984e90cc
@@ -57,6 +60,7 @@ signature: xK0f6gIqaarM8FTbhT/qnhSy4ROK8MsoluA2A6kpDCJaAvoea/41j3tY0c047OUL5f/wm
 ```
 
 ## SquashFS listing
+
 ```bash
 Parallel unsquashfs: Using 32 processors
 1 inodes (11 blocks) to write
@@ -72,15 +76,17 @@ dr-xr-xr-x user/user                 3 2021-03-01 10:15 squashfs-root/system
 
 ## Inspecting an NPK with the `--short` parameter
 
-To facilitate the inspection of many containers as part of scripts, the `inspect` command features the `--short` parameter.
-It condenses the inspection output into a single line with the following information:
+To facilitate the inspection of many containers as part of scripts, the
+`inspect` command features the `--short` parameter.  It condenses the inspection
+output into a single line with the following information:
 
 - Container name
 - Container version
 - NPK format version
 - Whether or not this is a [resource container](npk_format_reference.md#resource-containers)
 
-Inspecting the `hello-world` example container with the `--short` flag gives the following output:
+Inspecting the `hello-world` example container with the `--short` flag gives the
+following output:
 
 ```markdown
 $ sextant inspect --short target/northstar/repository/hello-world-0.0.1.npk 

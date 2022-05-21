@@ -167,7 +167,7 @@ build_example() {
     provision_artifact "${NAME}" "${ROOT_DIR}"
   fi
 
-  exe cargo run --bin sextant -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "${KEY}" --compression-algorithm "${COMPRESSION_ALGORITHM}"
+  exe cargo run --bin northstar-sextant -- pack ${CLONES} --manifest "${MANIFEST}" --root "${ROOT_DIR}" --out "${OUTPUT_DIR}" --key "${KEY}" --compression-algorithm "${COMPRESSION_ALGORITHM}"
 }
 
 main() {

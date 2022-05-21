@@ -1,0 +1,18 @@
+[package]
+name = "northstar-sextant"
+version = "0.0.1-pre"
+authors = ["ESRLabs"]
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0.57"
+base64 = "0.13.0"
+clap = { version = "3.1.18", features = ["derive"] }
+colored = "2.0.0"
+ed25519-dalek = "1.0.1"
+env_logger = "0.9.0"
+log = "0.4.17"
+northstar-runtime = { path = "../northstar-runtime", features = ["npk"] }
+tempfile = "3.3.0"
+zip = { version = "0.6.2", default-features = false }

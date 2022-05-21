@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
-use northstar::api::{
-    client,
+use northstar_client::{
     model::{Token, VerificationResult},
+    Client,
 };
 use std::time::Duration;
 use tokio::{
@@ -15,7 +15,7 @@ const SHARED: &str = "hello!";
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Connect to the runtime via NORTHSTAR_CONSOLE...
-    let mut client = client::Client::from_env(None, Duration::from_secs(5)).await?;
+    let mut client = Client::from_env(None, Duration::from_secs(5)).await?;
 
     // Listen on some random port
     let listener = tokio::net::TcpListener::bind("localhost:6543").await?;

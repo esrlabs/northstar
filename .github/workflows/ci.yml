@@ -134,7 +134,7 @@ jobs:
     - name: Lint markdown
       uses: docker://avtodev/markdown-lint:v1
       with:
-        args: './README.md tools/sextant/README.md' 
+        args: './README.md northstar-sextant/README.md' 
 
   cross:
     name: Cross
@@ -177,16 +177,16 @@ jobs:
         uses: Swatinem/rust-cache@v1
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Install nstar
-        run: cargo install --path tools/nstar
-      - name: Install schema
-        run: cargo install --path tools/schema
-      - name: Install sextant
-        run: cargo install --path tools/sextant
-      - name: Install stress
-        run: cargo install --path tools/stress
-      - name: Install seccomp-util
-        run: cargo install --path tools/seccomp-util
+      - name: Install northstar-nstar
+        run: cargo install --path northstar-nstar
+      - name: Install northstar-sextant
+        run: cargo install --path northstar-sextant
+      - name: Install northstar-seccomp
+        run: cargo install --path northstar-seccomp
+      - name: Install northstar-schema
+        run: cargo install --path northstar-schema
+      - name: Install northstar-stress
+        run: cargo install --path northstar-stress
 
   openapi:
     name: OpenApi
@@ -209,9 +209,9 @@ jobs:
           ./openapi-generator-cli version
       - name: Generate manifest jsonschema/html
         run: |
-          cargo run --bin schema -- -m manifest -o manifest.json
+          cargo run --bin northstar-schema -- -m manifest -o manifest.json
           ./openapi-generator-cli generate -i manifest.json -g html -o manifest.html --skip-validate-spec
       - name: Generate api jsonschema/html
         run: |
-          cargo run --bin schema -- -m api -o api.json
+          cargo run --bin northstar-schema -- -m api -o api.json
           ./openapi-generator-cli generate -i api.json -g html -o api.html --skip-validate-spec

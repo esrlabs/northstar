@@ -397,10 +397,10 @@ dependencies = [
 
 [[package]]
 name = "console"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
- "northstar",
+ "northstar-client",
  "tokio",
 ]
 
@@ -418,7 +418,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "cpueater"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "cpufeatures"
@@ -431,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "crashing"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "crc32fast"
@@ -737,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "ferris"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "fnv"
@@ -920,11 +920,11 @@ checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
 
 [[package]]
 name = "hello-resource"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "hello-world"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "hermit-abi"
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "inspect"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "caps",
  "nix 0.24.1",
@@ -1144,21 +1144,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "main"
-version = "0.1.0"
-dependencies = [
- "android-logd-logger",
- "anyhow",
- "clap 3.1.18",
- "env_logger",
- "log",
- "nix 0.24.1",
- "northstar",
- "tokio",
- "toml",
-]
-
-[[package]]
 name = "matchers"
 version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1181,7 +1166,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memeater"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "memfd"
@@ -1295,7 +1280,53 @@ dependencies = [
 
 [[package]]
 name = "northstar"
-version = "0.7.1-dev"
+version = "0.0.1-pre"
+dependencies = [
+ "android-logd-logger",
+ "anyhow",
+ "clap 3.1.18",
+ "env_logger",
+ "log",
+ "nix 0.24.1",
+ "northstar-runtime",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "northstar-client"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "futures",
+ "northstar-runtime",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "northstar-nstar"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "clap 3.1.18",
+ "clap_complete",
+ "futures",
+ "hex",
+ "humantime",
+ "itertools",
+ "northstar-client",
+ "pin-project-lite",
+ "prettytable-rs",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
+name = "northstar-runtime"
+version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1354,8 +1385,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "northstar-schema"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "clap 3.1.18",
+ "northstar-runtime",
+ "okapi",
+ "schemars",
+ "serde_json",
+]
+
+[[package]]
+name = "northstar-seccomp"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap 3.1.18",
+ "env_logger",
+ "itertools",
+ "northstar-runtime",
+ "regex",
+ "serde_yaml",
+]
+
+[[package]]
+name = "northstar-sextant"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "base64",
+ "clap 3.1.18",
+ "colored",
+ "ed25519-dalek",
+ "env_logger",
+ "log",
+ "northstar-runtime",
+ "tempfile",
+ "zip",
+]
+
+[[package]]
+name = "northstar-stress"
+version = "0.0.1-pre"
+dependencies = [
+ "anyhow",
+ "clap 3.1.18",
+ "env_logger",
+ "futures",
+ "humantime",
+ "itertools",
+ "log",
+ "northstar-client",
+ "rand 0.8.5",
+ "tokio",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "northstar-tests"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "env_logger",
@@ -1366,7 +1457,8 @@ dependencies = [
  "memfd",
  "nanoid",
  "nix 0.24.1",
- "northstar",
+ "northstar-client",
+ "northstar-runtime",
  "northstar-tests-derive",
  "rayon",
  "regex",
@@ -1377,31 +1469,11 @@ dependencies = [
 
 [[package]]
 name = "northstar-tests-derive"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "nstar"
-version = "0.4.2"
-dependencies = [
- "anyhow",
- "clap 3.1.18",
- "clap_complete",
- "futures",
- "hex",
- "humantime",
- "itertools",
- "northstar",
- "pin-project-lite",
- "prettytable-rs",
- "serde_json",
- "tokio",
- "tokio-util",
- "url",
 ]
 
 [[package]]
@@ -1506,7 +1578,7 @@ checksum = "d4fd5641d01c8f18a23da7b6fe29298ff4b55afcccdf78973b24cf3175fee32e"
 
 [[package]]
 name = "persistence"
-version = "0.1.0"
+version = "0.0.1"
 
 [[package]]
 name = "pin-project"
@@ -1781,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "redis-client"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "bytes",
  "mini-redis",
@@ -1924,18 +1996,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 
 [[package]]
-name = "schema"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "clap 3.1.18",
- "northstar",
- "okapi",
- "schemars",
- "serde_json",
-]
-
-[[package]]
 name = "schemars"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1969,20 +2029,6 @@ checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 [[package]]
 name = "seccomp"
 version = "0.0.1"
-
-[[package]]
-name = "seccomp-util"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap 3.1.18",
- "env_logger",
- "itertools",
- "northstar",
- "regex",
- "serde_yaml",
-]
 
 [[package]]
 name = "semver"
@@ -2092,22 +2138,6 @@ dependencies = [
  "ryu",
  "serde",
  "yaml-rust",
-]
-
-[[package]]
-name = "sextant"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "base64",
- "clap 3.1.18",
- "colored",
- "ed25519-dalek",
- "env_logger",
- "log",
- "northstar",
- "tempfile",
- "zip",
 ]
 
 [[package]]
@@ -2260,24 +2290,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 
 [[package]]
-name = "stress"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap 3.1.18",
- "env_logger",
- "futures",
- "humantime",
- "itertools",
- "log",
- "northstar",
- "rand 0.8.5",
- "tokio",
- "tokio-util",
- "url",
-]
-
-[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2403,7 +2415,7 @@ checksum = "507e9898683b6c43a9aa55b64259b721b52ba226e0f3779137e50ad114a4c90b"
 
 [[package]]
 name = "test-container"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "caps",
@@ -2510,23 +2522,23 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "token-client"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "futures",
  "hex",
- "northstar",
+ "northstar-client",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
 name = "token-server"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "hex",
- "northstar",
+ "northstar-client",
  "tokio",
 ]
 

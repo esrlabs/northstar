@@ -12,7 +12,9 @@ use std::{
     thread, time,
 };
 
+/// Northstar test container
 #[derive(Debug, Parser)]
+#[clap(author, version, about, long_about = None)]
 struct Opt {
     #[clap(subcommand)]
     command: Option<Command>,
@@ -47,7 +49,7 @@ enum Command {
     Inspect,
     Print {
         message: String,
-        #[structopt(short, long, parse(from_str), default_value = "stdout")]
+        #[clap(short, long, parse(from_str), default_value = "stdout")]
         io: Io,
     },
     Touch {

@@ -78,7 +78,7 @@ Northstar container contains:
 * Northstar manifest with process configuration and container meta information
 
 Northstar containers can be created with the Northstar utility
-[sextant](tools/sextant/README.md).
+[sextant](northstar-sextant/README.md).
 
 ### Processes
 
@@ -145,24 +145,24 @@ The Northstar workspace configuration configures a cargo
 [runner](.cargo/runner-x86_64-unknown-linux-gnu) that invokes the runtimes
 example main binary with super user rights.
 
-Use the [nstar](./tools/nstar/README.md) utility to inspect and modify the
+Use the [nstar](./northstar-nstar/README.md) utility to inspect and modify the
 runtimes state e.g.
 
 ```sh
-cargo build --release --bin nstar 
+cargo build --release --bin northstar-nstar 
 ...
-./target/release/nstar --help 
+./target/release/northstar-nstar --help 
 ...
-> ./target/release/nstar -j start hello-world
+> ./target/release/northstar-nstar -j start hello-world
 {"Response":{"Err":{"StartContainerStarted":{"name":"hello-world","version":"0.0.1"}}}}
-> ./target/release/nstar -j kill hello-world
+> ./target/release/northstar-nstar -j kill hello-world
 {"Response":{"Ok":null}}
 ```
 
 ## Configuration
 
 The example executable `northstar` reads a configuration file that represents
-`northstar::runtime::config::Config`.
+`northstar_runtime::runtime::config::Config`.
 
 ```toml
 # Directory where containers are mounted
@@ -295,10 +295,10 @@ only. Northstar is tested on the architectures
 
 Northstar cannot be run on 32 bit systems! In order to verify that all needed
 Kernel features are available, either run the
-[check_conf](./tools/check_conf.sh) script or manually compare the target's
+[check_conf](./check_conf.sh) script or manually compare the target's
 kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 
-**TODO**: List required `CONFIG_` items here. The check_confi script runs on
+**TODO**: List required `CONFIG_` items here. The check_config script runs on
 *Android only
 
 ## Internals

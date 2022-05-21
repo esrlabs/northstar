@@ -1,0 +1,14 @@
+[package]
+name = "northstar-client"
+version = "0.0.1-pre"
+authors = ["ESRLabs"]
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0.57"
+futures = "0.3.21"
+northstar-runtime = { path = "../northstar-runtime", features = ["api"] }
+thiserror = "1.0.31"
+tokio = "1.18.2"
+

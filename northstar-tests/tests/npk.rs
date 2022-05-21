@@ -1,4 +1,4 @@
-use northstar::npk::npk;
+use northstar_runtime::npk::npk;
 use std::{
     fs::{self, File},
     io::Write,

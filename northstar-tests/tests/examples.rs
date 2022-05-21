@@ -1,5 +1,5 @@
 use anyhow::Result;
-use northstar::api::model::{ExitStatus, Notification};
+use northstar_runtime::api::model::{ExitStatus, Notification};
 use northstar_tests::{containers::*, logger::assume, runtime::client, runtime_test};
 
 // Start crashing example
