@@ -9,6 +9,8 @@ io:
 mounts:
   /dev:
     type: dev
+  /sys:
+    type: sysfs
   /proc:
     type: proc
   /lib:
