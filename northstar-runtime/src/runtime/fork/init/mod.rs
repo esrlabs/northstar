@@ -11,6 +11,7 @@ use crate::{
         ExitStatus, Pid,
     },
     seccomp::AllowList,
+    warn,
 };
 pub use builder::build;
 use itertools::Itertools;
@@ -18,7 +19,7 @@ use nix::{
     errno::Errno,
     libc::{self, c_ulong},
     mount::MsFlags,
-    sched::unshare,
+    sched::{setns, unshare, CloneFlags},
     sys::{
         signal::Signal,
         wait::{waitpid, WaitStatus},
@@ -35,7 +36,7 @@ use std::{
         net::UnixStream,
         prelude::{AsRawFd, RawFd},
     },
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::exit,
 };
 
@@ -64,6 +65,7 @@ pub struct Init {
     pub gid: u16,
     pub mounts: Vec<Mount>,
     pub groups: Vec<u32>,
+    pub netns: Option<String>,
     pub capabilities: HashSet<Capability>,
     pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
@@ -84,6 +86,9 @@ impl Init {
         // Become a session group leader
         debug!("Setting session id");
         unistd::setsid().expect("failed to call setsid");
+
+        // Enter network namespace
+        self.enter_netns();
 
         // Enter mount namespace
         debug!("Entering mount namespace");
@@ -347,6 +352,27 @@ impl Init {
         Errno::result(result)
             .map(drop)
             .expect("failed to set PR_SET_NO_NEW_PRIVS")
+    }
+
+    fn enter_netns(&self) {
+        if let Some(netns) = &self.netns {
+            #[cfg(target_os = "android")]
+            let path = Path::new("/run/netns").join(netns);
+            #[cfg(not(target_os = "android"))]
+            let path = Path::new("/var/run/netns").join(netns);
+
+            if path.exists() {
+                let handle = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(false)
+                    .open(&path)
+                    .expect("failed to open netns");
+                debug!("Attaching to network namespace \"{}\"", netns);
+                setns(handle.as_raw_fd(), CloneFlags::CLONE_NEWNET).expect("failed to enter netns");
+            } else {
+                warn!("Failed to attach to network namespace \"{}\"", netns);
+            }
+        }
     }
 }
 

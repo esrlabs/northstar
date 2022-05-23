@@ -6,6 +6,7 @@ gid: 1000
 io:
   stdout: pipe
   stderr: discard
+netns: container
 mounts:
   /dev:
     type: dev

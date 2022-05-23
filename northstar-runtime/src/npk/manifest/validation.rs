@@ -27,6 +27,8 @@ const MAX_ENV_VAR_VALUE_LENTH: usize = 1024;
 const MAX_SUPPL_GROUPS: usize = 64;
 /// Max length of a supplementary group name
 const MAX_SUPPL_GROUP_LENGTH: usize = 64;
+/// Max length of a network namespace
+const MAX_NET_NAMESPACE_LENGTH: usize = 256;
 
 /// Environment varibables used by the runtime and not available to the user.
 const RESERVED_ENV_VARIABLES: &[&str] = &[
@@ -203,4 +205,13 @@ pub fn suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationErro
         ));
     }
     Ok(())
+}
+
+/// Validate network namespace setting
+pub fn netns(netns: &NonNulString) -> Result<(), ValidationError> {
+    if netns.len() > MAX_NET_NAMESPACE_LENGTH {
+        Err(ValidationError::new("network namespace exceeds max length"))
+    } else {
+        Ok(())
+    }
 }

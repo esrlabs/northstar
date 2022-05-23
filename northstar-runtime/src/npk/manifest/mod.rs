@@ -87,6 +87,9 @@ pub struct Manifest {
     pub autostart: Option<autostart::Autostart>,
     /// CGroup configuration
     pub cgroups: Option<self::cgroups::CGroups>,
+    /// Attach container process to a existing network namespace
+    #[validate(custom = "validation::netns")]
+    pub netns: Option<NonNulString>,
     /// Seccomp configuration
     #[validate(custom = "validation::seccomp")]
     pub seccomp: Option<Seccomp>,
