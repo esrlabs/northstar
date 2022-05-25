@@ -19,4 +19,4 @@ toml = "0.5.9"
 env_logger = "0.9.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
-android-logd-logger = "0.3.1"
+android-logd-logger = "0.3.2"
