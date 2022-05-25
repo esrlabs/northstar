@@ -62,6 +62,9 @@ pub enum Mount {
     /// Mount proc
     #[serde(rename = "proc")]
     Proc,
+    /// Mount sysfs
+    #[serde(rename = "sysfs")]
+    Sysfs,
     /// Mount a directory from a resource
     #[serde(rename = "resource")]
     Resource(Resource),

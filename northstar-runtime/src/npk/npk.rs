@@ -620,7 +620,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                     pseudo_directory(target.as_ref(), mode)
                 }
                 Mount::Persist => pseudo_directory(target.as_ref(), 755),
-                Mount::Proc => pseudo_directory(target.as_ref(), 444),
+                Mount::Proc | Mount::Sysfs => pseudo_directory(target.as_ref(), 444),
                 Mount::Resource { .. } => pseudo_directory(target.as_ref(), 555),
                 Mount::Tmpfs { .. } => pseudo_directory(target.as_ref(), 755),
                 Mount::Dev => {

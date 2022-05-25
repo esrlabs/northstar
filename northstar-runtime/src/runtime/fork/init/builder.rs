@@ -109,6 +109,7 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
                 );
             }
             mount::Mount::Proc => mounts.push(proc(root, target.as_ref())),
+            mount::Mount::Sysfs => mounts.push(sysfs(root, target.as_ref())),
             mount::Mount::Resource(requirement) => {
                 let container = Container::new(manifest.name.clone(), manifest.version.clone());
                 let dependency = State::match_container(
@@ -147,6 +148,18 @@ fn proc(root: &Path, target: &Path) -> Mount {
     let source = PathBuf::from("proc");
     let target = root.join_strip(target);
     const FSTYPE: Option<&'static str> = Some("proc");
+    let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
+    Mount::new(Some(source), target, FSTYPE, flags, None)
+}
+
+fn sysfs(root: &Path, target: &Path) -> Mount {
+    log::debug!(
+        "Adding sysfs on {} with options ro, nosuid, noexec and nodev",
+        target.display()
+    );
+    let source = PathBuf::from("sysfs");
+    let target = root.join_strip(target);
+    const FSTYPE: Option<&'static str> = Some("sysfs");
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
     Mount::new(Some(source), target, FSTYPE, flags, None)
 }
