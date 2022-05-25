@@ -13,9 +13,9 @@ dependencies = [
 
 [[package]]
 name = "android-logd-logger"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57cd015d72e31b99341ca22ed16a945db57afc8a9a51b41967c585081f7d9cd3"
+checksum = "70e4060d910a7ba63769526d9d263b0264e8be2f268f9ab1bc03d021c34cfb50"
 dependencies = [
  "bytes",
  "env_logger",
