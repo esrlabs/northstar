@@ -11,6 +11,8 @@ io:
 mounts:
   /dev:
     type: dev
+  /proc:
+    type: proc
   /etc:
     type: bind
     host: /etc
