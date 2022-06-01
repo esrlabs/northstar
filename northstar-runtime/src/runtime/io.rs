@@ -42,7 +42,7 @@ pub async fn open(container: &Container, io: &manifest::io::Io) -> io::Result<Co
     debug!("Spawning output logging task for {}", container);
     let (write, read) = output_device(OutputDevice::Socket)?;
 
-    let log_target = format!("northstar::{}", container);
+    let log_target = container.to_string();
     let log_task = task::spawn(log_lines(log_target, read));
 
     let (stdout, stderr) = match (&io.stdout, &io.stderr) {

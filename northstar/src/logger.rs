@@ -33,7 +33,7 @@ pub fn init() {
     }
 
     let mut builder = env_logger::Builder::new();
-    builder.parse_filters("northstar=debug");
+    builder.parse_filters("debug");
 
     builder.format(|buf, record| {
         let timestamp = buf.timestamp_millis().to_string();
@@ -50,7 +50,16 @@ pub fn init() {
         if let Some(target) = Option::from(record.target().is_empty())
             .map(|_| record.target())
             .or_else(|| record.module_path())
-            .and_then(|module_path| module_path.find(&"::").map(|p| &module_path[p + 2..]))
+            .map(|module_path| {
+                module_path
+                    .strip_prefix("northstar::")
+                    .unwrap_or(module_path)
+            })
+            .map(|module_path| {
+                module_path
+                    .strip_prefix("northstar_runtime::")
+                    .unwrap_or(module_path)
+            })
         {
             let mut tag_style = buf.style();
             TAG_SIZE.fetch_max(target.len(), Ordering::SeqCst);

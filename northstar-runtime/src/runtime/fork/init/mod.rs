@@ -1,12 +1,11 @@
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
-    debug, info,
     npk::manifest::{
         capabilities::Capability,
         rlimit::{RLimitResource, RLimitValue},
     },
     runtime::{
-        fork::util::{self, fork, set_child_subreaper, set_log_target, set_process_name},
+        fork::util::{self, fork, set_child_subreaper, set_process_name},
         ipc::{owned_fd::OwnedFd, Message as IpcMessage},
         ExitStatus, Pid,
     },
@@ -14,6 +13,7 @@ use crate::{
 };
 pub use builder::build;
 use itertools::Itertools;
+use log::{debug, info};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
@@ -72,8 +72,6 @@ pub struct Init {
 
 impl Init {
     pub fn run(self, mut stream: IpcMessage<UnixStream>, console: Option<OwnedFd>) -> ! {
-        set_log_target(format!("northstar::init::{}", self.container));
-
         // Become a subreaper
         set_child_subreaper(true);
 
@@ -144,7 +142,6 @@ impl Init {
 
                     // Start new process inside the container
                     let pid = fork(|| {
-                        set_log_target(format!("northstar::{}", self.container));
                         util::set_parent_death_signal(Signal::SIGKILL);
 
                         unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("failed to dup2");

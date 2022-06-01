@@ -6,9 +6,8 @@ use super::{
 };
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
-    debug,
     runtime::{
-        fork::util::{self, set_log_target},
+        fork::util::{self},
         ipc::{self, owned_fd::OwnedFd, socket_pair, AsyncMessage, Message as IpcMessage},
         ExitStatus, Pid,
     },
@@ -18,6 +17,7 @@ use futures::{
     Future,
 };
 use itertools::Itertools;
+use log::debug;
 use nix::{
     errno::Errno,
     sys::{signal::Signal, wait::waitpid},
@@ -102,7 +102,6 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, InitProcess) {
     let mut stream = socket_pair().expect("failed to create socket pair");
 
     let trampoline_pid = fork(|| {
-        set_log_target("northstar::forker-trampoline".into());
         util::set_parent_death_signal(Signal::SIGKILL);
 
         // Create pid namespace

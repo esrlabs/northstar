@@ -1,7 +1,5 @@
-use crate::{
-    debug, error,
-    runtime::{error::Error, Pid},
-};
+use crate::runtime::{error::Error, Pid};
+use log::{debug, error};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
@@ -92,52 +90,4 @@ where
             }
         },
     }
-}
-
-pub(crate) static mut LOG_TARGET: String = String::new();
-
-pub(crate) fn set_log_target(tag: String) {
-    unsafe {
-        LOG_TARGET = tag;
-    }
-}
-
-/// Log to debug
-#[allow(unused)]
-#[macro_export]
-macro_rules! debug {
-    ($($arg:tt)+) => (
-        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::debug!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
-    )
-}
-
-/// Log to info
-#[allow(unused)]
-#[macro_export]
-macro_rules! info {
-    ($($arg:tt)+) => (
-        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::info!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
-    )
-}
-
-/// Log to warn
-#[allow(unused)]
-#[macro_export]
-macro_rules! warn {
-    ($($arg:tt)+) => (
-        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::warn!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
-    )
-}
-
-/// Log to error
-#[allow(unused)]
-#[macro_export]
-macro_rules! error {
-    ($($arg:tt)+) => (
-        assert!(unsafe { !$crate::runtime::fork::util::LOG_TARGET.is_empty() });
-        log::error!(target: unsafe { $crate::runtime::fork::util::LOG_TARGET.as_str() }, $($arg)+)
-    )
 }
