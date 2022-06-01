@@ -90,8 +90,8 @@ impl Console {
         let stop = self.stop.clone();
 
         debug!(
-            "Starting console on {} with permissions \"{:?}\"",
-            url, configuration
+            "Starting console on {} with permissions \"{}\"",
+            url, configuration.permissions
         );
         let task = match Listener::new(url)
             .await
