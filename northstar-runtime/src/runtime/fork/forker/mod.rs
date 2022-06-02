@@ -5,16 +5,15 @@ use super::{
 };
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
-    debug,
     npk::manifest::Manifest,
     runtime::{
         config::Config,
-        fork::util::set_log_target,
         ipc::{owned_fd::OwnedFd, socket_pair, AsyncMessage},
     },
 };
 use anyhow::{Context, Result};
 use futures::FutureExt;
+use log::debug;
 pub use messages::{Message, Notification};
 use nix::sys::signal::{signal, SigHandler, Signal};
 use std::os::unix::net::UnixStream as StdUnixStream;
@@ -34,7 +33,6 @@ pub fn start() -> Result<(Pid, ForkerChannels)> {
     let mut notifications = socket_pair().expect("failed to open socket pair");
 
     let pid = util::fork(|| {
-        set_log_target("northstar::forker".into());
         util::set_child_subreaper(true);
         util::set_parent_death_signal(Signal::SIGKILL);
         util::set_process_name("northstar-fork");
