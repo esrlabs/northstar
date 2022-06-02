@@ -47,7 +47,6 @@ pub async fn init(name: &Path) -> Result<()> {
 
 /// Shutdown the cgroups config by removing the dir
 pub async fn shutdown(dir: &Path) -> Result<()> {
-    info!("Shutting down cgroups");
     cgroups_rs::Cgroup::new(hierarchy(), dir)
         .delete()
         .with_context(|| format!("failed to delete {} cgroup", dir.display()))

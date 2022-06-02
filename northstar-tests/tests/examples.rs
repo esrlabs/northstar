@@ -22,7 +22,6 @@ fn console() -> Result<()> {
     client().start(EXAMPLE_CONSOLE).await?;
     // The console example stop itself - so wait for it...
     assume("Container console:0.0.1 connected with permissions .*", 5).await?;
-    assume("We are console:0.0.1", 5).await?;
     assume("Killing console:0.0.1 with SIGTERM", 5).await?;
     assume(
         "Container console:0.0.1 exited with status Signalled\\(SIGTERM\\)",

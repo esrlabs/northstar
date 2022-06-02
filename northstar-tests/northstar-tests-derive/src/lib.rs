@@ -70,9 +70,9 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         // The test code within the async context
         let body = async {
             let runtime = runtime.start().await?;
-            let r: anyhow::Result<()> = #body;
+            let result: anyhow::Result<()> = #body;
             runtime.shutdown().await?;
-            r
+            result
         };
 
         // Run the test body inside of the Tokio runtime
@@ -81,7 +81,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
             .enable_all()
             .worker_threads(2)
             .build()
-            .expect("failed building the Runtime")
+            .expect("failed to setup tokio runtime")
             .block_on(body)
 
     };
@@ -89,7 +89,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
     let brace_token = input.block.brace_token;
     input.block = syn::parse2(quote_spanned! {last_stmt_end_span=>
         {
-            use std::os::unix::io::{IntoRawFd, AsRawFd};
+            use std::os::unix::io::AsRawFd;
             use std::io::{BufRead, Seek};
             use nix::sys::wait::{waitpid, WaitStatus};
             use nix::unistd::{ForkResult, dup2};
@@ -104,10 +104,13 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
 
                     // Copy stdout/stderr from the test to the parents stdout.
                     let mut output = mfd.into_file();
-                    output.seek(std::io::SeekFrom::Start(0)).unwrap();
+                    output.seek(std::io::SeekFrom::Start(0)).expect("failed to seek");
                     // This needs do be done linewise, because a std::io::copy
                     // to std::io::stdout results in conditionless printed output.
-                    std::io::BufReader::new(output).lines().for_each(|line| println!("{}", line.unwrap()));
+                    let mut lines = std::io::BufReader::new(output).lines();
+                    while let Some(Ok(line)) = lines.next() {
+                        println!("{}", line)
+                    }
 
                     // Return depending on the child exit code.
                     match result {
@@ -118,21 +121,24 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
                 ForkResult::Child => {
                     // Replace stout and stderr with the memfd.
                     dup2(mfd.as_raw_fd(), 1).unwrap();
-                    dup2(mfd.into_raw_fd(), 2).unwrap();
+                    dup2(mfd.as_raw_fd(), 2).unwrap();
 
                     // Run the test body and exit depending on the result.
-                    match { #test } {
-                        Ok(_) => exit(0),
+                    let result = { #test };
+                    let exit_code = match result {
+                        Ok(_) => 0,
                         Err(e) => {
-                            eprintln!("{}", e);
-                            exit(1);
+                            log::error!("{:?}", e);
+                            1
                         }
-                    }
+                    };
+
+                    exit(exit_code);
                 }
             }
         }
     })
-    .expect("Parsing failure");
+    .expect("parsing failure");
     input.block.brace_token = brace_token;
 
     let result = quote! {
