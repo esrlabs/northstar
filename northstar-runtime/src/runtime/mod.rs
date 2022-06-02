@@ -366,13 +366,14 @@ async fn run(
 
     // Terminate forker process
     debug!("Joining forker with pid {}", forker_pid);
-    // signal::kill(forker_pid, Some(SIGTERM)).ok();
     join_forker.await.expect("failed to join forker");
 
-    // Shutdown cgroups
-    cgroups::shutdown(&cgroup).await?;
+    info!("Shutting down cgroups");
+    cgroups::shutdown(&cgroup)
+        .await
+        .expect("failed to shutdown cgroups");
 
-    debug!("Shutdown complete");
+    info!("Shutdown complete");
 
     Ok(())
 }
