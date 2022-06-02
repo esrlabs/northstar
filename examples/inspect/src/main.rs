@@ -42,6 +42,7 @@ fn main() {
         let link = fs::read_link(&entry).expect("readlink");
         println!("    {}: {}", entry.display(), link.display());
     }
+    println!();
 
     for set in &[
         CapSet::Ambient,
@@ -56,6 +57,18 @@ fn main() {
             caps::read(None, *set).expect("failed to read caps")
         );
     }
+    println!();
+
+    println!("ns:");
+    for entry in fs::read_dir("/proc/self/ns").expect("read_dir /proc/self/ns") {
+        let entry = entry.unwrap().path();
+        let link = std::fs::read_link(entry).unwrap();
+        println!("        {:?}", link);
+    }
+    println!();
+
+    dump("/proc/self/net/dev");
+    println!();
 
     println!("ps:");
     for entry in fs::read_dir("/proc").expect("read_dir /proc") {
@@ -79,6 +92,7 @@ fn main() {
             .trim_end_matches(')');
         println!("{:>8}: {:>10}: {}", pid, name, cmdline);
     }
+    println!();
 
     println!(
         "{}",

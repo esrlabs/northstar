@@ -1,0 +1,25 @@
+name: netns
+version: 0.0.1
+init: /bin/ip
+args:
+  - netns
+uid: 1000
+gid: 1000
+netns: container
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /bin:
+    type: bind
+    host: /bin
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64

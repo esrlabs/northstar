@@ -8,6 +8,7 @@ pub const EXAMPLE_INSPECT: &str = "inspect:0.0.1";
 pub const EXAMPLE_MEMEATER: &str = "memeater:0.0.1";
 pub const EXAMPLE_MESSAGE_0_0_1: &str = "message:0.0.1";
 pub const EXAMPLE_MESSAGE_0_0_2: &str = "message:0.0.2";
+pub const EXAMPLE_NETNS: &str = "netns:0.0.1";
 pub const EXAMPLE_PERSISTENCE: &str = "persistence:0.0.1";
 pub const EXAMPLE_REDIS: &str = "redis:0.0.1";
 pub const EXAMPLE_REDIS_CLIENT: &str = "redis-client:0.0.1";
@@ -31,6 +32,7 @@ pub static EXAMPLE_HELLO_RESOURCE_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/hello-resource-0.0.1.npk"));
 pub static EXAMPLE_INSPECT_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/inspect-0.0.1.npk"));
+pub static EXAMPLE_NETNS_NPK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/netns-0.0.1.npk"));
 pub static EXAMPLE_MEMEATER_NPK: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/memeater-0.0.1.npk"));
 pub static EXAMPLE_MESSAGE_0_0_1_NPK: &[u8] =

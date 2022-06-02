@@ -549,8 +549,16 @@ impl State {
             .collect::<Vec<_>>();
 
         debug!("Container {} init is {:?}", container, init);
-        debug!("Container {} argv is {}", container, args.iter().join(" "));
-        debug!("Container {} env is {}", container, env.iter().join(", "));
+        debug!(
+            "Container {} argv is \"{}\"",
+            container,
+            args.iter().join(" ")
+        );
+        debug!(
+            "Container {} env is \"{}\"",
+            container,
+            env.iter().join(", ")
+        );
 
         // Send exec request to launcher
         if let Err(e) = self
