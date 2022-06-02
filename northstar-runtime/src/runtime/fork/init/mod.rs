@@ -10,11 +10,10 @@ use crate::{
         ExitStatus, Pid,
     },
     seccomp::AllowList,
-    warn,
 };
 pub use builder::build;
 use itertools::Itertools;
-use log::{debug, info};
+use log::{debug, info, warn};
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
