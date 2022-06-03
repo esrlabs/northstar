@@ -2,8 +2,8 @@ use std::{iter, path::Path};
 
 use anyhow::{Context, Result};
 use api::model::Error as ModelError;
-use futures::SinkExt;
-use northstar_client::error::RequestError;
+use futures::{SinkExt, StreamExt};
+use northstar_client::{error::RequestError, Client};
 use northstar_runtime::api::{
     self,
     model::{self, ConnectNack, Container},
@@ -22,7 +22,7 @@ async fn connect_none() -> Result<northstar_client::Client<UnixStream>> {
 // Verify that the client() reject a version mismatch in Connect
 #[runtime_test]
 async fn api_version() -> Result<()> {
-    let mut connection = api::codec::Framed::new(
+    let mut connection = api::codec::framed(
         UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?,
     );
 
@@ -221,8 +221,9 @@ async fn permissions_umount() -> Result<()> {
 
 #[runtime_test]
 async fn permissions_inspect() -> Result<()> {
+    let mut console = connect_none().await?;
     assert!(matches!(
-        connect_none().await?.inspect("hello_world:0.0.1").await,
+        Client::inspect(&mut console, "hello_world:0.0.1").await,
         Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
     ));
     Ok(())

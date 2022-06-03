@@ -84,7 +84,7 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     io: T,
     subscribe_notifications: bool,
 ) -> Result<Connection<T>, error::ConnectionError> {
-    let mut connection = codec::Framed::new(io);
+    let mut connection = codec::framed(io);
 
     // Send connect message
     let connect = Connect::Connect {

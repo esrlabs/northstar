@@ -49,6 +49,54 @@ pub(crate) enum Request {
     Install(RepositoryId, mpsc::Receiver<Bytes>),
 }
 
+// /// Returns the next decoded frame
+// pub async fn next(&mut self) -> Option<Result<<Codec as Decoder>::Item, io::Error>> {
+//     if let Some(remaining) = self.rate_limitter.as_mut().and_then(|r| r.expires()) {
+//         tokio::time::sleep(remaining).await;
+//     }
+//     let item = self.inner.next().await;
+//     if let Some(limitter) = self.rate_limitter.as_mut() {
+//         limitter.tick();
+//     }
+//     item
+// }
+
+/// Tracks time points in a fixed window until _now_ and calculates necessary delays for new points
+/// to limit their number in the window to a maximum.
+struct RateLimiter {
+    max_amount: usize,
+    window: time::Duration,
+    points: Vec<time::Instant>,
+}
+
+impl RateLimiter {
+    /// Create a new window from a maximun number of points and a fixed duration
+    fn new(max_amount: usize, window: time::Duration) -> Self {
+        Self {
+            max_amount,
+            window,
+            points: Vec::new(),
+        }
+    }
+
+    /// Adds a new time point for _now_ to the window
+    fn tick(&mut self) {
+        self.points.push(time::Instant::now());
+    }
+
+    /// If the window is full, returns the delay till a new `tick` is possible
+    fn expires(&mut self) -> Option<time::Duration> {
+        let now = time::Instant::now();
+        self.points.retain(|t| now - *t < self.window);
+
+        // The point that once out of the window would allow a new point insertion
+        let pivot = self.points.iter().rev().nth(self.max_amount - 1);
+
+        // Return the point's remaining time in the window
+        pivot.map(|t| *t + self.window - now)
+    }
+}
+
 /// A console is responsible for monitoring and serving incoming client connections
 /// It feeds relevant events back to the runtime and forwards responses and notifications
 /// to connected clients
@@ -159,13 +207,13 @@ impl Console {
         let max_request_size = configuration
             .max_request_size
             .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
-        let mut network_stream = api::codec::Framed::new_with_max_length(stream, max_request_size);
+        let mut network_stream = api::codec::framed_with_max_length(stream, max_request_size);
 
         // Get a framed stream and sink interface.
         let max_requests_per_sec = configuration
             .max_requests_per_sec
             .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
-        network_stream.throttle_stream(max_requests_per_sec, time::Duration::from_secs(1));
+        let mut limitter = RateLimiter::new(max_requests_per_sec, time::Duration::from_secs(1));
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
@@ -281,6 +329,11 @@ impl Console {
                     }
                 }
                 item = network_stream.next() => {
+                    if let Some(remaining) = limitter.expires() {
+                        time::sleep(remaining).await;
+                    }
+                    limitter.tick();
+
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
@@ -657,4 +710,16 @@ impl From<(Container, ContainerEvent)> for model::Notification {
             },
         }
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn time_window_counter_test() {
+    let mut tw = RateLimiter::new(2, time::Duration::from_secs(1));
+    assert_eq!(tw.expires(), None);
+    tw.tick();
+    assert_eq!(tw.expires(), None);
+    tw.tick();
+    assert_eq!(tw.expires(), Some(time::Duration::from_secs(1)));
+    tokio::time::advance(time::Duration::from_secs(1)).await;
+    assert_eq!(tw.expires(), None);
 }
