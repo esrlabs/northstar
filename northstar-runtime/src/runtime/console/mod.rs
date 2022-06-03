@@ -10,7 +10,6 @@ use async_stream::stream;
 use bytes::Bytes;
 use futures::{
     future::join_all,
-    sink::SinkExt,
     stream::{self, FuturesUnordered},
     Future, StreamExt,
 };
@@ -157,17 +156,17 @@ impl Console {
         let max_request_size = configuration
             .max_request_size
             .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
-        let mut network_stream = api::codec::framed_with_max_length(stream, max_request_size);
+        let stream = api::codec::framed_with_max_length(stream, max_request_size);
 
         // Limit requests per second
         let max_requests_per_sec = configuration
             .max_requests_per_sec
             .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
-        let mut limitter =
-            throttle::Throttle::new(max_requests_per_sec, time::Duration::from_secs(1));
+        let mut stream =
+            throttle::Throttle::new(stream, max_requests_per_sec, time::Duration::from_secs(1));
 
         // Wait for a connect message within timeout
-        let connect = network_stream.next();
+        let connect = stream.next();
         // TODO: This can for sure be done nicer
         let timeout = timeout.unwrap_or_else(|| time::Duration::from_secs(u64::MAX));
         let connect = time::timeout(timeout, connect);
@@ -211,7 +210,7 @@ impl Console {
             };
             let connect = model::Connect::Nack { error };
             let message = model::Message::Connect { connect };
-            network_stream.send(message).await.ok();
+            stream.send(message).await.ok();
             return Ok(());
         }
 
@@ -226,7 +225,7 @@ impl Console {
             let error = model::ConnectNack::PermissionDenied;
             let connect = model::Connect::Nack { error };
             let message = model::Message::Connect { connect };
-            network_stream.send(message).await.ok();
+            stream.send(message).await.ok();
             return Ok(());
         }
 
@@ -235,7 +234,7 @@ impl Console {
             configuration: configuration.clone(),
         };
         let message = model::Message::Connect { connect };
-        if let Err(e) = network_stream.send(message).await {
+        if let Err(e) = stream.send(message).await {
             warn!("{}: Connection error: {}", peer, e);
             return Ok(());
         }
@@ -271,7 +270,7 @@ impl Console {
                         None => break,
                     };
 
-                    if let Err(e) = network_stream
+                    if let Err(e) = stream
                         .send(api::model::Message::Notification {notification })
                         .await
                     {
@@ -279,16 +278,11 @@ impl Console {
                         break;
                     }
                 }
-                item = network_stream.next() => {
-                    if let Some(remaining) = limitter.expires() {
-                        time::sleep(remaining).await;
-                    }
-                    limitter.tick();
-
+                item = stream.next() => {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, token_validity, request).await {
+                            let response = match process_request(&peer, &mut stream, &stop, &configuration, &event_tx, token_validity, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -297,7 +291,7 @@ impl Console {
                             };
                             trace!("{}: <-- {:?}", peer, response);
 
-                            if let Err(e) = network_stream.send(response).await {
+                            if let Err(e) = stream.send(response).await {
                                 warn!("{}: Connection error: {}", peer, e);
                                 break;
                             }
