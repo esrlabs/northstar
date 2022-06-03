@@ -14,16 +14,11 @@ use futures::{
     stream::{self, FuturesUnordered},
     Future, StreamExt,
 };
+use listener::Listener;
 use log::{debug, info, trace, warn};
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-    unreachable,
-};
+use std::{fmt, path::Path, unreachable};
 use tokio::{
-    fs,
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
-    net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
     task, time,
@@ -32,6 +27,9 @@ use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
 pub use crate::npk::manifest::console::{Configuration, Permission, Permissions};
+
+mod listener;
+mod throttle;
 
 /// Default maximum requests per second
 const DEFAULT_REQUESTS_PER_SECOND: usize = 1024;
@@ -47,54 +45,6 @@ const DEFAULT_NPK_STREAM_TIMEOUT: u64 = 5;
 pub(crate) enum Request {
     Request(model::Request),
     Install(RepositoryId, mpsc::Receiver<Bytes>),
-}
-
-// /// Returns the next decoded frame
-// pub async fn next(&mut self) -> Option<Result<<Codec as Decoder>::Item, io::Error>> {
-//     if let Some(remaining) = self.rate_limitter.as_mut().and_then(|r| r.expires()) {
-//         tokio::time::sleep(remaining).await;
-//     }
-//     let item = self.inner.next().await;
-//     if let Some(limitter) = self.rate_limitter.as_mut() {
-//         limitter.tick();
-//     }
-//     item
-// }
-
-/// Tracks time points in a fixed window until _now_ and calculates necessary delays for new points
-/// to limit their number in the window to a maximum.
-struct RateLimiter {
-    max_amount: usize,
-    window: time::Duration,
-    points: Vec<time::Instant>,
-}
-
-impl RateLimiter {
-    /// Create a new window from a maximun number of points and a fixed duration
-    fn new(max_amount: usize, window: time::Duration) -> Self {
-        Self {
-            max_amount,
-            window,
-            points: Vec::new(),
-        }
-    }
-
-    /// Adds a new time point for _now_ to the window
-    fn tick(&mut self) {
-        self.points.push(time::Instant::now());
-    }
-
-    /// If the window is full, returns the delay till a new `tick` is possible
-    fn expires(&mut self) -> Option<time::Duration> {
-        let now = time::Instant::now();
-        self.points.retain(|t| now - *t < self.window);
-
-        // The point that once out of the window would allow a new point insertion
-        let pivot = self.points.iter().rev().nth(self.max_amount - 1);
-
-        // Return the point's remaining time in the window
-        pivot.map(|t| *t + self.window - now)
-    }
 }
 
 /// A console is responsible for monitoring and serving incoming client connections
@@ -209,11 +159,12 @@ impl Console {
             .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
         let mut network_stream = api::codec::framed_with_max_length(stream, max_request_size);
 
-        // Get a framed stream and sink interface.
+        // Limit requests per second
         let max_requests_per_sec = configuration
             .max_requests_per_sec
             .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
-        let mut limitter = RateLimiter::new(max_requests_per_sec, time::Duration::from_secs(1));
+        let mut limitter =
+            throttle::Throttle::new(max_requests_per_sec, time::Duration::from_secs(1));
 
         // Wait for a connect message within timeout
         let connect = network_stream.next();
@@ -532,47 +483,6 @@ where
     .map(|response| model::Message::Response { response })
 }
 
-/// Types of listeners for console connections
-enum Listener {
-    Tcp(TcpListener),
-    Unix(UnixListener),
-}
-
-impl Listener {
-    async fn new(url: &Url) -> io::Result<Listener> {
-        let listener = match url.scheme() {
-            "tcp" => {
-                let address = url
-                    .socket_addrs(|| Some(4200))?
-                    .first()
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::Other, format!("invalid url: {}", url))
-                    })?
-                    .to_owned();
-                let listener = TcpListener::bind(&address).await?;
-                debug!("Started console on {}", &address);
-
-                Listener::Tcp(listener)
-            }
-            "unix" => {
-                let path = PathBuf::from(url.path());
-
-                // TODO this file should not be deleted here
-                if path.exists() {
-                    fs::remove_file(&path).await?
-                }
-
-                let listener = UnixListener::bind(&path)?;
-
-                debug!("Started console on {}", path.display());
-                Listener::Unix(listener)
-            }
-            _ => unreachable!(),
-        };
-        Ok(listener)
-    }
-}
-
 /// Function to handle connections
 ///
 /// Generic handling of connections. The first parameter is a function that when called awaits for
@@ -710,16 +620,4 @@ impl From<(Container, ContainerEvent)> for model::Notification {
             },
         }
     }
-}
-
-#[tokio::test(start_paused = true)]
-async fn time_window_counter_test() {
-    let mut tw = RateLimiter::new(2, time::Duration::from_secs(1));
-    assert_eq!(tw.expires(), None);
-    tw.tick();
-    assert_eq!(tw.expires(), None);
-    tw.tick();
-    assert_eq!(tw.expires(), Some(time::Duration::from_secs(1)));
-    tokio::time::advance(time::Duration::from_secs(1)).await;
-    assert_eq!(tw.expires(), None);
 }
