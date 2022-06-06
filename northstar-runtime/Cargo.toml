@@ -145,4 +145,4 @@ tokio-test = "0.4.2"
 
 [build-dependencies]
 anyhow = { version = "1.0.57", optional = true }
-bindgen = { version = "0.59.2", default-features = false, features = ["runtime"], optional = true }
+bindgen = { version = "0.60.1", default-features = false, features = ["runtime"], optional = true }
