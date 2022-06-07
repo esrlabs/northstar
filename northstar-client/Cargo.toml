@@ -10,5 +10,5 @@ anyhow = "1.0.57"
 futures = "0.3.21"
 northstar-runtime = { path = "../northstar-runtime", features = ["api"] }
 thiserror = "1.0.31"
-tokio = "1.18.2"
+tokio = "1.19.1"
 
