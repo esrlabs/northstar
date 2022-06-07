@@ -49,22 +49,27 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         }));
 
         // Create a new network namespace
-        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET).expect("failed to craete network namespace");
+        log::debug!("Creating network namespace");
+        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNET).expect("failed to create network namespace");
         // Up the loopback interface
-        std::process::Command::new("ip")
-            .args(["link", "set", "lo", "up"])
+        log::debug!("Setting up loopback interface");
+        std::process::Command::new("sudo")
+            .args(["ip", "link", "set", "lo", "up"])
             .spawn()
             .and_then(|mut c| c.wait())
             .expect("failed to up the loopback interface");
 
         // Enter a new mount namespace in order to alter the mount propagation type on root.
+        log::debug!("Creating mount namespace");
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).unwrap();
         // Setting the propagation type to MS_PRIVATE ensures that no mounts are left behind
         // upon an abnormal test exit.
+        log::debug!("Remounting root");
         let flags = nix::mount::MsFlags::MS_PRIVATE | nix::mount::MsFlags::MS_REC;
         nix::mount::mount(Some("/"), "/", Option::<&str>::None, flags, Option::<&'static [u8]>::None).expect("failed to remount");
 
         // Initialize the runtime. The part without the Tokio runtime.
+        log::debug!("Starting runtime");
         let runtime = northstar_tests::runtime::Runtime::new().expect("failed to start runtime");
 
         // The test code within the async context
@@ -76,6 +81,7 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         };
 
         // Run the test body inside of the Tokio runtime
+        log::debug!("Starting Tokio runtime");
         #[allow(clippy::expect_used)]
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -83,7 +89,6 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
             .build()
             .expect("failed to setup tokio runtime")
             .block_on(body)
-
     };
 
     let brace_token = input.block.brace_token;

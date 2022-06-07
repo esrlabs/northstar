@@ -77,7 +77,7 @@ impl Hierarchy for RuntimeHierarchy {
                 cgroups_rs::Subsystem::Pid(_) => false,
                 cgroups_rs::Subsystem::Mem(_) => true,
                 cgroups_rs::Subsystem::CpuSet(_) => false,
-                cgroups_rs::Subsystem::CpuAcct(_) => false,
+                cgroups_rs::Subsystem::CpuAcct(_) => true,
                 cgroups_rs::Subsystem::Cpu(_) => true,
                 cgroups_rs::Subsystem::Devices(_) => false,
                 cgroups_rs::Subsystem::Freezer(_) => false,
