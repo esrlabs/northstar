@@ -10,5 +10,5 @@ anyhow = "1.0.56"
 futures = { version = "0.3.21", default-features = false }
 hex = "0.4.3"
 northstar-client= { path = "../../northstar-client" }
-tokio = { version = "1.19.1", features = ["macros", "rt", "net"] }
+tokio = { version = "1.19.2", features = ["macros", "rt", "net"] }
 tokio-util = { version = "0.7.3", features = ["codec"] }
