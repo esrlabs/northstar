@@ -551,7 +551,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         }
     }
 
-    /// Uninstall a npk
+    /// Uninstall a npk and optionally wipe the containers persistent dir
     ///
     /// ```no_run
     /// # use futures::StreamExt;
@@ -561,18 +561,22 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// client.uninstall("hello:0.0.1").await.expect("failed to uninstall \"hello\"");
+    /// client.uninstall("hello:0.0.1", false).await.expect("failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn uninstall<C>(&mut self, container: C) -> Result<(), error::RequestError>
+    pub async fn uninstall<C>(
+        &mut self,
+        container: C,
+        wipe: bool,
+    ) -> Result<(), error::RequestError>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
     {
         let container = container.try_into().context("invalid container")?;
-        match self.request(Request::Uninstall { container }).await? {
+        match self.request(Request::Uninstall { container, wipe }).await? {
             Response::Uninstall(model::UninstallResult::Ok { .. }) => Ok(()),
             Response::Uninstall(model::UninstallResult::Error { error, .. }) => {
                 Err(RequestError::Runtime(error))

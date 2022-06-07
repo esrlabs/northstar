@@ -24,7 +24,7 @@ use crate::{
         CGroupEvent, ENV_CONSOLE, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
     },
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::{
     future::{join_all, ready, Either},
@@ -44,6 +44,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{
+    fs,
     net::UnixStream,
     pin,
     sync::{mpsc, oneshot},
@@ -578,7 +579,7 @@ impl State {
             .exec(container.clone(), init, args, env, io)
             .await
         {
-            warn!("failed to exec {} ({}): {}", container, pid, e);
+            warn!("Failed to exec {} ({}): {}", container, pid, e);
 
             stop.cancel();
 
@@ -731,7 +732,7 @@ impl State {
     }
 
     /// Remove and umount a specific app
-    async fn uninstall(&mut self, container: &Container) -> Result<(), Error> {
+    async fn uninstall(&mut self, container: &Container, wipe: bool) -> Result<(), Error> {
         info!("Trying to uninstall {}", container);
 
         let state = self.state(container)?;
@@ -752,6 +753,22 @@ impl State {
             .expect("Internal error")
             .remove(container)
             .await?;
+
+        // Wipe persistent dir if present
+        if wipe {
+            let name: &str = container.name().as_ref();
+            let dir = self.config.data_dir.join(name);
+            if dir.exists() {
+                info!(
+                    "Wiping persistent data dir {} of {}",
+                    dir.display(),
+                    container
+                );
+                fs::remove_dir_all(&dir)
+                    .await
+                    .with_context(|| format!("failed to remove {}", dir.display()))?;
+            }
+        }
 
         self.containers.remove(container);
         info!("Successfully uninstalled {}", container);
@@ -934,8 +951,8 @@ impl State {
                         };
                         model::Response::Kill(result)
                     }
-                    model::Request::Uninstall { container } => {
-                        let result = match self.uninstall(container).await {
+                    model::Request::Uninstall { container, wipe } => {
+                        let result = match self.uninstall(container, *wipe).await {
                             Ok(_) => model::UninstallResult::Ok {
                                 container: container.clone(),
                             },

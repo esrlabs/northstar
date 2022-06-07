@@ -76,7 +76,7 @@ async fn install_uninstall_to_fs_repository() -> Result<()> {
 // Uninstalling an unknown container should fail
 #[runtime_test]
 async fn uninstall_unknown_container() -> Result<()> {
-    assert!(client().uninstall("fckptn:0.0.1").await.is_err());
+    assert!(client().uninstall("fckptn:0.0.1", false).await.is_err());
     Ok(())
 }
 
@@ -115,22 +115,22 @@ async fn install_uninstall_examples() -> Result<()> {
     client().install(TEST_CONTAINER_NPK, "mem").await?;
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
-    client().uninstall(EXAMPLE_CPUEATER).await?;
-    client().uninstall(EXAMPLE_CONSOLE).await?;
-    client().uninstall(EXAMPLE_CRASHING).await?;
-    client().uninstall(EXAMPLE_FERRIS).await?;
-    client().uninstall(EXAMPLE_HELLO_FERRIS).await?;
-    client().uninstall(EXAMPLE_HELLO_RESOURCE).await?;
-    client().uninstall(EXAMPLE_INSPECT).await?;
-    client().uninstall(EXAMPLE_MEMEATER).await?;
-    client().uninstall(EXAMPLE_MESSAGE_0_0_1).await?;
-    client().uninstall(EXAMPLE_MESSAGE_0_0_2).await?;
-    client().uninstall(EXAMPLE_PERSISTENCE).await?;
-    client().uninstall(EXAMPLE_SECCOMP).await?;
-    client().uninstall(EXAMPLE_TOKEN_CLIENT).await?;
-    client().uninstall(EXAMPLE_TOKEN_SERVER).await?;
-    client().uninstall(TEST_CONTAINER).await?;
-    client().uninstall(TEST_RESOURCE).await?;
+    client().uninstall(EXAMPLE_CPUEATER, false).await?;
+    client().uninstall(EXAMPLE_CONSOLE, false).await?;
+    client().uninstall(EXAMPLE_CRASHING, false).await?;
+    client().uninstall(EXAMPLE_FERRIS, false).await?;
+    client().uninstall(EXAMPLE_HELLO_FERRIS, false).await?;
+    client().uninstall(EXAMPLE_HELLO_RESOURCE, false).await?;
+    client().uninstall(EXAMPLE_INSPECT, false).await?;
+    client().uninstall(EXAMPLE_MEMEATER, false).await?;
+    client().uninstall(EXAMPLE_MESSAGE_0_0_1, false).await?;
+    client().uninstall(EXAMPLE_MESSAGE_0_0_2, false).await?;
+    client().uninstall(EXAMPLE_PERSISTENCE, false).await?;
+    client().uninstall(EXAMPLE_SECCOMP, false).await?;
+    client().uninstall(EXAMPLE_TOKEN_CLIENT, false).await?;
+    client().uninstall(EXAMPLE_TOKEN_SERVER, false).await?;
+    client().uninstall(TEST_CONTAINER, false).await?;
+    client().uninstall(TEST_RESOURCE, false).await?;
     Ok(())
 }
 

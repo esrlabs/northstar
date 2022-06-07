@@ -312,7 +312,7 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
             n = client.next() => {
                 match n {
                     Some(Ok(model::Notification::Install ( container ))) => {
-                        client.uninstall(container).await?;
+                        client.uninstall(container, true).await?;
                     }
                     Some(Ok(model::Notification::Uninstall( _ ))) => {
                         client.install_file(npk, repository).await?;

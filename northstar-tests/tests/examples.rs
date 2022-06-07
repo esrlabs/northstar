@@ -102,7 +102,15 @@ fn persistence() -> Result<()> {
     client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
     client().start(EXAMPLE_PERSISTENCE).await?;
     assume("Writing Hello! to /data/file", 5).await?;
-    assume("Content of /data/file: Hello!", 5).await
+    assume("Content of /data/file: Hello!", 5).await?;
+    client().stop(EXAMPLE_PERSISTENCE, 5).await?;
+    client().uninstall(EXAMPLE_PERSISTENCE, true).await?;
+    assume(
+        "Wiping persistent data dir .*/persistence of persistence:0.0.1",
+        5,
+    )
+    .await?;
+    Ok(())
 }
 
 // Start seccomp example
