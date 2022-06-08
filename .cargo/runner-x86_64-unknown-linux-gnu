@@ -12,9 +12,13 @@
 binary_name=`basename $1`
 
 if [[ $binary_name =~ ^(northstar|(tests|examples|console)-[a-z0-9]{16})$ ]]; then
-    sudo setcap "cap_chown,cap_dac_override,cap_kill,cap_setgid,cap_setpcap,cap_setuid,cap_sys_admin,cap_sys_chroot,cap_sys_resource=ep" $1
-    # wrap in a sudo to ensure all fds are set CLOEXEC
-    sudo -u $USER $@
+    if [ -z ${GITHUB_ACTIONS+x} ]; then
+        sudo setcap "cap_chown,cap_dac_override,cap_kill,cap_setgid,cap_setpcap,cap_setuid,cap_sys_admin,cap_sys_chroot,cap_sys_resource=ep" $1
+        # wrap in a sudo to ensure all fds are set CLOEXEC
+        sudo -u $USER $@
+    else
+        sudo $@
+    fi
 else
     eval $@
 fi

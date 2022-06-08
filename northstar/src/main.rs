@@ -6,10 +6,14 @@
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
 use log::{debug, info, warn};
-use nix::mount::MsFlags;
+use nix::{
+    mount::{mount, MsFlags},
+    sched::unshare,
+};
 use northstar_runtime::{runtime, runtime::Runtime as Northstar};
 use runtime::config::Config;
 use std::{
+    env,
     fs::{self, read_to_string},
     path::{Path, PathBuf},
     process::exit,
@@ -36,6 +40,13 @@ struct Opt {
 fn main() -> Result<(), Error> {
     // Initialize logging
     logger::init();
+
+    info!("Northstar Runtime v{}", env!("CARGO_PKG_VERSION"));
+    debug!(
+        "Running as user {} (uid: {})",
+        env::var("USER").unwrap_or_else(|_| "unknown".into()),
+        env::var("UID").unwrap_or_else(|_| "unknown".into())
+    );
 
     // Install a custom panic hook that aborts the process in case of a panic *anywhere*
     let default_panic = std::panic::take_hook();
@@ -73,7 +84,7 @@ fn init() -> Result<Config, Error> {
     if !opt.disable_mount_namespace {
         // Enter a mount namespace. This needs to be done before spawning the tokio threadpool.
         info!("Entering mount namespace");
-        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
+        unshare(nix::sched::CloneFlags::CLONE_NEWNS)?;
 
         // The mount propagation can be set to the root dir because this is done in the mount namespace
         // that is created above and does not affect the rest of the host system.
@@ -81,7 +92,7 @@ fn init() -> Result<Config, Error> {
         let flags = MsFlags::MS_PRIVATE | MsFlags::MS_REC;
         let root = Path::new("/");
         let none = Option::<&str>::None;
-        nix::mount::mount(Some(root), root, none, flags, none)
+        mount(Some(root), root, none, flags, none)
             .map_err(|_| anyhow!("failed to remount root"))?;
     } else {
         debug!("Mount namespace is disabled");

@@ -41,6 +41,13 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         northstar_tests::logger::init();
         log::set_max_level(log::LevelFilter::Debug);
 
+        log::info!("Northstar Test v{}", env!("CARGO_PKG_VERSION"));
+        log::debug!(
+            "Running as user {} (uid: {})",
+            std::env::var("USER").unwrap_or_else(|_| "unknown".into()),
+            std::env::var("UID").unwrap_or_else(|_| "unknown".into())
+        );
+
         // Install a custom panic hook that aborts the process in case of a panic *anywhere*
         let default_panic = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
