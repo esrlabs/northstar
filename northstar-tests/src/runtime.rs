@@ -135,6 +135,7 @@ impl Runtime {
                 strace: None,
                 perf: None,
             }),
+            metrics: config::MetricsConfiguration::default(),
         };
         let runtime = Northstar::new(config)?;
 

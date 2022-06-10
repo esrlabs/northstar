@@ -51,6 +51,8 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use super::metrics;
+
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
 
@@ -63,6 +65,8 @@ pub(super) struct State {
     forker: Forker,
     containers: HashMap<Container, ContainerState>,
     repositories: HashMap<RepositoryId, Repository>,
+    #[cfg(feature = "metrics")]
+    metrics: metrics::Metrics,
 }
 
 #[derive(Debug, Default)]
@@ -124,6 +128,9 @@ impl State {
                 .expect("failed to initialize mount control"),
         );
 
+        #[cfg(feature = "metrics")]
+        let metrics = metrics::Metrics::new(&config.metrics).await?;
+
         let mut state = State {
             events_tx,
             notification_tx,
@@ -132,6 +139,8 @@ impl State {
             config,
             forker,
             mount_control,
+            #[cfg(feature = "metrics")]
+            metrics,
         };
 
         // Initialize repositories. This populates self.containers and self.repositories
@@ -806,6 +815,9 @@ impl State {
 
                 info!("Container {} exited with status {}", container, exit_status);
 
+                #[cfg(feature = "metrics")]
+                self.metrics.remove(container);
+
                 // This is a critical flagged container that exited with a error exit code. That's not good...
                 if !exit_status.success() && is_critical {
                     return Err(Error::CriticalContainer(
@@ -835,6 +847,26 @@ impl State {
             ContainerEvent::CGroup(CGroupEvent::Memory(_)) => {
                 warn!("Process {} is out of memory", container);
             }
+        }
+
+        Ok(())
+    }
+
+    // Handle scrape events
+    #[allow(unused)]
+    #[cfg(feature = "metrics")]
+    pub(super) async fn on_scrape(&mut self) -> Result<(), Error> {
+        for (container, process) in self
+            .containers
+            .iter()
+            .filter_map(|(c, p)| p.process.as_ref().map(|p| (c, p)))
+        {
+            self.metrics
+                .add(container, "cpu", process.cgroups.stats_cpu()?);
+            self.metrics
+                .add(container, "blkio", process.cgroups.stats_blkio()?);
+            self.metrics
+                .add(container, "memory", process.cgroups.stats_memory()?);
         }
 
         Ok(())

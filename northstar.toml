@@ -54,3 +54,9 @@ capacity_size= "100MB"
 type = { fs = { dir = "target/northstar/repository" }}
 key = "examples/northstar.pub"
 mount_on_start = true
+
+[metrics]
+# Prometheus metrics endpoint
+url = "http://localhost:8080/metrics"
+# Prometheus scrape interval
+scrape_interval = "1s"

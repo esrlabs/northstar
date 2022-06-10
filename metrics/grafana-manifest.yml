@@ -1,0 +1,26 @@
+name: grafana
+version: 8.5.3
+init: /bin/grafana-server
+uid: 1000
+gid: 1000
+autostart: relaxed
+network: host
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /etc:
+    type: bind
+    host: /etc
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+  /data:
+    type: persist

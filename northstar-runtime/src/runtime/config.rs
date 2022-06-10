@@ -13,6 +13,10 @@ use url::Url;
 
 use crate::{common::non_nul_string::NonNulString, runtime::repository::RepositoryId};
 
+/// Metrics configuration
+#[cfg(feature = "metrics")]
+pub use crate::runtime::metrics::Configuration as MetricsConfiguration;
+
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +46,10 @@ pub struct Config {
     pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options
     pub debug: Option<Debug>,
+    /// Metrics configuration
+    #[cfg(feature = "metrics")]
+    #[serde(default)]
+    pub metrics: MetricsConfiguration,
 }
 
 /// Repository type

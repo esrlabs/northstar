@@ -10,6 +10,9 @@ mod fork;
 mod io;
 mod ipc;
 mod key;
+#[cfg(feature = "metrics")]
+#[allow(unused)]
+mod metrics;
 mod mount;
 mod repository;
 #[allow(clippy::module_inception)]
