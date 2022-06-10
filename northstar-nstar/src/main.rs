@@ -158,7 +158,7 @@ async fn resolve_container<T>(name: &str, client: &mut Client<T>) -> Result<Cont
 where
     T: AsyncRead + AsyncWrite + Unpin,
 {
-    let container = if let Some((name, _)) = name.split_once(':') {
+    let container = if name.contains(':') {
         Container::try_from(name)?
     } else {
         let name = Name::try_from(name)?;
