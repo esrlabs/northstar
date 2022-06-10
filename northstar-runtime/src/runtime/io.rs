@@ -3,6 +3,7 @@ use std::os::unix::{net::UnixStream, prelude::FromRawFd};
 use crate::{
     common::container::Container,
     npk::manifest::{self, io::Output},
+    runtime::spawn,
 };
 use log::debug;
 use nix::{
@@ -13,7 +14,7 @@ use nix::{
 };
 use tokio::{
     io::{self, AsyncBufReadExt},
-    task::{self, JoinHandle},
+    task::JoinHandle,
 };
 
 use super::ipc::owned_fd::OwnedFd;
@@ -80,7 +81,10 @@ pub async fn open(container: &Container, io: &manifest::io::Io) -> io::Result<Co
         _ => unreachable!(),
     };
 
-    let task = task::spawn(log_lines(container.to_string(), read));
+    let task = spawn(
+        &format!("{}-io", container),
+        log_lines(container.to_string(), read),
+    );
     let io = [dev_null, stdout, stderr];
 
     Ok(ContainerIo {

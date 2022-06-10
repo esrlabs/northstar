@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     npk::manifest,
-    runtime::{CGroupEvent, ContainerEvent, Event, MemoryEvent},
+    runtime::{spawn, CGroupEvent, ContainerEvent, Event, MemoryEvent},
 };
 use anyhow::{Context, Result};
 use cgroups_rs::{
@@ -20,7 +20,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     select,
     sync::mpsc::error::TrySendError,
-    task::{self, JoinHandle},
+    task::JoinHandle,
     time,
 };
 use tokio_eventfd::EventFd;
@@ -250,7 +250,7 @@ impl MemoryMonitor {
         // This task stops when the main loop receiver closes
         let task = {
             let stop = token.clone();
-            task::spawn(async move {
+            spawn(&format!("{}-cgroups", container), async move {
                 debug!("Listening for v1 oom events of {}", container);
                 let mut buffer = [0u8; 16];
 
@@ -299,7 +299,7 @@ impl MemoryMonitor {
                 .add_watch(&path, WatchMask::MODIFY)
                 .expect("failed to add file watch");
 
-            task::spawn(async move {
+            spawn(&format!("{}-cgroups", container), async move {
                 debug!("Listening for v2 oom events of {}", container);
 
                 let mut buffer = [0; 1024];

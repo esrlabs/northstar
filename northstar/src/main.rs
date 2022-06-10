@@ -38,6 +38,10 @@ struct Opt {
 }
 
 fn main() -> Result<(), Error> {
+    // Enable tracing
+    #[cfg(feature = "tracing")]
+    console_subscriber::init();
+
     // Initialize logging
     logger::init();
 
