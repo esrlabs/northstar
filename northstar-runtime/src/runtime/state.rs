@@ -28,7 +28,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use futures::{
     future::{join_all, ready, Either},
-    Future, FutureExt, Stream, StreamExt, TryFutureExt,
+    Future, Stream, StreamExt, TryFutureExt,
 };
 use humantime::format_duration;
 use itertools::Itertools;
@@ -318,7 +318,7 @@ impl State {
         let mount_control = self.mount_control.clone();
         mount_control
             .mount(npk, &root, key.as_ref())
-            .map(|_| Ok(root))
+            .map_ok(|_| root)
     }
 
     /// Create a future that umounts `container`. Return a futures that yield
