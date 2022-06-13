@@ -15,7 +15,7 @@ device_mapper_device_timeout = "2s"
 # Token timeout
 token_validity = "1m"
 # Loop device timeout
-loop_device_timeout = "2s"
+loop_device_timeout = "5s"
 
 # Debug TCP console on localhost with full access
 [consoles."tcp://localhost:4200"]
