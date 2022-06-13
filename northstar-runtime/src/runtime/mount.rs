@@ -195,7 +195,10 @@ fn mount(
             break loop_device;
         }
         if start.elapsed() > lo_timeout {
-            bail!("failed to acquire loop device");
+            bail!(
+                "failed to acquire loop device: timeout after {}",
+                format_duration(lo_timeout)
+            );
         }
     };
 
