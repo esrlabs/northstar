@@ -1,28 +1,35 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use futures::{
-    future::{self, pending, ready, try_join_all, Either},
+    future::{pending, ready, try_join_all},
+    stream::repeat,
     FutureExt, StreamExt,
 };
-use humantime::parse_duration;
+use rand::{distributions::Standard, prelude::Distribution, seq::IteratorRandom};
+
+use humantime::{format_duration, parse_duration};
 use log::{debug, info};
 use northstar_client::{
-    model::{self, Container, ExitStatus, Notification},
+    model::{self, Container, ContainerData},
     Client,
 };
+use rand::{thread_rng, Rng};
 use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, UnixStream},
     pin, select,
     sync::Barrier,
-    task, time,
+    task::{self, yield_now},
+    time::{self},
 };
-use tokio_util::sync::CancellationToken;
+use tokio_stream::wrappers::IntervalStream;
+use tokio_util::{either::Either, sync::CancellationToken};
 use url::Url;
 
 #[derive(Clone, Debug, PartialEq)]
 enum Mode {
+    Monkey,
     MountUmount,
     StartStop,
     StartStopUmount,
@@ -35,12 +42,31 @@ impl FromStr for Mode {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "monkey" => Ok(Mode::Monkey),
             "mount-umount" => Ok(Mode::MountUmount),
             "start-stop" => Ok(Mode::StartStop),
             "start-stop-umount" => Ok(Mode::StartStopUmount),
             "mount-start-stop-umount" => Ok(Mode::StartStopUmount),
             "install-uninstall" => Ok(Mode::InstallUninstall),
             _ => Err("invalid mode"),
+        }
+    }
+}
+
+enum MonkeyAction {
+    Start,
+    Kill(i32),
+    Mount,
+    Umount,
+}
+
+impl Distribution<MonkeyAction> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> MonkeyAction {
+        match rng.gen_range(0..4) {
+            0 => MonkeyAction::Start,
+            1 => MonkeyAction::Kill(rng.gen_range(1..=15)),
+            2 => MonkeyAction::Mount,
+            _ => MonkeyAction::Umount,
         }
     }
 }
@@ -57,13 +83,9 @@ struct Opt {
     #[clap(short, long, parse(try_from_str = parse_duration))]
     duration: Option<Duration>,
 
-    /// Random delay between each iteration within 0..value ms
+    /// Random delay between each iteration e.g 1s
     #[clap(short, long, parse(try_from_str = parse_duration))]
-    random: Option<Duration>,
-
-    /// Single client
-    #[clap(short, long)]
-    single: bool,
+    random_delay: Option<Duration>,
 
     /// Mode
     #[clap(short, long, default_value = "start-stop")]
@@ -78,18 +100,14 @@ struct Opt {
     repository: Option<String>,
 
     /// Initial random delay in ms to randomize tasks
-    #[clap(long)]
-    initial_random_delay: Option<u64>,
-
-    /// Notification timeout in seconds
-    #[clap(short, long, parse(try_from_str = parse_duration), default_value = "60s")]
-    timeout: Duration,
+    #[clap(short, long, parse(try_from_str = parse_duration), default_value = "1s")]
+    initial_random_delay: Duration,
 }
 
 pub trait N: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T> N for T where T: AsyncRead + AsyncWrite + Send + Unpin {}
 
-async fn io(url: &Url) -> Result<Box<dyn N>> {
+async fn io(url: &Url) -> Result<Box<dyn N + Sync>> {
     let timeout = time::Duration::from_secs(5);
     match url.scheme() {
         "tcp" => {
@@ -101,13 +119,13 @@ async fn io(url: &Url) -> Result<Box<dyn N>> {
                 .await
                 .context("failed to connect")??;
 
-            Ok(Box::new(stream) as Box<dyn N>)
+            Ok(Box::new(stream) as Box<dyn N + Sync>)
         }
         "unix" => {
             let stream = time::timeout(timeout, UnixStream::connect(url.path()))
                 .await
                 .context("failed to connect")??;
-            Ok(Box::new(stream) as Box<dyn N>)
+            Ok(Box::new(stream) as Box<dyn N + Sync>)
         }
         _ => Err(anyhow!("invalid url")),
     }
@@ -123,13 +141,19 @@ async fn main() -> Result<()> {
     debug!("address: {}", opt.url.to_string());
     debug!("repository: {:?}", opt.repository);
     debug!("npk: {:?}", opt.npk);
-    debug!("random: {:?}", opt.random);
-    debug!("timeout: {:?}", opt.timeout);
+    debug!("random: {:?}", opt.random_delay);
 
-    if opt.mode == Mode::InstallUninstall {
-        return install_uninstall(&opt).await;
+    match opt.mode {
+        Mode::Monkey => monkey(&opt).await,
+        Mode::MountUmount
+        | Mode::StartStop
+        | Mode::StartStopUmount
+        | Mode::MountStartStopUmount => start_stop(&opt).await,
+        Mode::InstallUninstall => install_uninstall(&opt).await,
     }
+}
 
+async fn start_stop(opt: &Opt) -> Result<()> {
     // Get a list of installed applications
     debug!("Getting list of startable containers");
     let mut client = Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
@@ -142,96 +166,93 @@ async fn main() -> Result<()> {
     }
     drop(client);
 
-    let mut tasks = Vec::new();
+    let mut tasks = Vec::with_capacity(containers.len());
     let stop = CancellationToken::new();
 
-    if opt.single {
-        let stop = stop.clone();
-        let task = task::spawn(async move {
-            let mut client = Client::new(
-                io(&opt.url).await?,
-                Some(containers.len() * 3),
-                time::Duration::from_secs(30),
-            )
-            .await?;
+    // Sync the start of all tasks
+    let start_barrier = Arc::new(Barrier::new(containers.len()));
+    let mut rng = thread_rng();
 
-            let mut iterations = 0;
-            loop {
-                for container in &containers {
+    for container in containers {
+        let mode = opt.mode.clone();
+        let random = opt.random_delay;
+        let start_barrier = start_barrier.clone();
+        let stop = stop.clone();
+        let url = opt.url.clone();
+        let initial_delay = time::Duration::from_millis(
+            rng.gen_range(1..opt.initial_random_delay.as_millis()) as u64,
+        );
+
+        debug!("Spawning task for {}", container);
+        let task = task::spawn(async move {
+            let mut client =
+                Client::new(io(&url).await?, None, time::Duration::from_secs(10)).await?;
+            start_barrier.wait().await;
+
+            info!(
+                "Delaying task start of {} for {}",
+                container,
+                format_duration(initial_delay)
+            );
+            time::sleep(initial_delay).await;
+
+            for iteration in 0u64.. {
+                let mode = &mode;
+                let container = &container;
+
+                if *mode == Mode::MountStartStopUmount || *mode == Mode::MountUmount {
+                    info!("{} mount", &container);
+                    client.mount(container).await?;
+                    info!("{}: awaiting mount", container);
+                    await_container_state(&mut client, container, |state| state.mounted).await?;
+                    info!("{}: mounted", container);
+                }
+
+                if *mode != Mode::MountUmount {
                     info!("{}: start", container);
                     client.start(container).await?;
+                    info!("{}: awaiting start", container);
+                    await_container_state(&mut client, container, |state| state.process.is_some())
+                        .await?;
+                    info!("{}: started", container);
                 }
-                for container in &containers {
-                    info!("{}: stopping", container);
+
+                if let Some(delay) = random {
+                    info!("{}: sleeping for {:?}", container, delay);
+                    time::sleep(delay).await;
+                }
+
+                if *mode != Mode::MountUmount {
+                    info!("{}: killing", container);
                     client
                         .kill(container.clone(), 15)
                         .await
                         .context("failed to stop container")?;
-                    info!("{}: waiting for termination", container);
-                    let stopped =
-                        Notification::Exit(container.clone(), ExitStatus::Signalled { signal: 15 });
-                    await_notification(&mut client, stopped, opt.timeout).await?;
+
+                    info!("{}: awaiting exit", container);
+                    await_container_state(&mut client, container, |state| state.process.is_none())
+                        .await?;
+                    info!("{}: exited", container);
                 }
 
-                iterations += containers.len();
+                // Check if we need to umount
+                if *mode != Mode::StartStop {
+                    info!("{}: umounting", container);
+                    client.umount(container).await.context("failed to umount")?;
+                    info!("{}: awaiting umount", container);
+                    await_container_state(&mut client, container, |state| !state.mounted).await?;
+                    info!("{}: umounted", container);
+                }
 
                 if stop.is_cancelled() {
-                    break Ok(iterations);
+                    return Result::<u64>::Ok(iteration);
                 }
             }
+            unreachable!()
         })
-        .then(|r| match r {
-            Ok(r) => ready(r),
-            Err(e) => ready(Result::<usize>::Err(anyhow!("task error: {}", e))),
-        });
+        .then(|r| ready(r.expect("task error")));
 
-        tasks.push(futures::future::Either::Right(task));
-    } else {
-        // Sync the start of all tasks
-        let start_barrier = Arc::new(Barrier::new(containers.len()));
-
-        for container in &containers {
-            let container = container.clone();
-            let initial_random_delay = opt.initial_random_delay;
-            let mode = opt.mode.clone();
-            let random = opt.random;
-            let start_barrier = start_barrier.clone();
-            let timeout = opt.timeout;
-            let stop = stop.clone();
-            let url = opt.url.clone();
-
-            debug!("Spawning task for {}", container);
-            let task = task::spawn(async move {
-                let mut client =
-                    Client::new(io(&url).await?, Some(1000), time::Duration::from_secs(30)).await?;
-
-                if let Some(initial_delay) = initial_random_delay {
-                    time::sleep(time::Duration::from_millis(
-                        rand::random::<u64>() % initial_delay,
-                    ))
-                    .await;
-                }
-
-                let mut iterations = 0usize;
-
-                start_barrier.wait().await;
-
-                loop {
-                    iteration(&mode, &container, &mut client, timeout, random).await?;
-                    iterations += 1;
-
-                    if stop.is_cancelled() {
-                        break Ok(iterations);
-                    }
-                }
-            })
-            .then(|r| match r {
-                Ok(r) => ready(r),
-                Err(e) => ready(Result::<usize>::Err(anyhow!("task error: {}", e))),
-            });
-
-            tasks.push(Either::Left(task));
-        }
+        tasks.push(task);
     }
 
     info!("Starting {} tasks", tasks.len());
@@ -242,7 +263,7 @@ async fn main() -> Result<()> {
         .duration
         .map(time::sleep)
         .map(Either::Left)
-        .unwrap_or_else(|| Either::Right(future::pending::<()>()));
+        .unwrap_or_else(|| Either::Right(pending::<()>()));
 
     let result = select! {
         _ = duration => {
@@ -258,79 +279,14 @@ async fn main() -> Result<()> {
         r = &mut tasks => r,
     };
 
-    info!("Total iterations: {}", result?.iter().sum::<usize>());
+    println!("iterations: {}", result?.iter().sum::<u64>());
     Ok(())
-}
-
-async fn iteration(
-    mode: &Mode,
-    container: &Container,
-    client: &mut Client<Box<dyn N>>,
-    timeout: Duration,
-    random: Option<Duration>,
-) -> Result<()> {
-    if *mode == Mode::MountStartStopUmount || *mode == Mode::MountUmount {
-        info!("{} mount", &container);
-        client.mount(container).await?;
-    }
-
-    if *mode != Mode::MountUmount {
-        info!("{}: start", container);
-        client.start(container).await?;
-        let started = Notification::Started(container.clone());
-        await_notification(client, started, timeout).await?;
-    }
-
-    if let Some(delay) = random {
-        info!("{}: sleeping for {:?}", container, delay);
-        time::sleep(delay).await;
-    }
-
-    if *mode != Mode::MountUmount {
-        info!("{}: stopping", container);
-        client
-            .kill(container.clone(), 15)
-            .await
-            .context("failed to stop container")?;
-
-        info!("{}: waiting for termination", container);
-        let stopped = Notification::Exit(container.clone(), ExitStatus::Signalled { signal: 15 });
-        await_notification(client, stopped, timeout).await?;
-    }
-
-    // Check if we need to umount
-    if *mode != Mode::StartStop {
-        info!("{}: umounting", container);
-        client.umount(container).await.context("failed to umount")?;
-    }
-
-    Ok(())
-}
-
-/// Wait for a `notification` for `duration` seconds or timeout
-async fn await_notification<T: AsyncRead + AsyncWrite + Unpin>(
-    client: &mut Client<T>,
-    notification: Notification,
-    duration: Duration,
-) -> Result<()> {
-    time::timeout(duration, async {
-        loop {
-            match client.next().await {
-                Some(Ok(n)) if n == notification => break Ok(()),
-                Some(Ok(_)) => continue,
-                Some(Err(e)) => break Err(e.into()),
-                None => break Err(anyhow!("Notification stream closed")),
-            }
-        }
-    })
-    .await
-    .with_context(|| format!("failed to wait for notification: {:?}", notification))?
 }
 
 /// Install and uninstall an npk in a loop
 async fn install_uninstall(opt: &Opt) -> Result<()> {
-    let timeout = time::Duration::from_secs(30);
-    let mut client = Client::new(io(&opt.url).await?, Some(10), timeout).await?;
+    let connect_timeout = time::Duration::from_secs(30);
+    let mut client = Client::new(io(&opt.url).await?, Some(10), connect_timeout).await?;
 
     let timeout = opt
         .duration
@@ -366,6 +322,80 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
                     None => break Err(anyhow!("Runtime closed the connection")),
                 }
             }
+        }
+    }
+}
+
+/// Monkey testing: randmon action on random container
+async fn monkey(opt: &Opt) -> Result<()> {
+    debug!("Getting list of containers");
+    let mut client = Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
+
+    let containers = client.list().await?;
+    let mut rng = rand::thread_rng();
+
+    let duration = opt
+        .duration
+        .map(time::sleep)
+        .map(Either::Left)
+        .unwrap_or_else(|| Either::Right(pending::<()>()));
+    pin!(duration);
+
+    let mut delay = opt
+        .random_delay
+        .map(time::interval)
+        .map(IntervalStream::new)
+        .map(|s| s.map(drop))
+        .map(Either::Left)
+        .unwrap_or_else(|| Either::Right(repeat(())));
+
+    loop {
+        select! {
+            _ = &mut duration => {
+                info!("Stopping because test duration exceeded");
+                break Ok(());
+            }
+            _ = &mut delay.next() => {
+                let container = containers
+                    .iter()
+                    .choose(&mut rng)
+                    .expect("failed to select random container");
+
+                match rand::random() {
+                    MonkeyAction::Start => {
+                        info!("Trying to start {}", container);
+                        client.start(container).map(drop).await;
+                    }
+                    MonkeyAction::Kill(signal) => {
+                        info!("Trying to kill {} with signal {}", container, signal);
+                        client.kill(container, signal).map(drop).await;
+                    }
+                    MonkeyAction::Mount => {
+                        info!("Trying to mount {}", container);
+                        client.mount(container).map(drop).await;
+                    }
+                    MonkeyAction::Umount => {
+                        info!("Trying to umount {}", container);
+                        client.umount(container).map(drop).await;
+                    }
+                };
+            }
+        }
+    }
+}
+
+/// Poll the container state until the process context is Some(_)
+async fn await_container_state(
+    client: &mut Client<Box<(dyn N + Sync)>>,
+    container: &Container,
+    mut pred: impl FnMut(ContainerData) -> bool,
+) -> Result<()> {
+    loop {
+        let data = client.inspect(container).await?;
+        if pred(data) {
+            break Ok(());
+        } else {
+            yield_now().await;
         }
     }
 }
