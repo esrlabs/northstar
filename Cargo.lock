@@ -169,6 +169,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.60.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "062dddbc1ba4aca46de6338e2bf87771414c335f7b2f2036e8f3e9befebf88e6"
+dependencies = [
+ "bitflags",
+ "cexpr",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -338,16 +357,16 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.2"
+version = "3.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e538f9ee5aa3b3963f09a997035f883677966ed50fce0292611927ce6f6d8c6"
+checksum = "6d20de3739b4fb45a17837824f40aa1769cc7655d7a83e68739a77fe7b30c87a"
 dependencies = [
  "atty",
  "bitflags",
  "clap_derive",
  "clap_lex",
  "indexmap",
- "lazy_static",
+ "once_cell",
  "strsim 0.10.0",
  "termcolor",
  "textwrap 0.15.0",
@@ -359,14 +378,14 @@ version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f6ebaab5f25e4f0312dfa07cb30a755204b96e6531457c2cfdecfdf5f2adf40"
 dependencies = [
- "clap 3.2.2",
+ "clap 3.2.4",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "3.2.2"
+version = "3.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7f98063cac4652f23ccda556b8d04347a7fc4b2cff1f7577cc8c6546e0d8078"
+checksum = "026baf08b89ffbd332836002ec9378ef0e69648cbfadd68af7cd398ca5bf98f7"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -586,7 +605,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bcbd37e4723b2221792aa84fc1a9f833657b132ae2fcfff1693a8bd3c68c1dd"
 dependencies = [
- "bindgen",
+ "bindgen 0.59.2",
  "nix 0.22.3",
 ]
 
@@ -1138,7 +1157,7 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bfa0855b04611e38acaff718542e9e809cddfc16535d39f9d9c694ab19f7388"
 dependencies = [
- "bindgen",
+ "bindgen 0.59.2",
  "errno",
  "libc",
 ]
@@ -1284,7 +1303,7 @@ version = "0.0.1-pre"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "clap 3.2.2",
+ "clap 3.2.4",
  "env_logger",
  "log",
  "nix 0.24.1",
@@ -1309,7 +1328,7 @@ name = "northstar-nstar"
 version = "0.0.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.2",
+ "clap 3.2.4",
  "clap_complete",
  "futures",
  "hex",
@@ -1333,7 +1352,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bincode",
- "bindgen",
+ "bindgen 0.60.1",
  "byteorder",
  "bytes",
  "bytesize",
@@ -1389,7 +1408,7 @@ name = "northstar-schema"
 version = "0.0.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.2",
+ "clap 3.2.4",
  "northstar-runtime",
  "okapi",
  "schemars",
@@ -1402,7 +1421,7 @@ version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "clap 3.2.2",
+ "clap 3.2.4",
  "env_logger",
  "itertools",
  "northstar-runtime",
@@ -1416,7 +1435,7 @@ version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "base64",
- "clap 3.2.2",
+ "clap 3.2.4",
  "colored",
  "ed25519-dalek",
  "env_logger",
@@ -1431,7 +1450,7 @@ name = "northstar-stress"
 version = "0.0.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.2",
+ "clap 3.2.4",
  "env_logger",
  "futures",
  "humantime",
@@ -1519,9 +1538,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.10.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87f3e037eac156d1775da914196f0f37741a274155e34a0b7e427c35d2a2ecb9"
+checksum = "7709cef83f0c1f58f666e746a08b21e0085f7440fa6a29cc194d68aac97a4225"
 
 [[package]]
 name = "opaque-debug"
@@ -2418,7 +2437,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "caps",
- "clap 3.2.2",
+ "clap 3.2.4",
  "nix 0.24.1",
 ]
 
