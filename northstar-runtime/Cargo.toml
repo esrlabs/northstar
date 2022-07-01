@@ -42,7 +42,7 @@ nix = { version = "0.24.1", default-features = false, features = ["fs", "sched",
 rand_core = { version = "0.6.3", features = ["getrandom"], optional = true }
 rlimit = { version = "0.8.3", optional = true }
 schemars = { version = "0.8.10", features = ["preserve_order"] }
-semver = { version = "1.0.10", features = ["serde"] }
+semver = { version = "1.0.12", features = ["serde"] }
 serde = { version = "1.0.137", features = ["derive", "rc"] }
 serde_json = { version = "1.0.81", optional = true }
 serde_plain = { version = "1.0.0", optional = true }
