@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.57"
+anyhow = "1.0.58"
 clap = { version = "3.2.4", features = ["derive"] }
 clap_complete = "3.2.1"
 futures = { version = "0.3.21", default-features = false }
