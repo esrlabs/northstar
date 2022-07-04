@@ -339,9 +339,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.4"
+version = "3.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d20de3739b4fb45a17837824f40aa1769cc7655d7a83e68739a77fe7b30c87a"
+checksum = "190814073e85d238f31ff738fcb0bf6910cedeb73376c87cd69291028966fd83"
 dependencies = [
  "atty",
  "bitflags",
@@ -360,14 +360,14 @@ version = "3.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ead064480dfc4880a10764488415a97fdd36a4cf1bb022d372f02e8faf8386e1"
 dependencies = [
- "clap 3.2.4",
+ "clap 3.2.8",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "3.2.4"
+version = "3.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "026baf08b89ffbd332836002ec9378ef0e69648cbfadd68af7cd398ca5bf98f7"
+checksum = "759bf187376e1afa7b85b959e6a664a3e7a95203415dba952ad19139e798f902"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -1285,7 +1285,7 @@ version = "0.0.1-pre"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "clap 3.2.4",
+ "clap 3.2.8",
  "env_logger",
  "log",
  "nix 0.24.1",
@@ -1310,7 +1310,7 @@ name = "northstar-nstar"
 version = "0.0.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.4",
+ "clap 3.2.8",
  "clap_complete",
  "futures",
  "hex",
@@ -1390,7 +1390,7 @@ name = "northstar-schema"
 version = "0.0.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.4",
+ "clap 3.2.8",
  "northstar-runtime",
  "okapi",
  "schemars",
@@ -1403,7 +1403,7 @@ version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "clap 3.2.4",
+ "clap 3.2.8",
  "env_logger",
  "itertools",
  "northstar-runtime",
@@ -1417,7 +1417,7 @@ version = "0.0.1-pre"
 dependencies = [
  "anyhow",
  "base64",
- "clap 3.2.4",
+ "clap 3.2.8",
  "colored",
  "ed25519-dalek",
  "env_logger",
@@ -1432,7 +1432,7 @@ name = "northstar-stress"
 version = "0.0.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.4",
+ "clap 3.2.8",
  "env_logger",
  "futures",
  "humantime",
@@ -2419,7 +2419,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "caps",
- "clap 3.2.4",
+ "clap 3.2.8",
  "nix 0.24.1",
 ]
 
