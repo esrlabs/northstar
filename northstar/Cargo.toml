@@ -10,7 +10,7 @@ default-run = "northstar"
 
 [dependencies]
 anyhow = "1.0.58"
-clap = { version = "3.2.4", features = ["derive"] }
+clap = { version = "3.2.8", features = ["derive"] }
 log = "0.4.17"
 nix = { version = "0.24.1", default-features = false, features = ["sched", "mount"] }
 northstar-runtime = { path = "../northstar-runtime", features = ["runtime"] }
