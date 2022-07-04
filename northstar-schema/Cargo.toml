@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.57"
+anyhow = "1.0.58"
 clap = { version = "3.2.4", features = ["derive"] }
 northstar-runtime = { path = "../northstar-runtime", features = ["api"] }
 okapi = "0.7.0-rc.1"

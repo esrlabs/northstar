@@ -7,7 +7,7 @@ license = "Apache-2.0"
 default-run = "northstar"
 
 [dependencies]
-anyhow = "1.0.57"
+anyhow = "1.0.58"
 clap = { version = "3.2.4", features = ["derive"] }
 log = "0.4.17"
 nix = { version = "0.24.1", default-features = false, features = ["sched", "mount"] }
