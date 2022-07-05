@@ -10,20 +10,14 @@ use async_stream::stream;
 use bytes::Bytes;
 use futures::{
     future::join_all,
-    sink::SinkExt,
     stream::{self, FuturesUnordered},
     Future, StreamExt,
 };
+use listener::Listener;
 use log::{debug, info, trace, warn};
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-    unreachable,
-};
+use std::{fmt, path::Path, unreachable};
 use tokio::{
-    fs,
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
-    net::{TcpListener, UnixListener},
     pin, select,
     sync::{broadcast, mpsc, oneshot},
     task, time,
@@ -32,6 +26,9 @@ use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
 pub use crate::npk::manifest::console::{Configuration, Permission, Permissions};
+
+mod listener;
+mod throttle;
 
 /// Default maximum requests per second
 const DEFAULT_REQUESTS_PER_SECOND: usize = 1024;
@@ -159,16 +156,17 @@ impl Console {
         let max_request_size = configuration
             .max_request_size
             .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
-        let mut network_stream = api::codec::Framed::new_with_max_length(stream, max_request_size);
+        let stream = api::codec::framed_with_max_length(stream, max_request_size);
 
-        // Get a framed stream and sink interface.
+        // Limit requests per second
         let max_requests_per_sec = configuration
             .max_requests_per_sec
             .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
-        network_stream.throttle_stream(max_requests_per_sec, time::Duration::from_secs(1));
+        let mut stream =
+            throttle::Throttle::new(stream, max_requests_per_sec, time::Duration::from_secs(1));
 
         // Wait for a connect message within timeout
-        let connect = network_stream.next();
+        let connect = stream.next();
         // TODO: This can for sure be done nicer
         let timeout = timeout.unwrap_or_else(|| time::Duration::from_secs(u64::MAX));
         let connect = time::timeout(timeout, connect);
@@ -212,7 +210,7 @@ impl Console {
             };
             let connect = model::Connect::Nack { error };
             let message = model::Message::Connect { connect };
-            network_stream.send(message).await.ok();
+            stream.send(message).await.ok();
             return Ok(());
         }
 
@@ -227,7 +225,7 @@ impl Console {
             let error = model::ConnectNack::PermissionDenied;
             let connect = model::Connect::Nack { error };
             let message = model::Message::Connect { connect };
-            network_stream.send(message).await.ok();
+            stream.send(message).await.ok();
             return Ok(());
         }
 
@@ -236,7 +234,7 @@ impl Console {
             configuration: configuration.clone(),
         };
         let message = model::Message::Connect { connect };
-        if let Err(e) = network_stream.send(message).await {
+        if let Err(e) = stream.send(message).await {
             warn!("{}: Connection error: {}", peer, e);
             return Ok(());
         }
@@ -272,7 +270,7 @@ impl Console {
                         None => break,
                     };
 
-                    if let Err(e) = network_stream
+                    if let Err(e) = stream
                         .send(api::model::Message::Notification {notification })
                         .await
                     {
@@ -280,11 +278,11 @@ impl Console {
                         break;
                     }
                 }
-                item = network_stream.next() => {
+                item = stream.next() => {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut network_stream, &stop, &configuration, &event_tx, token_validity, request).await {
+                            let response = match process_request(&peer, &mut stream, &stop, &configuration, &event_tx, token_validity, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -293,7 +291,7 @@ impl Console {
                             };
                             trace!("{}: <-- {:?}", peer, response);
 
-                            if let Err(e) = network_stream.send(response).await {
+                            if let Err(e) = stream.send(response).await {
                                 warn!("{}: Connection error: {}", peer, e);
                                 break;
                             }
@@ -477,47 +475,6 @@ where
         response
     })
     .map(|response| model::Message::Response { response })
-}
-
-/// Types of listeners for console connections
-enum Listener {
-    Tcp(TcpListener),
-    Unix(UnixListener),
-}
-
-impl Listener {
-    async fn new(url: &Url) -> io::Result<Listener> {
-        let listener = match url.scheme() {
-            "tcp" => {
-                let address = url
-                    .socket_addrs(|| Some(4200))?
-                    .first()
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::Other, format!("invalid url: {}", url))
-                    })?
-                    .to_owned();
-                let listener = TcpListener::bind(&address).await?;
-                debug!("Started console on {}", &address);
-
-                Listener::Tcp(listener)
-            }
-            "unix" => {
-                let path = PathBuf::from(url.path());
-
-                // TODO this file should not be deleted here
-                if path.exists() {
-                    fs::remove_file(&path).await?
-                }
-
-                let listener = UnixListener::bind(&path)?;
-
-                debug!("Started console on {}", path.display());
-                Listener::Unix(listener)
-            }
-            _ => unreachable!(),
-        };
-        Ok(listener)
-    }
 }
 
 /// Function to handle connections
