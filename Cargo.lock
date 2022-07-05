@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "northstar"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "android-logd-logger",
  "anyhow",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-client"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-nstar"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap 3.2.8",
@@ -1327,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-runtime"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-schema"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap 3.2.8",
@@ -1399,7 +1399,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-seccomp"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1413,7 +1413,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-sextant"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "northstar-stress"
-version = "0.0.1-pre"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "clap 3.2.8",
