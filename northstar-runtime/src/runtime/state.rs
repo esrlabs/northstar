@@ -61,7 +61,7 @@ pub(super) struct State {
     events_tx: EventTx,
     notification_tx: NotificationTx,
     mount_control: Arc<MountControl>,
-    launcher: Forker,
+    forker: Forker,
     containers: HashMap<Container, ContainerState>,
     repositories: HashMap<RepositoryId, Repository>,
 }
@@ -140,7 +140,7 @@ impl State {
             repositories,
             containers,
             config,
-            launcher: forker,
+            forker,
             mount_control,
         };
 
@@ -493,7 +493,7 @@ impl State {
         let config = &self.config;
         let containers = self.containers.iter().map(|(c, _)| c);
         let pid = self
-            .launcher
+            .forker
             .create(config, &manifest, console_fd, containers)
             .await?;
 
@@ -562,7 +562,7 @@ impl State {
 
         // Send exec request to launcher
         if let Err(e) = self
-            .launcher
+            .forker
             .exec(container.clone(), init, args, env, io)
             .await
         {

@@ -1,4 +1,5 @@
-use crate::{api, api::model::Container, runtime::ipc::AsyncMessage};
+use self::fork::Streams;
+use crate::{api, api::model::Container, runtime::ipc::AsyncFramedUnixStream};
 use async_stream::stream;
 use config::Config;
 use futures::{
@@ -26,8 +27,6 @@ use tokio::{
     task::{self, JoinHandle},
 };
 use tokio_util::sync::{CancellationToken, DropGuard};
-
-use self::fork::ForkerChannels;
 
 mod cgroups;
 mod console;
@@ -180,10 +179,8 @@ pub enum Runtime {
     Created {
         /// Runtime configuration
         config: Config,
-        /// Forker pid
-        forker_pid: Pid,
-        /// Forker channles
-        forker_channels: ForkerChannels,
+        /// Forker pid and streams
+        forker: (Pid, Streams),
     },
     /// The runtime is started.
     Running {
@@ -198,24 +195,14 @@ impl Runtime {
     /// Create new runtime instance
     pub fn new(config: Config) -> Result<Runtime, Error> {
         config.check()?;
-
-        let (forker_pid, forker_channels) = fork::start()?;
-        Ok(Runtime::Created {
-            config,
-            forker_pid,
-            forker_channels,
-        })
+        let forker = fork::start()?;
+        Ok(Runtime::Created { config, forker })
     }
 
     /// Start runtime with configuration `config`
     pub async fn start(self) -> Result<Runtime, Error> {
-        let (config, forker_pid, forker_channels) = if let Runtime::Created {
-            config,
-            forker_pid,
-            forker_channels,
-        } = self
-        {
-            (config, forker_pid, forker_channels)
+        let (config, forker) = if let Runtime::Created { config, forker } = self {
+            (config, forker)
         } else {
             panic!("Runtime::start called on a running runtime");
         };
@@ -224,7 +211,7 @@ impl Runtime {
         let guard = token.clone().drop_guard();
 
         // Start a task that drives the main loop and wait for shutdown results
-        let task = task::spawn(run(config, token, forker_pid, forker_channels));
+        let task = task::spawn(run(config, token, forker));
 
         Ok(Runtime::Running { guard, task })
     }
@@ -260,14 +247,14 @@ impl Runtime {
 async fn run(
     config: Config,
     token: CancellationToken,
-    forker_pid: Pid,
-    forker_channels: ForkerChannels,
+    forker: (Pid, Streams),
 ) -> anyhow::Result<()> {
     // Setup root cgroup(s)
     let cgroup = Path::new(config.cgroup.as_str()).to_owned();
     cgroups::init(&cgroup).await?;
 
     // Join forker
+    let (forker_pid, forker_channels) = forker;
     let mut join_forker = task::spawn_blocking(move || {
         let pid = unistd::Pid::from_raw(forker_pid as i32);
         loop {
@@ -302,22 +289,18 @@ async fn run(
         None
     };
 
-    // Convert stream and stream_fd into Tokio UnixStream
-    let (forker, mut exit_notifications) = {
-        let ForkerChannels {
-            stream,
-            notifications,
-        } = forker_channels;
-
-        let forker = fork::Forker::new(stream);
-        let exit_notifications: AsyncMessage<_> = notifications
-            .try_into()
-            .expect("failed to convert exit notification handle");
-        (forker, exit_notifications)
-    };
+    // Destructure the forker stream handle: Merge the exit notification into the main channel
+    // and create a handle to the foker process to be used in the state module;
+    let Streams {
+        command_stream,
+        socket_stream,
+        notification_stream,
+    } = forker_channels;
+    let forker = fork::Forker::new(command_stream, socket_stream);
 
     // Merge the exit notification from the forker process with other events into the main loop channel
     let event_rx = stream! {
+        let mut exit_notifications = AsyncFramedUnixStream::new(notification_stream);
         loop {
             select! {
                 Some(event) = event_rx.recv() => yield event,

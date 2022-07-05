@@ -113,7 +113,7 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
             mount::Mount::Proc => mounts.push(proc(root, target.as_ref())),
             mount::Mount::Sysfs => mounts.push(sysfs(root, target.as_ref())),
             mount::Mount::Resource(requirement) => {
-                let container = Container::new(manifest.name.clone(), manifest.version.clone());
+                let container = manifest.container();
                 let dependency = State::match_container(
                     &requirement.name,
                     &requirement.version,

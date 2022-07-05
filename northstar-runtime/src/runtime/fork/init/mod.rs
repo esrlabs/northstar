@@ -6,7 +6,7 @@ use crate::{
     },
     runtime::{
         fork::util::{self, fork, set_child_subreaper, set_process_name},
-        ipc::{owned_fd::OwnedFd, Message as IpcMessage},
+        ipc::{owned_fd::OwnedFd, FramedUnixStream},
         ExitStatus, Pid,
     },
     seccomp::AllowList,
@@ -31,10 +31,7 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::CString,
-    os::unix::{
-        net::UnixStream,
-        prelude::{AsRawFd, RawFd},
-    },
+    os::unix::prelude::{AsRawFd, RawFd},
     path::{Path, PathBuf},
     process::exit,
 };
@@ -72,7 +69,7 @@ pub struct Init {
 }
 
 impl Init {
-    pub fn run(self, mut stream: IpcMessage<UnixStream>, console: Option<OwnedFd>) -> ! {
+    pub fn run(self, mut stream: FramedUnixStream, console: Option<OwnedFd>) -> ! {
         // Become a subreaper
         set_child_subreaper(true);
 
@@ -139,7 +136,6 @@ impl Init {
                     }
 
                     let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
-                    debug_assert!(io.len() == 3);
                     let stdin = io[0];
                     let stdout = io[1];
                     let stderr = io[2];
@@ -184,45 +180,31 @@ impl Init {
                     stream.send(&message).expect("failed to send fork result");
 
                     // Wait for the child to exit
-                    loop {
+                    let exit_status = loop {
                         debug!("Waiting for child process {} to exit", pid);
                         match waitpid(Some(unistd::Pid::from_raw(pid as i32)), None) {
-                            Ok(WaitStatus::Exited(_pid, status)) => {
+                            Ok(WaitStatus::Exited(_, status)) => {
                                 debug!("Child process {} exited with status code {}", pid, status);
-                                let exit_status = ExitStatus::Exit(status);
-                                stream
-                                    .send(Message::Exit { pid, exit_status })
-                                    .expect("Channel error");
-
-                                assert_eq!(
-                                    waitpid(Some(unistd::Pid::from_raw(pid as i32)), None),
-                                    Err(nix::Error::ECHILD)
-                                );
-
-                                exit(0);
+                                break ExitStatus::Exit(status);
                             }
-                            Ok(WaitStatus::Signaled(_pid, status, _)) => {
+                            Ok(WaitStatus::Signaled(_, status, _)) => {
                                 debug!("Child process {} exited with signal {}", pid, status);
-                                let exit_status = ExitStatus::Signalled(status as u8);
-                                stream
-                                    .send(Message::Exit { pid, exit_status })
-                                    .expect("Channel error");
-
-                                assert_eq!(
-                                    waitpid(Some(unistd::Pid::from_raw(pid as i32)), None),
-                                    Err(nix::Error::ECHILD)
-                                );
-
-                                exit(0);
+                                break ExitStatus::Signalled(status as u8);
                             }
                             Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
-                                log::error!("Child process continued or stopped");
+                                log::warn!("Child process continued or stopped");
                                 continue;
                             }
                             Err(nix::Error::EINTR) => continue,
                             e => panic!("failed to waitpid on {}: {:?}", pid, e),
                         }
-                    }
+                    };
+
+                    stream
+                        .send(Message::Exit { pid, exit_status })
+                        .expect("channel error");
+
+                    exit(0);
                 }
                 Ok(None) => {
                     info!("Channel closed. Exiting...");

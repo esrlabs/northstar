@@ -139,9 +139,9 @@ seccomp = [
 anyhow = "1.0.58"
 proptest = "1.0.0"
 serde_json = "1.0.82"
-toml = "0.5.9"
 tokio = { version = "1.19.2", features = ["test-util"] }
 tokio-test = "0.4.2"
+toml = "0.5.9"
 
 [build-dependencies]
 anyhow = { version = "1.0.58", optional = true }
