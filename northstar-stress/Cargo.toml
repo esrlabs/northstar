@@ -15,7 +15,7 @@ futures = { version = "0.3.21", default-features = false }
 humantime = "2.1.0"
 itertools = "0.10.3"
 log = "0.4.17"
-northstar-client = { version = "0.5.0", path = "../northstar-client" }
+northstar-client = { version = "^0.5.0", path = "../northstar-client" }
 rand = "0.8.5"
 tokio = { version = "1.19.2", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = { version = "0.1.9", features = ["time"] }

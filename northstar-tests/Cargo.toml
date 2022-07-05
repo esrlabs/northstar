@@ -14,8 +14,8 @@ log = "0.4.17"
 memfd = "0.6.1"
 nanoid = "0.4.0"
 nix = { version = "0.24.1", default-features = false }
-northstar-client = { version = "0.5.0", path = "../northstar-client" }
-northstar-runtime = { version = "0.5.0", path = "../northstar-runtime", features = ["api", "runtime"] }
+northstar-client = { version = "^0.5.0", path = "../northstar-client" }
+northstar-runtime = { version = "^0.5.0", path = "../northstar-runtime", features = ["api", "runtime"] }
 northstar-tests-derive = { path = "northstar-tests-derive" }
 regex = "1.5.6"
 tempfile = "3.3.0"
