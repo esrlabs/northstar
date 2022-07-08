@@ -272,15 +272,15 @@ impl State {
         // Mount (parallel). Do not care about the result - this normally is fine. If not, the container will not start.
         if !to_mount.is_empty() {
             self.mount_all(&to_mount).await;
+        }
 
-            for (container, autostart) in autostarts {
-                info!("Autostarting {} ({:?})", container, autostart);
-                if let Err(e) = self
-                    .start(&container, &[], &HashMap::with_capacity(0))
-                    .await
-                {
-                    Self::warn_autostart_failure(&container, &autostart, e)?
-                }
+        for (container, autostart) in autostarts {
+            info!("Autostarting {} ({:?})", container, autostart);
+            if let Err(e) = self
+                .start(&container, &[], &HashMap::with_capacity(0))
+                .await
+            {
+                Self::warn_autostart_failure(&container, &autostart, e)?
             }
         }
 
