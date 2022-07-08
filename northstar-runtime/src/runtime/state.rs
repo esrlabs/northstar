@@ -370,6 +370,17 @@ impl State {
             return Err(Error::StartContainerStarted(container.clone()));
         }
 
+        // Check if a container with same name but different version is running
+        if let Some(container) = self
+            .containers
+            .iter()
+            .filter_map(|(k, v)| v.process.as_ref().map(|_| k))
+            .find(|c| c.name() == container.name())
+        {
+            warn!("Application {} is already running", container);
+            return Err(Error::StartContainerStarted(container.clone()));
+        }
+
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
         if env_extra.keys().any(|k| {
             k.as_str() == ENV_NAME
