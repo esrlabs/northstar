@@ -20,6 +20,9 @@ pub enum Output {
     /// Forward output to the logging system with level and optional tag
     #[serde(rename = "pipe")]
     Pipe,
+    /// Inherit stdout/stderr from the runtime
+    #[serde(rename = "inherit")]
+    Inherit,
 }
 
 impl Default for Output {

@@ -2,17 +2,11 @@
 
 use std::{
     fmt,
-    io::ErrorKind,
     os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
-    pin::Pin,
-    task::{Context, Poll},
 };
 
 use nix::{libc, unistd::dup};
 use std::io;
-use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
-
-use super::RawFdExt;
 
 /// Owned raw fd that closes on drop.
 pub struct OwnedFd {
@@ -80,98 +74,5 @@ impl From<std::os::unix::net::UnixStream> for OwnedFd {
     #[inline]
     fn from(stream: std::os::unix::net::UnixStream) -> Self {
         unsafe { Self::from_raw_fd(stream.into_raw_fd()) }
-    }
-}
-
-pub struct OwnedFdRw {
-    inner: AsyncFd<OwnedFd>,
-}
-
-impl OwnedFdRw {
-    pub fn new(inner: OwnedFd) -> io::Result<Self> {
-        inner.set_nonblocking(true)?;
-        AsyncFd::new(inner).map(|inner| Self { inner })
-    }
-}
-
-impl AsRawFd for OwnedFdRw {
-    #[inline]
-    fn as_raw_fd(&self) -> RawFd {
-        self.inner.as_raw_fd()
-    }
-}
-
-impl AsyncRead for OwnedFdRw {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        loop {
-            let mut ready = match self.inner.poll_read_ready(cx) {
-                Poll::Ready(x) => x?,
-                Poll::Pending => return Poll::Pending,
-            };
-
-            let ret = unsafe {
-                nix::libc::read(
-                    self.as_raw_fd(),
-                    buf.unfilled_mut() as *mut _ as _,
-                    buf.remaining(),
-                )
-            };
-
-            return if ret < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == ErrorKind::WouldBlock {
-                    ready.clear_ready();
-                    continue;
-                } else {
-                    Poll::Ready(Err(e))
-                }
-            } else {
-                let n = ret as usize;
-                unsafe { buf.assume_init(n) };
-                buf.advance(n);
-                Poll::Ready(Ok(()))
-            };
-        }
-    }
-}
-
-impl AsyncWrite for OwnedFdRw {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        loop {
-            let mut ready = match self.inner.poll_write_ready(cx) {
-                Poll::Ready(x) => x?,
-                Poll::Pending => return Poll::Pending,
-            };
-
-            let ret = unsafe { nix::libc::write(self.as_raw_fd(), buf.as_ptr() as _, buf.len()) };
-
-            return if ret < 0 {
-                let e = io::Error::last_os_error();
-                if e.kind() == ErrorKind::WouldBlock {
-                    ready.clear_ready();
-                    continue;
-                } else {
-                    Poll::Ready(Err(e))
-                }
-            } else {
-                Poll::Ready(Ok(ret as usize))
-            };
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
     }
 }
