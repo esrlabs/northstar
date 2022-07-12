@@ -11,7 +11,7 @@ repository = "https://github.com/esrlabs/northstar"
 [dependencies]
 anyhow = "1.0.58"
 base64 = "0.13.0"
-clap = { version = "3.2.8", features = ["derive"] }
+clap = { version = "3.2.10", features = ["derive"] }
 colored = "2.0.0"
 ed25519-dalek = "1.0.1"
 env_logger = "0.9.0"
