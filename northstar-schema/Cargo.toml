@@ -9,7 +9,7 @@ repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
 anyhow = "1.0.58"
-clap = { version = "3.2.8", features = ["derive"] }
+clap = { version = "3.2.10", features = ["derive"] }
 northstar-runtime = { version = "^0.5.1", path = "../northstar-runtime", features = ["api"] }
 okapi = "0.7.0-rc.1"
 schemars = "0.8.10"
