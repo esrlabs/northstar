@@ -119,6 +119,7 @@ runtime = [
     "nix",
     "npk",
     "rlimit",
+    "serde_plain",
     "tempfile",
     "tokio",
     "tokio-eventfd",

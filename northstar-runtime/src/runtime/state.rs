@@ -523,9 +523,10 @@ impl State {
         };
 
         // Open a file handle for stdin, stdout and stderr according to the manifest
-        let ContainerIo { io, log_task } = io::open(container, &manifest.io.unwrap_or_default())
-            .await
-            .expect("IO setup error");
+        let ContainerIo { io, task: log_task } =
+            io::open(container, &manifest.io.unwrap_or_default())
+                .await
+                .expect("IO setup error");
 
         // Binary arguments
         let mut args = Vec::with_capacity(

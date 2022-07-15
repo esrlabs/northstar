@@ -11,4 +11,4 @@ pub mod manifest;
 pub mod npk;
 
 /// NPK version
-pub const VERSION: Version = Version::new(0, 0, 1);
+pub const VERSION: Version = Version::new(0, 1, 1);
