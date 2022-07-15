@@ -12,6 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand_core::{OsRng, RngCore};
+use semver::Comparator;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -125,9 +126,25 @@ impl<R: Read + Seek> Npk<R> {
     pub fn from_reader(reader: R, key: Option<&PublicKey>) -> Result<Self, Error> {
         let mut zip = Zip::new(reader).context("archive error")?;
 
+        // Check npk format version against `VERSION`.
+        let version_request = semver::VersionReq {
+            comparators: vec![Comparator {
+                op: semver::Op::GreaterEq,
+                major: VERSION.major,
+                minor: Some(VERSION.minor),
+                patch: None,
+                pre: semver::Prerelease::default(),
+            }],
+        };
         let meta = meta(&zip)?;
-        if meta.version != VERSION {
-            return Err(anyhow!("version mismatch {} vs {}", meta.version, VERSION).into());
+        let version = &meta.version;
+        if !version_request.matches(&(version.into())) {
+            return Err(anyhow!(
+                "NPK version format {} doesn't match required version {}",
+                meta.version,
+                version_request
+            )
+            .into());
         }
 
         // Read hashes from the npk if a key is passed
