@@ -97,7 +97,8 @@ fn main() {
 
 /// Find a sextant binary in the current target directory tree or built is if not present.
 fn find_or_build_sextant() -> PathBuf {
-    if env::var(ENV_FORCE_BUILD).is_ok() {
+    println!("cargo:rerun-if-env-changed={}", ENV_FORCE_BUILD);
+    if env::var(ENV_FORCE_BUILD).is_err() {
         for dir in Path::new(&env::var("OUT_DIR").unwrap()).ancestors() {
             let sextant = dir.join("northstar-sextant");
             if sextant.is_file() {
