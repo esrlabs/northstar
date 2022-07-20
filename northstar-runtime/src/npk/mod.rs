@@ -1,4 +1,5 @@
 use crate::common::version::Version;
+use pkg_version::{pkg_version_major, pkg_version_minor, pkg_version_patch};
 
 /// dm-verity for integrity checking of block devices
 pub(crate) mod dm_verity;
@@ -10,5 +11,9 @@ pub mod manifest;
 #[allow(clippy::module_inception)]
 pub mod npk;
 
-/// NPK version
-pub const VERSION: Version = Version::new(0, 1, 1);
+/// API version
+pub const VERSION: Version = Version::new(
+    pkg_version_major!(),
+    pkg_version_minor!(),
+    pkg_version_patch!(),
+);
