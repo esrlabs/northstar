@@ -9,13 +9,15 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use error::RequestError;
 use futures::{SinkExt, Stream, StreamExt};
 use northstar_runtime::{
     api::{
         codec,
         model::{
-            Connect, ConnectNack, Container, ContainerData, Message, MountResult, Notification,
-            RepositoryId, Request, Response, Token, UmountResult, VerificationResult,
+            ConnectNack, Container, ContainerData, InspectResult, InstallResult, Message,
+            MountResult, Notification, RepositoryId, Request, Response, Token, UmountResult,
+            VerificationResult,
         },
     },
     common::non_nul_string::NonNulString,
@@ -87,12 +89,13 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     let mut connection = codec::framed(io);
 
     // Send connect message
-    let connect = Connect::Connect {
-        version: VERSION,
-        subscribe_notifications,
-    };
     connection
-        .send(Message::Connect { connect })
+        .send(Message::Connect {
+            connect: model::Connect {
+                version: VERSION,
+                subscribe_notifications,
+            },
+        })
         .await
         .context("failed to send connection request")?;
 
@@ -103,21 +106,15 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
         .ok_or_else(|| anyhow!("connection closed"))?
         .context("failed to read connection response")?;
 
-    // Expect a connect message
-    let connect = match message {
-        Message::Connect { connect } => connect,
-        _ => unreachable!("expecting connect"),
-    };
-
-    match connect {
-        Connect::Ack { .. } => Ok(connection),
-        Connect::Nack { error } => match error {
+    match message {
+        Message::ConnectAck { .. } => Ok(connection),
+        Message::ConnectNack { connect_nack } => match connect_nack {
             ConnectNack::InvalidProtocolVersion { .. } => {
                 Err(anyhow!("incompatible connection protocol version").into())
             }
             ConnectNack::PermissionDenied => Err(anyhow!("permission denied").into()),
         },
-        _ => unreachable!("expecting connect ack or nack"),
+        _ => unreachable!("expecting connect ack or connect nack"),
     }
 }
 
@@ -245,7 +242,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn ident(&mut self) -> Result<Container, error::RequestError> {
         match self.request(Request::Ident).await? {
             Response::Ident(container) => Ok(container),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on ident should be ident"),
         }
     }
@@ -267,7 +264,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn list(&mut self) -> Result<Vec<Container>, error::RequestError> {
         match self.request(Request::List).await? {
             Response::List(containers) => Ok(containers),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on containers should be containers"),
         }
     }
@@ -289,7 +286,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, error::RequestError> {
         match self.request(Request::Repositories).await? {
             Response::Repositories(repositories) => Ok(repositories),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on repositories should be ok or error"),
         }
     }
@@ -395,13 +392,20 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             env_converted.insert(key, value);
         }
 
-        let args = args_converted;
-        let env = env_converted;
-        let request = Request::Start(container, args, env);
+        let arguments = args_converted;
+        let environment = env_converted;
+        let request = Request::Start {
+            container,
+            arguments,
+            environment,
+        };
 
         match self.request(request).await? {
-            Response::Ok => Ok(()),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::Start(model::StartResult::Ok { .. }) => Ok(()),
+            Response::Start(model::StartResult::Error { error, .. }) => {
+                Err(RequestError::Runtime(error))
+            }
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on start should be ok or error"),
         }
     }
@@ -427,9 +431,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         C::Error: std::error::Error + Send + Sync + 'static,
     {
         let container = container.try_into().context("invalid container")?;
-        match self.request(Request::Kill(container, signal)).await? {
-            Response::Ok => Ok(()),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+        match self.request(Request::Kill { container, signal }).await? {
+            Response::Kill(model::KillResult::Ok { .. }) => Ok(()),
+            Response::Kill(model::KillResult::Error { error, .. }) => {
+                Err(RequestError::Runtime(error))
+            }
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on kill should be ok or error"),
         }
     }
@@ -488,7 +495,10 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         repository: &str,
     ) -> Result<Container, error::RequestError> {
         self.fused()?;
-        let request = Request::Install(repository.into(), size);
+        let request = Request::Install {
+            repository: repository.into(),
+            size,
+        };
         let message = Message::Request { request };
         self.connection
             .send(message)
@@ -528,8 +538,11 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
             match message {
                 Message::Response { response } => match response {
-                    Response::Install(container) => break Ok(container),
-                    Response::Error(error) => break Err(error::RequestError::Runtime(error)),
+                    Response::Install(InstallResult::Ok { container }) => break Ok(container),
+                    Response::Install(InstallResult::Error { error }) => {
+                        break Err(error::RequestError::Runtime(error))
+                    }
+                    Response::PermissionDenied(_) => break Err(RequestError::PermissionDenied),
                     _ => unreachable!("response on install should be container or error"),
                 },
                 Message::Notification { notification } => self.push_notification(notification)?,
@@ -559,9 +572,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         C::Error: std::error::Error + Send + Sync + 'static,
     {
         let container = container.try_into().context("invalid container")?;
-        match self.request(Request::Uninstall(container)).await? {
-            Response::Ok => Ok(()),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+        match self.request(Request::Uninstall { container }).await? {
+            Response::Uninstall(model::UninstallResult::Ok { .. }) => Ok(()),
+            Response::Uninstall(model::UninstallResult::Error { error, .. }) => {
+                Err(RequestError::Runtime(error))
+            }
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on uninstall should be ok or error"),
         }
     }
@@ -623,9 +639,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             result.push(container);
         }
 
-        match self.request(Request::Mount(result)).await? {
+        match self.request(Request::Mount { containers: result }).await? {
             Response::Mount(result) => Ok(result),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on umount_all should be mount"),
         }
     }
@@ -682,9 +698,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             result.push(container);
         }
 
-        match self.request(Request::Umount(result)).await? {
+        match self.request(Request::Umount { containers: result }).await? {
             Response::Umount(result) => Ok(result),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on umount should be umount"),
         }
     }
@@ -707,17 +723,24 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         C::Error: std::error::Error + Send + Sync + 'static,
     {
         let container = container.try_into().context("invalid container")?;
-        match self.request(Request::Inspect(container)).await? {
-            Response::Inspect(container) => Ok(*container),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+        match self.request(Request::Inspect { container }).await? {
+            Response::Inspect(InspectResult::Ok { container: _, data }) => Ok(*data),
+            Response::Inspect(InspectResult::Error {
+                container: _,
+                error,
+            }) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on container_stats should be a container_stats"),
         }
     }
 
     /// Create a token
     ///
-    /// The `target` parameter must be the container name of the container that
-    /// will try to verify the token.
+    /// The `target` parameter must be the container name (without version) of the container that
+    /// will try to verify the token. The token can only be successfully verified by the container
+    /// that is started with the name `target`!
+    /// The `shared` parameter is added into the token in order to make it specific to a dedicated
+    /// purpose, e.g. "mqtt".
     ///
     /// ```no_run
     /// # use std::time::Duration;
@@ -726,7 +749,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// println!("{:?}", client.create_token("target", "hello:0.0.1").await.unwrap());
+    /// println!("{:?}", client.create_token("webserver", "http").await.unwrap());
     /// # }
     /// ```
     pub async fn create_token<R, S>(
@@ -735,19 +758,29 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         shared: S,
     ) -> Result<Token, error::RequestError>
     where
-        R: AsRef<[u8]>,
+        R: TryInto<Name>,
+        R::Error: std::error::Error + Send + Sync + 'static,
         S: AsRef<[u8]>,
     {
-        let target = target.as_ref().to_vec();
+        let target = target.try_into().context("invalid target container name")?;
         let shared = shared.as_ref().to_vec();
-        match self.request(Request::TokenCreate(target, shared)).await? {
+        match self
+            .request(Request::TokenCreate { target, shared })
+            .await?
+        {
             Response::Token(token) => Ok(token),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on token should be a token reponse created"),
         }
     }
 
     /// Verify a slice of bytes with a token
+    ///
+    /// The `token` parameter shall contain a token that is received from a container.
+    /// The `user` parameter must match the name of the container, that created the token
+    /// and send it to the container that want to verify the token.
+    /// `shared` is some salt that makes a token specific for a usecase can must just match
+    /// the value used when the the token is created.
     ///
     /// ```no_run
     /// # use std::time::Duration;
@@ -757,30 +790,35 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
-    /// let token = client.create_token("hello:0.0.1", "target").await.unwrap();
-    /// assert_eq!(client.verify_token(&token, "hello:0.0.1", "target").await.unwrap(), VerificationResult::Ok);
-    /// assert_eq!(client.verify_token(&token, "#noafd", "target").await.unwrap(), VerificationResult::Ok);
+    /// let token = client.create_token("hello", "#noafd").await.unwrap(); // token can only verified by container `hello`
+    /// assert_eq!(client.verify_token(&token, "hello", "#noafd").await.unwrap(), VerificationResult::Ok);
+    /// assert_eq!(client.verify_token(&token, "hello", "").await.unwrap(), VerificationResult::Ok);
     /// # }
     /// ```
     pub async fn verify_token<R, S>(
         &mut self,
         token: &Token,
-        target: R,
+        user: R,
         shared: S,
     ) -> Result<VerificationResult, error::RequestError>
     where
-        R: AsRef<[u8]>,
+        R: TryInto<Name>,
+        R::Error: std::error::Error + Send + Sync + 'static,
         S: AsRef<[u8]>,
     {
         let token = token.clone();
         let shared = shared.as_ref().to_vec();
-        let target = target.as_ref().to_vec();
+        let user = user.try_into().context("invalid user container name")?;
         match self
-            .request(Request::TokenVerify(token, target, shared))
+            .request(Request::TokenVerify {
+                token,
+                user,
+                shared,
+            })
             .await?
         {
             Response::TokenVerification(result) => Ok(result),
-            Response::Error(error) => Err(error::RequestError::Runtime(error)),
+            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
             _ => unreachable!("response on token verification should be a token verification"),
         }
     }

@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use schemars::JsonSchema;
 use serde::{
     de::{Deserializer, Visitor},
     Deserialize, Serialize, Serializer,
@@ -12,7 +11,7 @@ use crate::common::{name::Name, non_nul_string::NonNulString, version::VersionRe
 pub type MountPoint = NonNulString;
 
 /// Resource mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Resource {
     /// Name of the resource container
@@ -27,7 +26,7 @@ pub struct Resource {
 }
 
 /// Bind mount configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bind {
     /// Path in the host filesystem
@@ -38,7 +37,7 @@ pub struct Bind {
 }
 
 /// Tmpfs configuration
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tmpfs {
     /// Size in bytes
@@ -47,7 +46,7 @@ pub struct Tmpfs {
 }
 
 /// Mounts
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Mount {
     /// Bind mount of a host dir with options
@@ -73,7 +72,7 @@ pub enum Mount {
     Tmpfs(Tmpfs),
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 #[allow(missing_docs)]
 /// Mount option
 pub enum MountOption {
@@ -121,7 +120,7 @@ impl fmt::Display for MountOption {
 }
 
 /// Mount option set
-#[derive(Default, Clone, Eq, PartialEq, Debug, JsonSchema)]
+#[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct MountOptions(HashSet<MountOption>);
 
 impl std::ops::Deref for MountOptions {

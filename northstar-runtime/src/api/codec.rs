@@ -75,7 +75,7 @@ impl Encoder<model::Message> for Codec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::model::{Message, Notification, Request, Response};
+    use crate::api::model::{Message, Notification, Request};
     use bytes::BytesMut;
     use proptest::{prelude::Just, prop_oneof, proptest, strategy::Strategy};
 
@@ -105,10 +105,7 @@ mod tests {
                 request: Request::Shutdown
             }),
             Just(Message::Request {
-                request: Request::Mount(vec!())
-            }),
-            Just(Message::Response {
-                response: Response::Ok
+                request: Request::Mount { containers: vec!() },
             }),
             Just(Message::Notification {
                 notification: Notification::Shutdown

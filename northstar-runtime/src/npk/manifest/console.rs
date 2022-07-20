@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use schemars::JsonSchema;
 use serde::{
     de::{Deserializer, Visitor},
     ser::SerializeSeq,
@@ -12,7 +11,7 @@ use strum_macros::{EnumCount, EnumIter};
 
 /// Console Quality of Service
 #[skip_serializing_none]
-#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
     /// Permissions
@@ -28,9 +27,7 @@ pub struct Configuration {
 }
 
 /// Console features. Matches the api request struct and notifications
-#[derive(
-    Clone, Eq, EnumIter, EnumCount, PartialEq, Debug, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Clone, Eq, EnumIter, EnumCount, PartialEq, Debug, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
     /// Identification
@@ -78,7 +75,7 @@ impl fmt::Display for Permission {
 /// ```yaml
 /// console: full
 /// ```
-#[derive(Default, Clone, Eq, PartialEq, Debug, JsonSchema)]
+#[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct Permissions(HashSet<Permission>);
 
 impl Permissions {

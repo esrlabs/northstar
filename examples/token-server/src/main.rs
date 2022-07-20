@@ -31,11 +31,10 @@ async fn main() -> Result<()> {
         reader.read_line(&mut line).await?;
         let mut split = line.split_whitespace();
         let container = split.next().ok_or_else(|| anyhow!("missing name"))?;
-        let token: [u8; 40] = split
+        let token = split
             .next()
             .ok_or_else(|| anyhow!("missing token"))
-            .and_then(|t| hex::decode(t).context("malformed token"))
-            .and_then(|t| t.try_into().map_err(|_| anyhow!("invalid token")))?;
+            .and_then(|t| base64::decode(t).context("malformed token"))?;
         let token: Token = token.into();
 
         println!(

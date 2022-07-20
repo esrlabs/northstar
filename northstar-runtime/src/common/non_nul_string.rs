@@ -1,8 +1,3 @@
-use schemars::{
-    gen::SchemaGenerator,
-    schema::{InstanceType, SchemaObject, StringValidation},
-    JsonSchema,
-};
 use serde::{Deserialize, Serialize, Serializer};
 use std::{
     convert::{TryFrom, TryInto},
@@ -148,25 +143,6 @@ impl<'de> Deserialize<'de> for NonNulString {
     }
 }
 
-impl JsonSchema for NonNulString {
-    fn schema_name() -> String {
-        "NonNulString".to_string()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            string: Some(Box::new(StringValidation {
-                min_length: None,
-                max_length: None,
-                pattern: Some("not nul".into()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 #[test]
 fn try_from() {
     assert!(NonNulString::try_from("hello").is_ok());
@@ -205,9 +181,4 @@ fn deserialize() {
 #[test]
 fn deserialize_with_nul() {
     assert!(serde_json::from_str::<NonNulString>("\"hel\0lo\"").is_err());
-}
-
-#[test]
-fn schema() {
-    schemars::schema_for!(NonNulString);
 }

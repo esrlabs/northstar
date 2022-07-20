@@ -2,7 +2,6 @@ use crate::{
     common::{container::Container, name::Name, non_nul_string::NonNulString, version::Version},
     seccomp::Seccomp,
 };
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{
@@ -49,7 +48,7 @@ pub enum Error {
 
 /// Northstar package manifest
 #[skip_serializing_none]
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema, Validate)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 #[validate(schema(function = "validation::manifest"))]
 pub struct Manifest {
@@ -597,10 +596,5 @@ env:
   NORTHSTAR_VERSION: foo";
         assert!(Manifest::from_str(manifest).is_err());
         Ok(())
-    }
-
-    #[test]
-    fn schema() {
-        schemars::schema_for!(Manifest);
     }
 }
