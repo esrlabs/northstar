@@ -29,9 +29,18 @@ impl<T: AsyncRead + Unpin, IO: Write> AsyncRead for Trace<T, IO> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let mut project = self.project();
-        let result = project.inner.poll_read(cx, buf);
-        io::copy(&mut buf.filled(), &mut project.io)?;
-        result
+        let filled_pre_read = buf.filled().len();
+        match project.inner.poll_read(cx, buf) {
+            Poll::Ready(Ok(())) => {
+                io::copy(
+                    &mut io::Cursor::new(&buf.filled()[filled_pre_read..]),
+                    &mut project.io,
+                )?;
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 
@@ -41,8 +50,14 @@ impl<T: AsyncWrite + Unpin, IO> AsyncWrite for Trace<T, IO> {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
-        io::copy(&mut io::Cursor::new(buf), &mut io::stdout())?;
-        self.project().inner.poll_write(cx, buf)
+        match self.project().inner.poll_write(cx, buf) {
+            Poll::Ready(Ok(n)) if n > 0 => {
+                io::copy(&mut io::Cursor::new(&buf[..n]), &mut io::stdout())?;
+                Poll::Ready(Ok(n))
+            }
+            Poll::Ready(e) => Poll::Ready(e),
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
