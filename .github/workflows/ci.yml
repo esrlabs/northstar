@@ -179,37 +179,5 @@ jobs:
         run: cargo install --path northstar-nstar
       - name: Install northstar-sextant
         run: cargo install --path northstar-sextant
-      - name: Install northstar-seccomp
-        run: cargo install --path northstar-seccomp
-      - name: Install northstar-schema
-        run: cargo install --path northstar-schema
       - name: Install northstar-stress
         run: cargo install --path northstar-stress
-
-  openapi:
-    name: OpenApi
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - name: Cache
-        uses: Swatinem/rust-cache@v1
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install OpenApi Generator
-        run: |
-          curl https://raw.githubusercontent.com/OpenAPITools/openapi-generator/master/bin/utils/openapi-generator-cli.sh > openapi-generator-cli
-          chmod u+x openapi-generator-cli
-          ./openapi-generator-cli version
-      - name: Generate manifest jsonschema/html
-        run: |
-          cargo run --bin northstar-schema -- -m manifest -o manifest.json
-          ./openapi-generator-cli generate -i manifest.json -g html -o manifest.html --skip-validate-spec
-      - name: Generate api jsonschema/html
-        run: |
-          cargo run --bin northstar-schema -- -m api -o api.json
-          ./openapi-generator-cli generate -i api.json -g html -o api.html --skip-validate-spec
