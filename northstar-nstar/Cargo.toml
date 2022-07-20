@@ -10,7 +10,7 @@ repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
 anyhow = "1.0.58"
-clap = { version = "3.2.11", features = ["derive"] }
+clap = { version = "3.2.12", features = ["derive"] }
 clap_complete = "3.2.3"
 futures = { version = "0.3.21", default-features = false }
 hex = "0.4.3"
