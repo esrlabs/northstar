@@ -1,0 +1,49 @@
+@startuml console-notification
+
+participant A
+participant Northstar
+participant B
+
+activate Northstar
+activate A
+activate B
+
+ref over A: connect
+
+A -> Northstar: request ident
+note left
+{
+  "request": "ident"
+}
+end note
+
+
+Northstar <- B: exit
+destroy B
+
+A <- Northstar: exit notification
+note right
+{
+  "notification": {
+    "exit": [
+      "B:0.0.1",
+      {
+        "signalled": {
+          "signal": 15
+        }
+      }
+    ]
+  }
+}
+end note
+
+A <- Northstar: ident response
+note right
+{
+  "response": {
+    "ident": "A:0.0.0"
+  }
+}
+end note
+
+@enduml

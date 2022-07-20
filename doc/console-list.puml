@@ -1,0 +1,45 @@
+@startuml console-list
+
+participant Container
+participant Northstar
+
+activate Northstar
+activate Container
+
+ref over Container: connect
+
+Container -> Northstar: list
+note left
+{
+  "request": "list"
+}
+end note
+Container <- Northstar: response token
+note right
+{
+  "response": {
+    "list": [
+      "seccomp:0.0.1",
+      "redis-client:0.0.1",
+      "persistence:0.0.1",
+      "token-server:0.0.1",
+      "console:0.0.1",
+      "cpueater:0.0.1",
+      "memeater:0.0.1",
+      "message:0.0.1",
+      "hello-resource:0.0.1",
+      "redis:0.0.1",
+      "crashing:0.0.1",
+      "hello-world:0.0.1",
+      "netns:0.0.1",
+      "inspect:0.0.1",
+      "message:0.0.2",
+      "ferris:0.0.1",
+      "hello-ferris:0.0.1",
+      "token-client:0.0.1"
+    ]
+  }
+}
+end note
+
+@enduml

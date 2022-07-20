@@ -1,0 +1,56 @@
+@startuml console-connect
+
+participant Container
+participant Northstar
+
+activate Northstar
+
+Container -> Northstar: connect
+note left
+{
+  "connect": {
+    "version": "0.5.1",
+    "subscribe_notifications": false
+  }
+}
+end note
+activate Container
+alt ack
+Container <- Northstar: connect ack
+note right
+{
+  "connect_ack": {
+    "configuration": {
+      "permissions": [
+        "ident",
+        "token"
+      ]
+    }
+  }
+}
+end note
+else nack
+
+alt nack version
+Container <- Northstar !!: connect nack
+note right
+{
+  "connect_nack": {
+    "invalid_protocol_version": {
+      "version": "0.4.9"
+    }
+  }
+}
+end note
+else nack permission
+Container <- Northstar !!: connect nack
+note right
+{
+  "connect_nack": "permission_denied"
+}
+end note
+
+end
+end
+
+@enduml
