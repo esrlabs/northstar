@@ -9,4 +9,4 @@ license = "Apache-2.0"
 anyhow = "1.0.58"
 caps = "0.5.3"
 clap = { version = "3.2.12", features = ["derive"] }
-nix = { version = "0.24.1", default-features = false, features = ["process", "user"] }
+nix = { version = "0.24.2", default-features = false, features = ["process", "user"] }

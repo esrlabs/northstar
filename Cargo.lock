@@ -294,7 +294,7 @@ checksum = "cf5525f2cf84d5113ab26bfb6474180eb63224b4b1e4be31ee87be4098f11399"
 dependencies = [
  "libc",
  "log",
- "nix 0.24.1",
+ "nix 0.24.2",
  "regex",
  "serde",
 ]
@@ -1034,7 +1034,7 @@ name = "inspect"
 version = "0.0.1"
 dependencies = [
  "caps",
- "nix 0.24.1",
+ "nix 0.24.2",
 ]
 
 [[package]]
@@ -1259,9 +1259,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.24.1"
+version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+checksum = "195cdbc1741b8134346d515b3a56a1c94b0912758009cfd53f99ea0f57b065fc"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -1288,7 +1288,7 @@ dependencies = [
  "clap 3.2.12",
  "env_logger",
  "log",
- "nix 0.24.1",
+ "nix 0.24.2",
  "northstar-runtime",
  "tokio",
  "toml",
@@ -1357,7 +1357,7 @@ dependencies = [
  "memfd",
  "memoffset",
  "nanoid",
- "nix 0.24.1",
+ "nix 0.24.2",
  "proptest",
  "rand_core 0.6.3",
  "rlimit",
@@ -1458,7 +1458,7 @@ dependencies = [
  "log",
  "memfd",
  "nanoid",
- "nix 0.24.1",
+ "nix 0.24.2",
  "northstar-client",
  "northstar-runtime",
  "northstar-tests-derive",
@@ -2421,7 +2421,7 @@ dependencies = [
  "anyhow",
  "caps",
  "clap 3.2.12",
- "nix 0.24.1",
+ "nix 0.24.2",
 ]
 
 [[package]]
