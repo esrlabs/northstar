@@ -13,7 +13,7 @@ lazy_static = "1.4.0"
 log = "0.4.17"
 memfd = "0.6.1"
 nanoid = "0.4.0"
-nix = { version = "0.24.1", default-features = false }
+nix = { version = "0.24.2", default-features = false }
 northstar-client = { version = "^0.5.1", path = "../northstar-client" }
 northstar-runtime = { version = "^0.5.1", path = "../northstar-runtime", features = ["api", "runtime"] }
 northstar-tests-derive = { path = "northstar-tests-derive" }
