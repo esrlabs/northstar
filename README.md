@@ -301,6 +301,24 @@ kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
 **TODO**: List required `CONFIG_` items here. The check_config script runs on
 *Android only
 
+### Runtime permissions
+
+The Northstar runtime requires privileged rights on the host system. The rights
+can be granted either by running Northstar as `root` *or* ensure the following
+list of
+[capabilities(7)](https://man7.org/linux/man-pages/man7/capabilities.7.html):
+
+* `cap_chown`: change ownership of container directories
+* `cap_dac_override`: lazy workaround for permissions on `/dev/mapper/control`
+  and `cgroups`. Do not use in production!
+* `cap_kill`: send signals to container inits
+* `cap_setgid`: supplementary groups
+* `cap_setpcap`: drop capabilities
+* `cap_setuid`: user id
+* `cap_sys_admin`: `mount`, `umount`, setns
+* `cap_sys_chroot`: `chroot` (init)
+* `cap_sys_resource`: increase `rlimits` (init)
+
 ## Internals
 
 ### Container launch sequence
