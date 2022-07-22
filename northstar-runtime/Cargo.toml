@@ -59,7 +59,7 @@ tokio-util = { version = "0.7.3", features = ["codec", "io"], optional = true }
 url = { version = "2.2.2", features = ["serde"], optional = true }
 uuid = { version = "1.1.2", features = ["v4"], optional = true }
 validator = { version = "0.15.0", features = ["derive"], optional = true }
-zeroize = { version = "1.5.6", optional = true }
+zeroize = { version = "1.5.7", optional = true }
 zip = { version = "0.6.2", default-features = false, optional = true }
 
 [features]
