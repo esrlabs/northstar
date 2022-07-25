@@ -1,8 +1,8 @@
 [target.aarch64-linux-android]
-image = "esrlabs/northstar-aarch64-linux-android:latest"
+dockerfile = "docker/Dockerfile.aarch64-linux-android"
 
 [target.aarch64-unknown-linux-gnu]
-image = "esrlabs/northstar-aarch64-unknown-linux-gnu:latest"
+dockerfile = "docker/Dockerfile.aarch64-unknown-linux-gnu"
 
 [target.aarch64-unknown-linux-musl]
-image = "esrlabs/northstar-aarch64-unknown-linux-musl:latest"
+dockerfile = "docker/Dockerfile.aarch64-unknown-linux-musl"
