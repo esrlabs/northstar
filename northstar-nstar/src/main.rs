@@ -82,6 +82,9 @@ enum Subcommand {
     },
     /// Uninstall a container
     Uninstall {
+        /// Wipe containers persistent dir (if present)
+        #[clap(short, long)]
+        wipe: bool,
         /// Container name and optional version
         #[clap(value_name = "name[:version]")]
         container: String,
@@ -320,9 +323,9 @@ async fn main() -> Result<()> {
                 println!("installed {} into {}", npk.display(), repository);
             }
         }
-        Subcommand::Uninstall { container } => {
+        Subcommand::Uninstall { container, wipe } => {
             let container = resolve_container(&container, &mut client).await?;
-            client.uninstall(&container).await?;
+            client.uninstall(&container, wipe).await?;
             if !opt.json {
                 println!("uninstalled {}", container);
             }

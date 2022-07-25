@@ -234,7 +234,10 @@ async fn permissions_install() -> Result<()> {
 #[runtime_test]
 async fn permissions_uninstall() -> Result<()> {
     assert!(matches!(
-        connect_none().await?.uninstall("hello-world:0.0.1").await,
+        connect_none()
+            .await?
+            .uninstall("hello-world:0.0.1", true)
+            .await,
         Err(RequestError::PermissionDenied)
     ));
     Result::<()>::Ok(())

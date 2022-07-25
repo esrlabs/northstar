@@ -144,6 +144,7 @@ pub enum Request {
     },
     Uninstall {
         container: Container,
+        wipe: bool,
     },
 }
 

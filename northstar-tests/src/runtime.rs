@@ -211,7 +211,7 @@ impl Client {
     /// Uninstall the test container and wait for the notification
     pub async fn uninstall_test_container(&mut self) -> Result<()> {
         self.client
-            .uninstall("test-container:0.0.1")
+            .uninstall("test-container:0.0.1", true)
             .await
             .context("failed to uninstall test container")?;
         self.assume_notification(|n| matches!(n, Notification::Uninstall { .. }), 15)
@@ -232,7 +232,7 @@ impl Client {
     /// Uninstall the test resource and wait for the notification
     pub async fn uninstall_test_resource(&mut self) -> Result<()> {
         self.client
-            .uninstall("test-resource:0.0.1")
+            .uninstall("test-resource:0.0.1", true)
             .await
             .context("failed to uninstall test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Uninstall { .. }), 15)
