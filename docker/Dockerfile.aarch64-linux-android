@@ -1,17 +1,5 @@
-FROM rustembedded/cross:aarch64-linux-android
+FROM ghcr.io/cross-rs/aarch64-linux-android:0.2.4
 
-RUN apt-get update
-RUN apt-get install --assume-yes --no-install-recommends --fix-missing libclang-dev wget unzip libz-dev
-
-# Remove the existing npk and replace with r19c
-RUN rm -r /android-ndk
-COPY install-ndk.sh /
-RUN /install-ndk.sh && rm /install-ndk.sh
-
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends --fix-missing libclang-dev wget unzip libz-dev
 COPY install-squashfs-tools.sh /
 RUN /install-squashfs-tools.sh && rm /install-squashfs-tools.sh
-
-ENV PATH=/android-ndk/bin:$PATH \
-    CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=aarch64-linux-android28-clang \
-    CC_aarch64_linux_android=aarch64-linux-android28-clang \
-    CXX_aarch64_linux_android=aarch64-linux-android28-clang++

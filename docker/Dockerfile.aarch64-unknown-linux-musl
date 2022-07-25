@@ -1,4 +1,4 @@
-FROM rustembedded/cross:aarch64-unknown-linux-musl
+FROM ghcr.io/cross-rs/aarch64-unknown-linux-musl:0.2.4
 
 RUN apt update && apt install --assume-yes musl-dev libclang-dev libz-dev
 ENV BINDGEN_EXTRA_CLANG_ARGS="-I/usr/local/aarch64-linux-musl/include"
