@@ -571,13 +571,14 @@ dependencies = [
 
 [[package]]
 name = "devicemapper"
-version = "0.32.0"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7484f3090212fe8db739ae16d70f3a828629095f730ef911b3f99f3fcee5736c"
+checksum = "e9c5453ed77c2eea1d847d86f90727f6d3e437c15fa5452748fb0c4084cee4be"
 dependencies = [
  "bitflags",
  "devicemapper-sys",
- "nix 0.23.1",
+ "lazy_static",
+ "nix 0.24.2",
  "semver 1.0.12",
  "serde",
 ]
@@ -1237,19 +1238,6 @@ name = "nix"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4916f159ed8e5de0082076562152a76b7a1f64a01fd9d1e0fea002c37624faf"
-dependencies = [
- "bitflags",
- "cc",
- "cfg-if",
- "libc",
- "memoffset",
-]
-
-[[package]]
-name = "nix"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
 dependencies = [
  "bitflags",
  "cc",
