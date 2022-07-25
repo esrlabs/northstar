@@ -116,12 +116,13 @@ fn calculate_hmac(time: &time::Duration, user: &[u8], target: &[u8], shared: &[u
     hmac.finalize()
 }
 
-impl From<(time::Duration, [u8; 40])> for Token {
-    fn from((validity, bytes): (time::Duration, [u8; 40])) -> Self {
+impl From<(time::Duration, Vec<u8>)> for Token {
+    fn from((validity, bytes): (time::Duration, Vec<u8>)) -> Self {
+        assert!(bytes.len() == 40);
         let mut time = [0u8; 8];
         time.copy_from_slice(&bytes[..8]);
         let time = time::Duration::from_secs(u64::from_be_bytes(time));
-        let hmac = CtOutput::<HmacSha256>::new(GenericArray::clone_from_slice(&bytes[8..]));
+        let hmac = CtOutput::<HmacSha256>::new(GenericArray::clone_from_slice(&bytes[8..40]));
         Token {
             validity,
             time,
@@ -130,11 +131,11 @@ impl From<(time::Duration, [u8; 40])> for Token {
     }
 }
 
-impl From<Token> for [u8; 40] {
+impl From<Token> for Vec<u8> {
     fn from(token: Token) -> Self {
-        let mut bytes = [0u8; 40];
+        let mut bytes = vec![0u8; 40];
         bytes[..8].copy_from_slice(&token.time.as_secs().to_be_bytes());
-        bytes[8..].copy_from_slice(&token.hmac.into_bytes());
+        bytes[8..40].copy_from_slice(&token.hmac.into_bytes());
         bytes
     }
 }
@@ -236,7 +237,7 @@ mod test {
     #[test]
     fn byte_array_roundtrip() {
         let original = Token::new(VALIDITY, USER, TARGET, SHARED);
-        let bytes: [u8; 40] = original.clone().into();
+        let bytes: Vec<u8> = original.clone().into();
         let token: Token = (VALIDITY, bytes).into();
         assert_eq!(original, token);
     }

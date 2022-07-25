@@ -18,8 +18,6 @@ members = [
     "northstar-client",
     "northstar-nstar",
     "northstar-runtime",
-    "northstar-schema",
-    "northstar-seccomp",
     "northstar-sextant",
     "northstar-stress",
     "northstar-tests",

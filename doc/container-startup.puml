@@ -1,4 +1,4 @@
-@startuml container_startup
+@startuml container-startup
 
 create Client
 activate Client

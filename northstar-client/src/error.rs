@@ -6,6 +6,8 @@ use thiserror::Error;
 pub enum RequestError {
     #[error("runtime error: {0:?}")]
     Runtime(northstar_runtime::api::model::Error),
+    #[error("permission denied")]
+    PermissionDenied,
     #[error("notification consumer lagged")]
     LaggedNotifications,
     #[error(transparent)]

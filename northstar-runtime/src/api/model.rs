@@ -1,15 +1,8 @@
-use crate::common::name::Name;
-use schemars::{
-    gen::SchemaGenerator,
-    schema::{InstanceType, SchemaObject},
-    JsonSchema,
-};
-use serde::{de::Visitor, Deserialize, Serialize, Serializer};
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-};
+use serde::{Deserialize, Serialize, Serializer};
+use std::collections::{HashMap, HashSet};
 
+/// Container name
+pub type Name = crate::common::name::Name;
 /// Console configuration
 pub type ConsoleConfiguration = crate::npk::manifest::console::Configuration;
 /// Console permission entity
@@ -34,18 +27,20 @@ pub type Version = crate::common::version::Version;
 pub type ContainerStats = HashMap<String, serde_json::Value>;
 
 /// Message
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[allow(missing_docs)]
 #[serde(untagged)]
 pub enum Message {
     Connect { connect: Connect },
+    ConnectAck { connect_ack: ConnectAck },
+    ConnectNack { connect_nack: ConnectNack },
     Request { request: Request },
     Response { response: Response },
     Notification { notification: Notification },
 }
 
 /// Notification / Event
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Notification {
@@ -58,7 +53,7 @@ pub enum Notification {
 }
 
 /// Cgroup event
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum CgroupNotification {
@@ -66,7 +61,7 @@ pub enum CgroupNotification {
 }
 
 /// CGroup memory event data
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub struct MemoryNotification {
@@ -77,28 +72,27 @@ pub struct MemoryNotification {
     pub oom_kill: Option<u64>,
 }
 
-/// Connect meta information
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+/// Connect
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
-pub enum Connect {
-    Connect {
-        /// API version
-        version: Version,
-        /// Subscribe this connection to notifications
-        subscribe_notifications: bool,
-    },
-    /// Ack
-    Ack { configuration: ConsoleConfiguration },
-    /// Nack
-    Nack {
-        /// Nack reason
-        error: ConnectNack,
-    },
+pub struct Connect {
+    /// API version
+    pub version: Version,
+    /// Subscribe this connection to notifications
+    pub subscribe_notifications: bool,
+}
+
+/// Connection ack
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub struct ConnectAck {
+    pub configuration: ConsoleConfiguration,
 }
 
 /// Connection nack
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum ConnectNack {
@@ -107,32 +101,55 @@ pub enum ConnectNack {
 }
 
 /// Request
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Request {
-    Inspect(Container),
+    Inspect {
+        container: Container,
+    },
     Ident,
-    Install(RepositoryId, u64),
-    Kill(Container, i32),
+    Install {
+        repository: RepositoryId,
+        size: u64,
+    },
+    Kill {
+        container: Container,
+        signal: i32,
+    },
     List,
-    Mount(Vec<Container>),
+    Mount {
+        containers: Vec<Container>,
+    },
     Repositories,
     Shutdown,
-    Start(
-        Container,
-        Vec<NonNulString>,
-        HashMap<NonNulString, NonNulString>,
-    ),
-    TokenCreate(Vec<u8>, Vec<u8>),
-    TokenVerify(Token, Vec<u8>, Vec<u8>),
-    Umount(Vec<Container>),
-    Uninstall(Container),
+    Start {
+        container: Container,
+        arguments: Vec<NonNulString>,
+        environment: HashMap<NonNulString, NonNulString>,
+    },
+    TokenCreate {
+        target: Name,
+        #[serde(with = "base64")]
+        shared: Vec<u8>,
+    },
+    TokenVerify {
+        token: Token,
+        user: Name,
+        #[serde(with = "base64")]
+        shared: Vec<u8>,
+    },
+    Umount {
+        containers: Vec<Container>,
+    },
+    Uninstall {
+        container: Container,
+    },
 }
 
 /// Token
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub struct Token([u8; 40]);
+pub struct Token(Vec<u8>);
 
 impl AsRef<[u8]> for Token {
     fn as_ref(&self) -> &[u8] {
@@ -140,20 +157,14 @@ impl AsRef<[u8]> for Token {
     }
 }
 
-impl From<Token> for [u8; 40] {
-    fn from(value: Token) -> Self {
-        value.0
-    }
-}
-
-impl From<[u8; 40]> for Token {
-    fn from(value: [u8; 40]) -> Self {
-        Self(value)
+impl From<Vec<u8>> for Token {
+    fn from(value: Vec<u8>) -> Self {
+        Token(value)
     }
 }
 
 /// Token verification result
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerificationResult {
     /// Verification succeeded
     Ok,
@@ -166,7 +177,7 @@ pub enum VerificationResult {
 }
 
 /// Container information
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ContainerData {
     /// Container manifest
@@ -180,7 +191,7 @@ pub struct ContainerData {
 }
 
 /// Process information
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Process {
     /// Process id
@@ -191,8 +202,8 @@ pub struct Process {
     pub statistics: ContainerStats,
 }
 
-/// Result of a mount operation
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+/// Mount result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum MountResult {
@@ -200,8 +211,8 @@ pub enum MountResult {
     Error { container: Container, error: Error },
 }
 
-/// Result of a umount operation
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+/// Unmount result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum UmountResult {
@@ -209,26 +220,80 @@ pub enum UmountResult {
     Error { container: Container, error: Error },
 }
 
+/// Start result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum StartResult {
+    Ok { container: Container },
+    Error { container: Container, error: Error },
+}
+
+/// Kill result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum KillResult {
+    Ok { container: Container },
+    Error { container: Container, error: Error },
+}
+
+/// Installation result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum InstallResult {
+    Ok { container: Container },
+    Error { error: Error },
+}
+
+/// Uninstallation result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum UninstallResult {
+    Ok { container: Container },
+    Error { container: Container, error: Error },
+}
+
+/// Inspect result
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum InspectResult {
+    Ok {
+        container: Container,
+        data: Box<ContainerData>,
+    },
+    Error {
+        container: Container,
+        error: Error,
+    },
+}
+
 /// Response
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Response {
-    Ok,
-    Error(Error),
     Ident(Container),
-    Inspect(Box<ContainerData>),
-    Install(Container),
+    Inspect(InspectResult),
+    Install(InstallResult),
+    Kill(KillResult),
     List(Vec<Container>),
     Mount(Vec<MountResult>),
+    PermissionDenied(Request),
     Repositories(HashSet<RepositoryId>),
+    Shutdown,
+    Start(StartResult),
     Token(Token),
     TokenVerification(VerificationResult),
     Umount(Vec<UmountResult>),
+    Uninstall(UninstallResult),
 }
 
 /// Container exit status
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExitStatus {
     /// Process exited with exit code
@@ -244,18 +309,12 @@ pub enum ExitStatus {
 }
 
 /// API error
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Error {
     Configuration {
         context: String,
-    },
-    PermissionDenied {
-        /// Permissions of this connections
-        permissions: HashSet<ConsolePermission>,
-        /// Required permission that was denied
-        required: ConsolePermission,
     },
     DuplicateContainer {
         container: Container,
@@ -307,57 +366,35 @@ pub enum Error {
 
 impl Serialize for Token {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(&self.0)
+        if self.0.len() == 40 {
+            base64::serialize(&self.0, serializer)
+        } else {
+            Err(serde::ser::Error::custom("invalid length"))
+        }
     }
 }
 
 impl<'de> Deserialize<'de> for Token {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct TokenVisitor;
-
-        impl<'de> Visitor<'de> for TokenVisitor {
-            type Value = Token;
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a 40 byte sequence")
-            }
-
-            fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
-                if v.len() != 40 {
-                    return Err(serde::de::Error::custom("token length is 40 bytes"));
-                }
-                Ok(Token(v.try_into().map_err(|_| {
-                    serde::de::Error::custom("token is not 40 bytes")
-                })?))
-            }
-
-            fn visit_seq<A: serde::de::SeqAccess<'de>>(
-                self,
-                mut seq: A,
-            ) -> Result<Self::Value, A::Error> {
-                let mut v = [0u8; 40];
-                for b in &mut v {
-                    *b = seq
-                        .next_element()?
-                        .ok_or_else(|| serde::de::Error::custom("token is not 40 bytes"))?;
-                }
-                Ok(Token(v))
-            }
+        let token = base64::deserialize(deserializer)?;
+        if token.len() == 40 {
+            Ok(Token(token))
+        } else {
+            Err(serde::de::Error::custom("invalid length"))
         }
-
-        deserializer.deserialize_bytes(TokenVisitor)
     }
 }
 
-impl JsonSchema for Token {
-    fn schema_name() -> String {
-        "Token".to_string()
+mod base64 {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
+        let base64 = base64::encode(v);
+        String::serialize(&base64, s)
     }
 
-    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::Array.into()),
-            ..Default::default()
-        }
-        .into()
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let base64 = String::deserialize(d)?;
+        base64::decode(base64.as_bytes()).map_err(serde::de::Error::custom)
     }
 }

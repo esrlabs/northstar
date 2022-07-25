@@ -7,8 +7,8 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.58"
+base64 = "0.13.0"
 futures = { version = "0.3.21", default-features = false }
-hex = "0.4.3"
 northstar-client= { path = "../../northstar-client" }
 tokio = { version = "1.20.0", features = ["macros", "rt", "net"] }
 tokio-util = { version = "0.7.3", features = ["codec"] }

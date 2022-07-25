@@ -1,8 +1,7 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// IO configuration for stdin, stdout, stderr
-#[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Io {
     /// stdout configuration
@@ -12,7 +11,7 @@ pub struct Io {
 }
 
 /// Io redirection for stdout/stderr
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Output {
     /// Discard output
     #[serde(rename = "discard")]
@@ -32,7 +31,7 @@ impl Default for Output {
 }
 
 /// Log level
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
     /// The "error" level.

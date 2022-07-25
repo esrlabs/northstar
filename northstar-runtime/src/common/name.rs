@@ -1,9 +1,4 @@
 use anyhow::{bail, Result};
-use schemars::{
-    gen::SchemaGenerator,
-    schema::{InstanceType, SchemaObject, StringValidation},
-    JsonSchema,
-};
 use serde::{de::Visitor, Deserialize, Serialize, Serializer};
 use std::{
     convert::{TryFrom, TryInto},
@@ -128,25 +123,6 @@ impl<'de> Deserialize<'de> for Name {
     }
 }
 
-impl JsonSchema for Name {
-    fn schema_name() -> String {
-        "Name".to_string()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            string: Some(Box::new(StringValidation {
-                min_length: Some(1),
-                max_length: Some(MAX_LENGTH as u32),
-                pattern: Some("([0-9]|[A-Z]|[a-z]|\\.|_|-)+".into()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 #[test]
 fn try_empty() {
     assert!(Name::try_from("").is_err());
@@ -188,9 +164,4 @@ fn deserialize() {
         Ok(n) if n == Name::try_from("a").unwrap()
     ));
     assert!(matches!(serde_json::from_str::<Name>("\"a\0\""), Err(_)));
-}
-
-#[test]
-fn schema() {
-    schemars::schema_for!(Name);
 }

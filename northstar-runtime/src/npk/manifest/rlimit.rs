@@ -1,8 +1,7 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Resource limits. See setrlimit(2)
-#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all(serialize = "lowercase", deserialize = "lowercase"))]
 pub enum RLimitResource {
     /// Address space
@@ -53,7 +52,7 @@ pub enum RLimitResource {
 }
 
 /// Value for a rlimit setting
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct RLimitValue {
     /// Soft limit value for resource. None indicates `unlimited`.
     pub soft: Option<u64>,

@@ -4,7 +4,7 @@
 #![deny(missing_docs)]
 
 use anyhow::{anyhow, bail, Context, Result};
-use clap::{self, IntoApp, Parser};
+use clap::{self, Parser};
 use futures::StreamExt;
 use northstar_client::{
     model::{Container, Token},
@@ -19,7 +19,9 @@ use tokio::{
 use tokio_util::either::Either;
 use trace::Trace;
 
+mod completion;
 mod pretty;
+mod seccomp;
 mod trace;
 
 /// Default nstar address
@@ -94,7 +96,7 @@ enum Subcommand {
     },
     /// Shell completion script generation
     Completion {
-        /// Output directory where to generate completions into
+        /// Output file where to generate completions into.
         #[clap(short, long)]
         output: Option<PathBuf>,
         /// Generate completions for shell type
@@ -119,12 +121,20 @@ enum Subcommand {
         /// Token
         token: String,
         /// User
-        target: String,
+        user: String,
         /// Shared info
         shared: String,
     },
     /// Identification
     Ident,
+    /// Generate seccomp profile from strace
+    Seccomp {
+        /// Path to strace log file
+        input: PathBuf,
+        /// Whether or not to allow the syscalls defined by the default profile
+        #[clap(long)]
+        no_default_profile: bool,
+    },
 }
 
 /// Northstar console client
@@ -134,7 +144,7 @@ struct Opt {
     /// Northstar address
     #[clap(short, long, default_value = DEFAULT_HOST)]
     pub url: url::Url,
-    /// Output the raw json payload
+    /// Output raw json payload
     #[clap(short, long)]
     pub json: bool,
     /// Connect timeout in seconds
@@ -187,28 +197,19 @@ async fn main() -> Result<()> {
     let timeout = time::Duration::from_secs(5);
 
     // Generate shell completions and exit on give subcommand
-    if let Subcommand::Completion { output, shell } = opt.command {
-        let mut output: Box<dyn std::io::Write> = match output {
-            Some(path) => {
-                println!("Generating {} completions to {}", shell, path.display());
-                let file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(&path)
-                    .with_context(|| format!("failed to open {}", path.display()))?;
-                Box::new(file)
-            }
-            None => Box::new(std::io::stdout()),
-        };
-
-        clap_complete::generate(
-            shell,
-            &mut Opt::command(),
-            Opt::command().get_name().to_string(),
-            &mut output,
-        );
-
-        process::exit(0);
+    match opt.command {
+        Subcommand::Completion { output, shell } => {
+            completion::completion(output, shell)?;
+            process::exit(0);
+        }
+        Subcommand::Seccomp {
+            input,
+            no_default_profile,
+        } => {
+            seccomp::seccomp(input, no_default_profile)?;
+            process::exit(0);
+        }
+        _ => (),
     }
 
     let io = match opt.url.scheme() {
@@ -232,7 +233,7 @@ async fn main() -> Result<()> {
         _ => return Err(anyhow!("invalid url")),
     };
 
-    let notifications = if let Subcommand::Notifications { .. } = opt.command {
+    let notifications = if let Subcommand::Notifications { .. } = &opt.command {
         Some(100)
     } else {
         None
@@ -340,24 +341,23 @@ async fn main() -> Result<()> {
             }
         }
         Subcommand::Token { target, shared } => {
-            let target = target.as_bytes().to_vec();
+            let target = Name::try_from(target)?;
             let shared = shared.as_bytes().to_vec();
-            let token = client.create_token(&target, &shared).await?;
+            let token = client.create_token(target, &shared).await?;
             if !opt.json {
-                println!("created {}", hex::encode(token))
+                println!("created token {}", base64::encode(token))
             }
         }
         Subcommand::VerifyToken {
             token,
-            target,
+            user,
             shared,
         } => {
-            let target = target.as_bytes().to_vec();
+            let user = Name::try_from(user)?;
             let shared = shared.as_bytes().to_vec();
-            let token = hex::decode(token.as_bytes()).context("invalid token")?;
-            let token: [u8; 40] = token.try_into().map_err(|_| anyhow!("invalid token"))?;
+            let token = base64::decode(token.as_bytes()).context("invalid token")?;
             let token: Token = token.into();
-            let result = client.verify_token(&token, &target, shared).await?;
+            let result = client.verify_token(&token, user, shared).await?;
             if !opt.json {
                 println!("{:?}", result);
             }
@@ -374,7 +374,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Subcommand::Completion { .. } => unreachable!(),
+        _ => unreachable!(),
     }
 
     Ok(())

@@ -845,7 +845,7 @@ impl State {
                 let payload = match request {
                     model::Request::List => model::Response::List(self.list_containers()),
                     model::Request::Install { .. } => unreachable!(),
-                    model::Request::Mount(containers) => {
+                    model::Request::Mount { containers } => {
                         let result = self
                             .mount_all(containers)
                             .await
@@ -861,7 +861,7 @@ impl State {
                             .collect();
                         model::Response::Mount(result)
                     }
-                    model::Request::Umount(containers) => {
+                    model::Request::Umount { containers } => {
                         let result = self
                             .umount_all(containers)
                             .await
@@ -886,46 +886,82 @@ impl State {
                             .send(Event::Shutdown)
                             .await
                             .expect("Internal channel error on main");
-                        model::Response::Ok
+                        model::Response::Shutdown
                     }
-                    model::Request::Start(container, args, env) => {
-                        match self.start(container, args, env).await {
-                            Ok(_) => model::Response::Ok,
+                    model::Request::Start {
+                        container,
+                        arguments,
+                        environment,
+                    } => {
+                        let result = match self.start(container, arguments, environment).await {
+                            Ok(_) => model::StartResult::Ok {
+                                container: container.clone(),
+                            },
                             Err(e) => {
                                 warn!("failed to start {}: {}", container, e);
-                                model::Response::Error(e.into())
+                                model::StartResult::Error {
+                                    container: container.clone(),
+                                    error: e.into(),
+                                }
                             }
-                        }
+                        };
+                        model::Response::Start(result)
                     }
-                    model::Request::Kill(container, signal) => match Signal::try_from(*signal) {
-                        Ok(signal) => match self.kill(container, signal).await {
-                            Ok(_) => model::Response::Ok,
+                    model::Request::Kill { container, signal } => {
+                        let result = match Signal::try_from(*signal) {
+                            Ok(signal) => match self.kill(container, signal).await {
+                                Ok(_) => model::KillResult::Ok {
+                                    container: container.clone(),
+                                },
+                                Err(e) => {
+                                    error!("failed to kill {} with {}: {}", container, signal, e);
+                                    model::KillResult::Error {
+                                        container: container.clone(),
+                                        error: e.into(),
+                                    }
+                                }
+                            },
                             Err(e) => {
                                 error!("failed to kill {} with {}: {}", container, signal, e);
-                                model::Response::Error(e.into())
+                                let error = model::Error::Unexpected {
+                                    error: e.to_string(),
+                                };
+                                model::KillResult::Error {
+                                    container: container.clone(),
+                                    error,
+                                }
                             }
-                        },
-                        Err(e) => {
-                            error!("failed to kill {} with {}: {}", container, signal, e);
-                            model::Response::Error(model::Error::Unexpected {
-                                error: e.to_string(),
-                            })
-                        }
-                    },
-                    model::Request::Uninstall(container) => match self.uninstall(container).await {
-                        Ok(_) => api::model::Response::Ok,
-                        Err(e) => {
-                            warn!("failed to uninstall {}: {}", container, e);
-                            model::Response::Error(e.into())
-                        }
-                    },
-                    model::Request::Inspect(container) => match self.inspect(container) {
-                        Ok(data) => model::Response::Inspect(Box::new(data)),
-                        Err(e) => model::Response::Error(e.into()),
+                        };
+                        model::Response::Kill(result)
+                    }
+                    model::Request::Uninstall { container } => {
+                        let result = match self.uninstall(container).await {
+                            Ok(_) => model::UninstallResult::Ok {
+                                container: container.clone(),
+                            },
+                            Err(e) => {
+                                warn!("failed to uninstall {}: {}", container, e);
+                                model::UninstallResult::Error {
+                                    container: container.clone(),
+                                    error: e.into(),
+                                }
+                            }
+                        };
+                        model::Response::Uninstall(result)
+                    }
+                    model::Request::Inspect { container } => match self.inspect(container) {
+                        Ok(data) => model::Response::Inspect(model::InspectResult::Ok {
+                            container: container.clone(),
+                            data: Box::new(data),
+                        }),
+                        Err(e) => model::Response::Inspect(model::InspectResult::Error {
+                            container: container.clone(),
+                            error: e.into(),
+                        }),
                     },
                     model::Request::Ident => unreachable!(), // handled in module console
-                    model::Request::TokenCreate(..) => unreachable!(), // handled in module console
-                    model::Request::TokenVerify(..) => unreachable!(), // handled in module console
+                    model::Request::TokenCreate { .. } => unreachable!(), // handled in module console
+                    model::Request::TokenVerify { .. } => unreachable!(), // handled in module console
                 };
 
                 // A error on the response_tx means that the connection
@@ -934,8 +970,12 @@ impl State {
             }
             Request::Install(repository, mut rx) => {
                 let payload = match self.install(&repository, &mut rx).await {
-                    Ok(container) => model::Response::Install(container),
-                    Err(e) => model::Response::Error(e.into()),
+                    Ok(container) => {
+                        model::Response::Install(model::InstallResult::Ok { container })
+                    }
+                    Err(e) => {
+                        model::Response::Install(model::InstallResult::Error { error: e.into() })
+                    }
                 };
 
                 // A error on the response_tx means that the connection

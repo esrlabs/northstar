@@ -1,6 +1,6 @@
 use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
-    api::{self, codec::Framed, VERSION as API_VERSION},
+    api::{self, codec::Framed, VERSION},
     common::container::Container,
     runtime::{token::Token, EventTx, ExitStatus},
 };
@@ -15,6 +15,7 @@ use futures::{
 };
 use listener::Listener;
 use log::{debug, info, trace, warn};
+use semver::Comparator;
 use std::{fmt, path::Path, unreachable};
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
@@ -174,7 +175,7 @@ impl Console {
             Ok(Some(Ok(m))) => match m {
                 model::Message::Connect {
                     connect:
-                        model::Connect::Connect {
+                        model::Connect {
                             version,
                             subscribe_notifications,
                         },
@@ -199,17 +200,24 @@ impl Console {
         };
 
         // Check protocol version from connect message against local model version
-        if protocol_version != API_VERSION {
+        let version_request = semver::VersionReq {
+            comparators: vec![Comparator {
+                op: semver::Op::GreaterEq,
+                major: VERSION.major,
+                minor: Some(VERSION.minor),
+                patch: None,
+                pre: semver::Prerelease::default(),
+            }],
+        };
+        let protocol_version = &protocol_version;
+        if !version_request.matches(&(protocol_version.into())) {
             warn!(
-                "{}: Client connected with invalid protocol version {}. Expected {}. Disconnecting...",
-                peer, protocol_version, API_VERSION
+                "{}: Client connected with insufficent protocol version {}. Expected {}. Disconnecting...",
+                peer, protocol_version, VERSION
             );
             // Send a ConnectNack and return -> closes the connection
-            let error = model::ConnectNack::InvalidProtocolVersion {
-                version: API_VERSION,
-            };
-            let connect = model::Connect::Nack { error };
-            let message = model::Message::Connect { connect };
+            let connect_nack = model::ConnectNack::InvalidProtocolVersion { version: VERSION };
+            let message = model::Message::ConnectNack { connect_nack };
             stream.send(message).await.ok();
             return Ok(());
         }
@@ -222,18 +230,17 @@ impl Console {
                 peer
             );
             // Send a ConnectNack and return -> closes the connection
-            let error = model::ConnectNack::PermissionDenied;
-            let connect = model::Connect::Nack { error };
-            let message = model::Message::Connect { connect };
+            let connect_nack = model::ConnectNack::PermissionDenied;
+            let message = model::Message::ConnectNack { connect_nack };
             stream.send(message).await.ok();
             return Ok(());
         }
 
         // Looks good - send ConnectAck
-        let connect = model::Connect::Ack {
+        let connect_ack = model::ConnectAck {
             configuration: configuration.clone(),
         };
-        let message = model::Message::Connect { connect };
+        let message = model::Message::ConnectAck { connect_ack };
         if let Err(e) = stream.send(message).await {
             warn!("{}: Connection error: {}", peer, e);
             return Ok(());
@@ -335,7 +342,6 @@ async fn process_request<S>(
 where
     S: AsyncRead + Unpin,
 {
-    let permissions = &configuration.permissions;
     let required_permission = match &request {
         model::Request::Ident { .. } => Permission::Ident,
         model::Request::Inspect { .. } => Permission::Inspect,
@@ -352,12 +358,10 @@ where
         model::Request::Uninstall { .. } => Permission::Uninstall,
     };
 
+    let permissions = &configuration.permissions;
     if !permissions.contains(&required_permission) {
         return Ok(model::Message::Response {
-            response: model::Response::Error(model::Error::PermissionDenied {
-                permissions: permissions.iter().cloned().collect(),
-                required: required_permission,
-            }),
+            response: model::Response::PermissionDenied(request),
         });
     }
 
@@ -366,13 +370,16 @@ where
         model::Request::Ident => {
             let ident = match peer {
                 #[allow(clippy::unwrap_used)]
-                Peer::Extern(_) => Container::try_from("remote:0.0.0").unwrap(),
+                Peer::Extern(_) => Container::try_from("extern:0.0.0").unwrap(),
                 Peer::Container(container) => container.clone(),
             };
             let response = api::model::Response::Ident(ident);
             reply_tx.send(response).ok();
         }
-        model::Request::Install(repository, mut size) => {
+        model::Request::Install {
+            repository,
+            mut size,
+        } => {
             debug!(
                 "{}: Received installation request with size {}",
                 peer,
@@ -425,35 +432,40 @@ where
                 tx.send(buf).await.ok();
             }
         }
-        model::Request::TokenCreate(target, shared) => {
+        model::Request::TokenCreate { target, shared } => {
             let user = match peer {
                 Peer::Extern(_) => "extern",
                 Peer::Container(container) => container.name().as_ref(),
             };
             info!(
                 "Creating token for user \"{}\" and target \"{}\" with shared \"{}\"",
-                hex::encode(&user),
-                hex::encode(&target),
+                user,
+                target,
                 hex::encode(&shared)
             );
-            let token: [u8; 40] = Token::new(token_validity, user, target, shared).into();
+            let token: Vec<u8> = Token::new(token_validity, user, target, shared).into();
             let token = api::model::Token::from(token);
             let response = api::model::Response::Token(token);
             reply_tx.send(response).ok();
         }
-        model::Request::TokenVerify(token, user, shared) => {
+        model::Request::TokenVerify {
+            token,
+            user,
+            shared,
+        } => {
+            // The target is the container name, this connection belongs to.
             let target = match peer {
                 Peer::Extern(_) => "extern",
                 Peer::Container(container) => container.name().as_ref(),
             };
             info!(
                 "Verifiying token for user \"{}\" and target \"{}\" with shared \"{}\"",
-                hex::encode(&user),
-                hex::encode(&target),
+                user,
+                target,
                 hex::encode(&shared)
             );
-            let token: [u8; 40] = token.into();
-            let token = Token::from((token_validity, token));
+            // The token has a valid length - verified by serde::deserialize
+            let token = Token::from((token_validity, token.as_ref().to_vec()));
             let result = token.verify(user, target, &shared).into();
             let response = api::model::Response::TokenVerification(result);
             reply_tx.send(response).ok();

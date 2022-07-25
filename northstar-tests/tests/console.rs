@@ -1,14 +1,13 @@
 use std::{iter, path::Path};
 
 use anyhow::{Context, Result};
-use api::model::Error as ModelError;
 use futures::{SinkExt, StreamExt};
 use northstar_client::{error::RequestError, Client};
 use northstar_runtime::api::{
     self,
-    model::{self, ConnectNack, Container},
+    model::{self, Container},
 };
-use northstar_tests::runtime_test;
+use northstar_tests::{runtime::client, runtime_test};
 use tokio::{net::UnixStream, time::Duration};
 
 /// Connect a client to the runtime console without any permission configured.
@@ -19,37 +18,88 @@ async fn connect_none() -> Result<northstar_client::Client<UnixStream>> {
         .context("failed to connect to the runtime")
 }
 
-// Verify that the client() reject a version mismatch in Connect
+// Connect with exact version
 #[runtime_test]
-async fn api_version() -> Result<()> {
+async fn api_version_match() -> Result<()> {
     let mut connection = api::codec::framed(
         UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?,
     );
-
-    // Send a connect with an version unequal to the one defined in the model
-    let mut version = api::VERSION;
-    version.major += 1;
-
-    let connect = api::model::Connect::Connect {
-        version,
-        subscribe_notifications: false,
+    let connect_message = api::model::Message::Connect {
+        connect: api::model::Connect {
+            version: api::VERSION,
+            subscribe_notifications: false,
+        },
     };
-    let connect_message = api::model::Message::Connect { connect };
     connection.send(connect_message.clone()).await?;
-
-    // Receive connect nack
-    let connack = connection.next().await.unwrap().unwrap();
-
-    drop(connection);
-
-    let error = ConnectNack::InvalidProtocolVersion {
-        version: api::VERSION,
-    };
-    let connect = model::Connect::Nack { error };
-    let expected_message = model::Message::Connect { connect };
-
-    assert_eq!(connack, expected_message);
+    match connection.next().await.unwrap().unwrap() {
+        model::Message::ConnectAck { .. } => (),
+        _ => panic!("unexpected message"),
+    }
+    client().list().await?;
     Ok(())
+}
+
+// Connect too low version
+#[runtime_test]
+async fn api_version_low() -> Result<()> {
+    let mut connection = api::codec::framed(
+        UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?,
+    );
+    let mut version = api::VERSION.clone();
+    version.minor -= 1;
+    let connect_message = api::model::Message::Connect {
+        connect: api::model::Connect {
+            version,
+            subscribe_notifications: false,
+        },
+    };
+    connection.send(connect_message.clone()).await?;
+    match connection.next().await.unwrap().unwrap() {
+        model::Message::ConnectNack { .. } => Ok(()),
+        _ => panic!("unexpected message"),
+    }
+}
+
+// Connect with higher version
+#[runtime_test]
+async fn api_version_higher() -> Result<()> {
+    let mut connection = api::codec::framed(
+        UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?,
+    );
+    let mut version = api::VERSION.clone();
+    version.patch += 1;
+    let connect_message = api::model::Message::Connect {
+        connect: api::model::Connect {
+            version,
+            subscribe_notifications: false,
+        },
+    };
+    connection.send(connect_message.clone()).await?;
+    match connection.next().await.unwrap().unwrap() {
+        model::Message::ConnectAck { .. } => Ok(()),
+        _ => panic!("unexpected message"),
+    }
+}
+
+// Connect with incompatibel minor version
+#[runtime_test]
+async fn api_version_minor_version_low() -> Result<()> {
+    let mut connection = api::codec::framed(
+        UnixStream::connect(&northstar_tests::runtime::console_none().path()).await?,
+    );
+    let mut version = api::VERSION.clone();
+    version.minor -= 1;
+    let connect_message = api::model::Message::Connect {
+        connect: api::model::Connect {
+            version,
+            subscribe_notifications: false,
+        },
+    };
+    connection.send(connect_message.clone()).await?;
+    match connection.next().await.unwrap().unwrap() {
+        model::Message::ConnectNack { .. } => Ok(()),
+        _ => panic!("unexpected message"),
+    }
 }
 
 /// Expect the connection to be closed if a request with a too long line is sent.
@@ -61,9 +111,9 @@ async fn too_long_line() -> Result<()> {
 
     // The default json line limit is 512K
     let container = Container::try_from("hello-world:0.0.1").unwrap();
-    let mount = iter::repeat(container).take(100000).collect();
+    let containers = iter::repeat(container).take(100000).collect();
 
-    match client.request(model::Request::Mount(mount)).await {
+    match client.request(model::Request::Mount { containers }).await {
         Ok(_) => panic!("expected IO error"),
         Err(_) => Ok(()),
     }
@@ -77,7 +127,10 @@ async fn npk_size_limit_violation() -> Result<()> {
     let mut client = northstar_client::Client::new(io, None, timeout).await?;
 
     match client
-        .request(model::Request::Install("mem".into(), 999999999))
+        .request(model::Request::Install {
+            repository: "mem".into(),
+            size: 999999999,
+        })
         .await
     {
         Ok(_) => panic!("expected IO error"),
@@ -118,7 +171,7 @@ async fn notifications() -> Result<()> {
 async fn permissions_list() -> Result<()> {
     assert!(matches!(
         connect_none().await?.list().await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -127,7 +180,7 @@ async fn permissions_list() -> Result<()> {
 async fn permissions_repositories() -> Result<()> {
     assert!(matches!(
         connect_none().await?.repositories().await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -136,21 +189,21 @@ async fn permissions_repositories() -> Result<()> {
 async fn permissions_start() -> Result<()> {
     assert!(matches!(
         connect_none().await?.start("hello-world:0.0.1").await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     assert!(matches!(
         connect_none()
             .await?
             .start_with_args("hello-world:0.0.1", ["--help"])
             .await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     assert!(matches!(
         connect_none()
             .await?
             .start_with_args_env("hello-world:0.0.1", ["--help"], [("HELLO", "YOU")])
             .await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -159,7 +212,7 @@ async fn permissions_start() -> Result<()> {
 async fn permissions_kill() -> Result<()> {
     assert!(matches!(
         connect_none().await?.kill("hello-world:0.0.1", 15).await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -167,11 +220,13 @@ async fn permissions_kill() -> Result<()> {
 #[runtime_test]
 async fn permissions_install() -> Result<()> {
     assert!(matches!(
-        connect_none()
-            .await?
-            .install_file(Path::new("/etc/hosts"), "mem")
-            .await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        dbg!(
+            connect_none()
+                .await?
+                .install_file(Path::new("/etc/hosts"), "mem")
+                .await
+        ),
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -180,7 +235,7 @@ async fn permissions_install() -> Result<()> {
 async fn permissions_uninstall() -> Result<()> {
     assert!(matches!(
         connect_none().await?.uninstall("hello-world:0.0.1").await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Result::<()>::Ok(())
 }
@@ -189,7 +244,7 @@ async fn permissions_uninstall() -> Result<()> {
 async fn permissions_mount() -> Result<()> {
     assert!(matches!(
         connect_none().await?.mount("hello-world:0.0.1").await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
 
     assert!(matches!(
@@ -197,7 +252,7 @@ async fn permissions_mount() -> Result<()> {
             .await?
             .mount_all(["hello-world:0.0.1", "crashing:0.0.1"])
             .await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -206,7 +261,7 @@ async fn permissions_mount() -> Result<()> {
 async fn permissions_umount() -> Result<()> {
     assert!(matches!(
         connect_none().await?.umount("hello-world:0.0.1").await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
 
     assert!(matches!(
@@ -214,7 +269,7 @@ async fn permissions_umount() -> Result<()> {
             .await?
             .umount_all(["hello-world:0.0.1", "crashing:0.0.1"])
             .await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }
@@ -224,7 +279,7 @@ async fn permissions_inspect() -> Result<()> {
     let mut console = connect_none().await?;
     assert!(matches!(
         Client::inspect(&mut console, "hello_world:0.0.1").await,
-        Err(RequestError::Runtime(ModelError::PermissionDenied { .. }))
+        Err(RequestError::PermissionDenied)
     ));
     Ok(())
 }

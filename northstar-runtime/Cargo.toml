@@ -1,6 +1,6 @@
 [package]
 name = "northstar-runtime"
-version = "0.5.1"
+version = "0.6.0"
 authors = ["ESRLabs"]
 build = "build.rs"
 description = "Northstar is an container runtime for Linux targetting embedded systems"
@@ -39,9 +39,9 @@ memfd = { version = "0.6.1", optional = true }
 memoffset = { version = "0.6.5", optional = true }
 nanoid = { version = "0.4.0", optional = true }
 nix = { version = "0.24.2", default-features = false, features = ["fs", "sched", "mount", "term", "uio", "socket", "net", "signal", "user"], optional = true }
+pkg-version = { version = "1.0.0", optional = true }
 rand_core = { version = "0.6.3", features = ["getrandom"], optional = true }
 rlimit = { version = "0.8.3", optional = true }
-schemars = { version = "0.8.10", features = ["preserve_order"] }
 semver = { version = "1.0.12", features = ["serde"] }
 serde = { version = "1.0.140", features = ["derive", "rc"] }
 serde_json = { version = "1.0.82", optional = true }
@@ -67,6 +67,7 @@ api = [
     "bytes",
     "futures",
     "npk",
+    "pkg-version",
     "serde_json",
     "tokio",
     "tokio-util",
@@ -78,6 +79,7 @@ npk = [
     "hex",
     "humanize-rs",
     "itertools",
+    "pkg-version",
     "rand_core",
     "sha2",
     "seccomp",
@@ -138,6 +140,7 @@ seccomp = [
 
 [dev-dependencies]
 anyhow = "1.0.58"
+memfd = "0.6.1"
 proptest = "1.0.0"
 serde_json = "1.0.82"
 tokio = { version = "1.20.0", features = ["test-util"] }
@@ -147,3 +150,6 @@ toml = "0.5.9"
 [build-dependencies]
 anyhow = { version = "1.0.58", optional = true }
 bindgen = { version = "0.59.2", default-features = false, features = ["runtime"], optional = true }
+
+[package.metadata.docs.rs]
+features = ["api", "npk", "runtime", "seccomp"]

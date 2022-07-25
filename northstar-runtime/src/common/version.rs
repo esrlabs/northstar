@@ -1,8 +1,3 @@
-use schemars::{
-    gen::SchemaGenerator,
-    schema::{InstanceType, SchemaObject, StringValidation},
-    JsonSchema,
-};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt, str::FromStr};
 use thiserror::Error;
@@ -153,25 +148,6 @@ impl Ord for Version {
     }
 }
 
-impl JsonSchema for Version {
-    fn schema_name() -> String {
-        "Version".to_string()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            string: Some(Box::new(StringValidation {
-                min_length: Some(5),
-                max_length: None,
-                pattern: Some("[0-9]+\\.[0-9]+\\.[0-9]+".into()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 /// Container version requirement
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct VersionReq {
@@ -227,26 +203,6 @@ impl<'de> Deserialize<'de> for VersionReq {
     }
 }
 
-impl JsonSchema for VersionReq {
-    fn schema_name() -> String {
-        "VersionReq".to_string()
-    }
-
-    fn json_schema(_: &mut SchemaGenerator) -> schemars::schema::Schema {
-        SchemaObject {
-            instance_type: Some(InstanceType::String.into()),
-            string: Some(Box::new(StringValidation {
-                min_length: Some(5),
-                max_length: None,
-                // See https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-                pattern: Some(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:-(?P<prerelease>(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$".into()),
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
 #[test]
 fn version() -> anyhow::Result<()> {
     let v1 = Version::parse("1.0.0")?;
@@ -259,9 +215,4 @@ fn version() -> anyhow::Result<()> {
     let v1_1_1 = Version::parse("1.1.1")?;
     assert!(v1_1_1 > v1_1);
     Ok(())
-}
-
-#[test]
-fn schema() {
-    schemars::schema_for!(Version);
 }

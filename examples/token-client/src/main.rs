@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         .map(|s| Framed::new(s, LinesCodec::new()))?;
 
     // Encode the token for using it on the tcp connection
-    let auth = format!("{} {}", USERNAME, hex::encode(token));
+    let auth = format!("{} {}", USERNAME, base64::encode(token));
     // Send the authorization token to the server
     connection.send(auth).await?;
 

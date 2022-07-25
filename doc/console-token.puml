@@ -1,0 +1,58 @@
+@startuml console-token
+
+participant Client
+participant Northstar
+participant Server
+
+activate Northstar
+activate Server
+activate Client
+
+ref over Client: connect
+
+Client -> Northstar: token create
+note left
+{
+  "request": {
+    "token_create": {
+      "target": "server",
+      "shared": "aGVsbG8h"
+    }
+  }
+}
+end note
+Client <- Northstar: response token
+note right
+{ "response": { "token": "AAAAA...zyMVg==" } }
+end note
+
+Client -> Server: connect(username = "client", password = "AAAAA...zyMVg==")
+
+Northstar <- Server: request verify
+note right
+{
+  "request": {
+    "token_verify": {
+      "token": "AAAAA...zyMVg=="
+      "user": "client",
+      "shared": "aGVsbG8h"
+     }
+  }
+}
+end note
+alt ok
+Northstar -> Server: verification success
+note right
+{ "response": { "token_verification": "Ok" } }
+end note
+Client <- Server: connect ack
+Client <-> Server: messages
+else not ok
+Northstar -> Server: verification failed
+note right
+{ "response": { "token_verification": "Expired" } }
+end note
+Client <- Server !!
+end
+
+@enduml

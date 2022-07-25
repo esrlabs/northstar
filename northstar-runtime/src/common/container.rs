@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     convert::{TryFrom, TryInto},
@@ -11,7 +10,7 @@ use thiserror::Error;
 use super::{name::Name, version::Version};
 
 /// Container identification
-#[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash, JsonSchema)]
+#[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash)]
 pub struct Container {
     inner: Arc<Inner>,
 }
@@ -104,7 +103,7 @@ impl<'de> Deserialize<'de> for Container {
     }
 }
 
-#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Hash, Serialize, Deserialize)]
 struct Inner {
     name: Name,
     version: Version,
@@ -123,9 +122,4 @@ fn try_from() {
 fn invalid_name() {
     assert!(Container::try_from("test\0:0.0.1").is_err());
     assert!(Container::try_from("tes%t:0.0.1").is_err());
-}
-
-#[test]
-fn schema() {
-    schemars::schema_for!(Container);
 }

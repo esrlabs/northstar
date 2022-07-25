@@ -1,9 +1,8 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// CGroups configuration
-#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CGroups {
     /// BlkIo controller
     pub blkio: Option<BlkIoResources>,
@@ -14,7 +13,7 @@ pub struct CGroups {
 }
 
 /// Bkio device resource
-#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct BlkIoDeviceResource {
     /// The major number of the device.
     pub major: u64,
@@ -27,7 +26,7 @@ pub struct BlkIoDeviceResource {
 }
 
 /// Provides the ability to throttle a device (both byte/sec, and IO op/s)
-#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct BlkIoDeviceThrottleResource {
     /// The major number of the device.
     pub major: u64,
@@ -38,7 +37,7 @@ pub struct BlkIoDeviceThrottleResource {
 }
 
 /// Blkio controller
-#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct BlkIoResources {
     /// The weight of the control group against descendant nodes.
     pub weight: Option<u16>,
@@ -57,7 +56,7 @@ pub struct BlkIoResources {
 }
 
 /// Cpu controller
-#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CpuResources {
     // cpuset
     /// A comma-separated list of CPU IDs where the task in the control group can run. Dashes
@@ -84,7 +83,7 @@ pub struct CpuResources {
 }
 
 /// Memory controller
-#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct MemoryResources {
     /// How much memory (in bytes) can the kernel consume.
     pub kernel_memory_limit: Option<i64>,

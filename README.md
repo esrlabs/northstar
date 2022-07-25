@@ -8,7 +8,7 @@
 <p align="center">
   <h1 align="center">Northstar</h1>
   <p align="center">
-    Northstar is an opinionated embedded container runtime prototype for Linux.
+    Northstar is an embedded container runtime prototype for Linux.
     <br/>
     ·
     <a href="https://github.com/esrlabs/northstar/issues">Report Bug</a>
@@ -264,12 +264,14 @@ implemented in any programming language.  However, Northstar as a library,
 provides a convenient
 [Client](https://esrlabs.github.io/northstar/northstar/api/client/struct.Client.html)
 type that can be used for a simpler client implementation using **Rust**.
-Northstar interacts with clients through a `TCP` socket bound to each address
-configured in `runtime::config::Config::console`.
 
-* **TODO**: Move client guide part to a README-console.md etc
-* **TODO**: Update guide/src/client/connect with the connect sequence.
-* **TODO**: [Client API docs](https://esrlabs.github.io/northstar/northstar/index.html)
+Details about the Northstar console are [here](doc/console.md). A good starting
+point is to run the `northstar-nstar` tool with the `-j` flag that. This
+instructs `northstar-nstar` to display the raw json payload exchanged with the
+runtime.
+
+Details about the model used as json payload are found
+[here](https://esrlabs.github.io/northstar/northstar/api/model/index.html).
 
 ## Integration tests
 

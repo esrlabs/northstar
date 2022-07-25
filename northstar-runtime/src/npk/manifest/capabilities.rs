@@ -1,8 +1,7 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Linux capability
-#[derive(Clone, Eq, Hash, PartialEq, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Eq, Hash, PartialEq, Debug, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum Capability {
     /// `CAP_CHOWN` (from POSIX)
