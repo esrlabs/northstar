@@ -140,6 +140,7 @@ seccomp = [
 
 [dev-dependencies]
 anyhow = "1.0.58"
+memfd = "0.6.1"
 proptest = "1.0.0"
 serde_json = "1.0.82"
 tokio = { version = "1.20.0", features = ["test-util"] }

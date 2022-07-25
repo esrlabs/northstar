@@ -172,17 +172,10 @@ mod test {
 
     /// Open two memfds for testing
     fn open_test_files() -> [File; 2] {
-        let fd0 = nix::sys::memfd::memfd_create(
-            &std::ffi::CString::new("hello").unwrap(),
-            nix::sys::memfd::MemFdCreateFlag::empty(),
-        )
-        .unwrap();
-        let fd1 = nix::sys::memfd::memfd_create(
-            &std::ffi::CString::new("again").unwrap(),
-            nix::sys::memfd::MemFdCreateFlag::empty(),
-        )
-        .unwrap();
-        unsafe { [File::from_raw_fd(fd0), File::from_raw_fd(fd1)] }
+        let opts = memfd::MemfdOptions::default();
+        let file0 = opts.create("hello").unwrap().into_file();
+        let file1 = opts.create("again").unwrap().into_file();
+        [file0, file1]
     }
 
     /// Read file to end and assert the result is equal to the expected `s`
