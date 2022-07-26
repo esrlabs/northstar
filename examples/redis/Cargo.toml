@@ -7,4 +7,4 @@ license = "Apache-2.0"
 
 [dependencies]
 mini-redis = "0.4.1"
-tokio = { version = "1.20.0", features = ["macros", "rt", "net", "signal"] }
+tokio = { version = "1.20.1", features = ["macros", "rt", "net", "signal"] }
