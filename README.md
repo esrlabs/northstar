@@ -145,7 +145,7 @@ The Northstar workspace configuration configures a cargo
 [runner](.cargo/runner-x86_64-unknown-linux-gnu) that invokes the runtimes
 example main binary with super user rights.
 
-Use the [nstar](./northstar-nstar/README.md) utility to inspect and modify the
+Use the [northstar-nstar](./northstar-nstar) utility to inspect and modify the
 runtimes state e.g.
 
 ```sh
