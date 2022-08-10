@@ -6,6 +6,6 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1.0.59"
+anyhow = "1.0.60"
 tokio = { version = "1.20.1", features = ["macros", "rt", "net"] }
 northstar-client = { path = "../../northstar-client" }
