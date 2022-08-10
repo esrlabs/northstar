@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 /// Predefined seccomp profile
 #[derive(Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Profile {
     /// Default seccomp filter similar to docker's default profile
-    #[serde(rename = "default")]
     Default,
 }
 
@@ -24,12 +24,11 @@ pub struct Seccomp {
 
 /// Syscall rule
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum SyscallRule {
     /// Any syscall argument is allowed
-    #[serde(rename = "any")]
     Any,
     /// Explicit list of allowed syscalls arguments
-    #[serde(rename = "args")]
     Args(SyscallArgRule),
 }
 
@@ -40,6 +39,7 @@ pub struct SyscallArgRule {
     /// Index of syscall argument
     pub index: usize,
     /// Value of syscall argument
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<u64>>,
     /// Bitmask of syscall argument
     #[serde(skip_serializing_if = "Option::is_none")]
