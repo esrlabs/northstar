@@ -46,12 +46,11 @@ seccomp:
   profile:
     default
   allow:
-    delete_module:
-      args:
-        index: 1
-        values: [
-            1,
-        ]
-        mask: 0x06
+    delete_module: !args
+      index: 1
+      values: [
+          1,
+      ]
+      mask: 0x06
 selinux:
   context: unconfined_u:object_r:user_home_t:s0

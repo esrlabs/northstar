@@ -15,8 +15,7 @@ uid: 100
 gid: 1
 env:
   HELLO: north";
-const TEST_MANIFEST_UNPACKED: &str = "---
-name: hello
+const TEST_MANIFEST_UNPACKED: &str = "name: hello
 version: 0.0.2
 init: /hello
 env:
