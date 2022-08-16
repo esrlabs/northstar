@@ -218,7 +218,6 @@ fn mount(
 
                 debug!("Using loop device id {}", loop_device_id);
 
-                
                 dmsetup(
                     dm.clone(),
                     &loop_device_id,
