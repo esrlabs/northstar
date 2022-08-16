@@ -123,7 +123,7 @@ struct MemoryEvent {
 }
 
 /// Container exit status
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExitStatus {
     /// Process exited with exit code
     Exit(ExitCode),

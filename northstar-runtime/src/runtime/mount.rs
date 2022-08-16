@@ -218,7 +218,8 @@ fn mount(
 
                 debug!("Using loop device id {}", loop_device_id);
 
-                let verity_device = dmsetup(
+                
+                dmsetup(
                     dm.clone(),
                     &loop_device_id,
                     header,
@@ -226,8 +227,7 @@ fn mount(
                     hashes.fs_verity_hash.as_str(),
                     hashes.fs_verity_offset,
                     dm_timeout,
-                )?;
-                verity_device
+                )?
             }
             _ => {
                 warn!(

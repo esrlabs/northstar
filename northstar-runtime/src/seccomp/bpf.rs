@@ -167,7 +167,7 @@ fn check_platform_requirements() {
     compile_error!("seccomp is not supported on Big Endian architectures");
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SockFilter {
     pub code: u16,
     pub jt: u8,
