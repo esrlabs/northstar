@@ -88,7 +88,7 @@ impl VerityHeader {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut raw_sb: Vec<u8> = vec![];
+        let mut raw_sb: Vec<u8> = Vec::with_capacity(BLOCK_SIZE);
         raw_sb.extend(&self.header);
         raw_sb.extend(&self.version.to_ne_bytes());
         raw_sb.extend(&self.hash_type.to_ne_bytes());
@@ -98,9 +98,9 @@ impl VerityHeader {
         raw_sb.extend(&self.hash_block_size.to_ne_bytes());
         raw_sb.extend(&self.data_blocks.to_ne_bytes());
         raw_sb.extend(&self.salt_size.to_ne_bytes());
-        raw_sb.extend(&[0_u8; 6]); // padding
+        raw_sb.extend(&[0; 6]); // padding
         raw_sb.extend(&self.salt);
-        raw_sb.extend(vec![0u8; BLOCK_SIZE - raw_sb.len()]); // pad to block size
+        raw_sb.resize(BLOCK_SIZE, 0); // pad to block size
         raw_sb
     }
 
