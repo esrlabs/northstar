@@ -755,6 +755,9 @@ impl State {
             .await?;
 
         // Wipe persistent dir if present
+        // TODO: This is inconstent. If `remove_dir_all` fails the container is left in `containers` but it's
+        // removed from the repository.
+        // See https://github.com/esrlabs/northstar/issues/762
         if wipe {
             let name: &str = container.name().as_ref();
             let dir = self.config.data_dir.join(name);
