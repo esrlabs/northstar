@@ -21,7 +21,7 @@ use crate::{
         console::{Console, Peer},
         io::ContainerIo,
         ipc::owned_fd::OwnedFd,
-        CGroupEvent, ENV_CONSOLE, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
+        spawn, CGroupEvent, ENV_CONSOLE, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
     },
 };
 use anyhow::{Context, Result};
@@ -48,7 +48,7 @@ use tokio::{
     net::UnixStream,
     pin,
     sync::{mpsc, oneshot},
-    task::{self, JoinHandle},
+    task::JoinHandle,
     time,
 };
 use tokio_util::sync::CancellationToken;
@@ -480,6 +480,7 @@ impl State {
             let notifications = self.notification_tx.subscribe();
             let events_tx = self.events_tx.clone();
             let stop = stop.clone();
+            let task = format!("{}-console", container);
             let container = Some(container.clone());
             let connection = Console::connection(
                 runtime,
@@ -494,7 +495,7 @@ impl State {
             );
 
             // Start console task
-            task::spawn(connection);
+            spawn(&task, connection);
 
             Some(container_fd)
         } else {

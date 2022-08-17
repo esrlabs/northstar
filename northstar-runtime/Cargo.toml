@@ -135,6 +135,7 @@ seccomp = [
     "nix",
     "npk",
 ]
+tracing = ["tokio/tracing"]
 
 [dev-dependencies]
 anyhow = { version = "1.0.61", features = ["backtrace"] }
@@ -150,4 +151,4 @@ anyhow = { version = "1.0.61", features = ["backtrace"] }
 bindgen = { version = "0.59.2", default-features = false, features = ["runtime"], optional = true }
 
 [package.metadata.docs.rs]
-features = ["api", "npk", "runtime", "seccomp"]
+features = ["api", "npk", "runtime", "seccomp", "tracing"]

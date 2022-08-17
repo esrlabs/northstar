@@ -2,7 +2,7 @@ use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed, VERSION},
     common::container::Container,
-    runtime::{token::Token, EventTx, ExitStatus},
+    runtime::{spawn, token::Token, EventTx, ExitStatus},
 };
 use anyhow::{bail, Context, Result};
 use api::model;
@@ -16,7 +16,7 @@ use futures::{
 use listener::Listener;
 use log::{debug, info, trace, warn};
 use semver::Comparator;
-use std::{fmt, path::Path, unreachable};
+use std::{fmt, fmt::Debug, path::Path, unreachable};
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
     pin, select,
@@ -95,7 +95,7 @@ impl Console {
             .await
             .context("failed to start console listener")?
         {
-            Listener::Tcp(listener) => task::spawn(async move {
+            Listener::Tcp(listener) => spawn(&format!("console-{}", url), async move {
                 serve(
                     || listener.accept(),
                     event_tx,
@@ -106,7 +106,7 @@ impl Console {
                 )
                 .await
             }),
-            Listener::Unix(listener) => task::spawn(async move {
+            Listener::Unix(listener) => spawn(&format!("console-{}", url), async move {
                 serve(
                     || listener.accept(),
                     event_tx,

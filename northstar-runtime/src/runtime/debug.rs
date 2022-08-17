@@ -3,7 +3,7 @@ use super::{
     error::Error,
     Pid,
 };
-use crate::npk::manifest::Manifest;
+use crate::{npk::manifest::Manifest, runtime::spawn};
 use anyhow::Context;
 use futures::future::OptionFuture;
 use log::{debug, error, info};
@@ -13,7 +13,7 @@ use tokio::{
     io::{self, AsyncBufReadExt},
     process::{Child, Command},
     select,
-    task::{self, JoinHandle},
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -118,7 +118,7 @@ impl Strace {
             let name = manifest.name.clone();
             let strace = strace.clone();
 
-            task::spawn(async move {
+            spawn(&format!("{}-strace", manifest.container()), async move {
                 // Discard until execve if configured
                 if !strace.include_runtime.unwrap_or_default() {
                     loop {

@@ -211,7 +211,7 @@ impl Runtime {
         let guard = token.clone().drop_guard();
 
         // Start a task that drives the main loop and wait for shutdown results
-        let task = task::spawn(run(config, token, forker));
+        let task = spawn("northstar-runtime", run(config, token, forker));
 
         Ok(Runtime::Running { guard, task })
     }
@@ -359,4 +359,24 @@ async fn run(
     info!("Shutdown complete");
 
     Ok(())
+}
+
+/// Spawn a Tokio task with `name` associated if the `tracing` feature is enabled.
+#[cfg(all(tokio_unstable, feature = "tracing"))]
+fn spawn<Fut>(name: &str, future: Fut) -> JoinHandle<Fut::Output>
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+{
+    tokio::task::Builder::new().name(name).spawn(future)
+}
+
+/// Spawn a Tokio task.
+#[cfg(not(feature = "tracing"))]
+fn spawn<Fut>(_name: &str, future: Fut) -> JoinHandle<Fut::Output>
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+{
+    tokio::task::spawn(future)
 }
