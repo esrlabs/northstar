@@ -13,7 +13,7 @@ anyhow = { version = "1.0.61", features = ["backtrace"] }
 base64 = "0.13.0"
 clap = { version = "3.2.17", features = ["derive"] }
 clap_complete = "3.2.3"
-futures = { version = "0.3.21", default-features = false }
+futures = { version = "0.3.23", default-features = false }
 humantime = "2.1.0"
 itertools = "0.10.3"
 northstar-client = { version = "^0.6.1-pre", path = "../northstar-client" }
