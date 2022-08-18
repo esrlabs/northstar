@@ -87,9 +87,11 @@ impl Init {
         self.enter_netns();
 
         // Enter mount namespace
-        debug!("Entering mount and IPC namespace");
-        sched::unshare(CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWIPC)
-            .expect("failed to unshare");
+        debug!("Entering mount, IPC and UTS namespace");
+        sched::unshare(
+            CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWIPC | CloneFlags::CLONE_NEWUTS,
+        )
+        .expect("failed to unshare");
 
         // Perform all mounts passed in mounts
         self.mount();
