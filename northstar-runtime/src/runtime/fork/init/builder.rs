@@ -9,6 +9,7 @@ use crate::{
     seccomp,
 };
 use anyhow::Context;
+use log::warn;
 use nix::{mount::MsFlags, unistd};
 use std::{
     ffi::{c_void, CString},
@@ -268,7 +269,7 @@ fn resource(
     config: &Config,
     container: &Container,
     dependency: &Container,
-    src: &Path,
+    dir: &Path,
     options: &mount::MountOptions,
 ) -> Result<(Mount, Mount), Error> {
     let src = {
@@ -277,11 +278,13 @@ fn resource(
             config
                 .run_dir
                 .join(format!("{}:{}", dependency.name(), dependency.version()));
-        let src = src
-            .strip_prefix("/")
-            .map(|d| resource_root.join(d))
-            .unwrap_or(resource_root);
+        let src = resource_root.join_strip(dir);
+
         if !src.exists() {
+            warn!(
+                "Resource directory {} is missing in resource rootfs",
+                dir.display()
+            );
             return Err(Error::StartContainerMissingResource(
                 container.clone(),
                 dependency.name().clone(),
