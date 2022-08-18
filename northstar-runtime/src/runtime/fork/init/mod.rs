@@ -19,7 +19,7 @@ use nix::{
     fcntl::{self},
     libc::{self, c_ulong},
     mount::{self},
-    sched,
+    sched::{self, CloneFlags},
     sys::{
         signal::Signal,
         stat::Mode,
@@ -87,8 +87,11 @@ impl Init {
         self.enter_netns();
 
         // Enter mount namespace
-        debug!("Entering mount namespace");
-        sched::unshare(nix::sched::CloneFlags::CLONE_NEWNS).expect("failed to unshare NEWNS");
+        debug!("Entering mount, IPC and UTS namespace");
+        sched::unshare(
+            CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWIPC | CloneFlags::CLONE_NEWUTS,
+        )
+        .expect("failed to unshare");
 
         // Perform all mounts passed in mounts
         self.mount();
@@ -348,7 +351,7 @@ impl Init {
                     .open(&path)
                     .expect("failed to open netns");
                 debug!("Attaching to network namespace \"{}\"", netns);
-                sched::setns(handle.as_raw_fd(), sched::CloneFlags::CLONE_NEWNET)
+                sched::setns(handle.as_raw_fd(), CloneFlags::CLONE_NEWNET)
                     .expect("failed to enter netns");
             } else {
                 warn!("Failed to attach to network namespace \"{}\"", netns);

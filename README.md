@@ -92,6 +92,8 @@ subsystems and features:
 * User and group id
 * Mount namespace
 * PID namespace
+* IPC namespace
+* UTS namespace
 * Cgroups memory (optional)
 * CGroups CPU (optional)
 * Additional bind mounts (optional)
