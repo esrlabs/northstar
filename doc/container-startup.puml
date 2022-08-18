@@ -26,7 +26,7 @@ Trampoline -> Trampoline: Create PID namespace
 create Init
 Trampoline -> Init: Fork
 activate Init
-Init -> Init: Mount, Chroot, UID / GID,\ndrop privileges, file descriptors
+Init -> Init: Mount, Pivot root, UID / GID,\ndrop privileges, file descriptors
 
 Trampoline -> Forker: Forked init with PID
 destroy Trampoline
