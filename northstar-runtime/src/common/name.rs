@@ -165,3 +165,10 @@ fn deserialize() {
     ));
     assert!(matches!(serde_json::from_str::<Name>("\"a\0\""), Err(_)));
 }
+
+#[test]
+#[should_panic]
+#[allow(clippy::unwrap_used)]
+fn deserialize_name_contains_slash() {
+    serde_json::from_str::<Name>("test/../test").unwrap();
+}
