@@ -424,6 +424,35 @@ mounts:
         Ok(())
     }
 
+    /// Resource mount with realtive dir
+    #[test]
+    #[should_panic]
+    fn resource_relative_dir() {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
+mounts:
+  /resource:
+    type: resource
+    name: bla-blah.foo
+    version: '>=1.0.0'
+    dir: bin/foo
+";
+        Manifest::from_str(manifest).unwrap();
+    }
+
+    /// Resource mount with absolute dir
+    #[test]
+    fn resource_absolute() {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001
+mounts:
+  /resource:
+    type: resource
+    name: bla-blah.foo
+    version: '>=1.0.0'
+    dir: /bin/foo
+";
+        Manifest::from_str(manifest).unwrap();
+    }
+
     #[test]
     fn tmpfs() {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1000\ngid: 1001

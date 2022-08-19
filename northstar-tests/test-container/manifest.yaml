@@ -36,7 +36,7 @@ mounts:
     type: resource
     name: test-resource
     version: '>=0.0.1'
-    dir: test
+    dir: /
     options: nosuid,nodev,noexec
 rlimits:
   nproc:
