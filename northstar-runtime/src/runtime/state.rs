@@ -1043,7 +1043,7 @@ impl State {
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
-                    warn!("failed to mount {}: {}", container, e);
+                    warn!("Failed to mount {}: {}", container, e);
                     result.push(Err(e));
                 }
             }

@@ -275,7 +275,7 @@ fn mount(
     let mount_result = nix::mount::mount(source, target, fstype, flags, data);
 
     if let Err(ref e) = mount_result {
-        warn!("failed to mount: {}", e);
+        warn!("Failed to mount: {}", e);
     }
 
     // Set the device to auto-remove. If the above mount operation failed the verity device is removed.
@@ -291,7 +291,7 @@ fn mount(
         )?;
     }
 
-    Ok(())
+    mount_result.map_err(Into::into)
 }
 
 fn dmsetup(
