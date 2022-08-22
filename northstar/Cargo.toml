@@ -10,7 +10,7 @@ repository = "https://github.com/esrlabs/northstar"
 default-run = "northstar"
 
 [dependencies]
-anyhow = { version = "1.0.61", features = ["backtrace"] }
+anyhow = { version = "1.0.62", features = ["backtrace"] }
 clap = { version = "3.2.17", features = ["derive"] }
 log = "0.4.17"
 nix = { version = "0.25.0", default-features = false, features = ["sched", "mount"] }
