@@ -66,6 +66,8 @@ pub struct Meta {
 /// NPK Hashes
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Hashes {
+    /// Meta hash (zip comment)
+    pub meta_hash: String,
     /// Hash of the manifest.yaml
     pub manifest_hash: String,
     /// Verity root hash
@@ -77,6 +79,12 @@ pub struct Hashes {
 impl FromStr for Hashes {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct MetaHash {
+            hash: String,
+        }
+
         #[derive(Deserialize)]
         #[serde(rename_all = "kebab-case")]
         struct ManifestHash {
@@ -93,6 +101,7 @@ impl FromStr for Hashes {
         #[derive(Deserialize)]
         #[serde(rename_all = "kebab-case")]
         struct SerdeHashes {
+            meta: MetaHash,
             #[serde(rename = "manifest.yaml")]
             manifest: ManifestHash,
             #[serde(rename = "fs.img")]
@@ -102,6 +111,7 @@ impl FromStr for Hashes {
         let hashes = serde_yaml::from_str::<SerdeHashes>(s).context("failed to parse hashes")?;
 
         Ok(Hashes {
+            meta_hash: hashes.meta.hash,
             manifest_hash: hashes.manifest.hash,
             fs_verity_hash: hashes.fs.verity_hash,
             fs_verity_offset: hashes.fs.verity_offset,
@@ -136,7 +146,16 @@ impl<R: Read + Seek> Npk<R> {
                 pre: semver::Prerelease::default(),
             }],
         };
-        let meta = meta(&zip)?;
+
+        // Read hashes from the npk if a key is passed
+        let hashes = if let Some(key) = key {
+            let hashes = hashes(&mut zip, key)?;
+            Some(hashes)
+        } else {
+            None
+        };
+
+        let meta = meta(&mut zip, hashes.as_ref())?;
         let version = &meta.version;
         if !version_request.matches(&(version.into())) {
             return Err(anyhow!(
@@ -146,14 +165,6 @@ impl<R: Read + Seek> Npk<R> {
             )
             .into());
         }
-
-        // Read hashes from the npk if a key is passed
-        let hashes = if let Some(key) = key {
-            let hashes = hashes(&mut zip, key)?;
-            Some(hashes)
-        } else {
-            None
-        };
 
         let manifest = manifest(&mut zip, hashes.as_ref())?;
         let (fs_img_offset, fs_img_size) = {
@@ -238,7 +249,19 @@ impl AsRawFd for Npk<BufReader<fs::File>> {
     }
 }
 
-fn meta<R: Read + Seek>(zip: &Zip<R>) -> Result<Meta> {
+fn meta<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result<Meta> {
+    let content = zip.comment();
+    if let Some(Hashes { meta_hash, .. }) = &hashes {
+        let expected_hash = hex::decode(meta_hash).context("failed to parse manifest hash")?;
+        let actual_hash = Sha256::digest(content);
+        if expected_hash != actual_hash.as_slice() {
+            bail!(
+                "invalid meta hash (expected={} actual={})",
+                meta_hash,
+                hex::encode(actual_hash)
+            );
+        }
+    }
     serde_yaml::from_slice(zip.comment()).context("comment malformed")
 }
 
@@ -337,15 +360,16 @@ impl Builder {
     fn build<W: Write + Seek>(&self, writer: W) -> Result<()> {
         // Create squashfs image
         let tmp = tempfile::TempDir::new().context("failed to create temporary directory")?;
+        let meta = &Meta { version: VERSION };
         let fsimg = tmp.path().join(FS_IMG_NAME);
         create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_options)?;
 
         // Sign and write NPK
         if let Some(key) = &self.key {
-            let signature = signature(key, &fsimg, &self.manifest)?;
-            write_npk(writer, &self.manifest, &fsimg, Some(&signature))
+            let signature = signature(key, meta, &fsimg, &self.manifest)?;
+            write_npk(writer, meta, &self.manifest, &fsimg, Some(&signature))
         } else {
-            write_npk(writer, &self.manifest, &fsimg, None)
+            write_npk(writer, meta, &self.manifest, &fsimg, None)
         }
     }
 }
@@ -564,10 +588,18 @@ fn secret_key(mut bytes: [u8; SECRET_KEY_LENGTH]) -> Result<SecretKey> {
 }
 
 /// Generate the signatures yaml file
-fn hashes_yaml(manifest_hash: &[u8], verity_hash: &[u8], verity_offset: u64) -> String {
+fn hashes_yaml(
+    meta_hash: &[u8],
+    manifest_hash: &[u8],
+    verity_hash: &[u8],
+    verity_offset: u64,
+) -> String {
     format!(
         "{}:\n  hash: {:02x?}\n\
+         {}:\n  hash: {:02x?}\n\
          {}:\n  verity-hash: {:02x?}\n  verity-offset: {}\n",
+        "meta",
+        meta_hash.iter().format(""),
         &MANIFEST_NAME,
         manifest_hash.iter().format(""),
         &FS_IMG_NAME,
@@ -577,7 +609,14 @@ fn hashes_yaml(manifest_hash: &[u8], verity_hash: &[u8], verity_offset: u64) -> 
 }
 
 /// Try to construct the signature yaml file
-fn signature(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
+fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
+    let meta_hash = {
+        let mut sha256 = Sha256::new();
+        let meta = serde_yaml::to_string(&meta).context("failed to encode metadata")?;
+        sha2::digest::Update::update(&mut sha256, meta.as_bytes());
+        sha256.finalize()
+    };
+
     let manifest_hash = {
         let mut sha256 = Sha256::new();
         sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
@@ -594,7 +633,7 @@ fn signature(key: &Path, fsimg: &Path, manifest: &Manifest) -> Result<String, Er
         .context("failed to calculate verity root hash")?;
 
     // Format the signatures.yaml
-    let hashes_yaml = hashes_yaml(&manifest_hash, fsimg_hash, fsimg_size);
+    let hashes_yaml = hashes_yaml(&meta_hash, &manifest_hash, fsimg_hash, fsimg_size);
 
     let key_pair = read_keypair(key)?;
     let signature = key_pair.sign(hashes_yaml.as_bytes());
@@ -807,6 +846,7 @@ fn unpack_squashfs(image: &Path, out: &Path, unsquashfs: &Path) -> Result<()> {
 
 fn write_npk<W: Write + Seek>(
     npk: W,
+    meta: &Meta,
     manifest: &Manifest,
     fsimg: &Path,
     signature: Option<&str>,
@@ -817,11 +857,10 @@ fn write_npk<W: Write + Seek>(
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string =
         serde_yaml::to_string(&manifest).context("failed to serialize manifest")?;
+    let meta_string = serde_yaml::to_string(&meta).context("failed to serialize meta")?;
 
     let mut zip = zip::ZipWriter::new(npk);
-    zip.set_comment(
-        serde_yaml::to_string(&Meta { version: VERSION }).context("failed to serialize meta")?,
-    );
+    zip.set_comment(&meta_string);
 
     if let Some(signature) = signature {
         zip.start_file(SIGNATURE_NAME, options)?;
