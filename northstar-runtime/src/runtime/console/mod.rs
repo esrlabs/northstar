@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use api::model;
 use async_stream::stream;
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use futures::{
     future::join_all,
     stream::{self, FuturesUnordered},
@@ -16,7 +16,7 @@ use futures::{
 use listener::Listener;
 use log::{debug, info, trace, warn};
 use semver::Comparator;
-use std::{fmt, path::Path, unreachable};
+use std::{cmp::min, fmt, path::Path, unreachable};
 use tokio::{
     io::{self, AsyncRead, AsyncReadExt, AsyncWrite},
     pin, select,
@@ -405,15 +405,14 @@ where
 
             // The codec might have pulled bytes in the the read buffer of the connection.
             if !stream.read_buffer().is_empty() {
-                let read_buffer = stream.read_buffer_mut().split();
-
-                // TODO: handle this case. The connected entity pushed the install file
-                // and a subsequent request. If the codec pulls in the *full* install blob
-                // and some bytes from the following command the logic is screwed up.
-                assert!(read_buffer.len() as u64 <= size);
-
-                size -= read_buffer.len() as u64;
-                tx.send(read_buffer.freeze()).await.ok();
+                let available = stream.read_buffer().len();
+                // Limit the first read operation to `size` if there's more data available.
+                // If `size` bytes are available, `size` is decremented to 0 and the following
+                // while let loop breaks.
+                let read_max = min(size as usize, available);
+                let buffer = stream.read_buffer_mut().copy_to_bytes(read_max);
+                size -= buffer.len() as u64;
+                tx.send(buffer).await.ok();
             }
 
             // If the connections breaks: just break. If the receiver is dropped: just break.
