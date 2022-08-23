@@ -328,7 +328,9 @@ impl Builder {
 
         // Kill process if architecture does not match
         jump_if_acc_is_equal(&mut filter, AUDIT_ARCH, SKIP_NEXT, EVAL_NEXT);
-        filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_KILL));
+        filter
+            .list
+            .push(bpf_ret(nix::libc::SECCOMP_RET_KILL_PROCESS));
 
         // Load syscall number into accumulator for subsequent filtering
         load_syscall_nr_into_acc(&mut filter);
@@ -620,7 +622,9 @@ fn return_fail(filter: &mut AllowList, log_only: bool) -> u32 {
     if log_only {
         filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_LOG));
     } else {
-        filter.list.push(bpf_ret(nix::libc::SECCOMP_RET_KILL));
+        filter
+            .list
+            .push(bpf_ret(nix::libc::SECCOMP_RET_KILL_PROCESS));
     }
     1
 }
