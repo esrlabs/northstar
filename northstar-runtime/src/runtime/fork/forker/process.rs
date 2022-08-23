@@ -8,7 +8,7 @@ use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     runtime::{
         fork::util::{self},
-        ipc::{owned_fd::OwnedFd, socket_pair, AsyncFramedUnixStream, FramedUnixStream},
+        ipc::{socket_pair, AsyncFramedUnixStream, FramedUnixStream},
         ExitStatus, Pid,
     },
 };
@@ -20,15 +20,16 @@ use itertools::Itertools;
 use log::debug;
 use nix::{
     errno::Errno,
+    libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
     sys::{signal::Signal, wait::waitpid},
-    unistd,
+    unistd::{self},
 };
 use std::{
     collections::HashMap,
     os::unix::{
         io::FromRawFd,
         net::UnixStream,
-        prelude::{IntoRawFd, RawFd},
+        prelude::{AsRawFd, IntoRawFd, OwnedFd},
     },
     process::exit,
 };
@@ -56,19 +57,19 @@ pub async fn run(
         select! {
             request = recv_command(&mut command_stream, &mut socket_stream) => {
                 match request {
-                    Some(Message::CreateRequest { init, console }) => {
+                    Some(Message::CreateRequest { init, console, io }) => {
                         debug!("Creating init process for {}", init.container);
                         let container = init.container.clone();
-                        let (pid, message_stream) = create(init, console).await;
+                        let io = io.expect("create request without io");
+                        let (pid, message_stream) = create(init, io, console).await;
                         debug_assert!(!inits.contains_key(&container));
                         inits.insert(container, (pid, message_stream));
                         command_stream.send(Message::CreateResult { pid }).await.expect("failed to send response");
                     }
-                    Some(Message::ExecRequest { container, path, args, env, io }) => {
-                        let io = io.expect("exec request without io");
+                    Some(Message::ExecRequest { container, path, args, env }) => {
                         let (pid, message_stream) = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {}", container));
                         // There's a init - let's exec!
-                        let (response, exit) = exec(pid, message_stream, container, path, args, env, io).await;
+                        let (response, exit) = exec(pid, message_stream, container, path, args, env).await;
 
                         // Add exit status future of this exec request
                         exits.push(exit);
@@ -93,7 +94,7 @@ pub async fn run(
 }
 
 /// Create a new init process ("container")
-async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, FramedUnixStream) {
+async fn create(init: Init, io: [OwnedFd; 3], console: Option<OwnedFd>) -> (Pid, FramedUnixStream) {
     let container = init.container.clone();
     debug!("Creating container {}", container);
     let mut stream = socket_pair().expect("failed to create socket pair");
@@ -101,13 +102,23 @@ async fn create(init: Init, console: Option<OwnedFd>) -> (Pid, FramedUnixStream)
     let trampoline_pid = fork(|| {
         util::set_parent_death_signal(Signal::SIGKILL);
 
+        // Work around the borrow checker and fork
+        let stream = stream.second().into_raw_fd();
+
+        debug!("Applying io settings");
+        // Apply io settings
+        let stdin = &io[0];
+        let stdout = &io[1];
+        let stderr = &io[2];
+        unistd::dup2(stdin.as_raw_fd(), STDIN_FILENO).expect("failed to dup2");
+        unistd::dup2(stdout.as_raw_fd(), STDOUT_FILENO).expect("failed to dup2");
+        unistd::dup2(stderr.as_raw_fd(), STDERR_FILENO).expect("failed to dup2");
+        drop(io);
+
         // Create pid namespace
         debug!("Creating pid namespace");
         nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWPID)
             .expect("failed to create pid namespace");
-
-        // Work around the borrow checker and fork
-        let stream = stream.second().into_raw_fd();
 
         // Fork the init process
         debug!("Forking init of {}", container);
@@ -157,7 +168,6 @@ async fn exec(
     path: NonNulString,
     args: Vec<NonNulString>,
     env: Vec<NonNulString>,
-    io: [OwnedFd; 3],
 ) -> (Message, impl Future<Output = (Container, ExitStatus)>) {
     let mut message_stream = message_stream;
 
@@ -172,10 +182,6 @@ async fn exec(
     message_stream
         .send(message)
         .expect("failed to send exec to init");
-
-    // Send io file descriptors
-    message_stream.send_fds(&io).expect("failed to send fd");
-    drop(io);
 
     let message_stream = message_stream.into_inner();
     let mut message_stream = AsyncFramedUnixStream::new(message_stream);
@@ -220,16 +226,16 @@ async fn recv_command(
 
     match request {
         Some(Message::CreateRequest { init, .. }) => {
+            let io = socket_stream.recv_fds::<OwnedFd, 3>().ok();
             let console = if init.console {
                 let console = socket_stream
-                    .recv_fds::<RawFd, 1>()
+                    .recv_fds::<OwnedFd, 1>()
                     .expect("failed to receive console fd");
-                let console = unsafe { OwnedFd::from_raw_fd(console[0]) };
-                Some(console)
+                Some(console.into_iter().next().expect("missing console fd"))
             } else {
                 None
             };
-            Some(Message::CreateRequest { init, console })
+            Some(Message::CreateRequest { init, io, console })
         }
         Some(Message::ExecRequest {
             container,
@@ -237,18 +243,12 @@ async fn recv_command(
             args,
             env,
             ..
-        }) => {
-            let io = socket_stream
-                .recv_fds::<OwnedFd, 3>()
-                .expect("failed to receive io");
-            Some(Message::ExecRequest {
-                container,
-                path,
-                args,
-                env,
-                io: Some(io),
-            })
-        }
+        }) => Some(Message::ExecRequest {
+            container,
+            path,
+            args,
+            env,
+        }),
         command => command,
     }
 }

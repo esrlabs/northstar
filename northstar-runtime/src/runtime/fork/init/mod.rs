@@ -7,7 +7,7 @@ use crate::{
     },
     runtime::{
         fork::util::{self, fork, set_child_subreaper, set_process_name},
-        ipc::{owned_fd::OwnedFd, FramedUnixStream},
+        ipc::FramedUnixStream,
         ExitStatus, Pid,
     },
     seccomp::AllowList,
@@ -34,7 +34,7 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::CString,
-    os::unix::prelude::{AsRawFd, RawFd},
+    os::unix::prelude::{AsRawFd, OwnedFd},
     path::{Path, PathBuf},
     process::exit,
 };
@@ -141,22 +141,9 @@ impl Init {
                         env.push(s);
                     }
 
-                    let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
-                    let stdin = io[0];
-                    let stdout = io[1];
-                    let stderr = io[2];
-
                     // Start new process inside the container
                     let pid = fork(|| {
                         util::set_parent_death_signal(Signal::SIGKILL);
-
-                        unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("failed to dup2");
-                        unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("failed to dup2");
-                        unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("failed to dup2");
-
-                        unistd::close(stdin).expect("failed to close stdout after dup2");
-                        unistd::close(stdout).expect("failed to close stdout after dup2");
-                        unistd::close(stderr).expect("failed to close stderr after dup2");
 
                         // Set seccomp filter
                         if let Some(ref filter) = self.seccomp {
@@ -178,9 +165,6 @@ impl Init {
 
                     // close fds
                     drop(console);
-                    unistd::close(stdin).expect("failed to close stdout");
-                    unistd::close(stdout).expect("failed to close stdout");
-                    unistd::close(stderr).expect("failed to close stderr");
 
                     let message = Message::Forked { pid };
                     stream.send(&message).expect("failed to send fork result");

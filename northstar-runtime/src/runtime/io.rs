@@ -1,4 +1,7 @@
-use std::os::unix::{net::UnixStream, prelude::FromRawFd};
+use std::os::unix::{
+    net::UnixStream,
+    prelude::{FromRawFd, OwnedFd},
+};
 
 use crate::{
     common::container::Container,
@@ -15,8 +18,6 @@ use tokio::{
     io::{self, AsyncBufReadExt},
     task::{self, JoinHandle},
 };
-
-use super::ipc::owned_fd::OwnedFd;
 
 pub struct ContainerIo {
     pub io: [OwnedFd; 3],
@@ -45,7 +46,7 @@ pub async fn open(container: &Container, io: &manifest::io::Io) -> io::Result<Co
     // Don't start the output task if stdout and stderr are configured to be discarded
     if io.stdout == Output::Discard && io.stderr == Output::Discard {
         return Ok(ContainerIo {
-            io: [dev_null.clone()?, dev_null.clone()?, dev_null],
+            io: [dev_null.try_clone()?, dev_null.try_clone()?, dev_null],
             task: None,
         });
     }
@@ -67,16 +68,16 @@ pub async fn open(container: &Container, io: &manifest::io::Io) -> io::Result<Co
     let (read, write) = UnixStream::pair()?;
     let write = write.into();
     let (stdout, stderr) = match (&io.stdout, &io.stderr) {
-        (Output::Discard, Output::Pipe) => (dev_null.clone()?, write),
-        (Output::Pipe, Output::Discard) => (write, dev_null.clone()?),
+        (Output::Discard, Output::Pipe) => (dev_null.try_clone()?, write),
+        (Output::Pipe, Output::Discard) => (write, dev_null.try_clone()?),
 
         (Output::Inherit, Output::Pipe) => (stdout_dup()?, write),
         (Output::Pipe, Output::Inherit) => (write, stderr_dup()?),
 
-        (Output::Inherit, Output::Discard) => (stdout_dup()?, dev_null.clone()?),
-        (Output::Discard, Output::Inherit) => (dev_null.clone()?, stderr_dup()?),
+        (Output::Inherit, Output::Discard) => (stdout_dup()?, dev_null.try_clone()?),
+        (Output::Discard, Output::Inherit) => (dev_null.try_clone()?, stderr_dup()?),
 
-        (Output::Pipe, Output::Pipe) => (write.clone()?, write),
+        (Output::Pipe, Output::Pipe) => (write.try_clone()?, write),
         _ => unreachable!(),
     };
 

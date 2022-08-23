@@ -8,7 +8,7 @@ use crate::{
     npk::manifest::Manifest,
     runtime::{
         config::Config,
-        ipc::{owned_fd::OwnedFd, socket_pair, AsyncFramedUnixStream, FramedUnixStream},
+        ipc::{socket_pair, AsyncFramedUnixStream, FramedUnixStream},
     },
 };
 use anyhow::{Context, Result};
@@ -16,8 +16,8 @@ use futures::FutureExt;
 use log::debug;
 pub use messages::{Message, Notification};
 use nix::sys::signal::{signal, SigHandler, Signal};
-use std::os::unix::net::UnixStream;
-use tokio::{runtime, task};
+use std::os::unix::{net::UnixStream, prelude::OwnedFd};
+use tokio::runtime;
 
 mod messages;
 mod process;
@@ -98,13 +98,18 @@ impl Forker {
         &mut self,
         config: &Config,
         manifest: &Manifest,
+        io: [OwnedFd; 3],
         console: Option<OwnedFd>,
         containers: I,
     ) -> Result<Pid, Error> {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
         let init = init::build(config, manifest, containers).await?;
-        let message = Message::CreateRequest { init, console };
+        let message = Message::CreateRequest {
+            init,
+            io: Some(io),
+            console,
+        };
 
         match self
             .request_response(message)
@@ -124,14 +129,12 @@ impl Forker {
         path: NonNulString,
         args: Vec<NonNulString>,
         env: Vec<NonNulString>,
-        io: [OwnedFd; 3],
     ) -> Result<(), Error> {
         let message = Message::ExecRequest {
             container,
             path,
             args,
             env,
-            io: Some(io),
         };
         self.request_response(message).await.map(drop)
     }
@@ -140,29 +143,33 @@ impl Forker {
     async fn request_response(&mut self, request: Message) -> Result<Message, Error> {
         let mut request = request;
 
-        // Remove fds from message
-        let fds = match &mut request {
-            Message::CreateRequest { init: _, console } => {
-                console.take().map(|console| vec![console])
-            }
-            Message::ExecRequest { io, .. } => io.take().map(Vec::from),
-            _ => None,
-        };
-
-        // Send it
-        self.command_stream
-            .send(request)
-            .await
-            .context("failed to send request")?;
-
-        // Send fds if any
-        if let Some(fds) = fds {
-            task::block_in_place(|| {
+        match request {
+            Message::CreateRequest {
+                init: _,
+                ref mut io,
+                ref mut console,
+            } => {
+                let io = io.take();
+                let console = console.take();
+                self.command_stream
+                    .send(request)
+                    .await
+                    .context("failed to send request")?;
                 self.socket_stream
-                    .send_fds(&fds)
-                    .context("failed to send fd")
-            })?;
-            drop(fds);
+                    .send_fds(&io.expect("missing io"))
+                    .context("failed to send fd")?;
+                if let Some(console) = console {
+                    self.socket_stream
+                        .send_fds(&[console])
+                        .context("failed to send fd")?;
+                }
+            }
+            message => {
+                self.command_stream
+                    .send(message)
+                    .await
+                    .context("failed to send request")?;
+            }
         }
 
         // Receive reply
