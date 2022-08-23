@@ -406,6 +406,49 @@ to the manifest. The `/dev` is populated with *only*:
 
 If the container binary needs more devices, bind mount the host systems `/dev`.
 
+#### Seccomp
+
+Northstar supports
+[Seccomp](https://www.kernel.org/doc/Documentation/prctl/seccomp_filter.txt)
+to filter syscalls of containers.
+The easiest way to add seccomp to a container is to add the `default` profile
+to the container's manifest:
+
+```toml
+seccomp:
+  profile:
+    default
+```
+
+The `default` profile is similar to
+[Docker's default profile](https://docs.docker.com/engine/security/seccomp/).
+
+More specific seccomp rules that target filter syscalls are possible.
+For example, the following manifest entry allows the `default` profile as well
+as the
+[delete_module](https://man7.org/linux/man-pages/man2/delete_module.2.html)
+syscall, if its second argument equals `1` or matches the mask `0x06`.
+
+```toml
+seccomp:
+  profile:
+    default
+  allow:
+    delete_module: !args
+      index: 1
+      values: [
+          1,
+      ]
+      mask: 0x06
+```
+
+The complete format of the seccomp manifest entry is described
+[here](https://esrlabs.github.io/northstar/northstar/seccomp/struct.Seccomp.html).
+
+If seccomp is defined in the manifest and the container attempts to access a
+syscall that is not on the list of allowed calls the process is terminated
+immediately.
+
 ## Roadmap
 
 See the [open issues](https://github.com/esrlabs/northstar/issues) for a list of
