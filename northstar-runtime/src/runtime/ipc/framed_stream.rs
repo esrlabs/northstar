@@ -195,11 +195,12 @@ mod test {
 
     #[test]
     fn send_recv_sync() {
-        let mut pair = super::super::socket_pair().unwrap();
+        let (first, second) = std::os::unix::net::UnixStream::pair().unwrap();
 
         match unsafe { nix::unistd::fork() }.unwrap() {
             nix::unistd::ForkResult::Parent { child: _ } => {
-                let mut stream = FramedUnixStream::new(pair.first());
+                drop(second);
+                let mut stream = FramedUnixStream::new(first);
                 for _ in 0..ITERATIONS {
                     let tx = nanoid::nanoid!();
                     stream.send(&tx).unwrap();
@@ -208,7 +209,8 @@ mod test {
                 }
             }
             nix::unistd::ForkResult::Child => {
-                let mut stream = FramedUnixStream::new(pair.second());
+                drop(first);
+                let mut stream = FramedUnixStream::new(second);
                 while let Ok(Some(s)) = stream.recv::<String>() {
                     stream.send(s).unwrap();
                 }
@@ -219,16 +221,17 @@ mod test {
 
     #[test]
     fn send_recv_async() {
-        let mut pair = super::super::socket_pair().unwrap();
+        let (first, second) = std::os::unix::net::UnixStream::pair().unwrap();
 
         match unsafe { nix::unistd::fork() }.unwrap() {
             nix::unistd::ForkResult::Parent { child: _ } => {
+                drop(second);
                 tokio::runtime::Builder::new_current_thread()
                     .enable_io()
                     .build()
                     .unwrap()
                     .block_on(async move {
-                        let mut stream = AsyncFramedUnixStream::new(pair.first());
+                        let mut stream = AsyncFramedUnixStream::new(first);
                         for _ in 0..ITERATIONS {
                             let tx = nanoid::nanoid!();
                             stream.send(&tx).await.unwrap();
@@ -240,12 +243,13 @@ mod test {
                 exit(0);
             }
             nix::unistd::ForkResult::Child => {
+                drop(first);
                 tokio::runtime::Builder::new_current_thread()
                     .enable_io()
                     .build()
                     .unwrap()
                     .block_on(async move {
-                        let mut stream = AsyncFramedUnixStream::new(pair.second());
+                        let mut stream = AsyncFramedUnixStream::new(second);
                         while let Ok(Some(s)) = stream.recv::<String>().await {
                             stream.send(s).await.unwrap();
                         }
@@ -259,11 +263,12 @@ mod test {
     #[test]
     fn send_recv_fd_blocking() {
         let mut files = open_test_files();
-        let mut pair = super::super::socket_pair().unwrap();
+        let (first, second) = std::os::unix::net::UnixStream::pair().unwrap();
 
         match unsafe { nix::unistd::fork() }.unwrap() {
             nix::unistd::ForkResult::Parent { child: _ } => {
-                let stream = FramedUnixStream::new(pair.first());
+                drop(second);
+                let stream = FramedUnixStream::new(first);
 
                 for _ in 0..ITERATIONS {
                     stream.send_fds(&files).unwrap();
@@ -274,7 +279,8 @@ mod test {
                 read_assert(&mut files[1], "again");
             }
             nix::unistd::ForkResult::Child => {
-                let stream = FramedUnixStream::new(pair.second());
+                drop(first);
+                let stream = FramedUnixStream::new(second);
 
                 for _ in 0..ITERATIONS {
                     let mut files = stream.recv_fds::<File, 2>().unwrap();

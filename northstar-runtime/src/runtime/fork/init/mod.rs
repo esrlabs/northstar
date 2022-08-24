@@ -6,7 +6,7 @@ use crate::{
         rlimit::{RLimitResource, RLimitValue},
     },
     runtime::{
-        fork::util::{self, fork, set_child_subreaper, set_process_name},
+        fork::util::{self, set_child_subreaper, set_process_name},
         ipc::FramedUnixStream,
         ExitStatus, Pid,
     },
@@ -26,8 +26,7 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitStatus},
     },
-    unistd,
-    unistd::Uid,
+    unistd::{self, fork, ForkResult, Uid},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -142,26 +141,28 @@ impl Init {
                     }
 
                     // Start new process inside the container
-                    let pid = fork(|| {
-                        util::set_parent_death_signal(Signal::SIGKILL);
+                    let pid = match unsafe { fork().expect("failed to fork") } {
+                        ForkResult::Parent { child } => child.as_raw() as Pid,
+                        ForkResult::Child => {
+                            util::set_parent_death_signal(Signal::SIGKILL);
 
-                        // Set seccomp filter
-                        if let Some(ref filter) = self.seccomp {
-                            filter.apply().expect("failed to apply seccomp filter.");
+                            // Set seccomp filter
+                            if let Some(ref filter) = self.seccomp {
+                                filter.apply().expect("failed to apply seccomp filter.");
+                            }
+
+                            let path = CString::from(path);
+                            let args = args.into_iter().map_into::<CString>().collect_vec();
+                            let env = env.into_iter().map_into::<CString>().collect_vec();
+
+                            panic!(
+                                "execve: {:?} {:?}: {:?}",
+                                &path,
+                                &args,
+                                unistd::execve(&path, &args, &env)
+                            )
                         }
-
-                        let path = CString::from(path);
-                        let args = args.into_iter().map_into::<CString>().collect_vec();
-                        let env = env.into_iter().map_into::<CString>().collect_vec();
-
-                        panic!(
-                            "execve: {:?} {:?}: {:?}",
-                            &path,
-                            &args,
-                            unistd::execve(&path, &args, &env)
-                        )
-                    })
-                    .expect("failed to spawn child process");
+                    };
 
                     // close fds
                     drop(console);

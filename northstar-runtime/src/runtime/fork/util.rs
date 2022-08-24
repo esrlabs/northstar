@@ -1,12 +1,9 @@
-use crate::runtime::{error::Error, Pid};
-use log::{debug, error};
+use log::debug;
 use nix::{
     errno::Errno,
     libc::{self, c_ulong},
     sys::signal::Signal,
-    unistd::{self},
 };
-use std::process::exit;
 
 /// Set the parent death signal of the calling process
 pub fn set_parent_death_signal(signal: Signal) {
@@ -68,26 +65,4 @@ pub fn set_child_subreaper(value: bool) {
     Errno::result(result)
         .map(drop)
         .expect("failed to set child subreaper flag")
-}
-
-/// Fork a new process.
-///
-/// # Arguments:
-///
-/// * `f` - The closure to run in the child process.
-///
-pub fn fork<F>(f: F) -> nix::Result<Pid>
-where
-    F: FnOnce() -> Result<(), Error>,
-{
-    match unsafe { unistd::fork()? } {
-        unistd::ForkResult::Parent { child } => Ok(child.as_raw() as Pid),
-        unistd::ForkResult::Child => match f() {
-            Ok(_) => exit(0),
-            Err(e) => {
-                error!("failed after fork: {:?}", e);
-                exit(-1);
-            }
-        },
-    }
 }

@@ -34,8 +34,6 @@ pub enum Message {
     },
     /// Confirmation message fo a exec request.
     ExecResult,
-    /// Something went wrong.
-    Error(String),
 }
 
 /// Notification from the forker to the runtime

@@ -8,15 +8,21 @@ use crate::{
     npk::manifest::Manifest,
     runtime::{
         config::Config,
-        ipc::{socket_pair, AsyncFramedUnixStream, FramedUnixStream},
+        ipc::{AsyncFramedUnixStream, FramedUnixStream},
     },
 };
 use anyhow::{Context, Result};
 use futures::FutureExt;
 use log::debug;
 pub use messages::{Message, Notification};
-use nix::sys::signal::{signal, SigHandler, Signal};
-use std::os::unix::{net::UnixStream, prelude::OwnedFd};
+use nix::{
+    sys::signal::{signal, SigHandler, Signal},
+    unistd,
+};
+use std::{
+    os::unix::{net::UnixStream, prelude::OwnedFd},
+    process::exit,
+};
 use tokio::runtime;
 
 mod messages;
@@ -30,43 +36,47 @@ pub struct Streams {
 
 /// Fork the forker process
 pub fn start() -> Result<(Pid, Streams)> {
-    let mut command_stream_pair = socket_pair().expect("failed to open socket pair");
-    let mut socket_stream_pair = socket_pair().expect("failed to open socket pair");
-    let mut notification_stream_pair = socket_pair().expect("failed to open socket pair");
+    let (command_first, command_second) = UnixStream::pair()?;
+    let (socket_first, socket_second) = UnixStream::pair()?;
+    let (notification_first, notification_second) = UnixStream::pair()?;
 
-    let pid = util::fork(|| {
-        util::set_child_subreaper(true);
-        util::set_parent_death_signal(Signal::SIGKILL);
-        util::set_process_name("northstar-fork");
+    let pid = match unsafe { unistd::fork() }? {
+        unistd::ForkResult::Parent { child } => child.as_raw() as Pid,
+        unistd::ForkResult::Child => {
+            util::set_child_subreaper(true);
+            util::set_parent_death_signal(Signal::SIGKILL);
+            util::set_process_name("northstar-fork");
 
-        let command_stream = command_stream_pair.second();
-        let socket_stream = socket_stream_pair.second();
-        let notification_stream = notification_stream_pair.second();
+            drop(command_first);
+            drop(socket_first);
+            drop(notification_first);
 
-        debug!("Setting signal handlers for SIGINT and SIGHUP");
-        unsafe {
-            signal(Signal::SIGINT, SigHandler::SigIgn).context("setting SIGINT handler failed")?;
-            signal(Signal::SIGHUP, SigHandler::SigIgn).context("setting SIGHUP handler failed")?;
+            debug!("Setting signal handlers for SIGINT and SIGHUP");
+            unsafe {
+                signal(Signal::SIGINT, SigHandler::SigIgn)
+                    .context("setting SIGINT handler failed")?;
+                signal(Signal::SIGHUP, SigHandler::SigIgn)
+                    .context("setting SIGHUP handler failed")?;
+            }
+
+            let run = async move {
+                process::run(command_second, socket_second, notification_second).await;
+            };
+
+            runtime::Builder::new_current_thread()
+                .thread_name("northstar-fork-runtime")
+                .enable_io()
+                .build()
+                .expect("failed to start runtime")
+                .block_on(run);
+            exit(0);
         }
-
-        let run = async move {
-            process::run(command_stream, socket_stream, notification_stream).await;
-        };
-
-        runtime::Builder::new_current_thread()
-            .thread_name("northstar-fork-runtime")
-            .enable_io()
-            .build()
-            .expect("failed to start runtime")
-            .block_on(run);
-        Ok(())
-    })
-    .expect("failed to start forker process");
+    };
 
     let forker = Streams {
-        command_stream: command_stream_pair.first(),
-        socket_stream: socket_stream_pair.first(),
-        notification_stream: notification_stream_pair.first(),
+        command_stream: command_first,
+        socket_stream: socket_first,
+        notification_stream: notification_first,
     };
 
     Ok((pid, forker))
@@ -105,11 +115,8 @@ impl Forker {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
         let init = init::build(config, manifest, containers).await?;
-        let message = Message::CreateRequest {
-            init,
-            io: Some(io),
-            console,
-        };
+        let io = Some(io);
+        let message = Message::CreateRequest { init, io, console };
 
         match self
             .request_response(message)
@@ -117,7 +124,6 @@ impl Forker {
             .context("failed to send request")?
         {
             Message::CreateResult { pid: init } => Ok(init),
-            Message::Error(error) => Err(Error::StartContainerFailed(manifest.container(), error)),
             m => panic!("Unexpected forker response {:?}", m),
         }
     }

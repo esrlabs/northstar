@@ -2,13 +2,12 @@ use super::{
     init,
     init::Init,
     messages::{Message, Notification},
-    util::fork,
 };
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     runtime::{
-        fork::util::{self},
-        ipc::{socket_pair, AsyncFramedUnixStream, FramedUnixStream},
+        fork::util::set_parent_death_signal,
+        ipc::{AsyncFramedUnixStream, FramedUnixStream},
         ExitStatus, Pid,
     },
 };
@@ -21,15 +20,15 @@ use log::debug;
 use nix::{
     errno::Errno,
     libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
+    sched,
     sys::{signal::Signal, wait::waitpid},
-    unistd::{self},
+    unistd::{self, fork, ForkResult},
 };
 use std::{
     collections::HashMap,
     os::unix::{
-        io::FromRawFd,
         net::UnixStream,
-        prelude::{AsRawFd, IntoRawFd, OwnedFd},
+        prelude::{AsRawFd, OwnedFd},
     },
     process::exit,
 };
@@ -97,49 +96,45 @@ pub async fn run(
 async fn create(init: Init, io: [OwnedFd; 3], console: Option<OwnedFd>) -> (Pid, FramedUnixStream) {
     let container = init.container.clone();
     debug!("Creating container {}", container);
-    let mut stream = socket_pair().expect("failed to create socket pair");
 
-    let trampoline_pid = fork(|| {
-        util::set_parent_death_signal(Signal::SIGKILL);
+    let (stream_first, stream_second) = UnixStream::pair().expect("failed to create socket pair");
 
-        // Work around the borrow checker and fork
-        let stream = stream.second().into_raw_fd();
+    let trampoline_pid = match unsafe { fork().expect("failed to fork") } {
+        ForkResult::Parent { child } => child.as_raw() as Pid,
+        ForkResult::Child => {
+            drop(stream_first);
+            let mut stream = FramedUnixStream::new(stream_second);
 
-        debug!("Applying io settings");
-        // Apply io settings
-        let stdin = &io[0];
-        let stdout = &io[1];
-        let stderr = &io[2];
-        unistd::dup2(stdin.as_raw_fd(), STDIN_FILENO).expect("failed to dup2");
-        unistd::dup2(stdout.as_raw_fd(), STDOUT_FILENO).expect("failed to dup2");
-        unistd::dup2(stderr.as_raw_fd(), STDERR_FILENO).expect("failed to dup2");
-        drop(io);
+            set_parent_death_signal(Signal::SIGKILL);
 
-        // Create pid namespace
-        debug!("Creating pid namespace");
-        nix::sched::unshare(nix::sched::CloneFlags::CLONE_NEWPID)
-            .expect("failed to create pid namespace");
+            // Apply io settings
+            let stdin = &io[0];
+            let stdout = &io[1];
+            let stderr = &io[2];
+            unistd::dup2(stdin.as_raw_fd(), STDIN_FILENO).expect("failed to dup2");
+            unistd::dup2(stdout.as_raw_fd(), STDOUT_FILENO).expect("failed to dup2");
+            unistd::dup2(stderr.as_raw_fd(), STDERR_FILENO).expect("failed to dup2");
+            drop(io);
 
-        // Fork the init process
-        debug!("Forking init of {}", container);
-        let init_pid = fork(|| {
-            let stream = FramedUnixStream::new(unsafe { UnixStream::from_raw_fd(stream) });
-            // Dive into init and never return
-            init.run(stream, console);
-        })
-        .expect("failed to fork init");
+            // Create pid namespace
+            sched::unshare(sched::CloneFlags::CLONE_NEWPID)
+                .expect("failed to create pid namespace");
 
-        // Send the pid of init to the forker process
-        let stream = unsafe { UnixStream::from_raw_fd(stream) };
-        let mut stream = FramedUnixStream::new(stream);
-        stream.send(init_pid).expect("failed to send init pid");
+            // Fork the init process
+            let init_pid = match unsafe { fork().expect("failed to fork") } {
+                ForkResult::Parent { child } => child.as_raw() as Pid,
+                ForkResult::Child => init.run(stream, console),
+            };
 
-        debug!("Exiting trampoline");
-        Ok(())
-    })
-    .expect("failed to fork trampoline process");
+            // Send the pid of init to the forker process
+            stream.send(init_pid).expect("failed to send init pid");
+            exit(0);
+        }
+    };
 
-    let mut stream = FramedUnixStream::new(stream.first());
+    drop(stream_second);
+
+    let mut stream = FramedUnixStream::new(stream_first);
 
     debug!("Waiting for init pid of container {}", container);
     let pid = stream
