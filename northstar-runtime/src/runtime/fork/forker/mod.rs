@@ -1,3 +1,5 @@
+use self::channel::Channel;
+
 use super::{
     super::{error::Error, Pid},
     init,
@@ -12,7 +14,6 @@ use crate::{
     },
 };
 use anyhow::{Context, Result};
-use futures::FutureExt;
 use log::debug;
 pub use messages::{Message, Notification};
 use nix::{
@@ -25,8 +26,12 @@ use std::{
 };
 use tokio::runtime;
 
+mod channel;
 mod messages;
 mod process;
+
+pub type Args = Vec<NonNulString>;
+pub type Env = Vec<NonNulString>;
 
 pub struct Streams {
     pub command_stream: UnixStream,
@@ -59,10 +64,7 @@ pub fn start() -> Result<(Pid, Streams)> {
                     .context("setting SIGHUP handler failed")?;
             }
 
-            let run = async move {
-                process::run(command_second, socket_second, notification_second).await;
-            };
-
+            let run = process::run(command_second, socket_second, notification_second);
             runtime::Builder::new_current_thread()
                 .thread_name("northstar-fork-runtime")
                 .enable_io()
@@ -86,24 +88,22 @@ pub fn start() -> Result<(Pid, Streams)> {
 /// with the forker process.
 #[derive(Debug)]
 pub struct Forker {
-    /// Framed stream/sink for sending messages to the forker process
-    command_stream: AsyncFramedUnixStream,
-    /// Unix socket stream for file descriptor transfer
-    socket_stream: FramedUnixStream,
+    channel: Channel,
 }
 
 impl Forker {
     /// Create a new forker handle
     pub fn new(command_stream: UnixStream, socket_stream: UnixStream) -> Self {
+        // Important: The AsyncFramedUnixStream *must* be constructed in the context
+        // of the Tokio runtime that will poll the stream. This is the reason why
+        // this fn takes UnixStream from `std`.
         let command_stream = AsyncFramedUnixStream::new(command_stream);
         let socket_stream = FramedUnixStream::new(socket_stream);
-        Self {
-            command_stream,
-            socket_stream,
-        }
+        let channel = Channel::new(command_stream, socket_stream);
+        Self { channel }
     }
 
-    /// Send a request to the forker process to create a new container
+    /// Send a request to the forker process to create a new container.
     pub async fn create<'a, I: Iterator<Item = &'a Container> + Clone>(
         &mut self,
         container: &Container,
@@ -115,79 +115,43 @@ impl Forker {
     ) -> Result<Pid, Error> {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
+        // Request
         let init = init::build(config, manifest, containers).await?;
-        let io = Some(io);
-        let message = Message::CreateRequest { init, io, console };
+        let request = Message::CreateRequest { init, io, console };
+        self.channel.send(request).await;
 
-        match self
-            .request_response(message)
-            .await
-            .context("failed to send request")?
-        {
-            Message::CreateResult { result } => {
+        // Response
+        match self.channel.recv().await {
+            Some(Message::CreateResult { result }) => {
                 result.map_err(|e| Error::StartContainerFailed(container.clone(), e))
             }
-            m => panic!("unexpected forker response {:?}", m),
+            Some(message) => panic!("unexpected message from forker: {:?}", message),
+            None => panic!("forker stream closed"),
         }
     }
 
-    /// Start container process in a previously created container
+    /// Start container process in a previously created container.
     pub async fn exec(
         &mut self,
         container: Container,
         path: NonNulString,
-        args: Vec<NonNulString>,
-        env: Vec<NonNulString>,
+        args: Args,
+        env: Env,
     ) -> Result<(), Error> {
-        let message = Message::ExecRequest {
+        // Request
+        let request = Message::ExecRequest {
             container,
             path,
             args,
             env,
         };
-        self.request_response(message).await.map(drop)
-    }
+        self.channel.send(request).await;
 
-    /// Send a request to the forker process and wait for a response
-    async fn request_response(&mut self, request: Message) -> Result<Message, Error> {
-        let mut request = request;
-
-        match request {
-            Message::CreateRequest {
-                init: _,
-                ref mut io,
-                ref mut console,
-            } => {
-                let io = io.take();
-                let console = console.take();
-                self.command_stream
-                    .send(request)
-                    .await
-                    .context("failed to send request")?;
-                self.socket_stream
-                    .send_fds(&io.expect("missing io"))
-                    .context("failed to send fd")?;
-                if let Some(console) = console {
-                    self.socket_stream
-                        .send_fds(&[console])
-                        .context("failed to send fd")?;
-                }
-            }
-            message => self
-                .command_stream
-                .send(message)
-                .await
-                .context("failed to send to command stream")?,
+        // Response
+        match self.channel.recv().await {
+            Some(Message::ExecResult { .. }) => Ok(()),
+            Some(message) => panic!("unexpected message from forker: {:?}", message),
+            None => panic!("forker stream closed"),
         }
-
-        // Receive reply
-        let reply = self
-            .command_stream
-            .recv()
-            .map(|s| s.map(|s| s.expect("invalid message")))
-            .await
-            .context("failed to receive response from forker")?;
-
-        Ok(reply)
     }
 }

@@ -6,7 +6,7 @@ use super::{
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     runtime::{
-        fork::util::set_parent_death_signal,
+        fork::{forker::channel::Channel, util::set_parent_death_signal},
         ipc::{AsyncFramedUnixStream, FramedUnixStream},
         ExitStatus, Pid,
     },
@@ -43,32 +43,30 @@ pub async fn run(
 ) -> ! {
     let mut inits = HashMap::<Container, (Pid, FramedUnixStream)>::new();
     let mut exits = FuturesUnordered::new();
-
-    // Notifications from the forker to the runtime
     let mut notifications = AsyncFramedUnixStream::new(notifications);
-    // Message from the runtime to the forker process
-    let mut command_stream = AsyncFramedUnixStream::new(command_stream);
-    // Socket sent from the runtime to the forker process
-    let mut socket_stream = FramedUnixStream::new(socket_stream);
+    let command = AsyncFramedUnixStream::new(command_stream);
+    let socket = FramedUnixStream::new(socket_stream);
+    let mut channel = Channel::new(command, socket);
 
     debug!("Entering main loop");
 
     loop {
         select! {
-            request = recv_command(&mut command_stream, &mut socket_stream) => {
+            request = channel.recv() => {
                 match request {
                     Some(Message::CreateRequest { init, console, io }) => {
                         debug!("Creating init process for {}", init.container);
                         let container = init.container.clone();
-                        let io = io.expect("create request without io");
                         match create(init, io, console).await {
                             Ok((pid, stream)) => {
                                 debug_assert!(!inits.contains_key(&container));
                                 inits.insert(container, (pid, stream));
-                                command_stream.send(Message::CreateResult { result: Ok(pid) }).await.expect("failed to send response");
+                                let message = Message::CreateResult { result: Ok(pid) };
+                                channel.send(message).await;
                             }
                             Err(e) => {
-                                command_stream.send(Message::CreateResult { result: Err(e.to_string())}).await.expect("failed to send response");
+                                let message = Message::CreateResult { result: Err(e.to_string())};
+                                channel.send(message).await;
                             }
                         }
                     }
@@ -81,11 +79,11 @@ pub async fn run(
                         exits.push(exit);
 
                         // Send the result of the exec request to the runtime
-                        command_stream.send(response).await.expect("failed to send response");
+                        channel.send(response).await;
                     }
                     Some(_) => unreachable!("Unexpected message"),
                     None => {
-                        debug!("Forker request channel closed. Exiting ");
+                        debug!("Channel closed. Exiting...");
                         std::process::exit(0);
                     }
                 }
@@ -93,7 +91,8 @@ pub async fn run(
             exit = exits.next(), if !exits.is_empty() => {
                 let (container, exit_status) = exit.expect("invalid exit status");
                 debug!("Forwarding exit status notification of {}: {}", container, exit_status);
-                notifications.send(Notification::Exit { container, exit_status }).await.expect("failed to send exit notification");
+                let notification = Notification::Exit { container, exit_status };
+                notifications.send(notification).await.expect("failed to send exit notification");
             }
         }
     }
@@ -243,46 +242,4 @@ async fn exec(
     };
 
     (Message::ExecResult, exit_status)
-}
-
-/// Receive a command on the command stream
-async fn recv_command(
-    stream: &mut AsyncFramedUnixStream,
-    socket_stream: &mut FramedUnixStream,
-) -> Option<Message> {
-    let request = match stream.recv().await {
-        Ok(request) => request,
-        Err(e) => {
-            debug!("Forker request error: {}. Exiting...", e);
-            exit(0);
-        }
-    };
-
-    match request {
-        Some(Message::CreateRequest { init, .. }) => {
-            let io = socket_stream.recv_fds::<OwnedFd, 3>().ok();
-            let console = if init.console {
-                let console = socket_stream
-                    .recv_fds::<OwnedFd, 1>()
-                    .expect("failed to receive console fd");
-                Some(console.into_iter().next().expect("missing console fd"))
-            } else {
-                None
-            };
-            Some(Message::CreateRequest { init, io, console })
-        }
-        Some(Message::ExecRequest {
-            container,
-            path,
-            args,
-            env,
-            ..
-        }) => Some(Message::ExecRequest {
-            container,
-            path,
-            args,
-            env,
-        }),
-        command => command,
-    }
 }
