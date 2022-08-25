@@ -1,4 +1,4 @@
-use std::os::unix::prelude::OwnedFd;
+use std::{iter::once, os::unix::prelude::OwnedFd};
 
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
@@ -15,7 +15,9 @@ use super::messages::Message;
 /// Command and socket stream bundled in one entity.
 #[derive(Debug)]
 pub struct Channel {
+    /// Socket for message communication.
     command: AsyncFramedUnixStream,
+    /// Socket for file descriptor transfer.
     socket: FramedUnixStream,
 }
 
@@ -30,17 +32,17 @@ impl Channel {
         match message {
             Message::CreateRequest { init, io, console } => {
                 let message = SerdeMessage::CreateRequest { init };
-                // TODO: Send io and console fd in one operation (performance)
                 self.command
                     .send(message)
                     .await
                     .expect("failed to send response");
-                self.socket.send_fds(&io).expect("failed to send fds");
-                // Optionally send the console fd
+
+                // Send file descriptors. The console fd is optional.
                 if let Some(console) = console {
-                    self.socket
-                        .send_fds(&[console])
-                        .expect("failed to send fds");
+                    let fds: Vec<_> = io.into_iter().chain(once(console)).collect();
+                    self.socket.send_fds(&fds).expect("failed to send fds");
+                } else {
+                    self.socket.send_fds(&io).expect("failed to send fds");
                 }
             }
             m => {
@@ -56,19 +58,27 @@ impl Channel {
     pub async fn recv(&mut self) -> Option<Message> {
         match self.command.recv().await.ok()?? {
             SerdeMessage::CreateRequest { init } => {
-                // TODO: Receive io and console fd in one operation (performance)
-                let io = self
-                    .socket
-                    .recv_fds::<OwnedFd, 3>()
-                    .expect("failed to receive io fds");
-                let console = init.console.then(|| {
-                    let fd = self
+                // Receive file descriptors.
+                if init.console {
+                    let mut fds = self
                         .socket
-                        .recv_fds::<OwnedFd, 1>()
-                        .expect("failed to receive console fd");
-                    fd.into_iter().next().expect("unreachable")
-                });
-                Some(Message::CreateRequest { init, io, console })
+                        .recv_fds::<OwnedFd, 4>()
+                        .expect("failed to receive fds");
+                    let console = fds.pop();
+                    let io = fds.try_into().expect("invalid number of fds");
+                    Some(Message::CreateRequest { init, io, console })
+                } else {
+                    let io = self
+                        .socket
+                        .recv_fds::<OwnedFd, 3>()
+                        .expect("failed to receive fds");
+                    let io = io.try_into().expect("invalid number of fds received");
+                    Some(Message::CreateRequest {
+                        init,
+                        io,
+                        console: None,
+                    })
+                }
             }
             message => Some(message.into()),
         }

@@ -4,12 +4,11 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use nix::{
     cmsg_space,
-    sys::socket::{self, ControlMessageOwned, SockaddrIn6},
+    sys::socket::{self, recvmsg, sendmsg, ControlMessageOwned, SockaddrIn6},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     io::{self, ErrorKind, IoSlice, IoSliceMut, Read},
-    mem::MaybeUninit,
     os::unix::prelude::{AsRawFd, FromRawFd, RawFd},
 };
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -50,25 +49,25 @@ impl FramedUnixStream {
         let buf = &[0u8];
         let iov = &[IoSlice::new(buf)];
         let fds = fds.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();
-        let cmsg = [socket::ControlMessage::ScmRights(&fds)];
+        let control_message = [socket::ControlMessage::ScmRights(&fds)];
+        let fd = self.0.as_raw_fd();
         const FLAGS: socket::MsgFlags = socket::MsgFlags::empty();
 
-        socket::sendmsg::<SockaddrIn6>(self.0.as_raw_fd(), iov, &cmsg, FLAGS, None)
-            .map_err(os_err)
-            .map(drop)
+        sendmsg::<SockaddrIn6>(fd, iov, &control_message, FLAGS, None).map_err(os_err)?;
+        Ok(())
     }
 
     /// Receive a file descriptor via the socket
-    pub fn recv_fds<T: FromRawFd, const N: usize>(&self) -> io::Result<[T; N]> {
+    pub fn recv_fds<T: FromRawFd, const N: usize>(&self) -> io::Result<Vec<T>> {
         let mut buf = [0u8];
         let iov = &mut [IoSliceMut::new(&mut buf)];
-        let mut cmsg_buffer = cmsg_space!([RawFd; N]);
+        let mut control_message_buffer = cmsg_space!([RawFd; N]);
+        let control_message_buffer = Some(&mut control_message_buffer);
+        let fd = self.0.as_raw_fd();
         const FLAGS: socket::MsgFlags = socket::MsgFlags::empty();
 
         let message =
-            socket::recvmsg::<SockaddrIn6>(self.0.as_raw_fd(), iov, Some(&mut cmsg_buffer), FLAGS)
-                .map_err(os_err)?;
-
+            recvmsg::<SockaddrIn6>(fd, iov, control_message_buffer, FLAGS).map_err(os_err)?;
         recv_control_msg::<T, N>(message.cmsgs().next())
     }
 
@@ -126,19 +125,15 @@ fn os_err(err: nix::Error) -> io::Error {
 
 fn recv_control_msg<T: FromRawFd, const N: usize>(
     message: Option<ControlMessageOwned>,
-) -> io::Result<[T; N]> {
+) -> io::Result<Vec<T>> {
     match message {
         Some(socket::ControlMessageOwned::ScmRights(fds)) => {
-            let mut result: [MaybeUninit<T>; N] = unsafe { MaybeUninit::uninit().assume_init() };
-
-            for (fd, result) in fds.iter().zip(&mut result) {
-                result.write(unsafe { T::from_raw_fd(*fd) });
-            }
-
-            let ptr = &mut result as *mut _ as *mut [T; N];
-            let res = unsafe { ptr.read() };
-            core::mem::forget(result);
-            Ok(res)
+            let result: Vec<T> = fds
+                .into_iter()
+                .map(|fd| unsafe { T::from_raw_fd(fd) })
+                .collect();
+            assert_eq!(result.len(), N);
+            Ok(result)
         }
         Some(message) => Err(io::Error::new(
             io::ErrorKind::Other,
@@ -171,11 +166,11 @@ mod test {
     const ITERATIONS: usize = 10_000;
 
     /// Open two memfds for testing
-    fn open_test_files() -> [File; 2] {
+    fn open_test_files() -> Vec<File> {
         let opts = memfd::MemfdOptions::default();
         let file0 = opts.create("hello").unwrap().into_file();
         let file1 = opts.create("again").unwrap().into_file();
-        [file0, file1]
+        vec![file0, file1]
     }
 
     /// Read file to end and assert the result is equal to the expected `s`

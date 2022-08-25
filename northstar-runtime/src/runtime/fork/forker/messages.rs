@@ -12,8 +12,7 @@ use serde::{Deserialize, Serialize};
 pub enum Message {
     /// Request from the runtime to the forker process to create a new init process
     /// for a container. The console fd is optional and only present if configured
-    /// in the manifest. The `io` is *not* optional and just optional to satisfy
-    /// serde's requirement of `Default`.
+    /// in the manifest.
     CreateRequest {
         init: Init,
         io: [OwnedFd; 3],
