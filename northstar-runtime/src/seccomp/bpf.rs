@@ -94,10 +94,7 @@ fn builder_from_profile(profile: &Profile, caps: &HashSet<Capability>) -> Builde
                         Capability::CAP_LINUX_IMMUTABLE => {}
                         Capability::CAP_NET_BIND_SERVICE => {}
                         Capability::CAP_NET_BROADCAST => {}
-                        Capability::CAP_NET_ADMIN => {
-                            cap_sys_admin = true;
-                            builder.extend(default::CAP_SYS_ADMIN.clone());
-                        }
+                        Capability::CAP_NET_ADMIN => {}
                         Capability::CAP_NET_RAW => {}
                         Capability::CAP_IPC_LOCK => {}
                         Capability::CAP_IPC_OWNER => {}
@@ -116,7 +113,10 @@ fn builder_from_profile(profile: &Profile, caps: &HashSet<Capability>) -> Builde
                         Capability::CAP_SYS_PACCT => {
                             builder.extend(default::CAP_SYS_PACCT.clone());
                         }
-                        Capability::CAP_SYS_ADMIN => {}
+                        Capability::CAP_SYS_ADMIN => {
+                            cap_sys_admin = true;
+                            builder.extend(default::CAP_SYS_ADMIN.clone());
+                        }
                         Capability::CAP_SYS_BOOT => {
                             builder.extend(default::CAP_SYS_BOOT.clone());
                         }
