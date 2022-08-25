@@ -14,30 +14,32 @@ Client -> Runtime: Connect: Hello
 Client <- Runtime: ConnectAck
 Client -> Runtime: Start container
 Runtime -> Runtime: Check and mount container(s)
-Runtime -> Runtime: Open PTY
+Runtime -> Runtime: Configure container io: stdin, stdout, stderr
 
 Runtime -> Forker: Create container
 
 create Trampoline
 Forker -> Trampoline: Fork
 activate Trampoline
+Trampoline -> Trampoline: Apply IO: stdin, stdout, stderr
 Trampoline -> Trampoline: Create PID namespace
 
 create Init
 Trampoline -> Init: Fork
+
+Trampoline -> Forker: Init PID
+Forker -> Init: Go go go!
 activate Init
 Init -> Init: Mount, Pivot root, UID / GID,\nunshare(*)\ndrop privileges, file descriptors
 
-Trampoline -> Forker: Forked init with PID
 destroy Trampoline
 
 Forker -> Forker: reap Trampoline
 
-Forker -> Runtime: Created init with PID
+Forker -> Runtime: Init PID
 
 Runtime -> Runtime: Configure cgroups
 Runtime -> Runtime: Configure debug
-Runtime -> Runtime: Configure PTY forward
 
 Runtime -> Forker: Exec container
 Forker -> Init: Exec Container
@@ -50,7 +52,6 @@ Client <- Runtime: Started
 Client <- Runtime: Notification: Started
 
 Init -> Init: Wait for container to exit (waitpid)
-Container -> Container: Setup PTY
 Container -> Container: Set seccomp filter
 Container -> : Execve(..)
 ...
