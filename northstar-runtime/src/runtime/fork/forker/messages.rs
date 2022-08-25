@@ -7,7 +7,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Request from the runtime to the forker
+/// Messages between the runtime and the forker process
 #[non_exhaustive]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
@@ -23,7 +23,7 @@ pub enum Message {
         console: Option<OwnedFd>,
     },
     /// Result of a container init creation.
-    CreateResult { pid: Pid },
+    CreateResult { result: Result<Pid, String> },
     /// Perfrom a exec from a container init with the given arguments (mainly
     /// from the manifest).
     ExecRequest {

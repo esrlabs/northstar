@@ -106,6 +106,7 @@ impl Forker {
     /// Send a request to the forker process to create a new container
     pub async fn create<'a, I: Iterator<Item = &'a Container> + Clone>(
         &mut self,
+        container: &Container,
         config: &Config,
         manifest: &Manifest,
         io: [OwnedFd; 3],
@@ -123,8 +124,10 @@ impl Forker {
             .await
             .context("failed to send request")?
         {
-            Message::CreateResult { pid: init } => Ok(init),
-            m => panic!("Unexpected forker response {:?}", m),
+            Message::CreateResult { result } => {
+                result.map_err(|e| Error::StartContainerFailed(container.clone(), e))
+            }
+            m => panic!("unexpected forker response {:?}", m),
         }
     }
 
@@ -170,12 +173,11 @@ impl Forker {
                         .context("failed to send fd")?;
                 }
             }
-            message => {
-                self.command_stream
-                    .send(message)
-                    .await
-                    .context("failed to send request")?;
-            }
+            message => self
+                .command_stream
+                .send(message)
+                .await
+                .context("failed to send to command stream")?,
         }
 
         // Receive reply

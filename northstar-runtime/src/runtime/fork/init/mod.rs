@@ -164,9 +164,10 @@ impl Init {
                         }
                     };
 
-                    // close fds
+                    // Close the console fd used in the container binary only.
                     drop(console);
 
+                    // Inform the forker that we forked.
                     let message = Message::Forked { pid };
                     stream.send(&message).expect("failed to send fork result");
 

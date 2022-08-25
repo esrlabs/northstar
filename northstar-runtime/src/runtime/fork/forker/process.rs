@@ -11,12 +11,13 @@ use crate::{
         ExitStatus, Pid,
     },
 };
+use anyhow::{anyhow, Context, Result};
 use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future,
 };
 use itertools::Itertools;
-use log::debug;
+use log::{debug, warn};
 use nix::{
     errno::Errno,
     libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO},
@@ -60,10 +61,16 @@ pub async fn run(
                         debug!("Creating init process for {}", init.container);
                         let container = init.container.clone();
                         let io = io.expect("create request without io");
-                        let (pid, message_stream) = create(init, io, console).await;
-                        debug_assert!(!inits.contains_key(&container));
-                        inits.insert(container, (pid, message_stream));
-                        command_stream.send(Message::CreateResult { pid }).await.expect("failed to send response");
+                        match create(init, io, console).await {
+                            Ok((pid, stream)) => {
+                                debug_assert!(!inits.contains_key(&container));
+                                inits.insert(container, (pid, stream));
+                                command_stream.send(Message::CreateResult { result: Ok(pid) }).await.expect("failed to send response");
+                            }
+                            Err(e) => {
+                                command_stream.send(Message::CreateResult { result: Err(e.to_string())}).await.expect("failed to send response");
+                            }
+                        }
                     }
                     Some(Message::ExecRequest { container, path, args, env }) => {
                         let (pid, message_stream) = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {}", container));
@@ -93,17 +100,22 @@ pub async fn run(
 }
 
 /// Create a new init process ("container")
-async fn create(init: Init, io: [OwnedFd; 3], console: Option<OwnedFd>) -> (Pid, FramedUnixStream) {
+async fn create(
+    init: Init,
+    io: [OwnedFd; 3],
+    console: Option<OwnedFd>,
+) -> Result<(Pid, FramedUnixStream)> {
     let container = init.container.clone();
     debug!("Creating container {}", container);
 
-    let (stream_first, stream_second) = UnixStream::pair().expect("failed to create socket pair");
+    let (stream_parent, stream_child) =
+        UnixStream::pair().context("failed to create socket pair")?;
 
-    let trampoline_pid = match unsafe { fork().expect("failed to fork") } {
+    let trampoline_pid = match unsafe { fork().context("failed to fork") }? {
         ForkResult::Parent { child } => child.as_raw() as Pid,
         ForkResult::Child => {
-            drop(stream_first);
-            let mut stream = FramedUnixStream::new(stream_second);
+            drop(stream_parent);
+            let mut stream = FramedUnixStream::new(stream_child);
 
             set_parent_death_signal(Signal::SIGKILL);
 
@@ -123,7 +135,12 @@ async fn create(init: Init, io: [OwnedFd; 3], console: Option<OwnedFd>) -> (Pid,
             // Fork the init process
             let init_pid = match unsafe { fork().expect("failed to fork") } {
                 ForkResult::Parent { child } => child.as_raw() as Pid,
-                ForkResult::Child => init.run(stream, console),
+                ForkResult::Child => {
+                    // Wait until the forker process received our pid sent
+                    // over by the trampoline.
+                    drop(stream.recv::<()>());
+                    init.run(stream, console)
+                }
             };
 
             // Send the pid of init to the forker process
@@ -132,15 +149,17 @@ async fn create(init: Init, io: [OwnedFd; 3], console: Option<OwnedFd>) -> (Pid,
         }
     };
 
-    drop(stream_second);
+    // Ensure to close the socket pair end of the child.
+    drop(stream_child);
 
-    let mut stream = FramedUnixStream::new(stream_first);
-
+    // Wait for the trampoline to send over the PID of init.
     debug!("Waiting for init pid of container {}", container);
-    let pid = stream
-        .recv()
-        .expect("failed to receive init pid")
-        .expect("failed to receive init pid");
+    let mut stream = FramedUnixStream::new(stream_parent);
+    let pid = stream.recv()?.ok_or_else(|| anyhow!("stream closed"))?;
+
+    // Notifiy init that we have successfully received their PID and
+    // release them into the wild.
+    stream.send(()).context("failed to notify init")?;
 
     // Reap the trampoline process
     debug!("Waiting for trampoline process {} to exit", trampoline_pid);
@@ -152,19 +171,19 @@ async fn create(init: Init, io: [OwnedFd; 3], console: Option<OwnedFd>) -> (Pid,
 
     debug!("Created container {} with pid {}", container, pid);
 
-    (pid, stream)
+    Ok((pid, stream))
 }
 
 /// Send a exec request to a container
 async fn exec(
     init_pid: Pid,
-    message_stream: FramedUnixStream,
+    stream: FramedUnixStream,
     container: Container,
     path: NonNulString,
     args: Vec<NonNulString>,
     env: Vec<NonNulString>,
 ) -> (Message, impl Future<Output = (Container, ExitStatus)>) {
-    let mut message_stream = message_stream;
+    let mut stream = stream;
 
     debug!(
         "Forwarding exec request for container {}: {}",
@@ -173,29 +192,49 @@ async fn exec(
     );
 
     // Send the exec request to the init process
+    // Ignore any error on the stream send because the async block
+    // below will take care. If the stream is accidently closed
+    // on the other end the process is treated as gone.
     let message = init::Message::Exec { path, args, env };
-    message_stream
-        .send(message)
-        .expect("failed to send exec to init");
+    drop(stream.send(message));
 
-    let message_stream = message_stream.into_inner();
-    let mut message_stream = AsyncFramedUnixStream::new(message_stream);
+    let stream = stream.into_inner();
+    let mut stream = AsyncFramedUnixStream::new(stream);
 
-    match message_stream.recv().await.expect("failed to receive") {
-        Some(init::Message::Forked { .. }) => (),
-        _ => panic!("Unexpected message from init"),
+    /// Send a SIGKILL to `pid`.
+    fn kill(pid: Pid) {
+        let process_group = unistd::Pid::from_raw(-(pid as i32));
+        warn!("Sending a SIGKILL to {}", process_group);
+        nix::sys::signal::kill(process_group, Some(Signal::SIGKILL)).ok();
     }
 
-    // Construct a future that waits to the init to signal a exit of it's child
-    // Afterwards reap the init process which should have exited already
-    let exit = async move {
-        let exit_status = match message_stream.recv().await {
+    // Wait until init tells us that it forked.
+    match stream.recv().await.expect("failed to receive") {
+        Some(init::Message::Forked { .. }) => (),
+        _ => {
+            warn!("Unexpected message from init. This shall never happen",);
+            kill(init_pid);
+        }
+    }
+
+    // Construct a future that waits for init to signal a exit of it's child.
+    // Afterwards reap the init process which should have exited already.
+    let exit_status = async move {
+        let exit_status = match stream.recv().await {
             Ok(Some(init::Message::Exit {
                 pid: _,
                 exit_status,
             })) => exit_status,
-            Ok(None) | Err(_) => ExitStatus::Exit(-1),
-            Ok(_) => panic!("Unexpected message from init"),
+            Ok(m) => {
+                warn!("Unexpected message from init {:?}", m);
+                kill(init_pid);
+                ExitStatus::Exit(-1)
+            }
+            Err(e) => {
+                warn!("Unexpected error while waiting for exit status: {}", e);
+                kill(init_pid);
+                ExitStatus::Exit(-2)
+            }
         };
 
         debug!("Reaping init process of {} ({})", container, init_pid);
@@ -203,7 +242,7 @@ async fn exec(
         (container, exit_status)
     };
 
-    (Message::ExecResult, exit)
+    (Message::ExecResult, exit_status)
 }
 
 /// Receive a command on the command stream

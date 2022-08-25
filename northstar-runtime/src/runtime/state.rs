@@ -504,7 +504,7 @@ impl State {
         let containers = self.containers.iter().map(|(c, _)| c);
         let pid = self
             .forker
-            .create(config, &manifest, io, console_fd, containers)
+            .create(container, config, &manifest, io, console_fd, containers)
             .await?;
 
         // Debug
