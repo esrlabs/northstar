@@ -15,6 +15,8 @@ use std::{
 use thiserror::Error;
 use validator::{Validate, ValidationErrors};
 
+use self::network::Network;
+
 /// Autostart
 pub mod autostart;
 /// Linux capabilities
@@ -27,6 +29,8 @@ pub mod console;
 pub mod io;
 /// Container mounts
 pub mod mount;
+/// Networking
+pub mod network;
 /// Linux resource limits
 pub mod rlimit;
 /// SE Linux
@@ -86,9 +90,9 @@ pub struct Manifest {
     pub autostart: Option<autostart::Autostart>,
     /// CGroup configuration
     pub cgroups: Option<self::cgroups::CGroups>,
-    /// Attach container process to a existing network namespace
-    #[validate(custom = "validation::netns")]
-    pub netns: Option<NonNulString>,
+    /// Network configuration. Unshare the network if omitted.
+    #[validate(custom = "validation::network")]
+    pub network: Option<Network>,
     /// Seccomp configuration
     #[validate(custom = "validation::seccomp")]
     pub seccomp: Option<Seccomp>,

@@ -5,7 +5,7 @@ args:
   - netns
 uid: 1000
 gid: 1000
-netns: container
+network: !namespace container
 io:
   stdout: pipe
   stderr: pipe

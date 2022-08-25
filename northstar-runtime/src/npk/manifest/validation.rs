@@ -11,6 +11,7 @@ use validator::ValidationError;
 
 use super::{
     mount::{Mount, MountOption, MountPoint},
+    network::Network,
     selinux::Selinux,
     Manifest,
 };
@@ -211,10 +212,10 @@ pub fn suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationErro
 }
 
 /// Validate network namespace setting
-pub fn netns(netns: &NonNulString) -> Result<(), ValidationError> {
-    if netns.len() > MAX_NET_NAMESPACE_LENGTH {
-        Err(ValidationError::new("network namespace exceeds max length"))
-    } else {
-        Ok(())
+pub fn network(network: &Network) -> Result<(), ValidationError> {
+    match network {
+        Network::Host => Ok(()),
+        Network::Namespace(netns) if netns.len() <= MAX_NET_NAMESPACE_LENGTH => Ok(()),
+        Network::Namespace(_) => Err(ValidationError::new("network namespace exceeds max length")),
     }
 }

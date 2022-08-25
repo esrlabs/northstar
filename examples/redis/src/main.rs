@@ -5,7 +5,7 @@ use tokio::signal::unix::{signal, SignalKind};
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> io::Result<()> {
     // Listen on localhost:6379
-    println!("Listenin on localhost:6379");
+    println!("Listening on localhost:6379");
     let listener = tokio::net::TcpListener::bind("localhost:6379").await?;
 
     // Register a (virtual) signal handler
