@@ -610,18 +610,9 @@ fn hashes_yaml(
 
 /// Try to construct the signature yaml file
 fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
-    let meta_hash = {
-        let mut sha256 = Sha256::new();
-        let meta = serde_yaml::to_string(&meta).context("failed to encode metadata")?;
-        sha2::digest::Update::update(&mut sha256, meta.as_bytes());
-        sha256.finalize()
-    };
-
-    let manifest_hash = {
-        let mut sha256 = Sha256::new();
-        sha2::digest::Update::update(&mut sha256, manifest.to_string().as_bytes());
-        sha256.finalize()
-    };
+    let meta_hash =
+        Sha256::digest(serde_yaml::to_string(&meta).context("failed to encode metadata")?);
+    let manifest_hash = Sha256::digest(manifest.to_string().as_bytes());
 
     // The size of the fs image is the offset of the verity block. The verity block
     // is appended to the fs.img
