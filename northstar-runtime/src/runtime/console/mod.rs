@@ -351,7 +351,12 @@ where
         model::Request::Mount { .. } => Permission::Mount,
         model::Request::Repositories => Permission::Repositories,
         model::Request::Shutdown => Permission::Shutdown,
-        model::Request::Start { .. } => Permission::Start,
+        model::Request::Start {
+            arguments,
+            environment,
+            ..
+        } if arguments.is_empty() && environment.is_empty() => Permission::Start,
+        model::Request::Start { .. } => Permission::StartWithArgsAndEnv,
         model::Request::TokenCreate { .. } => Permission::Token,
         model::Request::TokenVerify { .. } => Permission::Token,
         model::Request::Umount { .. } => Permission::Umount,
