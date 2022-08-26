@@ -13,11 +13,6 @@ use url::Url;
 use super::RepositoryId;
 use crate::common::non_nul_string::NonNulString;
 
-/// Console configuration
-pub use crate::runtime::console::Configuration as ConsoleConfiguration;
-/// Console permission configuration
-pub use crate::runtime::console::Permissions as ConsolePermissions;
-
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,9 +40,6 @@ pub struct Config {
     /// Token validity
     #[serde(with = "humantime_serde", default = "default_token_validity")]
     pub token_validity: time::Duration,
-    /// Console configuration
-    #[serde(deserialize_with = "console")]
-    pub consoles: HashMap<Url, ConsoleConfiguration>,
     /// Repositories
     #[serde(default)]
     pub repositories: HashMap<RepositoryId, Repository>,
@@ -86,6 +78,9 @@ pub struct Repository {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Debug {
+    /// Console configuration
+    #[serde(deserialize_with = "console")]
+    pub console: Url,
     /// Strace options
     pub strace: Option<debug::Strace>,
     /// perf options
@@ -174,19 +169,16 @@ fn is_rw(path: &Path) -> bool {
     }
 }
 
-/// Validate the console configuration that the url schemes are all "tcp" or "unix"
-fn console<'de, D>(deserializer: D) -> Result<HashMap<Url, ConsoleConfiguration>, D::Error>
+/// Validate the console url schemes are all "tcp" or "unix"
+fn console<'de, D>(deserializer: D) -> Result<Url, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let consoles = HashMap::<Url, _>::deserialize(deserializer)?;
-    if consoles
-        .keys()
-        .any(|url| url.scheme() != "tcp" && url.scheme() != "unix")
-    {
-        Err(D::Error::custom("console must be tcp or unix"))
+    let url = Url::deserialize(deserializer)?;
+    if url.scheme() != "tcp" && url.scheme() != "unix" {
+        Err(D::Error::custom("console scheme must be tcp or unix"))
     } else {
-        Ok(consoles)
+        Ok(url)
     }
 }
 
@@ -219,11 +211,9 @@ data_dir = "target/northstar/data"
 log_dir = "target/northstar/logs"
 cgroup = "northstar"
 
-[consoles."tcp://localhost:4200"]
-permissions = "full"
-
-[consoles."unix://tmp/foo"]
-permissions = []"#;
+[debug]
+console = "tcp://localhost:4200"
+"#;
 
     toml::from_str::<Config>(config).unwrap();
 
@@ -234,8 +224,9 @@ data_dir = "target/northstar/data"
 log_dir = "target/northstar/logs"
 cgroup = "northstar"
 
-[consoles."http://localhost:4200"]
-permissions = []"#;
+[debug]
+console = "http://localhost:4200"
+"#;
 
     assert!(toml::from_str::<Config>(config).is_err());
 }

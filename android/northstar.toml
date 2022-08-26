@@ -4,8 +4,8 @@ log_dir = "/data/northstar/logs"
 cgroup = "northstar"
 
 # Debug TCP console on localhost with full access
-[consoles."tcp://localhost:4200"]
-permissions = "full"
+[debug]
+console = "tcp://localhost:4200"
 
 [repositories.system]
 key = "/system/etc/northstar/system.pub"

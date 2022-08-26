@@ -2,6 +2,7 @@ use self::fork::Streams;
 use crate::{api, api::model::Container, runtime::ipc::AsyncFramedUnixStream};
 use async_stream::stream;
 use config::Config;
+use console::{Configuration, Permissions};
 use futures::{
     future::{ready, Either},
     FutureExt, StreamExt,
@@ -277,13 +278,16 @@ async fn run(
     let (notification_tx, _) = sync::broadcast::channel(config.notification_buffer_size);
 
     // Initialize the console if configured
-    let console = if !config.consoles.is_empty() {
+    let console = if let Some(url) = config.debug.as_ref().map(|d| &d.console) {
         let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
-        for (url, configuration) in config.consoles.iter() {
-            console
-                .listen(url, configuration, config.token_validity)
-                .await?;
-        }
+        // Default debug console configuration with full access and no limits.
+        let configuration = Configuration {
+            permissions: Permissions::full(),
+            ..Default::default()
+        };
+        console
+            .listen(url, &configuration, config.token_validity)
+            .await?;
         Some(console)
     } else {
         None
