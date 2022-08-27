@@ -29,32 +29,3 @@ impl Default for Output {
         Output::Discard
     }
 }
-
-/// Log level
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Level {
-    /// The "error" level.
-    #[serde(alias = "ERROR")]
-    Error = 1,
-    /// The "warn" level.
-    ///
-    /// Designates hazardous situations.
-    #[serde(alias = "WARN")]
-    Warn,
-    /// The "info" level.
-    ///
-    /// Designates useful information.
-    #[serde(alias = "INFO")]
-    Info,
-    /// The "debug" level.
-    ///
-    /// Designates lower priority information.
-    #[serde(alias = "DEBUG")]
-    Debug,
-    /// The "trace" level.
-    ///
-    /// Designates very low priority, often extremely verbose, information.
-    #[serde(alias = "TRACE")]
-    Trace,
-}

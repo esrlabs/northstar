@@ -2,6 +2,7 @@ use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     npk::manifest::{
         capabilities::Capability,
+        network::Network,
         rlimit::{RLimitResource, RLimitValue},
     },
     runtime::{
@@ -19,7 +20,7 @@ use nix::{
     fcntl::{self},
     libc::{self, c_ulong},
     mount::{self},
-    sched::{self, CloneFlags},
+    sched::{self, unshare, CloneFlags},
     sys::{
         signal::Signal,
         stat::Mode,
@@ -63,7 +64,7 @@ pub struct Init {
     pub gid: u16,
     pub mounts: Vec<Mount>,
     pub groups: Vec<u32>,
-    pub netns: Option<String>,
+    pub network: Option<Network>,
     pub capabilities: HashSet<Capability>,
     pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
@@ -84,7 +85,7 @@ impl Init {
         unistd::setsid().expect("failed to call setsid");
 
         // Enter network namespace
-        self.enter_netns();
+        self.network();
 
         // Enter mount namespace
         debug!("Entering mount, IPC and UTS namespace");
@@ -337,24 +338,33 @@ impl Init {
             .expect("failed to set PR_SET_NO_NEW_PRIVS")
     }
 
-    fn enter_netns(&self) {
-        if let Some(netns) = &self.netns {
-            #[cfg(target_os = "android")]
-            let path = Path::new("/run/netns").join(netns);
-            #[cfg(not(target_os = "android"))]
-            let path = Path::new("/var/run/netns").join(netns);
+    fn network(&self) {
+        match &self.network {
+            Some(Network::Host) => {
+                debug!("Using host network");
+            }
+            Some(Network::Namespace(namespace)) => {
+                #[cfg(target_os = "android")]
+                let path = Path::new("/run/netns").join(namespace);
+                #[cfg(not(target_os = "android"))]
+                let path = Path::new("/var/run/netns").join(namespace);
 
-            if path.exists() {
-                let handle = std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(false)
-                    .open(&path)
-                    .expect("failed to open netns");
-                debug!("Attaching to network namespace \"{}\"", netns);
-                sched::setns(handle.as_raw_fd(), CloneFlags::CLONE_NEWNET)
-                    .expect("failed to enter netns");
-            } else {
-                warn!("Failed to attach to network namespace \"{}\"", netns);
+                if path.exists() {
+                    let handle = std::fs::OpenOptions::new()
+                        .read(true)
+                        .write(false)
+                        .open(&path)
+                        .expect("failed to open netns");
+                    debug!("Trying to attach to network namespace \"{}\"", namespace);
+                    sched::setns(handle.as_raw_fd(), CloneFlags::CLONE_NEWNET)
+                        .expect("failed to enter netns");
+                } else {
+                    warn!("Failed to attach to network namespace \"{}\"", namespace);
+                }
+            }
+            None => {
+                debug!("Unsharing network namespace");
+                unshare(CloneFlags::CLONE_NEWNET).expect("failed to unshare");
             }
         }
     }

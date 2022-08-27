@@ -8,6 +8,7 @@ gid: 1000
 io:
   stdout: pipe
   stderr: pipe
+network: host
 mounts:
   /dev:
     type: dev
