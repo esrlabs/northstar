@@ -17,23 +17,27 @@ Example:
 ## Connecting to the runtime
 
 The console can be connected via two different approaches. For debugging
-purposes the runtime configuration allows to configure system wide accessible
-unix sockets or tcp ports that expose the runtime's console. This is done by the
-`consoles` setting in the runtime configuration. The number of listening
-sockets is not limited. The key for each listener is a `Url` with one of the
-schemes `unix` or `tcp`.
+purposes (and ***only for debugging purposes***) the runtime configuration
+allows to configure system wide accessible unix or tcp socket that exposes the
+runtime's console. This is done by the `debug.console` setting in the runtime
+configuration. The scheme of the url must be either `tcp` or `unix`.
 
 ```toml
-[consoles."tcp://localhost:4200"]
-permissions = "full"
+[debug.console]
+console = "tcp://localhost:4200"
+```
 
-[consoles."unix:///tmp/northstar-debug"]
-permissions = "full"
+or
+
+```toml
+[debug.console]
+console = "unix:///tmp/northstar"
 ```
 
 Debugging console listeners shall ***never*** be enabled in production. The
 listening sockets shall never be used for ***anything*** related production
-software. You have been warned.
+software. the debugging console is not restricted in any means. You have been
+warned.
 
 Containers shall ***never*** use the debugging console setting described above.
 Containers can access the console by a connection opened by the runtime at

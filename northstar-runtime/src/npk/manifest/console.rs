@@ -50,6 +50,8 @@ pub enum Permission {
     Shutdown,
     /// Start a container
     Start,
+    /// Start a container with extra args and env
+    StartWithArgsAndEnv,
     /// Token creation and verification
     Token,
     /// Umount a container

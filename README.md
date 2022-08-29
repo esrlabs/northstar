@@ -187,9 +187,8 @@ token_validity = "1m"
 loop_device_timeout = "2s"
 
 # Debug TCP console on localhost with full access
-[consoles."tcp://localhost:4200"]
-permissions = "full"
-
+# [debug]
+# console = "tcp://localhost:4200"
 # Start a `strace -p PID ...` instance after a container is started.
 # The execution of the application is deferred until strace is attached.
 [debug.strace]
