@@ -20,7 +20,6 @@ use crate::{
     runtime::{
         console::{Console, Peer},
         io::ContainerIo,
-        ipc::owned_fd::OwnedFd,
         CGroupEvent, ENV_CONSOLE, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
     },
 };
@@ -39,7 +38,7 @@ use std::{
     convert::TryFrom,
     fmt::Debug,
     iter::{once, FromIterator},
-    os::unix::net::UnixStream as StdUnixStream,
+    os::unix::{net::UnixStream as StdUnixStream, prelude::OwnedFd},
     path::PathBuf,
     sync::Arc,
 };
@@ -48,7 +47,7 @@ use tokio::{
     net::UnixStream,
     pin,
     sync::{mpsc, oneshot},
-    task::{self, JoinHandle},
+    task::{self},
     time,
 };
 use tokio_util::sync::CancellationToken;
@@ -90,7 +89,6 @@ pub(super) struct ContainerContext {
     debug: super::debug::Debug,
     cgroups: cgroups::CGroups,
     stop: CancellationToken,
-    log_task: Option<JoinHandle<std::io::Result<()>>>,
     /// Resources used by this container. This list differs from
     /// manifest because the manifest just containers version
     /// requirements and not concrete resources.
@@ -98,14 +96,9 @@ pub(super) struct ContainerContext {
 }
 
 impl ContainerContext {
-    async fn destroy(mut self) {
+    async fn destroy(self) {
         // Stop console if there's any any
         self.stop.cancel();
-
-        if let Some(log_task) = self.log_task.take() {
-            // Wait for the pty to finish
-            drop(log_task.await);
-        }
 
         self.debug
             .destroy()
@@ -501,12 +494,17 @@ impl State {
             None
         };
 
+        // Open a file handle for stdin, stdout and stderr according to the manifest
+        let ContainerIo { io } = io::open(container, &manifest.io.clone().unwrap_or_default())
+            .await
+            .expect("IO setup error");
+
         // Create container
         let config = &self.config;
         let containers = self.containers.iter().map(|(c, _)| c);
         let pid = self
             .forker
-            .create(config, &manifest, console_fd, containers)
+            .create(container, config, &manifest, io, console_fd, containers)
             .await?;
 
         // Debug
@@ -522,12 +520,6 @@ impl State {
                 .await
                 .expect("failed to create cgroup")
         };
-
-        // Open a file handle for stdin, stdout and stderr according to the manifest
-        let ContainerIo { io, task: log_task } =
-            io::open(container, &manifest.io.unwrap_or_default())
-                .await
-                .expect("IO setup error");
 
         // Binary arguments
         let mut args = Vec::with_capacity(
@@ -574,18 +566,11 @@ impl State {
         );
 
         // Send exec request to launcher
-        if let Err(e) = self
-            .forker
-            .exec(container.clone(), init, args, env, io)
-            .await
-        {
+        if let Err(e) = self.forker.exec(container.clone(), init, args, env).await {
             warn!("Failed to exec {} ({}): {}", container, pid, e);
 
             stop.cancel();
 
-            if let Some(log_task) = log_task {
-                drop(log_task.await);
-            }
             debug.destroy().await.expect("failed to destroy debug");
             cgroups.destroy().await;
             return Err(e);
@@ -602,7 +587,6 @@ impl State {
             debug,
             cgroups,
             stop,
-            log_task,
             resources,
         });
 

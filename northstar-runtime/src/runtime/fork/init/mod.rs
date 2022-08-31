@@ -6,8 +6,8 @@ use crate::{
         rlimit::{RLimitResource, RLimitValue},
     },
     runtime::{
-        fork::util::{self, fork, set_child_subreaper, set_process_name},
-        ipc::{owned_fd::OwnedFd, FramedUnixStream},
+        fork::util::{self, set_child_subreaper, set_process_name},
+        ipc::FramedUnixStream,
         ExitStatus, Pid,
     },
     seccomp::AllowList,
@@ -26,15 +26,14 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitStatus},
     },
-    unistd,
-    unistd::Uid,
+    unistd::{self, fork, ForkResult, Uid},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::CString,
-    os::unix::prelude::{AsRawFd, RawFd},
+    os::unix::prelude::{AsRawFd, OwnedFd},
     path::{Path, PathBuf},
     process::exit,
 };
@@ -141,47 +140,34 @@ impl Init {
                         env.push(s);
                     }
 
-                    let io = stream.recv_fds::<RawFd, 3>().expect("failed to receive io");
-                    let stdin = io[0];
-                    let stdout = io[1];
-                    let stderr = io[2];
-
                     // Start new process inside the container
-                    let pid = fork(|| {
-                        util::set_parent_death_signal(Signal::SIGKILL);
+                    let pid = match unsafe { fork().expect("failed to fork") } {
+                        ForkResult::Parent { child } => child.as_raw() as Pid,
+                        ForkResult::Child => {
+                            util::set_parent_death_signal(Signal::SIGKILL);
 
-                        unistd::dup2(stdin, nix::libc::STDIN_FILENO).expect("failed to dup2");
-                        unistd::dup2(stdout, nix::libc::STDOUT_FILENO).expect("failed to dup2");
-                        unistd::dup2(stderr, nix::libc::STDERR_FILENO).expect("failed to dup2");
+                            // Set seccomp filter
+                            if let Some(ref filter) = self.seccomp {
+                                filter.apply().expect("failed to apply seccomp filter.");
+                            }
 
-                        unistd::close(stdin).expect("failed to close stdout after dup2");
-                        unistd::close(stdout).expect("failed to close stdout after dup2");
-                        unistd::close(stderr).expect("failed to close stderr after dup2");
+                            let path = CString::from(path);
+                            let args: Vec<_> = args.into_iter().map_into::<CString>().collect();
+                            let env: Vec<_> = env.into_iter().map_into::<CString>().collect();
 
-                        // Set seccomp filter
-                        if let Some(ref filter) = self.seccomp {
-                            filter.apply().expect("failed to apply seccomp filter.");
+                            panic!(
+                                "execve: {:?} {:?}: {:?}",
+                                &path,
+                                &args,
+                                unistd::execve(&path, &args, &env)
+                            )
                         }
+                    };
 
-                        let path = CString::from(path);
-                        let args = args.into_iter().map_into::<CString>().collect_vec();
-                        let env = env.into_iter().map_into::<CString>().collect_vec();
-
-                        panic!(
-                            "execve: {:?} {:?}: {:?}",
-                            &path,
-                            &args,
-                            unistd::execve(&path, &args, &env)
-                        )
-                    })
-                    .expect("failed to spawn child process");
-
-                    // close fds
+                    // Close the console fd used in the container binary only.
                     drop(console);
-                    unistd::close(stdin).expect("failed to close stdout");
-                    unistd::close(stdout).expect("failed to close stdout");
-                    unistd::close(stderr).expect("failed to close stderr");
 
+                    // Inform the forker that we forked.
                     let message = Message::Forked { pid };
                     stream.send(&message).expect("failed to send fork result");
 

@@ -8,7 +8,7 @@ edition = "2021"
 license = "Apache-2.0"
 readme = "../README.md"
 repository = "https://github.com/esrlabs/northstar"
-rust-version = "1.60.0"
+rust-version = "1.63.0"
 
 [dependencies]
 anyhow = { version = "1.0.62", features = ["backtrace"] }
