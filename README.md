@@ -97,7 +97,7 @@ Northstar containers can be created with the Northstar utility
 
 ### Processes
 
-Started Northstar contains are Linux processes. The attributes and environment
+Started Northstar containers are Linux processes. The attributes and environment
 for a spawned container is described in a container manifest which is included
 in a NPK. The container manifest allows to configure the following Linux
 subsystems and features:
@@ -141,7 +141,7 @@ Install build dependencies on Debian based distributions by running
 sudo apt-get install build-essential libclang1 squashfs-tools
 ```
 
-The `squashfs-tools` are required in version **4.5** or higher.
+The `squashfs-tools` package is required in version **4.5** or higher.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
@@ -166,9 +166,9 @@ Use the [northstar-nstar](./northstar-nstar) utility to inspect and modify the
 runtimes state e.g.
 
 ```sh
-cargo build --release --bin northstar-nstar 
+cargo build --release --bin northstar-nstar
 ...
-./target/release/northstar-nstar --help 
+./target/release/northstar-nstar --help
 ...
 > ./target/release/northstar-nstar -j start hello-world
 {"Response":{"Err":{"StartContainerStarted":{"name":"hello-world","version":"0.0.1"}}}}
@@ -258,16 +258,16 @@ is used to configure a device mapper verity devices that is mounted instead of
 the contained Squashfs image.
 
 Repositories without a `key` are treated as trustful sources. No signature
-checks are performed. The root filesystems are mounted *without* verity. A
+checks are performed. The root filesystem is mounted *without* verity. A
 possibly present verity root hash with in the NPK is ignored. Trusted
-repositories are should on verified and read only file systems.
+repositories should be verified and read only file systems.
 
 Set the `mount_on_start` flag of a `fs` repository to `true` to make the runtime
 mount *all* containers present at startup. The mount operations are done in
 parallel.
 
-The `mem` repositories uses
-[memfd](https://man7.org/linux/man-pages/man2/memfd_create.2.html) for it's
+The `mem` type repositories use
+[memfd](https://man7.org/linux/man-pages/man2/memfd_create.2.html) for their
 storage. No data is persistently stored during an installation of a container.
 Obviously it's not possible to have NPK's preinstalled in a `mem` repository at
 runtime startup. The `mem` repositories are mainly used for testing.
@@ -375,7 +375,7 @@ set (optional):
 /bin/java:
   type: resource
   name: java13
-  version: 
+  version:
   dir: /
   options: nodev, nosuid
 ```
@@ -477,12 +477,13 @@ repository.
 Just a few guidelines to remember before you ask a question:
 
 * Ensure your question hasn't already been answered. If it has been answered but
-  do es not satisfy you, feel free to comment in the issue and we will re-open it.
+  the answer does not satisfy you, feel free to comment in the issue and we
+  will re-open it.
 * Use a succinct title and description. Add as *much* information as possible e.g
   manifests, npks, applications...
 * If your question has already been asked and answered adequately, please add a
   thumbs-up (or the emoji of your choice!) to the issue. This helps us in identifying
-  common problems that people usually face.  
+  common problems that people usually face.
 * Lastly, be civil, polite and patient. :)
 
 ## Contributing
