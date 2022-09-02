@@ -67,6 +67,10 @@ container handling and process spawning. To build the most efficient and robust
 solution, Northstar is completely developed in Rust, a language designed to
 afford the performance of C/C++ without their footguns.
 
+The [Northstar - Embedded Container
+Runtime](doc/Northstar%20-%20Embedded%20Container%20Runtime.pdf) whitepaper
+describes the motivation and initial concepts and ideas of Northstar.
+
 ### Containers
 
 Northstar containers are called `NPK`. The NPK format is heavily inspired by the
