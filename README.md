@@ -67,6 +67,21 @@ container handling and process spawning. To build the most efficient and robust
 solution, Northstar is completely developed in Rust, a language designed to
 afford the performance of C/C++ without their footguns.
 
+The [Northstar - Embedded Container
+Runtime](doc/Northstar%20-%20Embedded%20Container%20Runtime.pdf) whitepaper
+describes the motivation and initial concepts and ideas of Northstar.
+
+Security is a strong concern and hard to achieve. Northstar uses tons of OS
+interfaces with room for mistakes security and stability wise. This
+[report](doc/Cure53%20ESR-01-report.pdf) describes the results of a security
+assessment of the Northstar Embedded Linux Container Runtime. Carried out by
+[Cure53](https://cure53.de) in August 2022, the project included a penetration
+test and a dedicated audit of the source code. Outcome and actions take are
+documented in the projects [issue
+tracker](https://github.com/esrlabs/northstar/issues?q=label%3Aaudit_0822+)
+label
+[audit_0822](https://github.com/esrlabs/northstar/issues?q=label%3Aaudit_0822+).
+
 ### Containers
 
 Northstar containers are called `NPK`. The NPK format is heavily inspired by the
