@@ -428,7 +428,7 @@ to filter syscalls of containers.
 The easiest way to add seccomp to a container is to add the `default` profile
 to the container's manifest:
 
-```toml
+```yaml
 seccomp:
   profile:
     default
@@ -443,7 +443,7 @@ as the
 [delete_module](https://man7.org/linux/man-pages/man2/delete_module.2.html)
 syscall, if its second argument equals `1` or matches the mask `0x06`.
 
-```toml
+```yaml
 seccomp:
   profile:
     default
