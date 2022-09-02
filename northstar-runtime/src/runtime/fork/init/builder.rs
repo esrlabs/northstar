@@ -13,6 +13,7 @@ use log::warn;
 use nix::{mount::MsFlags, unistd};
 use std::{
     ffi::{c_void, CString},
+    os::unix::prelude::PermissionsExt,
     path::{Path, PathBuf},
     ptr::null,
 };
@@ -104,11 +105,16 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
                 mounts.extend(bind(root, target.as_ref(), host.as_ref(), options));
             }
             mount::Mount::Persist => {
-                // Note that the version is intentionally not part of the path. This allows
-                // upgrades with persistent data migration
-                let source = config.data_dir.join(manifest.name.to_string());
                 mounts.push(
-                    persist(root, &source, target.as_ref(), manifest.uid, manifest.gid).await?,
+                    persist(
+                        config,
+                        manifest,
+                        root,
+                        target.as_ref(),
+                        manifest.uid,
+                        manifest.gid,
+                    )
+                    .await?,
                 );
             }
             mount::Mount::Proc => mounts.push(proc(root, target.as_ref())),
@@ -220,12 +226,17 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) 
 }
 
 async fn persist(
+    config: &Config,
+    manifest: &Manifest,
     root: &Path,
-    source: &Path,
     target: &Path,
     uid: u16,
     gid: u16,
 ) -> Result<Mount, Error> {
+    // Note that the version is intentionally not part of the path. This allows
+    // upgrades with persistent data migration
+    let source = config.data_dir.join(manifest.name.to_string());
+
     if !source.exists() {
         log::debug!("Creating {}", source.display());
         fs::create_dir_all(&source)
@@ -245,6 +256,16 @@ async fn persist(
         uid,
         gid
     ))?;
+
+    log::debug!("Chmod {} to 700", source.display());
+    let mut permissions = fs::metadata(&source)
+        .await
+        .with_context(|| format!("failed to get permissions of {}", source.display()))?
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&source, permissions)
+        .await
+        .with_context(|| format!("failed to set permission on {}", source.display()))?;
 
     log::debug!(
         "Adding {} on {} with options nodev, nosuid and noexec",
