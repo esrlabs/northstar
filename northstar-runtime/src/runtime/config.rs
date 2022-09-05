@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{bail, Context};
+use bytesize::ByteSize;
 use nix::{sys::stat, unistd};
 use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use url::Url;
@@ -65,13 +66,18 @@ pub enum RepositoryType {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
-    /// Mount the containers from this repository on runtime start. Default: false
+    /// Repository type: fs or mem.
+    pub r#type: RepositoryType,
+    /// Optional key for this repository.
+    pub key: Option<PathBuf>,
+    /// Mount the containers from this repository on runtime start. Default: false.
     #[serde(default)]
     pub mount_on_start: bool,
-    /// Optional key for this repository
-    pub key: Option<PathBuf>,
-    /// Repository type: fs or mem
-    pub r#type: RepositoryType,
+    /// Maximum number of containers that can be stored in this repository.
+    pub capacity_num: Option<u32>,
+    /// Maximum total size of all containers in this repository.
+    #[serde(default, deserialize_with = "bytesize")]
+    pub capacity_size: Option<u64>,
 }
 
 /// Container debug settings
@@ -182,6 +188,23 @@ where
     }
 }
 
+/// Parse human readable byte sizes.
+fn bytesize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let size: Option<String> = Option::<String>::deserialize(deserializer)?;
+    if let Some(size) = size {
+        Ok(Some(
+            size.parse::<ByteSize>()
+                .map_err(D::Error::custom)
+                .map(|s| s.as_u64())?,
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
 const fn default_device_mapper_timeout() -> time::Duration {
     time::Duration::from_secs(10)
 }
@@ -229,4 +252,22 @@ console = "http://localhost:4200"
 "#;
 
     assert!(toml::from_str::<Config>(config).is_err());
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn repository_size() {
+    let config = r#"
+run_dir = "target/northstar/run"
+data_dir = "target/northstar/data"
+log_dir = "target/northstar/logs"
+cgroup = "northstar"
+
+[repositories.memory]
+type = "mem"
+key = "examples/northstar.pub"
+capacity_num = 10
+capacity_size = "100MB"
+"#;
+    toml::from_str::<Config>(config).unwrap();
 }

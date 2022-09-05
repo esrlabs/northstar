@@ -228,15 +228,21 @@ flags = ""
 
 # NPK Repository `memory` configuration. This is a not persistent in memory repository
 [repositories.memory]
-key = "examples/northstar.pub"
 type = "mem"
+# Optional key for this repository.
+key = "examples/northstar.pub"
+# Maximum number of containers that can be stored in this repository.
+capacity_num = 10
+# Maximum total size of all containers in this repository.
+capacity_size = "10 MB"
 
 # NPK Repository `default` in `dir`
 [repositories.default]
+type = { fs = { dir = "target/northstar/repository" }}
+# Optional key for this repository.
+key = "examples/northstar.pub"
 # Mount the containers from this repository on runtime start. Default: false
 mount_on_start = true
-key = "examples/northstar.pub"
-type = { fs = { dir = "target/northstar/repository" }}
 ```
 
 ### Repositories

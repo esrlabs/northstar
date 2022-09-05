@@ -50,19 +50,23 @@ impl Runtime {
             (
                 "mem".into(),
                 config::Repository {
-                    mount_on_start: false,
                     r#type: config::RepositoryType::Memory,
                     key: Some(example_key.clone()),
+                    mount_on_start: false,
+                    capacity_num: None,
+                    capacity_size: None,
                 },
             ),
             (
                 "fs".into(),
                 config::Repository {
-                    mount_on_start: false,
                     r#type: config::RepositoryType::Fs {
                         dir: test_repository,
                     },
                     key: Some(example_key),
+                    mount_on_start: false,
+                    capacity_num: None,
+                    capacity_size: None,
                 },
             ),
         ]

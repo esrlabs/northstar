@@ -44,11 +44,15 @@ console = "tcp://localhost:4200"
 
 # NPK Repository `memory` configuration. This is a not persistent in memory repository
 [repositories.memory]
-key = "examples/northstar.pub"
 type = "mem"
+key = "examples/northstar.pub"
+# Maximum number of containers that can be stored in this repository.
+capacity_num = 10
+# Maximum total size of all containers in this repository.
+capacity_size= "100MB"
 
 # NPK Repository `default` in `dir`
 [repositories.default]
-mount_on_start = true
-key = "examples/northstar.pub"
 type = { fs = { dir = "target/northstar/repository" }}
+key = "examples/northstar.pub"
+mount_on_start = true

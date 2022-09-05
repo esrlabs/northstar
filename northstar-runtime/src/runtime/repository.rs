@@ -1,4 +1,5 @@
 use super::{
+    config,
     key::{self, PublicKey},
     Container,
 };
@@ -54,11 +55,11 @@ pub(super) struct DirRepository {
 }
 
 impl DirRepository {
-    pub async fn new(dir: &Path, key: Option<&Path>) -> Result<DirRepository> {
+    pub async fn new(dir: &Path, configuration: &config::Repository) -> Result<DirRepository> {
         let mut containers = HashMap::new();
 
         // Load key
-        let key = if let Some(key) = key {
+        let key = if let Some(ref key) = configuration.key {
             info!(
                 "Loading repository {} with key {}",
                 dir.display(),
@@ -203,8 +204,8 @@ pub(super) struct MemRepository {
 }
 
 impl MemRepository {
-    pub async fn new(key: Option<&Path>) -> Result<MemRepository> {
-        let key = if let Some(key) = key {
+    pub async fn new(configuration: &config::Repository) -> Result<MemRepository> {
+        let key = if let Some(ref key) = configuration.key {
             info!("Loading memory repository with key {}", key.display());
             Some(key::load(key).await.context("failed to load key")?)
         } else {
