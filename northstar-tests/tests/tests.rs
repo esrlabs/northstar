@@ -45,7 +45,7 @@ async fn install_duplicate_other_repository() -> Result<()> {
     Ok(())
 }
 
-// Try to a container into a repository that does not exist
+// Try to install a container into a repository that does not exist.
 #[runtime_test]
 async fn install_invalid_repository() -> Result<()> {
     let client: &mut northstar_client::Client<_> = &mut *client();
@@ -56,6 +56,58 @@ async fn install_invalid_repository() -> Result<()> {
         })) => Ok(()),
         e => panic!("Unexpected response: {:?}", e),
     }
+}
+
+// Test the capacity limit of memory repositories.
+#[runtime_test]
+async fn install_hit_num_limit_mem() -> Result<()> {
+    client()
+        .install(TEST_CONTAINER_NPK, "limited_capacity_num_mem")
+        .await?;
+    assert!(client()
+        .install(TEST_RESOURCE_NPK, "limited_capacity_num_mem")
+        .await
+        .is_err());
+    Ok(())
+}
+
+// Test the capacity limit of fs repositories.
+#[runtime_test]
+async fn install_hit_num_limit_fs() -> Result<()> {
+    client()
+        .install(TEST_CONTAINER_NPK, "limited_capacity_num_fs")
+        .await?;
+    assert!(client()
+        .install(TEST_RESOURCE_NPK, "limited_capacity_num_fs")
+        .await
+        .is_err());
+    Ok(())
+}
+
+// Test the size limit of mem repositories.
+#[runtime_test]
+async fn install_hit_size_limit_mem() -> Result<()> {
+    // Check that the configured repository has a size
+    // limit lower than the npk to be installed.
+    assert!(TEST_CONTAINER_NPK.len() > 1000);
+    assert!(client()
+        .install(TEST_RESOURCE_NPK, "limited_capacity_size_mem")
+        .await
+        .is_err());
+    Ok(())
+}
+
+// Test the size limit of fs repositories.
+#[runtime_test]
+async fn install_hit_size_limit_fs() -> Result<()> {
+    // Check that the configured repository has a size
+    // limit lower than the npk to be installed.
+    assert!(TEST_CONTAINER_NPK.len() > 1000);
+    assert!(client()
+        .install(TEST_RESOURCE_NPK, "limited_capacity_size_fs")
+        .await
+        .is_err());
+    Ok(())
 }
 
 // Install a container to the file system backed repository

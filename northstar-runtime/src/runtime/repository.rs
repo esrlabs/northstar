@@ -51,7 +51,9 @@ pub(super) trait Repository: fmt::Debug {
 pub(super) struct DirRepository {
     dir: PathBuf,
     key: Option<PublicKey>,
-    containers: HashMap<Container, (PathBuf, Npk)>,
+    containers: HashMap<Container, (PathBuf, Npk, u64)>,
+    capacity_num: Option<u32>,
+    capacity_size: Option<u64>,
 }
 
 impl DirRepository {
@@ -87,13 +89,14 @@ impl DirRepository {
                 );
                 let reader = std::fs::File::open(&file)
                     .with_context(|| format!("failed to open {}", file.display()))?;
+                let size = file.metadata()?.len();
                 let reader = std::io::BufReader::new(reader);
                 let npk = NpkNpk::from_reader(reader, key.as_ref())
                     .with_context(|| format!("failed to read npk {}", file.display()))?;
                 let name = npk.manifest().name.clone();
                 let version = npk.manifest().version.clone();
                 let container = Container::new(name, version);
-                Result::<_, anyhow::Error>::Ok((container, (file, npk)))
+                Result::<_, anyhow::Error>::Ok((container, (file, npk, size)))
             })
             .then(|r| ready(r.expect("Task error")));
 
@@ -101,8 +104,8 @@ impl DirRepository {
         }
 
         for result in try_join_all(tasks).await? {
-            let (container, (file, npk)) = result;
-            containers.insert(container, (file, npk));
+            let (container, (file, npk, size)) = result;
+            containers.insert(container, (file, npk, size));
         }
 
         let duration = start.elapsed();
@@ -117,19 +120,64 @@ impl DirRepository {
             dir: dir.to_owned(),
             key,
             containers,
+            capacity_num: configuration.capacity_num,
+            capacity_size: configuration.capacity_size,
         })
+    }
+
+    fn size(&self) -> u64 {
+        self.containers.values().map(|(_, _, size)| size).sum()
     }
 }
 
 #[async_trait::async_trait]
 impl Repository for DirRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container> {
+        let current_size_sum = self.size();
+
+        // Check container number capacity.
+        if let Some(num) = self.capacity_num {
+            if self.containers.len() >= num as usize {
+                bail!("max number of container reached");
+            }
+        }
+
+        // Check if already full.
+        if let Some(size) = self.capacity_size {
+            if current_size_sum >= size {
+                bail!("size limit reached");
+            }
+        }
+
         let dest = self.dir.join(format!("{}.npk", nanoid!()));
         let mut file = fs::File::create(&dest)
             .await
             .with_context(|| format!("failed create repository {}", dest.display()))?;
+
+        let mut written = 0;
         while let Some(r) = rx.recv().await {
-            file.write_all(&r).await.context("failed to write npk")?;
+            match file.write_all(&r).await {
+                Ok(_) => {
+                    // Check if capacity limit is reached.
+                    written += r.len() as u64;
+                    if let Some(size) = self.capacity_size {
+                        if written + current_size_sum > size as u64 {
+                            drop(file);
+                            fs::remove_file(&dest)
+                                .await
+                                .with_context(|| format!("failed to remove {}", dest.display()))?;
+                            bail!("size limit reached");
+                        }
+                    }
+                }
+                Err(e) => {
+                    drop(file);
+                    fs::remove_file(&dest)
+                        .await
+                        .with_context(|| format!("failed to remove {}", dest.display()))?;
+                    return Err(e.into());
+                }
+            }
         }
         file.flush().await.context("failed to flush npk")?;
         drop(file);
@@ -165,13 +213,14 @@ impl Repository for DirRepository {
             fs::rename(&old, &new)
                 .await
                 .context("Rename file in repository")?;
-            self.containers.insert(container.clone(), (new, npk));
+            self.containers
+                .insert(container.clone(), (new, npk, written));
             Ok(container)
         }
     }
 
     async fn remove(&mut self, container: &Container) -> Result<()> {
-        let (path, npk) = self
+        let (path, npk, _) = self
             .containers
             .remove(container)
             .expect("Container not found");
@@ -184,7 +233,7 @@ impl Repository for DirRepository {
     }
 
     fn get(&self, container: &Container) -> Option<&Npk> {
-        self.containers.get(container).map(|(_, npk)| npk)
+        self.containers.get(container).map(|(_, npk, _)| npk)
     }
 
     fn key(&self) -> Option<&PublicKey> {
@@ -192,7 +241,7 @@ impl Repository for DirRepository {
     }
 
     fn containers(&self) -> Vec<&Npk> {
-        self.containers.values().map(|(_, npk)| npk).collect()
+        self.containers.values().map(|(_, npk, _)| npk).collect()
     }
 }
 
@@ -200,7 +249,9 @@ impl Repository for DirRepository {
 #[derive(Debug)]
 pub(super) struct MemRepository {
     key: Option<PublicKey>,
-    containers: HashMap<Container, Npk>,
+    containers: HashMap<Container, (Npk, u64)>,
+    capacity_num: Option<u32>,
+    capacity_size: Option<u64>,
 }
 
 impl MemRepository {
@@ -216,6 +267,8 @@ impl MemRepository {
         Ok(MemRepository {
             key,
             containers: HashMap::new(),
+            capacity_num: configuration.capacity_num,
+            capacity_size: configuration.capacity_size,
         })
     }
 }
@@ -223,6 +276,12 @@ impl MemRepository {
 #[async_trait::async_trait]
 impl Repository for MemRepository {
     async fn insert(&mut self, rx: &mut Receiver<Bytes>) -> Result<Container> {
+        if let Some(num) = self.capacity_num {
+            if self.containers.len() >= num as usize {
+                bail!("max number of container reached");
+            }
+        }
+
         // Create a new memfd
         let opts = memfd::MemfdOptions::default().allow_sealing(true);
         let fd = opts.create(nanoid!()).context("failed to create memfd")?;
@@ -237,6 +296,14 @@ impl Repository for MemRepository {
         }
 
         file.seek(SeekFrom::Start(0)).await.context("failed seek")?;
+        let npk_size = file.metadata().await?.len();
+
+        // Check repository capacity limit
+        if let Some(size) = self.capacity_size {
+            if self.containers.values().map(|a| a.1).sum::<u64>() + npk_size >= size {
+                bail!("repository capacity limit reached");
+            }
+        }
 
         // Seal the memfd
         let seals = memfd::SealsHashSet::from_iter([
@@ -268,7 +335,7 @@ impl Repository for MemRepository {
             );
             bail!("{} already in repository", container)
         } else {
-            self.containers.insert(container.clone(), npk);
+            self.containers.insert(container.clone(), (npk, npk_size));
             Ok(container)
         }
     }
@@ -280,11 +347,11 @@ impl Repository for MemRepository {
     }
 
     fn get(&self, container: &Container) -> Option<&Npk> {
-        self.containers.get(container)
+        self.containers.get(container).map(|a| &a.0)
     }
 
     fn containers(&self) -> Vec<&Npk> {
-        self.containers.values().collect()
+        self.containers.values().map(|a| &a.0).collect()
     }
 
     fn key(&self) -> Option<&PublicKey> {

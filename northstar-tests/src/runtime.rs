@@ -43,6 +43,10 @@ impl Runtime {
         std::fs::create_dir(&log_dir)?;
         let test_repository = tmpdir.path().join("test");
         std::fs::create_dir(&test_repository)?;
+        let test_repository_limited_num = tmpdir.path().join("test_limited_num");
+        std::fs::create_dir(&test_repository_limited_num)?;
+        let test_repository_limited_size = tmpdir.path().join("test_limited_size");
+        std::fs::create_dir(&test_repository_limited_size)?;
         let example_key = tmpdir.path().join("key.pub");
         std::fs::write(&example_key, include_bytes!("../../examples/northstar.pub"))?;
 
@@ -63,10 +67,54 @@ impl Runtime {
                     r#type: config::RepositoryType::Fs {
                         dir: test_repository,
                     },
-                    key: Some(example_key),
+                    key: Some(example_key.clone()),
                     mount_on_start: false,
                     capacity_num: None,
                     capacity_size: None,
+                },
+            ),
+            (
+                "limited_capacity_num_mem".into(),
+                config::Repository {
+                    r#type: config::RepositoryType::Memory,
+                    key: Some(example_key.clone()),
+                    mount_on_start: false,
+                    capacity_num: Some(1),
+                    capacity_size: None,
+                },
+            ),
+            (
+                "limited_capacity_num_fs".into(),
+                config::Repository {
+                    r#type: config::RepositoryType::Fs {
+                        dir: test_repository_limited_num,
+                    },
+                    key: Some(example_key.clone()),
+                    mount_on_start: false,
+                    capacity_num: Some(1),
+                    capacity_size: None,
+                },
+            ),
+            (
+                "limited_capacity_size_mem".into(),
+                config::Repository {
+                    r#type: config::RepositoryType::Memory,
+                    key: Some(example_key.clone()),
+                    mount_on_start: false,
+                    capacity_num: None,
+                    capacity_size: Some(1000),
+                },
+            ),
+            (
+                "limited_capacity_size_fs".into(),
+                config::Repository {
+                    r#type: config::RepositoryType::Fs {
+                        dir: test_repository_limited_size,
+                    },
+                    key: Some(example_key),
+                    mount_on_start: false,
+                    capacity_num: None,
+                    capacity_size: Some(1000),
                 },
             ),
         ]
