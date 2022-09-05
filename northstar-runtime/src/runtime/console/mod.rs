@@ -357,8 +357,8 @@ where
             ..
         } if arguments.is_empty() && environment.is_empty() => Permission::Start,
         model::Request::Start { .. } => Permission::StartWithArgsAndEnv,
-        model::Request::TokenCreate { .. } => Permission::Token,
-        model::Request::TokenVerify { .. } => Permission::Token,
+        model::Request::TokenCreate { .. } => Permission::TokenCreate,
+        model::Request::TokenVerify { .. } => Permission::TokenVerification,
         model::Request::Umount { .. } => Permission::Umount,
         model::Request::Uninstall { .. } => Permission::Uninstall,
     };

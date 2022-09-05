@@ -111,6 +111,9 @@ Full sequence of token creation and verification:
 
 <br/><img src="console-token.png" class="inline" width=600/>
 
+The permission `token_verification` is needed to perform a token verification.
+The permission `token_create` is needed to create tokens.
+
 #### Target and User
 
 A token is created for a `user`. The `user` string is implicitly the container

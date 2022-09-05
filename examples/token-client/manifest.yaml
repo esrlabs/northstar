@@ -2,7 +2,7 @@ name: token-client
 version: 0.0.1
 init: /token-client
 console:
-  permissions: [ident, token]
+  permissions: [ident, token_create]
 uid: 1000
 gid: 1000
 io:
