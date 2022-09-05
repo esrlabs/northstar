@@ -52,8 +52,10 @@ pub enum Permission {
     Start,
     /// Start a container with extra args and env
     StartWithArgsAndEnv,
-    /// Token creation and verification
-    Token,
+    /// Token creation
+    TokenCreate,
+    /// Token verification
+    TokenVerification,
     /// Umount a container
     Umount,
     /// Uninstall a container
