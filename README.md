@@ -141,7 +141,8 @@ Install build dependencies on Debian based distributions by running
 sudo apt-get install build-essential libclang1 squashfs-tools
 ```
 
-The `squashfs-tools` package is required in version **4.5** or higher.
+The `squashfs-tools` package is required in version **4.1** or higher. The
+recommended version is `Squashfs-tools 4.5.1 released (17th March 2022)`.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
