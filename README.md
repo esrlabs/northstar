@@ -176,6 +176,9 @@ cargo build --release --bin northstar-nstar
 {"Response":{"Ok":null}}
 ```
 
+`northstar-nstar` is developement tool and not considered for any production
+usecase. See [console](./doc/console.md) for details why.
+
 ## Configuration
 
 The example executable `northstar` reads a configuration file that represents
