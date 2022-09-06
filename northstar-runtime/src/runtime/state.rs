@@ -163,11 +163,11 @@ impl State {
 
             let repository = match &repository.r#type {
                 RepositoryType::Fs { dir } => {
-                    let repository = DirRepository::new(dir, repository.key.as_deref()).await?;
+                    let repository = DirRepository::new(dir, repository).await?;
                     Box::new(repository) as Repository
                 }
                 RepositoryType::Memory => {
-                    let repository = MemRepository::new(repository.key.as_deref()).await?;
+                    let repository = MemRepository::new(repository).await?;
                     Box::new(repository) as Repository
                 }
             };
