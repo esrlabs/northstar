@@ -9,7 +9,7 @@ readme = "../README.md"
 repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
-anyhow = { version = "1.0.62", features = ["backtrace"] }
+anyhow = { version = "1.0.64", features = ["backtrace"] }
 base64 = "0.13.0"
 clap = { version = "3.2.17", features = ["derive"] }
 clap_complete = "3.2.4"
