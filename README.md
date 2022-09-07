@@ -1,5 +1,5 @@
 ![CI Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
-[![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://esrlabs.github.io/northstar/northstar/index.html)
+[![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://docs.rs/crate/northstar-runtime/latest)
 ![License](https://img.shields.io/github/license/esrlabs/northstar)
 ![Issues](https://img.shields.io/github/issues/esrlabs/northstar)
 ![Top Language](https://img.shields.io/github/languages/top/esrlabs/northstar)
@@ -84,9 +84,11 @@ label
 
 ### Containers
 
+<!-- markdown-link-check-disable -->
 Northstar containers are called `NPK`. The NPK format is heavily inspired by the
 [Android APEX](https://source.android.com/devices/tech/ota/apex) technology. A
 Northstar container contains:
+<!-- markdown-link-check-enable -->
 
 * Root filesystem in a [Squashfs](https://github.com/plougher/squashfs-tools)
   file system image (optionally compressed)
@@ -152,7 +154,7 @@ corresponding NPKs is done via:
 ./examples/build_examples.sh
 ```
 
-Building and starting the [example runtime main](./main/src/main.rs) is
+Building and starting the [example runtime main](./northstar/src/main.rs) is
 triggered by a
 
 ```sh
@@ -254,9 +256,7 @@ mount_on_start = true
 A repository is an entity that is able to store NPK's at runtime. Repositories
 are configured at initialization time of the runtime. The repository
 configuration cannot be changed at runtime. Each configured repository has a
-unique identifier
-[id](https://esrlabs.github.io/northstar/northstar/api/model/type.RepositoryId.html).
-Currently two types of repositories exists: `fs` and `mem`.
+unique identifier. Currently two types of repositories exists: `fs` and `mem`.
 
 The `fs` type repositories are backed by file system storage. The configured
 directory (`dir`) is used to store NPK's. If this directory is read only, no
@@ -288,7 +288,7 @@ Northstar uses **JSON** to encode the messages shared with clients. The messages
 are newline delimited. This is a common approach that facilitates clients being
 implemented in any programming language.  However, Northstar as a library,
 provides a convenient
-[Client](https://esrlabs.github.io/northstar/northstar/api/client/struct.Client.html)
+[Client](https://docs.rs/northstar-client/latest/northstar_client/struct.Client.html)
 type that can be used for a simpler client implementation using **Rust**.
 
 Details about the Northstar console are [here](doc/console.md). A good starting
@@ -297,7 +297,7 @@ instructs `northstar-nstar` to display the raw json payload exchanged with the
 runtime.
 
 Details about the model used as json payload are found
-[here](https://esrlabs.github.io/northstar/northstar/api/model/index.html).
+[here](https://docs.rs/northstar-runtime/latest/northstar_runtime/api/model/index.html).
 
 ## Integration tests
 
@@ -354,7 +354,7 @@ list of
 
 ### Manifest Format
 
-The manifest format is described [here](https://esrlabs.github.io/northstar/northstar/npk/manifest/struct.Manifest.html).
+The manifest format is described [here](https://docs.rs/northstar-runtime/latest/northstar_runtime/npk/manifest/struct.Manifest.html).
 
 #### Mounts
 
@@ -402,9 +402,6 @@ Mounts of type `persist` are support from the runtime for containers. The runtim
 takes care to mount a *read* and *writeable* directory into the containers fs. The
 directory is dedicated to this container. The directory is not shared with other
 containers.
-
-TODO: When are the directories removed? See
-[#560](https://github.com/esrlabs/northstar/issues/560)
 
 ```yaml
 /data:
@@ -467,7 +464,7 @@ seccomp:
 ```
 
 The complete format of the seccomp manifest entry is described
-[here](https://esrlabs.github.io/northstar/northstar/seccomp/struct.Seccomp.html).
+[here](https://docs.rs/northstar-runtime/latest/northstar_runtime/seccomp/struct.Seccomp.html).
 
 If seccomp is defined in the manifest and the container attempts to access a
 syscall that is not on the list of allowed calls the process is terminated
@@ -520,6 +517,7 @@ Project Link: [https://github.com/esrlabs/northstar](https://github.com/esrlabs/
 
 * [The Rust Community](https://users.rust-lang.org) for providing
   [crates](./northstar/Cargo.toml) that form the foundation of Northstar
+<!-- markdown-link-check-disable-next-line -->
 * [The Android Open Source Project](https://source.android.com) for the APEX inspiration
 * [youki](https://github.com/containers/youki) for solving similar problems
 * [The manpage project](https://man7.org/linux/man-pages/dir_section_2.html)
