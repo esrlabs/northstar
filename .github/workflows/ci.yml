@@ -133,6 +133,8 @@ jobs:
       uses: docker://avtodev/markdown-lint:v1
       with:
         args: './README.md northstar-sextant/README.md' 
+    - name: Lint markdown links
+      uses: gaurav-nelson/github-action-markdown-link-check@v1
 
   cross:
     name: Cross
