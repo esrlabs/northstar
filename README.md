@@ -1,61 +1,30 @@
+# Northstar
+
 ![CI Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
 [![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://docs.rs/crate/northstar-runtime/latest)
 ![License](https://img.shields.io/github/license/esrlabs/northstar)
 ![Issues](https://img.shields.io/github/issues/esrlabs/northstar)
 ![Top Language](https://img.shields.io/github/languages/top/esrlabs/northstar)
 
-<br/>
-<p align="center">
-  <h1 align="center">Northstar</h1>
-  <p align="center">
-    Northstar is an embedded container runtime prototype for Linux.
-    <br/>
-    ·
-    <a href="https://github.com/esrlabs/northstar/issues">Report Bug</a>
-    ·
-    <a href="https://github.com/esrlabs/northstar/issues">Request Feature</a>
-    ·
-    <br/>
-    <br/>
-    <a href="https://github.com/esrlabs/northstar">
-        <img src="doc/northstar.gif">
-    </a>
-  </p>
-</p>
+Northstar is an embedded container runtime prototype for Linux.
 
-<details open="open">
-  <summary><h2 style="display: inline-block">Table of Contents</h2></summary>
-  <ol>
-    <li>
-      <a href="#about">About</a>
-      <ul>
-        <li><a href="#containers">Containers</a></li>
-        <li><a href="#processes">Processes</a></li>
-        <li><a href="#comparison">Comparison</a></li>
-      </ul>
-    </li>
-    <li><a href="#quickstart">Quickstart</a></li>
-    <li>
-      <a href="#configuration">Configuration</a>
-      <ul>
-        <li><a href="#repositories">Repositories</a></li>
-      </ul>
-    </li>
-    <li><a href="#integration-tests">Integration Tests</a></li>
-    <li><a href="#portability">Portability</a></li>
-    <li><a href="#internals">Internals</a>
-      <ul>
-        <li><a href="#container-launch-sequence">Container launch sequence</a></li>
-        <li><a href="#manifest-format">Manifest format</a></li>
-      </ul>
-    </li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgements">Acknowledgements</a></li>
-  </ol>
-</details>
+![Demo](./doc/northstar.gif)
+
+## Table of content
+
+- [About](#about)
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [Console](#console)
+- [Integration tests](#integration-tests)
+- [Portability](#portability)
+- [Internals](#internals)
+- [Roadmap](#roadmap)
+- [Questions and Help](#questions-and-help)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+- [Acknowledgements](#acknowledgements)
 
 ## About
 

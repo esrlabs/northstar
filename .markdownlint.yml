@@ -1,4 +1,5 @@
-MD041: false # First line in a file should be a top-level
-MD033: false # Allow inline html
+MD004: false
 MD013: # Line length
   code_blocks: false
+MD033: false # Allow inline html
+MD041: false # First line in a file should be a top-level
