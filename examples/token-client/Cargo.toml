@@ -11,4 +11,4 @@ base64 = "0.13.0"
 futures = { version = "0.3.24", default-features = false }
 northstar-client= { path = "../../northstar-client" }
 tokio = { version = "1.21.0", features = ["macros", "rt", "net"] }
-tokio-util = { version = "0.7.3", features = ["codec"] }
+tokio-util = { version = "0.7.4", features = ["codec"] }
