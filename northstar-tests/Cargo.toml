@@ -20,7 +20,7 @@ northstar-tests-derive = { path = "northstar-tests-derive" }
 regex = "1.6.0"
 tempfile = "3.3.0"
 tokio = { version = "1.21.0", features = ["fs", "time"] }
-url = "2.2.2"
+url = "2.3.1"
 
 [build-dependencies]
 escargot = "0.5.7"
