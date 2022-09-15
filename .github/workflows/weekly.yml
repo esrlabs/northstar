@@ -1,4 +1,4 @@
-name: Northstar CI (daily)
+name: Northstar CI (weekly)
 
 on:
   schedule:
