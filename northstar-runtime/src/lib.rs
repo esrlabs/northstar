@@ -8,22 +8,30 @@
     clippy::unwrap_used
 )]
 
-/// Common internal types used in Northstar
+/// Common internal types used in Northstar.
 pub mod common;
 
-#[cfg(feature = "api")]
 /// Northstar remote API. Control start and stop of applications and
 /// receive updates about container states.
+#[cfg(feature = "api")]
 pub mod api;
 
+/// Northstar package format and utils.
 #[cfg(feature = "npk")]
-/// Northstar package format and utils
 pub mod npk;
 
+/// The Northstar runtime.
 #[cfg(feature = "runtime")]
-/// The Northstar runtime
 pub mod runtime;
 
+/// Support for seccomp syscall filtering.
 #[cfg(feature = "seccomp")]
-/// Support for seccomp syscall filtering
 pub mod seccomp;
+
+/// Reexec.
+#[cfg(feature = "rexec")]
+mod rexec;
+
+/// Replace /proc/self/exe with a read-only and sealed memfd and (re)exeve.
+#[cfg(feature = "rexec")]
+pub use rexec::rexec;

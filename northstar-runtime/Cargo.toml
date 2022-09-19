@@ -95,6 +95,7 @@ npk = [
     "zeroize",
     "zip"
 ]
+rexec = ["nix", "memfd"]
 runtime = [
     "api",
     "async-stream",
