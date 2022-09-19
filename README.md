@@ -12,19 +12,28 @@ Northstar is an embedded container runtime prototype for Linux.
 
 ## Table of content
 
-- [About](#about)
-- [Quickstart](#quickstart)
-- [Configuration](#configuration)
-- [Console](#console)
-- [Integration tests](#integration-tests)
-- [Portability](#portability)
-- [Internals](#internals)
-- [Roadmap](#roadmap)
-- [Questions and Help](#questions-and-help)
-- [Contributing](#contributing)
-- [License](#license)
-- [Contact](#contact)
-- [Acknowledgements](#acknowledgements)
+- [Northstar](#northstar)
+  - [Table of content](#table-of-content)
+  - [About](#about)
+    - [Containers](#containers)
+    - [Processes](#processes)
+    - [Comparison](#comparison)
+  - [Quickstart](#quickstart)
+  - [Configuration](#configuration)
+    - [Repositories](#repositories)
+  - [Console](#console)
+  - [Integration tests](#integration-tests)
+  - [Integration](#integration)
+  - [Container launch sequence](#container-launch-sequence)
+  - [Manifest Format](#manifest-format)
+    - [Mounts](#mounts)
+    - [Seccomp](#seccomp)
+  - [Roadmap](#roadmap)
+  - [Questions and Help](#questions-and-help)
+  - [Contributing](#contributing)
+  - [License](#license)
+  - [Contact](#contact)
+  - [Acknowledgements](#acknowledgements)
 
 ## About
 
@@ -278,54 +287,24 @@ Rust test system:
 cargo test -p northstar-tests
 ```
 
-and are executed by the project [CI](https://github.com/esrlabs/northstar/actions).
+and are executed by the project
+[CI](https://github.com/esrlabs/northstar/actions). Check the
+[northstar-tests](./northstar-tests/) crate for details. The Northstar projects
+recommends [nextest](https://nexte.st) 🙂.
 
-## Portability
+## Integration
 
-Northstar makes extensive use of Linux Kernel features and runs on Linux systems
-only. Northstar is tested on the architectures
+Notes about integrating Northstar into an ebemdded Linux system can be found [here](./doc/integration.md).
 
-* `aarch64-linux-android`
-* `aarch64-unknown-linux-gnu`
-* `aarch64-unknown-linux-musl`
-* `x86_64-unknown-linux-gnu` aka `Linux Desktop`
-
-Northstar cannot be run on 32 bit systems! In order to verify that all needed
-Kernel features are available, either run the
-[check_conf](./check_conf.sh) script or manually compare the target's
-kernel configuration with the `CONFIG_` entries in the `check_conf.sh` script.
-
-**TODO**: List required `CONFIG_` items here. The check_config script runs on
-*Android only
-
-### Runtime permissions
-
-The Northstar runtime requires privileged rights on the host system. The rights
-can be granted either by running Northstar as `root` *or* ensure the following
-list of
-[capabilities(7)](https://man7.org/linux/man-pages/man7/capabilities.7.html):
-
-* `cap_chown`: change ownership of container directories
-* `cap_dac_override`: lazy workaround for permissions on `/dev/mapper/control`
-  and `cgroups`. Do not use in production!
-* `cap_kill`: send signals to container inits
-* `cap_setgid`: supplementary groups
-* `cap_setpcap`: drop capabilities
-* `cap_setuid`: user id
-* `cap_sys_admin`: `mount`, `umount`, setns
-* `cap_sys_resource`: increase `rlimits` (init)
-
-## Internals
-
-### Container launch sequence
+## Container launch sequence
 
 <br/><img src="doc/container-startup.png" class="inline" width=600/>
 
-### Manifest Format
+## Manifest Format
 
 The manifest format is described [here](https://docs.rs/northstar-runtime/latest/northstar_runtime/npk/manifest/struct.Manifest.html).
 
-#### Mounts
+### Mounts
 
 The options of a mount entry in the manifest are optional. To apply one of the
 mount options `rw`, `noexec`, `nosuid`, `nodev` or `rec` it must be explicitly set.
@@ -396,7 +375,7 @@ to the manifest. The `/dev` is populated with *only*:
 
 If the container binary needs more devices, bind mount the host systems `/dev`.
 
-#### Seccomp
+### Seccomp
 
 Northstar supports
 [Seccomp](https://www.kernel.org/doc/Documentation/prctl/seccomp_filter.txt)
@@ -442,7 +421,7 @@ immediately.
 ## Roadmap
 
 See the [open issues](https://github.com/esrlabs/northstar/issues) for a list of
-proposed features and known issues).
+proposed features and known issues.
 
 ## Questions and Help
 
