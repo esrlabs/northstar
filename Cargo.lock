@@ -344,9 +344,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "3.2.20"
+version = "3.2.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23b71c3ce99b7611011217b366d923f1d0a7e07a92bb2dbf1e84508c673ca3bd"
+checksum = "86447ad904c7fb335a790c9d7fe3d0d971dc523b8ccd1561a520de9a85302750"
 dependencies = [
  "atty",
  "bitflags",
@@ -356,7 +356,7 @@ dependencies = [
  "once_cell",
  "strsim 0.10.0",
  "termcolor",
- "textwrap 0.15.0",
+ "textwrap 0.15.1",
 ]
 
 [[package]]
@@ -365,7 +365,7 @@ version = "3.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f7a2e0a962c45ce25afce14220bc24f9dade0a1787f185cecf96bfba7847cd8"
 dependencies = [
- "clap 3.2.20",
+ "clap 3.2.22",
 ]
 
 [[package]]
@@ -1311,7 +1311,7 @@ version = "0.6.1-pre"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "clap 3.2.20",
+ "clap 3.2.22",
  "env_logger",
  "log",
  "nix 0.25.0",
@@ -1337,7 +1337,7 @@ version = "0.6.1-pre"
 dependencies = [
  "anyhow",
  "base64",
- "clap 3.2.20",
+ "clap 3.2.22",
  "clap_complete",
  "futures",
  "humantime",
@@ -1421,7 +1421,7 @@ version = "0.6.1-pre"
 dependencies = [
  "anyhow",
  "base64",
- "clap 3.2.20",
+ "clap 3.2.22",
  "colored",
  "ed25519-dalek",
  "env_logger",
@@ -1436,7 +1436,7 @@ name = "northstar-stress"
 version = "0.6.1-pre"
 dependencies = [
  "anyhow",
- "clap 3.2.20",
+ "clap 3.2.22",
  "env_logger",
  "futures",
  "humantime",
@@ -2378,7 +2378,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "caps",
- "clap 3.2.20",
+ "clap 3.2.22",
  "nix 0.25.0",
 ]
 
@@ -2393,9 +2393,9 @@ dependencies = [
 
 [[package]]
 name = "textwrap"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1141d4d61095b28419e22cb0bbf02755f5e54e0526f97f1e3d1d160e60885fb"
+checksum = "949517c0cf1bf4ee812e2e07e08ab448e3ae0d23472aee8a06c985f0c8815b16"
 
 [[package]]
 name = "thiserror"
