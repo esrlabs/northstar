@@ -583,7 +583,7 @@ dependencies = [
  "devicemapper-sys",
  "lazy_static",
  "nix 0.24.2",
- "semver 1.0.13",
+ "semver 1.0.14",
  "serde",
 ]
 
@@ -1392,7 +1392,7 @@ dependencies = [
  "proptest",
  "rand_core 0.6.3",
  "rlimit",
- "semver 1.0.13",
+ "semver 1.0.14",
  "serde",
  "serde_json",
  "serde_plain",
@@ -2008,9 +2008,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93f6841e709003d68bb2deee8c343572bf446003ec20a583e76f7b15cebf3711"
+checksum = "e25dfac463d778e353db5be2449d1cce89bd6fd23c9f1ea21310ce6e5a1b29c4"
 dependencies = [
  "serde",
 ]
