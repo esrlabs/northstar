@@ -15,6 +15,7 @@ use runtime::config::Config;
 use std::{
     env,
     fs::{self, read_to_string},
+    panic,
     path::{Path, PathBuf},
     process::exit,
 };
@@ -38,6 +39,11 @@ struct Opt {
 }
 
 fn main() -> Result<(), Error> {
+    // Replace /proc/self/exe with a memfd. See [1] why. This is *not* needed if
+    // the runtime binary is invoked from a secure and read only storage location.
+    // [1] https://github.com/lxc/lxc/commit/6400238d08cdf1ca20d49bafb85f4e224348bf9d
+    // northstar_runtime::rexec()?;
+
     // Initialize logging
     logger::init();
 
@@ -49,8 +55,8 @@ fn main() -> Result<(), Error> {
     );
 
     // Install a custom panic hook that aborts the process in case of a panic *anywhere*
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
+    let default_panic = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
         default_panic(info);
         exit(1);
     }));
