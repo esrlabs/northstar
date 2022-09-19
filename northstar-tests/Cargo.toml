@@ -7,7 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = { version = "1.0.65", features = ["backtrace"] }
-env_logger = "0.9.0"
+env_logger = "0.9.1"
 futures = { version = "0.3.24", default-features = false }
 lazy_static = "1.4.0"
 log = "0.4.17"
