@@ -100,7 +100,7 @@ fn dump(file: &str) {
 
 fn cat(path: &Path) -> Result<()> {
     let mut input =
-        fs::File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut output = std::io::stdout();
     io::copy(&mut input, &mut output)
         .map(drop)

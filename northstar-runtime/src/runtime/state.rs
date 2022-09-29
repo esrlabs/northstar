@@ -501,7 +501,7 @@ impl State {
 
         // Create container
         let config = &self.config;
-        let containers = self.containers.iter().map(|(c, _)| c);
+        let containers = self.containers.keys();
         let pid = self
             .forker
             .create(container, config, &manifest, io, console_fd, containers)

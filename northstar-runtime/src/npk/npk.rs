@@ -498,10 +498,10 @@ pub fn pack_with(
     // Append filename from manifest if only a directory path was given
     if Path::is_dir(out) {
         dest.push(format!("{}-{}.", &name, &version));
-        dest.set_extension(&NPK_EXT);
+        dest.set_extension(NPK_EXT);
     }
     let npk = fs::File::create(&dest)
-        .with_context(|| format!("failed to create NPK: '{}'", &dest.display()))?;
+        .with_context(|| format!("failed to create NPK: '{}'", dest.display()))?;
     builder.build(npk)?;
     Ok(())
 }
@@ -514,28 +514,28 @@ pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 /// Extract the npk content to `out` with a give unsquashfs binary
 pub fn unpack_with(npk: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
     let mut zip = open(npk)?;
-    zip.extract(&out)
-        .with_context(|| format!("failed to extract NPK to '{}'", &out.display()))?;
-    let fsimg = out.join(&FS_IMG_NAME);
+    zip.extract(out)
+        .with_context(|| format!("failed to extract NPK to '{}'", out.display()))?;
+    let fsimg = out.join(FS_IMG_NAME);
     unpack_squashfs(&fsimg, out, unsquashfs)?;
     Ok(())
 }
 
 /// Generate a keypair suitable for signing and verifying NPKs
 pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
-    fn assume_non_existing(path: &Path) -> anyhow::Result<()> {
+    fn assume_non_existing(path: &Path) -> Result<()> {
         if path.exists() {
-            bail!("file '{}' already exists", &path.display())
+            bail!("file '{}' already exists", path.display())
         } else {
             Ok(())
         }
     }
 
     fn write(data: &[u8], path: &Path) -> Result<(), Error> {
-        let mut file = fs::File::create(&path)
+        let mut file = fs::File::create(path)
             .with_context(|| format!("failed to create '{}'", path.display()))?;
         file.write_all(data)
-            .with_context(|| format!("failed to write to '{}'", &path.display()))?;
+            .with_context(|| format!("failed to write to '{}'", path.display()))?;
         Ok(())
     }
 
@@ -559,16 +559,16 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
 
 fn read_manifest(path: &Path) -> Result<Manifest> {
     let file =
-        fs::File::open(&path).with_context(|| format!("failed to open '{}'", &path.display()))?;
-    Manifest::from_reader(&file).with_context(|| format!("failed to parse '{}'", &path.display()))
+        fs::File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
+    Manifest::from_reader(&file).with_context(|| format!("failed to parse '{}'", path.display()))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
-    fs::File::open(&key_file)
-        .with_context(|| format!("failed to open '{}'", &key_file.display()))?
+    fs::File::open(key_file)
+        .with_context(|| format!("failed to open '{}'", key_file.display()))?
         .read_exact(&mut secret_key_bytes)
-        .with_context(|| format!("failed to read key data from '{}'", &key_file.display()))?;
+        .with_context(|| format!("failed to read key data from '{}'", key_file.display()))?;
 
     let secret_key = secret_key(secret_key_bytes)?;
     let public_key = PublicKey::from(&secret_key);
@@ -616,8 +616,8 @@ fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &Manifest) -> Resu
 
     // The size of the fs image is the offset of the verity block. The verity block
     // is appended to the fs.img
-    let fsimg_size = fs::metadata(&fsimg)
-        .with_context(|| format!("failed to read file size: '{}'", &fsimg.display()))?
+    let fsimg_size = fs::metadata(fsimg)
+        .with_context(|| format!("failed to read file size: '{}'", fsimg.display()))?
         .len();
     // Calculate verity root hash
     let fsimg_hash: &[u8] = &append_dm_verity_block(fsimg, fsimg_size)
@@ -743,7 +743,7 @@ fn create_squashfs_img(
 
     // Check root
     if !root.exists() {
-        bail!("Root directory '{}' does not exist", &root.display());
+        bail!("Root directory '{}' does not exist", root.display());
     }
 
     // Check mksquashfs version
@@ -790,8 +790,8 @@ fn create_squashfs_img(
 
     // Run mksquashfs to create image
     let mut cmd = Command::new(mksquashfs);
-    cmd.arg(&root.display().to_string())
-        .arg(&image.display().to_string())
+    cmd.arg(root.display().to_string())
+        .arg(image.display().to_string())
         .arg("-no-progress")
         .arg("-comp")
         .arg(squashfs_opts.compression_algorithm.to_string())
@@ -811,7 +811,7 @@ fn create_squashfs_img(
         bail!(
             "'{}' failed to create '{}'",
             mksquashfs.display(),
-            &image.display()
+            image.display()
         );
     }
 
@@ -822,12 +822,12 @@ fn unpack_squashfs(image: &Path, out: &Path, unsquashfs: &Path) -> Result<()> {
     let squashfs_root = out.join("squashfs-root");
 
     if !image.exists() {
-        bail!("Squashfs image '{}' does not exist", &image.display());
+        bail!("Squashfs image '{}' does not exist", image.display());
     }
     let mut cmd = Command::new(unsquashfs);
     cmd.arg("-dest")
-        .arg(&squashfs_root.display().to_string())
-        .arg(&image.display().to_string());
+        .arg(squashfs_root.display().to_string())
+        .arg(image.display().to_string());
 
     cmd.output()
         .with_context(|| format!("Error while executing '{}'", unsquashfs.display(),))?;
@@ -843,7 +843,7 @@ fn write_npk<W: Write + Seek>(
     signature: Option<&str>,
 ) -> Result<()> {
     let mut fsimg =
-        fs::File::open(&fsimg).with_context(|| format!("failed to open '{}'", &fsimg.display()))?;
+        fs::File::open(fsimg).with_context(|| format!("failed to open '{}'", fsimg.display()))?;
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
     let manifest_string =
@@ -878,7 +878,7 @@ fn write_npk<W: Write + Seek>(
 /// Open a Zip file
 fn open(path: &Path) -> Result<Zip<BufReader<fs::File>>> {
     let file =
-        fs::File::open(&path).with_context(|| format!("failed to open '{}'", &path.display()))?;
+        fs::File::open(path).with_context(|| format!("failed to open '{}'", path.display()))?;
     ZipArchive::new(BufReader::new(file))
-        .with_context(|| format!("failed to parse ZIP format: '{}'", &path.display()))
+        .with_context(|| format!("failed to parse ZIP format: '{}'", path.display()))
 }

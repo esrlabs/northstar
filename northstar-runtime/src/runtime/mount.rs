@@ -177,7 +177,7 @@ fn mount(
 
     if !target.exists() {
         debug!("Creating mount point {}", target.display());
-        std::fs::create_dir_all(&target)
+        std::fs::create_dir_all(target)
             .with_context(|| format!("failed to create directory {}", target.display()))?;
     }
 

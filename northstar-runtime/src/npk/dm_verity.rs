@@ -89,17 +89,17 @@ impl VerityHeader {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut raw_sb: Vec<u8> = Vec::with_capacity(BLOCK_SIZE);
-        raw_sb.extend(&self.header);
-        raw_sb.extend(&self.version.to_ne_bytes());
-        raw_sb.extend(&self.hash_type.to_ne_bytes());
-        raw_sb.extend(&self.uuid);
-        raw_sb.extend(&self.algorithm);
-        raw_sb.extend(&self.data_block_size.to_ne_bytes());
-        raw_sb.extend(&self.hash_block_size.to_ne_bytes());
-        raw_sb.extend(&self.data_blocks.to_ne_bytes());
-        raw_sb.extend(&self.salt_size.to_ne_bytes());
-        raw_sb.extend(&[0; 6]); // padding
-        raw_sb.extend(&self.salt);
+        raw_sb.extend(self.header);
+        raw_sb.extend(self.version.to_ne_bytes());
+        raw_sb.extend(self.hash_type.to_ne_bytes());
+        raw_sb.extend(self.uuid);
+        raw_sb.extend(self.algorithm);
+        raw_sb.extend(self.data_block_size.to_ne_bytes());
+        raw_sb.extend(self.hash_block_size.to_ne_bytes());
+        raw_sb.extend(self.data_blocks.to_ne_bytes());
+        raw_sb.extend(self.salt_size.to_ne_bytes());
+        raw_sb.extend([0; 6]); // padding
+        raw_sb.extend(self.salt);
         raw_sb.resize(BLOCK_SIZE, 0); // pad to block size
         raw_sb
     }
@@ -178,7 +178,7 @@ fn generate_hash_tree(
     // For a description of the overall hash tree generation logic see
     // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
-    let mut fsimg = &std::fs::File::open(&fsimg)
+    let mut fsimg = &std::fs::File::open(fsimg)
         .with_context(|| format!("failed to open {}", &fsimg.display()))?;
     let mut hashes: Vec<[u8; SHA256_SIZE]> = vec![];
     let mut level_num = 0;
@@ -266,7 +266,7 @@ fn append_superblock_and_hashtree(
     let mut fsimg = std::fs::OpenOptions::new()
         .write(true)
         .append(true)
-        .open(&fsimg)
+        .open(fsimg)
         .with_context(|| format!("failed to open {}", &fsimg.display()))?;
     let mut uuid = [0u8; 16];
     uuid.copy_from_slice(
