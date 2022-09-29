@@ -53,6 +53,9 @@ pub struct BlkIoResources {
     pub throttle_write_bps_device: Vec<BlkIoDeviceThrottleResource>,
     /// Throttled write IO operations per second can be provided for each device.
     pub throttle_write_iops_device: Vec<BlkIoDeviceThrottleResource>,
+    /// Customized key-value attributes
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub attrs: HashMap<String, String>,
 }
 
 /// Cpu controller

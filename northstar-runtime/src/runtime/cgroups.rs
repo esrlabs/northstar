@@ -412,6 +412,7 @@ impl From<manifest::cgroups::BlkIoResources> for BlkIoResources {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
+            attrs: v.attrs,
         }
     }
 }
