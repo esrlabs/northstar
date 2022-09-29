@@ -151,7 +151,7 @@ struct Opt {
     #[clap(short, long)]
     pub json: bool,
     /// Connect timeout in seconds
-    #[clap(short, long, default_value = "10s", parse(try_from_str = humantime::parse_duration))]
+    #[clap(short, long, default_value = "10s", value_parser = humantime::parse_duration)]
     pub timeout: time::Duration,
     /// Command
     #[clap(subcommand)]

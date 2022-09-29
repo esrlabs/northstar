@@ -9,8 +9,10 @@ use std::{
     io::{self, Write},
     path::{Path, PathBuf},
     ptr::null_mut,
+    str::FromStr,
     thread, time,
 };
+use thiserror::Error;
 
 /// Northstar test container
 #[derive(Debug, Parser)]
@@ -26,12 +28,20 @@ enum Io {
     Stderr,
 }
 
-impl From<&str> for Io {
-    fn from(s: &str) -> Io {
+#[derive(Error, Debug)]
+enum Error {
+    #[error("invalid io: {0}")]
+    ParseError(String),
+}
+
+impl FromStr for Io {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
-            "stdout" => Io::Stdout,
-            "stderr" => Io::Stderr,
-            _ => panic!("invalid io: {}", s),
+            "stdout" => Ok(Io::Stdout),
+            "stderr" => Ok(Io::Stderr),
+            _ => Err(Error::ParseError(s.to_string())),
         }
     }
 }
@@ -39,7 +49,7 @@ impl From<&str> for Io {
 #[derive(Debug, Parser)]
 enum Command {
     Cat {
-        #[clap(parse(from_os_str))]
+        #[clap(value_parser)]
         path: PathBuf,
     },
     Crash,
@@ -49,7 +59,7 @@ enum Command {
     Inspect,
     Print {
         message: String,
-        #[clap(short, long, parse(from_str), default_value = "stdout")]
+        #[clap(short, long, default_value = "stdout")]
         io: Io,
     },
     Touch {

@@ -80,11 +80,11 @@ struct Opt {
     url: url::Url,
 
     /// Duration to run the test for in seconds
-    #[clap(short, long, parse(try_from_str = parse_duration))]
+    #[clap(short, long, value_parser = parse_duration)]
     duration: Option<Duration>,
 
     /// Random delay between each iteration e.g 1s
-    #[clap(short, long, parse(try_from_str = parse_duration))]
+    #[clap(short, long, value_parser = parse_duration)]
     random_delay: Option<Duration>,
 
     /// Mode
@@ -100,7 +100,7 @@ struct Opt {
     repository: Option<String>,
 
     /// Initial random delay in ms to randomize tasks
-    #[clap(short, long, parse(try_from_str = parse_duration), default_value = "1s")]
+    #[clap(short, long, value_parser = parse_duration, default_value = "1s")]
     initial_random_delay: Duration,
 }
 

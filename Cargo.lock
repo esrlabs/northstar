@@ -2377,6 +2377,7 @@ dependencies = [
  "caps",
  "clap 3.2.22",
  "nix 0.25.0",
+ "thiserror",
 ]
 
 [[package]]
