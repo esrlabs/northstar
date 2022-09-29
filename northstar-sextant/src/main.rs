@@ -16,63 +16,63 @@ mod pack;
 
 /// Northstar package tool
 #[derive(Debug, Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 enum Opt {
     /// Pack Northstar containers
     Pack {
         /// Manifest path
-        #[clap(short, long)]
+        #[arg(short, long)]
         manifest: PathBuf,
         /// Container source directory
-        #[clap(short, long)]
+        #[arg(short, long)]
         root: PathBuf,
         /// Key file
-        #[clap(short, long)]
+        #[arg(short, long)]
         key: Option<PathBuf>,
         /// Output directory
-        #[clap(short, long)]
+        #[arg(short, long)]
         out: PathBuf,
         /// Compression algorithm to use in squashfs (default gzip)
-        #[clap(short, long, default_value = "gzip")]
+        #[arg(short, long, default_value = "gzip")]
         compression_algorithm: CompressionAlgorithm,
         /// mksqushfs binary
-        #[clap(long, default_value = "mksquashfs")]
+        #[arg(long, default_value = "mksquashfs")]
         mksquashfs: PathBuf,
         /// Block size used by squashfs (default 128 KiB)
-        #[clap(short, long)]
+        #[arg(short, long)]
         block_size: Option<u32>,
         /// Create n clones of the container
-        #[clap(long)]
+        #[arg(long)]
         clones: Option<u32>,
     },
     /// Unpack Northstar containers
     Unpack {
         /// NPK path
-        #[clap(short, long)]
+        #[arg(short, long)]
         npk: PathBuf,
         /// Output directory
-        #[clap(short, long)]
+        #[arg(short, long)]
         out: PathBuf,
         /// unsquashfs binary
-        #[clap(long, default_value = "unsquashfs")]
+        #[arg(long, default_value = "unsquashfs")]
         unsquashfs: PathBuf,
     },
     /// Print information about a Northstar container
     Inspect {
-        #[clap(short, long)]
+        #[arg(short, long)]
         short: bool,
         /// NPK to inspect
         npk: PathBuf,
         /// unsquashfs binary
-        #[clap(long, default_value = "unsquashfs")]
+        #[arg(long, default_value = "unsquashfs")]
         unsquashfs: PathBuf,
     },
     GenKey {
         /// Name of key
-        #[clap(short, long)]
+        #[arg(short, long)]
         name: String,
         /// Key directory
-        #[clap(short, long)]
+        #[arg(short, long)]
         out: PathBuf,
     },
 }

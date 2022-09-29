@@ -73,34 +73,34 @@ impl Distribution<MonkeyAction> for Standard {
 
 /// Northstar stress test utility
 #[derive(Debug, Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Opt {
     /// Runtime address
-    #[clap(short, long, default_value = "tcp://localhost:4200")]
+    #[arg(short, long, default_value = "tcp://localhost:4200")]
     url: url::Url,
 
     /// Duration to run the test for in seconds
-    #[clap(short, long, value_parser = parse_duration)]
+    #[arg(short, long, value_parser = parse_duration)]
     duration: Option<Duration>,
 
     /// Random delay between each iteration e.g 1s
-    #[clap(short, long, value_parser = parse_duration)]
+    #[arg(short, long, value_parser = parse_duration)]
     random_delay: Option<Duration>,
 
     /// Mode
-    #[clap(short, long, default_value = "start-stop")]
+    #[arg(short, long, default_value = "start-stop")]
     mode: Mode,
 
     /// Npk for install-uninstall mode
-    #[clap(long, required_if_eq("mode", "install-uninstall"))]
+    #[arg(long, required_if_eq("mode", "install-uninstall"))]
     npk: Option<PathBuf>,
 
     /// Repository for install-uninstall mode
-    #[clap(long, required_if_eq("mode", "install-uninstall"))]
+    #[arg(long, required_if_eq("mode", "install-uninstall"))]
     repository: Option<String>,
 
     /// Initial random delay in ms to randomize tasks
-    #[clap(short, long, value_parser = parse_duration, default_value = "1s")]
+    #[arg(short, long, value_parser = parse_duration, default_value = "1s")]
     initial_random_delay: Duration,
 }
 

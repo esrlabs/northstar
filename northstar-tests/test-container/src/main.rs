@@ -16,13 +16,13 @@ use thiserror::Error;
 
 /// Northstar test container
 #[derive(Debug, Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Opt {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Option<Command>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Io {
     Stdout,
     Stderr,
@@ -49,7 +49,7 @@ impl FromStr for Io {
 #[derive(Debug, Parser)]
 enum Command {
     Cat {
-        #[clap(value_parser)]
+        #[arg()]
         path: PathBuf,
     },
     Crash,
@@ -59,7 +59,7 @@ enum Command {
     Inspect,
     Print {
         message: String,
-        #[clap(short, long, default_value = "stdout")]
+        #[arg(short, long, default_value = "stdout")]
         io: Io,
     },
     Touch {
