@@ -60,7 +60,7 @@ pub fn set_child_subreaper(value: bool) {
 
     debug!("Setting child subreaper flag to {}", value);
 
-    let value = if value { 1u64 } else { 0u64 };
+    let value = u64::from(value);
     let result = unsafe { nix::libc::prctl(PR_SET_CHILD_SUBREAPER, value, 0, 0, 0) };
     Errno::result(result)
         .map(drop)

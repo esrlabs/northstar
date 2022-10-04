@@ -18,7 +18,7 @@ pub(crate) fn pack(
     // Create npk clones with the number appended to the name
     if let Some(clones) = clones {
         let manifest_file = manifest;
-        let reader = fs::File::open(&manifest_file).context("failed to open manifest")?;
+        let reader = fs::File::open(manifest_file).context("failed to open manifest")?;
         let mut manifest = Manifest::from_reader(reader).context("failed to read manifest")?;
 
         // Only clone non-resource containers

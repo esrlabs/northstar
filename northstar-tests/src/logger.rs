@@ -44,7 +44,7 @@ pub fn init() {
 
             if let Some(module_path) = record
                 .module_path()
-                .and_then(|module_path| module_path.find(&"::").map(|p| &module_path[p + 2..]))
+                .and_then(|module_path| module_path.find("::").map(|p| &module_path[p + 2..]))
             {
                 writeln!(
                     buf,
