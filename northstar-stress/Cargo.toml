@@ -9,7 +9,7 @@ repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
 anyhow = { version = "1.0.65", features = ["backtrace"] }
-clap = { version = "3.2.22", features = ["derive"] }
+clap = { version = "4.0.9", features = ["derive"] }
 env_logger = "0.9.1"
 futures = { version = "0.3.24", default-features = false }
 humantime = "2.1.0"
@@ -18,6 +18,6 @@ log = "0.4.17"
 northstar-client = { path = "../northstar-client" }
 rand = "0.8.5"
 tokio = { version = "1.21.0", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
-tokio-stream = { version = "0.1.9", features = ["time"] }
+tokio-stream = { version = "0.1.10", features = ["time"] }
 tokio-util = "0.7.4"
 url = { version = "2.3.1", features = ["serde"] }
