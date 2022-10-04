@@ -29,8 +29,8 @@ pub fn seccomp(path: PathBuf, no_default_profile: bool) -> Result<()> {
             Ok(())
         })?;
 
-    let profile = (!no_default_profile).then(|| Profile::Default);
-    let allow = (!syscalls.is_empty()).then(|| syscalls);
+    let profile = (!no_default_profile).then_some(Profile::Default);
+    let allow = (!syscalls.is_empty()).then_some(syscalls);
 
     println!("{}", &serde_yaml::to_string(&Seccomp { profile, allow })?);
     Ok(())
