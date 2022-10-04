@@ -25,16 +25,16 @@ mod logger;
 
 /// Northstar Runtime
 #[derive(Debug, Parser)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Opt {
     /// File that contains the northstar configuration
-    #[clap(short, long, default_value = "northstar.toml")]
+    #[arg(short, long, default_value = "northstar.toml")]
     pub config: PathBuf,
 
     /// Do not enter a mount namespace if this option is set Be aware that in
     /// case of a non normal termination of the runtime the images mounted in
     /// `run_dir` have to be umounted manually before starting the runtime again.
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub disable_mount_namespace: bool,
 }
 

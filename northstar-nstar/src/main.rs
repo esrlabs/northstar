@@ -36,39 +36,39 @@ fn about() -> &'static str {
 #[derive(Parser, Clone, PartialEq)]
 enum Subcommand {
     /// List available containers
-    #[clap(alias = "ls")]
+    #[command(alias = "ls")]
     List,
     /// List configured repositories
-    #[clap(alias = "repos")]
+    #[command(alias = "repos")]
     Repositories,
     /// Mount a container
     Mount {
         /// Container name and optional version
-        #[clap(value_name = "name[:version]")]
+        #[arg(value_name = "name[:version]")]
         containers: Vec<String>,
     },
     /// Umount a container
     Umount {
         /// Container name and optional version
-        #[clap(value_name = "name[:version]")]
+        #[arg(value_name = "name[:version]")]
         containers: Vec<String>,
     },
     /// Start a container
     Start {
         /// Container name and optional version
-        #[clap(value_name = "name[:version]")]
+        #[arg(value_name = "name[:version]")]
         container: String,
         /// Command line arguments
-        #[clap(short, long)]
+        #[arg(short, long)]
         args: Option<Vec<String>>,
         /// Environment variables in KEY=VALUE format
-        #[clap(short, long)]
+        #[arg(short, long)]
         env: Option<Vec<String>>,
     },
     /// Stop a container
     Kill {
         /// Container name and optional version
-        #[clap(value_name = "name[:version]")]
+        #[arg(value_name = "name[:version]")]
         container: String,
         /// Signal
         signal: Option<i32>,
@@ -83,10 +83,10 @@ enum Subcommand {
     /// Uninstall a container
     Uninstall {
         /// Wipe containers persistent dir (if present)
-        #[clap(short, long)]
+        #[arg(short, long)]
         wipe: bool,
         /// Container name and optional version
-        #[clap(value_name = "name[:version]")]
+        #[arg(value_name = "name[:version]")]
         container: String,
     },
     /// Shutdown Northstar
@@ -94,22 +94,22 @@ enum Subcommand {
     /// Notifications
     Notifications {
         /// Exit after n notifications
-        #[clap(short, long)]
+        #[arg(short, long)]
         number: Option<usize>,
     },
     /// Shell completion script generation
     Completion {
         /// Output file where to generate completions into.
-        #[clap(short, long)]
+        #[arg(short, long)]
         output: Option<PathBuf>,
         /// Generate completions for shell type
-        #[clap(short, long)]
+        #[arg(short, long)]
         shell: clap_complete::Shell,
     },
     /// Display information about the container
     Inspect {
         /// Container name and optional version
-        #[clap(value_name = "name[:version]")]
+        #[arg(value_name = "name[:version]")]
         container: String,
     },
     /// Create a token
@@ -135,26 +135,26 @@ enum Subcommand {
         /// Path to strace log file
         input: PathBuf,
         /// Whether or not to allow the syscalls defined by the default profile
-        #[clap(long)]
+        #[arg(long)]
         no_default_profile: bool,
     },
 }
 
 /// Northstar console client
 #[derive(Parser)]
-#[clap(author, version, about = about(), long_about = None)]
+#[command(author, version, about = about(), long_about = None)]
 struct Opt {
     /// Northstar address
-    #[clap(short, long, default_value = DEFAULT_HOST)]
+    #[arg(short, long, default_value = DEFAULT_HOST)]
     pub url: url::Url,
     /// Output raw json payload
-    #[clap(short, long)]
+    #[arg(short, long)]
     pub json: bool,
     /// Connect timeout in seconds
-    #[clap(short, long, default_value = "10s", parse(try_from_str = humantime::parse_duration))]
+    #[arg(short, long, default_value = "10s", value_parser = humantime::parse_duration)]
     pub timeout: time::Duration,
     /// Command
-    #[clap(subcommand)]
+    #[command(subcommand)]
     pub command: Subcommand,
 }
 

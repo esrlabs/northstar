@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::IntoApp;
+use clap::CommandFactory;
 use clap_complete::Shell;
 use std::{fs, path::PathBuf};
 
