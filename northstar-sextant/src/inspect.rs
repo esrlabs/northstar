@@ -35,7 +35,7 @@ pub(crate) fn inspect_short(npk: &Path) -> Result<()> {
 }
 
 fn open(path: &Path) -> Result<ZipArchive<BufReader<std::fs::File>>> {
-    let file = std::fs::File::open(&path)
+    let file = std::fs::File::open(path)
         .with_context(|| format!("failed to open '{}'", &path.display()))?;
     ZipArchive::new(BufReader::new(file))
         .with_context(|| format!("failed to parse ZIP format: '{}'", &path.display()))
@@ -159,8 +159,8 @@ mounts:
 
     fn gen_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
         generate_key(TEST_KEY_NAME, key_dir).expect("Generate key pair");
-        let prv_key = key_dir.join(&TEST_KEY_NAME).with_extension("key");
-        let pub_key = key_dir.join(&TEST_KEY_NAME).with_extension("pub");
+        let prv_key = key_dir.join(TEST_KEY_NAME).with_extension("key");
+        let pub_key = key_dir.join(TEST_KEY_NAME).with_extension("pub");
         assert!(prv_key.exists());
         assert!(pub_key.exists());
         (pub_key, prv_key)
