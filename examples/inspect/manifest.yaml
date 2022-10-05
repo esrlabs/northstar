@@ -25,7 +25,6 @@ mounts:
   /tmp:
     type: tmpfs
     size: 10MB
-capabilities: [ CAP_NET_RAW, CAP_NET_ADMIN ]
 rlimits:
   nproc:
     soft: 10000
