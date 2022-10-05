@@ -28,6 +28,7 @@ Northstar is an embedded container runtime prototype for Linux.
   - [Manifest Format](#manifest-format)
     - [Mounts](#mounts)
     - [Seccomp](#seccomp)
+    - [Capabilities](#capabilities)
   - [Roadmap](#roadmap)
   - [Questions and Help](#questions-and-help)
   - [Contributing](#contributing)
@@ -417,6 +418,22 @@ The complete format of the seccomp manifest entry is described
 If seccomp is defined in the manifest and the container attempts to access a
 syscall that is not on the list of allowed calls the process is terminated
 immediately.
+
+### Capabilities
+
+Every capability assigned to a container in the manifests `capabilities` field,
+instructs the runtime to *not* drop this capability *after* forking a container.
+Please note that the capabilities listed in the `capabilities` field is raised
+in the [ambient](https://man7.org/linux/man-pages/man7/capabilities.7.html) set.
+
+With a an empty capability set in the manifest *all* capabilities in *all* sets
+are dropped upon container launch.
+
+Example capability setting in a manifest:
+
+```yaml
+capabilities: [ CAP_NET_RAW, CAP_NET_ADMIN ]
+```
 
 ## Roadmap
 
