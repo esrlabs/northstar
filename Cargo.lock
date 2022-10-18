@@ -344,9 +344,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.9"
+version = "4.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30607dd93c420c6f1f80b544be522a0238a7db35e6a12968d28910983fee0df0"
+checksum = "6bf8832993da70a4c6d13c581f4463c2bdda27b9bf1c5498dc4365543abe6d6f"
 dependencies = [
  "atty",
  "bitflags",
@@ -363,14 +363,14 @@ version = "4.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11cba7abac9b56dfe2f035098cdb3a43946f276e6db83b72c4e692343f9aab9a"
 dependencies = [
- "clap 4.0.9",
+ "clap 4.0.15",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "4.0.9"
+version = "4.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a307492e1a34939f79d3b6b9650bd2b971513cd775436bf2b78defeb5af00b"
+checksum = "c42f169caba89a7d512b5418b09864543eeb4d497416c917d7137863bd2076ad"
 dependencies = [
  "heck 0.4.0",
  "proc-macro-error",
@@ -1318,7 +1318,7 @@ version = "0.6.1-pre"
 dependencies = [
  "android-logd-logger",
  "anyhow",
- "clap 4.0.9",
+ "clap 4.0.15",
  "env_logger",
  "log",
  "nix 0.25.0",
@@ -1344,7 +1344,7 @@ version = "0.6.1-pre"
 dependencies = [
  "anyhow",
  "base64",
- "clap 4.0.9",
+ "clap 4.0.15",
  "clap_complete",
  "futures",
  "humantime",
@@ -1428,7 +1428,7 @@ version = "0.6.1-pre"
 dependencies = [
  "anyhow",
  "base64",
- "clap 4.0.9",
+ "clap 4.0.15",
  "colored",
  "ed25519-dalek",
  "env_logger",
@@ -1443,7 +1443,7 @@ name = "northstar-stress"
 version = "0.6.1-pre"
 dependencies = [
  "anyhow",
- "clap 4.0.9",
+ "clap 4.0.15",
  "env_logger",
  "futures",
  "humantime",
@@ -2385,7 +2385,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "caps",
- "clap 4.0.9",
+ "clap 4.0.15",
  "nix 0.25.0",
  "thiserror",
 ]
