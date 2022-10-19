@@ -2,6 +2,9 @@ FROM ghcr.io/cross-rs/aarch64-linux-android:edge
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update && apt install --assume-yes libz-dev llvm-dev libclang-dev clang && rm -rf /var/lib/apt/lists/*
+# Fix BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android until https://github.com/cross-rs/cross/pull/1086 is in the base image.
+ENV BINDGEN_EXTRA_CLANG_ARGS="-I/android-ndk/sysroot/usr/include/linux -I/android-ndk/sysroot/usr/include/aarch64-linux-android --sysroot=/android-ndk/sysroot"
+ENV BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="-I/android-ndk/sysroot/usr/include/linux -I/android-ndk/sysroot/usr/include/aarch64-linux-android --sysroot=/android-ndk/sysroot"
 
 COPY docker/install-squashfs-tools.sh /
 RUN /install-squashfs-tools.sh && rm /install-squashfs-tools.sh
