@@ -44,7 +44,7 @@ rand_core = { version = "0.6.4", features = ["getrandom"], optional = true }
 rlimit = { version = "0.8.3", optional = true }
 semver = { version = "1.0.14", features = ["serde"] }
 serde = { version = "1.0.145", features = ["derive", "rc"] }
-serde_json = { version = "1.0.86", optional = true }
+serde_json = { version = "1.0.87", optional = true }
 serde_plain = { version = "1.0.0", optional = true }
 serde_with = { version = "2.0.1", optional = true }
 serde_yaml = { version = "0.9.13", optional = true }
@@ -141,7 +141,7 @@ seccomp = [
 anyhow = { version = "1.0.65", features = ["backtrace"] }
 memfd = "0.6.1"
 proptest = "1.0.0"
-serde_json = "1.0.86"
+serde_json = "1.0.87"
 tokio = { version = "1.21.2", features = ["test-util"] }
 tokio-test = "0.4.2"
 toml = "0.5.9"
