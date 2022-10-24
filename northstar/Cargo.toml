@@ -11,7 +11,7 @@ default-run = "northstar"
 
 [dependencies]
 anyhow = { version = "1.0.65", features = ["backtrace"] }
-clap = { version = "4.0.15", features = ["derive"] }
+clap = { version = "4.0.18", features = ["derive"] }
 log = "0.4.17"
 nix = { version = "0.25.0", default-features = false, features = ["sched", "mount"] }
 northstar-runtime = { version = "^0.6.1-pre", path = "../northstar-runtime", features = ["runtime", "rexec"] }
