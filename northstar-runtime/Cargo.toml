@@ -11,7 +11,7 @@ repository = "https://github.com/esrlabs/northstar"
 rust-version = "1.63.0"
 
 [dependencies]
-anyhow = { version = "1.0.65", features = ["backtrace"] }
+anyhow = { version = "1.0.66", features = ["backtrace"] }
 async-stream = { version = "0.3.3", optional = true }
 async-trait = { version = "0.1.58", optional = true }
 base64 = { version = "0.13.1", optional = true }
@@ -138,7 +138,7 @@ seccomp = [
 ]
 
 [dev-dependencies]
-anyhow = { version = "1.0.65", features = ["backtrace"] }
+anyhow = { version = "1.0.66", features = ["backtrace"] }
 memfd = "0.6.1"
 proptest = "1.0.0"
 serde_json = "1.0.87"
@@ -147,7 +147,7 @@ tokio-test = "0.4.2"
 toml = "0.5.9"
 
 [build-dependencies]
-anyhow = { version = "1.0.65", features = ["backtrace"] }
+anyhow = { version = "1.0.66", features = ["backtrace"] }
 bindgen = { version = "0.59.2", default-features = false, features = ["runtime"], optional = true }
 
 [package.metadata.docs.rs]
