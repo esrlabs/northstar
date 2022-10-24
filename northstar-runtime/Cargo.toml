@@ -47,7 +47,7 @@ serde = { version = "1.0.145", features = ["derive", "rc"] }
 serde_json = { version = "1.0.87", optional = true }
 serde_plain = { version = "1.0.1", optional = true }
 serde_with = { version = "2.0.1", optional = true }
-serde_yaml = { version = "0.9.13", optional = true }
+serde_yaml = { version = "0.9.14", optional = true }
 sha2 = { version = "0.10.6", optional = true }
 strum = { version = "0.24.1", optional = true }
 strum_macros = { version = "0.24.3", optional = true }
