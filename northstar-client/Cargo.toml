@@ -10,7 +10,7 @@ repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
 anyhow = { version = "1.0.66", features = ["backtrace"] }
-futures = "0.3.24"
+futures = "0.3.25"
 northstar-runtime = { version = "^0.6.1-pre", path = "../northstar-runtime", features = ["api"] }
 thiserror = "1.0.37"
 tokio = "1.21.2"
