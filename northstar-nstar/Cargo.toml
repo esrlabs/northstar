@@ -1,6 +1,6 @@
 [package]
 name = "northstar-nstar"
-version = "0.7.0"
+version = "0.7.1-pre"
 authors = ["ESRLabs"]
 description = "Northstar is an container runtime for Linux targetting embedded systems"
 edition = "2021"
@@ -16,8 +16,8 @@ clap_complete = "4.0.3"
 futures = { version = "0.3.24", default-features = false }
 humantime = "2.1.0"
 itertools = "0.10.5"
-northstar-client = { version = "0.7.0", path = "../northstar-client" }
-northstar-runtime = { version = "0.7.0", path = "../northstar-runtime", features = ["seccomp"] }
+northstar-client = { version = "^0.7.1-pre", path = "../northstar-client" }
+northstar-runtime = { version = "^0.7.1-pre", path = "../northstar-runtime", features = ["seccomp"] }
 pin-project-lite = "0.2.9"
 prettytable-rs = "0.9.0"
 regex = "1.6.0"

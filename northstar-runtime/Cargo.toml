@@ -1,6 +1,6 @@
 [package]
 name = "northstar-runtime"
-version = "0.7.0"
+version = "0.7.1-pre"
 authors = ["ESRLabs"]
 build = "build.rs"
 description = "Northstar is an container runtime for Linux targetting embedded systems"
