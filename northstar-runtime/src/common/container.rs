@@ -58,19 +58,12 @@ impl TryFrom<&str> for Container {
     }
 }
 
-impl TryFrom<&Container> for Container {
-    type Error = InvalidContainerError;
-
-    fn try_from(container: &Container) -> Result<Self, Self::Error> {
-        Ok(container.clone())
-    }
-}
-
 impl<N, V> TryFrom<(N, V)> for Container
 where
     N: TryInto<Name>,
     N::Error: Into<anyhow::Error>,
-    V: ToString,
+    V: TryInto<Version>,
+    V::Error: Into<anyhow::Error>,
 {
     type Error = InvalidContainerError;
 
@@ -79,7 +72,10 @@ where
             .try_into()
             .map_err(Into::into)
             .context("invalid name")?;
-        let version = Version::parse(&version.to_string()).context("invalid version")?;
+        let version = version
+            .try_into()
+            .map_err(Into::into)
+            .context("invalid version")?;
         Ok(Container::new(name, version))
     }
 }

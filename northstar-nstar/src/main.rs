@@ -258,7 +258,7 @@ async fn main() -> Result<()> {
         Subcommand::List => {
             let mut containers = HashMap::new();
             for container in client.list().await? {
-                let inspect = Client::inspect(&mut client, &container).await?;
+                let inspect = Client::inspect(&mut client, container.clone()).await?;
                 containers.insert(container, inspect);
             }
             if !opt.json {
@@ -274,9 +274,9 @@ async fn main() -> Result<()> {
         Subcommand::Mount { containers } => {
             let mut converted = Vec::with_capacity(containers.len());
             for container in containers {
-                converted.push(resolve_container(&container, &mut client).await?);
+                converted.push(resolve_container(&container, &mut client).await?.clone());
             }
-            let result = client.mount_all(&converted).await?;
+            let result = client.mount_all(converted).await?;
             if !opt.json {
                 pretty::mounts(&result);
             }
@@ -284,9 +284,9 @@ async fn main() -> Result<()> {
         Subcommand::Umount { containers } => {
             let mut converted = Vec::with_capacity(containers.len());
             for container in containers {
-                converted.push(resolve_container(&container, &mut client).await?);
+                converted.push(resolve_container(&container, &mut client).await?.clone());
             }
-            let result = client.umount_all(&converted).await?;
+            let result = client.umount_all(converted).await?;
             if !opt.json {
                 pretty::umounts(&result);
             }
@@ -304,7 +304,9 @@ async fn main() -> Result<()> {
                 .map(|s| s.split_once('=').expect("invalid env. use key=value"))
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect::<Vec<_>>();
-            client.start_with_args_env(&container, args, env).await?;
+            client
+                .start_with_args_env(container.clone(), args, env)
+                .await?;
             if !opt.json {
                 println!("started {}", container);
             }
@@ -312,7 +314,7 @@ async fn main() -> Result<()> {
         Subcommand::Kill { container, signal } => {
             let container = resolve_container(&container, &mut client).await?;
             let signal = signal.unwrap_or(15);
-            client.kill(&container, signal).await?;
+            client.kill(container.clone(), signal).await?;
             if !opt.json {
                 println!("signalled {} with signal {}", container, signal);
             }
@@ -325,7 +327,7 @@ async fn main() -> Result<()> {
         }
         Subcommand::Uninstall { container, wipe } => {
             let container = resolve_container(&container, &mut client).await?;
-            client.uninstall(&container, wipe).await?;
+            client.uninstall(container.clone(), wipe).await?;
             if !opt.json {
                 println!("uninstalled {}", container);
             }
@@ -338,7 +340,7 @@ async fn main() -> Result<()> {
         }
         Subcommand::Inspect { container } => {
             let container = resolve_container(&container, &mut client).await?;
-            let inspect = Client::inspect(&mut client, &container).await?;
+            let inspect = Client::inspect(&mut client, container).await?;
             if !opt.json {
                 println!("{}", serde_json::to_string_pretty(&inspect)?);
             }

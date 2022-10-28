@@ -207,7 +207,7 @@ async fn mount_umount() -> Result<()> {
     client().install(TEST_RESOURCE_NPK, "mem").await?;
 
     let containers = client().list().await?;
-    client().mount_all(&containers).await?;
+    client().mount_all(containers.clone()).await?;
 
     client().umount_all(containers).await?;
     Ok(())
