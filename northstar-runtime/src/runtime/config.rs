@@ -11,8 +11,7 @@ use nix::{sys::stat, unistd};
 use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use url::Url;
 
-use super::RepositoryId;
-use crate::common::non_nul_string::NonNulString;
+use crate::{common::non_nul_string::NonNulString, runtime::repository::RepositoryId};
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]

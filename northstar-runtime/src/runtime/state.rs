@@ -1,26 +1,25 @@
-use super::{
-    cgroups,
-    config::{Config, RepositoryType},
-    console::Request,
-    error::Error,
-    fork::Forker,
-    io,
-    mount::MountControl,
-    repository::{DirRepository, MemRepository, Npk},
-    Container, ContainerEvent, Event, EventTx, ExitStatus, NotificationTx, Pid, RepositoryId,
-};
 use crate::{
     api::{self, model},
-    common::{name::Name, non_nul_string::NonNulString, version::VersionReq},
+    common::{container::Container, name::Name, non_nul_string::NonNulString, version::VersionReq},
     npk::manifest::{
         autostart::Autostart,
         mount::{Mount, Resource},
         Manifest,
     },
     runtime::{
-        console::{Console, Peer},
+        cgroups,
+        config::{Config, RepositoryType},
+        console::{Console, Peer, Request},
+        env,
+        error::Error,
+        events::{CGroupEvent, ContainerEvent, Event, EventTx},
+        exit_status::ExitStatus,
+        fork::Forker,
+        io,
         io::ContainerIo,
-        CGroupEvent, ENV_CONSOLE, ENV_CONTAINER, ENV_NAME, ENV_VERSION,
+        mount::MountControl,
+        repository::{DirRepository, MemRepository, Npk, RepositoryId},
+        runtime::{NotificationTx, Pid},
     },
 };
 use anyhow::{Context, Result};
@@ -377,14 +376,17 @@ impl State {
 
         // Check optional env variables for reserved ENV_NAME or ENV_VERSION key which cannot be overwritten
         if env_extra.keys().any(|k| {
-            k.as_str() == ENV_NAME
-                || k.as_str() == ENV_VERSION
-                || k.as_str() == ENV_CONTAINER
-                || k.as_str() == ENV_CONSOLE
+            k.as_str() == env::NAME
+                || k.as_str() == env::VERSION
+                || k.as_str() == env::CONTAINER
+                || k.as_str() == env::CONSOLE
         }) {
             return Err(Error::InvalidArguments(format!(
                 "env contains reserved key {} or {} or {} or {}",
-                ENV_NAME, ENV_VERSION, ENV_CONTAINER, ENV_CONSOLE
+                env::NAME,
+                env::VERSION,
+                env::CONTAINER,
+                env::CONSOLE
             )));
         }
 
@@ -547,9 +549,9 @@ impl State {
         let env = env
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
-            .chain(once(format!("{}={}", ENV_CONTAINER, container)))
-            .chain(once(format!("{}={}", ENV_NAME, container.name())))
-            .chain(once(format!("{}={}", ENV_VERSION, container.version())))
+            .chain(once(format!("{}={}", env::CONTAINER, container)))
+            .chain(once(format!("{}={}", env::NAME, container.name())))
+            .chain(once(format!("{}={}", env::VERSION, container.version())))
             .map(|s| unsafe { NonNulString::from_string_unchecked(s) })
             .collect::<Vec<_>>();
 

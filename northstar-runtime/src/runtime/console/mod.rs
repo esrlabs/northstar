@@ -1,8 +1,13 @@
-use super::{ContainerEvent, Event, NotificationTx, RepositoryId};
 use crate::{
     api::{self, codec::Framed, VERSION},
     common::container::Container,
-    runtime::{token::Token, EventTx, ExitStatus},
+    runtime::{
+        events::{CGroupEvent, ContainerEvent, Event, EventTx},
+        exit_status::ExitStatus,
+        repository::RepositoryId,
+        runtime::NotificationTx,
+        token::Token,
+    },
 };
 use anyhow::{bail, Context, Result};
 use api::model;
@@ -617,7 +622,7 @@ impl From<(Container, ContainerEvent)> for model::Notification {
             ContainerEvent::Installed => api::model::Notification::Install(container),
             ContainerEvent::Uninstalled => api::model::Notification::Uninstall(container),
             ContainerEvent::CGroup(event) => match event {
-                super::CGroupEvent::Memory(memory) => api::model::Notification::CGroup(
+                CGroupEvent::Memory(memory) => api::model::Notification::CGroup(
                     container,
                     api::model::CgroupNotification::Memory(api::model::MemoryNotification {
                         low: memory.low,

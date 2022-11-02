@@ -1,10 +1,12 @@
 use super::{
+    events::EventTx,
+    runtime::Pid,
     stats::{to_value, ContainerStats},
-    Container, EventTx, Pid,
 };
 use crate::{
+    common::container::Container,
     npk::manifest,
-    runtime::{CGroupEvent, ContainerEvent, Event, MemoryEvent},
+    runtime::events::{CGroupEvent, ContainerEvent, Event, MemoryEvent},
 };
 use anyhow::{Context, Result};
 use cgroups_rs::{

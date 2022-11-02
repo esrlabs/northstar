@@ -6,9 +6,10 @@ use super::{
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
     runtime::{
+        exit_status::ExitStatus,
         fork::{forker::channel::Channel, util::set_parent_death_signal},
         ipc::{AsyncFramedUnixStream, FramedUnixStream},
-        ExitStatus, Pid,
+        runtime::Pid,
     },
 };
 use anyhow::{anyhow, Context, Result};

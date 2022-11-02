@@ -6,9 +6,10 @@ use crate::{
         rlimit::{RLimitResource, RLimitValue},
     },
     runtime::{
+        exit_status::ExitStatus,
         fork::util::{self, set_child_subreaper, set_process_name},
         ipc::FramedUnixStream,
-        ExitStatus, Pid,
+        runtime::Pid,
     },
     seccomp::AllowList,
 };

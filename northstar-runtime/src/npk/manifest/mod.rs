@@ -171,7 +171,7 @@ impl ToString for Manifest {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::mount::*;
+    use super::mount::{Bind, Mount, MountOption, Resource, Tmpfs};
     use crate::{common::version::VersionReq, npk::manifest::*, seccomp::SyscallRule};
     use anyhow::Result;
     use std::{

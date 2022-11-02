@@ -1,9 +1,12 @@
-use super::{
-    config,
-    key::{self, PublicKey},
-    Container,
+use crate::{
+    common::container::Container,
+    npk::npk::Npk as NpkNpk,
+    runtime::{
+        config,
+        ipc::RawFdExt,
+        key::{self, PublicKey},
+    },
 };
-use crate::{npk::npk::Npk as NpkNpk, runtime::ipc::RawFdExt};
 use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use futures::{future::try_join_all, FutureExt};
@@ -27,6 +30,9 @@ use tokio::{
 };
 
 pub(super) type Npk = NpkNpk<BufReader<std::fs::File>>;
+
+/// Repository name.
+pub type RepositoryId = String;
 
 #[async_trait::async_trait]
 pub(super) trait Repository: fmt::Debug {

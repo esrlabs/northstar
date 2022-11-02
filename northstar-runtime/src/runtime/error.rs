@@ -2,9 +2,11 @@ use thiserror::Error;
 
 use crate::{
     api::{self},
-    common::name::Name,
-    runtime::{Container, ExitStatus, RepositoryId},
+    common::{container::Container, name::Name},
+    runtime::exit_status::ExitStatus,
 };
+
+use crate::runtime::repository::RepositoryId;
 
 #[derive(Error, Debug)]
 pub enum Error {

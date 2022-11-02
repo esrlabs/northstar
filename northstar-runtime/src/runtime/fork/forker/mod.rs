@@ -1,7 +1,7 @@
 use self::channel::Channel;
 
 use super::{
-    super::{error::Error, Pid},
+    super::error::Error,
     init,
     util::{self},
 };
@@ -11,6 +11,7 @@ use crate::{
     runtime::{
         config::Config,
         ipc::{AsyncFramedUnixStream, FramedUnixStream},
+        runtime::Pid,
     },
 };
 use anyhow::{Context, Result};

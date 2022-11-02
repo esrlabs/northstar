@@ -7,7 +7,7 @@ use std::{
 };
 use thiserror::Error;
 
-use super::{name::Name, version::Version};
+use crate::common::{name::Name, version::Version};
 
 /// Container identification
 #[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Debug, Hash)]

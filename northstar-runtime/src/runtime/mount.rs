@@ -1,7 +1,7 @@
-use super::{key::PublicKey, repository::Npk};
 use crate::{
     common::version::Version,
     npk::{dm_verity::VerityHeader, manifest::selinux::Selinux, npk::Hashes},
+    runtime::{key::PublicKey, repository::Npk},
 };
 use anyhow::{anyhow, bail, Context, Result};
 use devicemapper::{DevId, DmName, DmOptions};
