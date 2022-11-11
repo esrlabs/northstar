@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
 
     // Iterate containers and print their names and state
     for container in client.list().await? {
-        let data = client.inspect(&container).await?;
+        let data = client.inspect(container.clone()).await?;
         println!(
             "{} is {}",
             container,

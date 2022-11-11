@@ -159,9 +159,9 @@ async fn start_stop(opt: &Opt) -> Result<()> {
     let mut client = Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
     let mut containers: Vec<Container> = Vec::new();
     for container in client.list().await? {
-        let data = Client::inspect(&mut client, &container).await?;
+        let data = Client::inspect(&mut client, container.clone()).await?;
         if data.manifest.init.is_some() {
-            containers.push(container);
+            containers.push(container.clone());
         }
     }
     drop(client);
@@ -202,7 +202,7 @@ async fn start_stop(opt: &Opt) -> Result<()> {
 
                 if *mode == Mode::MountStartStopUmount || *mode == Mode::MountUmount {
                     info!("{} mount", &container);
-                    client.mount(container).await?;
+                    client.mount(container.clone()).await?;
                     info!("{}: awaiting mount", container);
                     await_container_state(&mut client, container, |state| state.mounted).await?;
                     info!("{}: mounted", container);
@@ -210,7 +210,7 @@ async fn start_stop(opt: &Opt) -> Result<()> {
 
                 if *mode != Mode::MountUmount {
                     info!("{}: start", container);
-                    client.start(container).await?;
+                    client.start(container.clone()).await?;
                     info!("{}: awaiting start", container);
                     await_container_state(&mut client, container, |state| state.process.is_some())
                         .await?;
@@ -238,7 +238,10 @@ async fn start_stop(opt: &Opt) -> Result<()> {
                 // Check if we need to umount
                 if *mode != Mode::StartStop {
                     info!("{}: umounting", container);
-                    client.umount(container).await.context("failed to umount")?;
+                    client
+                        .umount(container.clone())
+                        .await
+                        .context("failed to umount")?;
                     info!("{}: awaiting umount", container);
                     await_container_state(&mut client, container, |state| !state.mounted).await?;
                     info!("{}: umounted", container);
@@ -364,19 +367,19 @@ async fn monkey(opt: &Opt) -> Result<()> {
                 match rand::random() {
                     MonkeyAction::Start => {
                         info!("Trying to start {}", container);
-                        client.start(container).map(drop).await;
+                        client.start(container.clone()).map(drop).await;
                     }
                     MonkeyAction::Kill(signal) => {
                         info!("Trying to kill {} with signal {}", container, signal);
-                        client.kill(container, signal).map(drop).await;
+                        client.kill(container.clone(), signal).map(drop).await;
                     }
                     MonkeyAction::Mount => {
                         info!("Trying to mount {}", container);
-                        client.mount(container).map(drop).await;
+                        client.mount(container.clone()).map(drop).await;
                     }
                     MonkeyAction::Umount => {
                         info!("Trying to umount {}", container);
-                        client.umount(container).map(drop).await;
+                        client.umount(container.clone()).map(drop).await;
                     }
                 };
             }
@@ -391,7 +394,7 @@ async fn await_container_state(
     mut pred: impl FnMut(ContainerData) -> bool,
 ) -> Result<()> {
     loop {
-        let data = client.inspect(container).await?;
+        let data = client.inspect(container.clone()).await?;
         if pred(data) {
             break Ok(());
         } else {
