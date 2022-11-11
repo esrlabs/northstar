@@ -100,6 +100,8 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      - name: Mold
+        uses: rui314/setup-mold@v1
       - name: Cache
         uses: Swatinem/rust-cache@v1
       - name: Checkout
@@ -173,6 +175,8 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      - name: Mold
+        uses: rui314/setup-mold@v1
       - name: Cache
         uses: Swatinem/rust-cache@v1
       - name: Checkout
