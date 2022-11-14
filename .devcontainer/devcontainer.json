@@ -1,0 +1,16 @@
+{
+	"name": "Northstar",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/rust:1": {},
+		"ghcr.io/guiyomh/features/vim:0": {},
+		"ghcr.io/jungaretti/features/ripgrep:1": {},
+		"ghcr.io/lee-orr/rusty-dev-containers/cargo-make:0": {},
+		"ghcr.io/lee-orr/rusty-dev-containers/cargo-nextest:0": {},
+		"ghcr.io/lee-orr/rusty-dev-containers/cargo-watch:0": {},
+		"ghcr.io/stuartleeks/dev-container-features/shell-history:0": {}
+	}
+}
