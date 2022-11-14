@@ -1,0 +1,12 @@
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android28-clang++"
+runner = '.cargo/runner.aarch64-linux-android'
+
+[target.x86_64-unknown-linux-gnu]
+runner = '.cargo/runner.x86_64-unknown-linux-gnu'
+
+[target.aarch64-unknown-linux-gnu.env]
+BINDGEN_EXTRA_CLANG_ARGS = "-I/usr/aarch64-linux-gnu/include"
+
+[target.aarch64-unknown-linux-musl.env]
+BINDGEN_EXTRA_CLANG_ARGS="-I/usr/local/aarch64-linux-musl/include"
