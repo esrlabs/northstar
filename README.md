@@ -141,7 +141,7 @@ cargo run --bin northstar
 ```
 
 The Northstar workspace configuration configures a cargo
-[runner](.cargo/runner-x86_64-unknown-linux-gnu) that invokes the runtimes
+[runner](.cargo/runner.x86_64-unknown-linux-gnu) that invokes the runtimes
 example main binary with super user rights.
 
 Use the [northstar-nstar](./northstar-nstar) utility to inspect and modify the
