@@ -8,7 +8,6 @@ env:
 cgroups:
   cpu:
     shares: 100
-    attrs: {}
 mounts:
   /dev:
     type: dev

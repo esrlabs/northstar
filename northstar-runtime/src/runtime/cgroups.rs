@@ -111,7 +111,7 @@ impl Hierarchy for RuntimeHierarchy {
 pub struct CGroups {
     container: Container,
     cgroup: cgroups_rs::Cgroup,
-    memory_monitor: MemoryMonitor,
+    oom_monitor: Option<MemoryMonitor>,
 }
 
 impl CGroups {
@@ -136,10 +136,29 @@ impl CGroups {
             hugepages: cgroups_rs::HugePageResources::default(),
             blkio: config.blkio.clone().map(Into::into).unwrap_or_default(),
         };
-
         cgroup
             .apply(&resources)
             .context("failed to configure cgroups")?;
+
+        let oom_monitor = if config
+            .memory
+            .as_ref()
+            .map(|m| m.oom_monitor)
+            .unwrap_or(false)
+        {
+            let memory_controller = cgroup
+                .controller_of::<MemController>()
+                .expect("failed to get memory controller");
+            let memory_path = memory_controller.path();
+            let memory_monitor = if cgroup.v2() {
+                MemoryMonitor::new_v2(container.clone(), memory_path, tx).await
+            } else {
+                MemoryMonitor::new_v1(container.clone(), memory_path, tx).await
+            };
+            Some(memory_monitor)
+        } else {
+            None
+        };
 
         // If adding the task fails it's a fault of the runtime or it's integration
         // and not of the container
@@ -147,26 +166,18 @@ impl CGroups {
             .add_task(cgroups_rs::CgroupPid::from(pid as u64))
             .expect("failed to assign pid");
 
-        let memory_controller = cgroup
-            .controller_of::<MemController>()
-            .expect("failed to get memory controller");
-        let memory_path = memory_controller.path();
-        let memory_monitor = if cgroup.v2() {
-            MemoryMonitor::new_v2(container.clone(), memory_path, tx).await
-        } else {
-            MemoryMonitor::new_v1(container.clone(), memory_path, tx).await
-        };
-
         Ok(CGroups {
             container: container.clone(),
             cgroup,
-            memory_monitor,
+            oom_monitor,
         })
     }
 
     pub async fn destroy(self) {
-        debug!("Stopping oom monitor of {}", self.container);
-        self.memory_monitor.stop().await;
+        if let Some(oom_monitor) = self.oom_monitor {
+            debug!("Stopping oom monitor of {}", self.container);
+            oom_monitor.stop().await;
+        }
 
         info!("Destroying cgroup of {}", self.container);
         assert!(self.cgroup.tasks().is_empty());
