@@ -31,10 +31,10 @@ use tokio_util::sync::CancellationToken;
 /// Default runtime hierarchy that yields only implemented and supported controllers
 /// instead of the default list.
 fn hierarchy() -> Box<dyn Hierarchy> {
-    Box::new(RuntimeHierarchy::new())
+    Box::new(RuntimeHierarchy::default())
 }
 
-/// Create the top level cgroups used by northstar
+/// Create the top level cgroups used by Northstar
 pub async fn init(name: &Path) -> Result<()> {
     // TODO: Add check for supported controllers
 
@@ -60,9 +60,8 @@ struct RuntimeHierarchy {
     inner: Box<dyn Hierarchy>,
 }
 
-impl RuntimeHierarchy {
-    /// Create a new instance
-    fn new() -> RuntimeHierarchy {
+impl Default for RuntimeHierarchy {
+    fn default() -> RuntimeHierarchy {
         RuntimeHierarchy {
             inner: cgroups_rs::hierarchies::auto(),
         }
@@ -74,7 +73,7 @@ impl Hierarchy for RuntimeHierarchy {
     fn subsystems(&self) -> Vec<cgroups_rs::Subsystem> {
         self.inner
             .subsystems()
-            .drain(..)
+            .into_iter()
             .filter(|s| match s {
                 cgroups_rs::Subsystem::Pid(_) => false,
                 cgroups_rs::Subsystem::Mem(_) => true,
@@ -124,8 +123,18 @@ impl CGroups {
     ) -> Result<CGroups> {
         debug!("Creating cgroups for {}", container);
         let name: &str = container.name().as_ref();
-        let cgroup: cgroups_rs::Cgroup =
-            cgroups_rs::Cgroup::new(hierarchy(), Path::new(top_level_dir).join(name));
+        let path = if let Some(parent) = &config.parent {
+            parent.join(name)
+        } else {
+            Path::new(top_level_dir).join(name)
+        };
+        debug!(
+            "CGroup path of container {} is {}",
+            container,
+            path.display()
+        );
+
+        let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(hierarchy(), path);
 
         let resources = cgroups_rs::Resources {
             memory: config.memory.clone().map(Into::into).unwrap_or_default(),

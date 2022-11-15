@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 /// CGroups configuration
 #[skip_serializing_none]
 #[derive(Clone, Eq, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CGroups {
+    /// Parent CGroup. Defaults to the cgroup in the runtime configuration.
+    pub parent: Option<PathBuf>,
     /// BlkIo controller
     pub blkio: Option<BlkIoResources>,
     /// Cpu controller
