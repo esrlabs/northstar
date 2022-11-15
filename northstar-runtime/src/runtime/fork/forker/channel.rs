@@ -5,12 +5,12 @@ use crate::{
     runtime::{
         fork::init::Init,
         ipc::{AsyncFramedUnixStream, FramedUnixStream},
-        Pid,
+        runtime::Pid,
     },
 };
 use serde::{Deserialize, Serialize};
 
-use super::messages::Message;
+use super::Message;
 
 /// Command and socket stream bundled in one entity.
 #[derive(Debug)]

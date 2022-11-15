@@ -1,9 +1,11 @@
-use super::{
-    config::{debug, Config},
-    error::Error,
-    Pid,
+use crate::{
+    npk::manifest::Manifest,
+    runtime::{
+        config::{debug, Config},
+        error::Error,
+        runtime::Pid,
+    },
 };
-use crate::npk::manifest::Manifest;
 use anyhow::Context;
 use futures::future::OptionFuture;
 use log::{debug, error, info};

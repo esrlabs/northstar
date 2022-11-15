@@ -3,7 +3,7 @@ use std::os::unix::prelude::OwnedFd;
 use super::init::Init;
 use crate::{
     common::{container::Container, non_nul_string::NonNulString},
-    runtime::{ExitStatus, Pid},
+    runtime::{exit_status::ExitStatus, runtime::Pid},
 };
 use serde::{Deserialize, Serialize};
 
