@@ -24,9 +24,3 @@ members = [
     "northstar-tests/northstar-tests-derive",
     "northstar-tests/test-container",
 ]
-
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = "z"
-strip = true
