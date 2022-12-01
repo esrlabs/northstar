@@ -7,7 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = { version = "1.0.66", features = ["backtrace"] }
-caps = "0.5.4"
+caps = "0.5.5"
 clap = { version = "4.0.18", features = ["derive"] }
 nix = { version = "0.25.0", default-features = false, features = ["process", "user"] }
 thiserror = "1.0.37"
