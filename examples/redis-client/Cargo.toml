@@ -8,4 +8,4 @@ license = "Apache-2.0"
 [dependencies]
 bytes = "1.2.1"
 mini-redis = "0.4.1"
-tokio = { version = "1.21.2", features = ["macros", "rt", "net"] }
+tokio = { version = "1.22.0", features = ["macros", "rt", "net"] }
