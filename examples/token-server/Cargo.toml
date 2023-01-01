@@ -9,4 +9,4 @@ license = "Apache-2.0"
 anyhow = { version = "1.0.66", features = ["backtrace"] }
 base64 = "0.13.1"
 northstar-client = { path = "../../northstar-client" }
-tokio = { version = "1.22.0", features = ["macros", "rt", "net"] }
+tokio = { version = "1.23.0", features = ["macros", "rt", "net"] }

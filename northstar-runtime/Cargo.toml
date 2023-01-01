@@ -53,7 +53,7 @@ strum = { version = "0.24.1", optional = true }
 strum_macros = { version = "0.24.3", optional = true }
 tempfile = { version = "3.3.0", optional = true }
 thiserror = "1.0.37"
-tokio = { version = "1.22.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "sync", "time", "net"], optional = true }
+tokio = { version = "1.23.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "sync", "time", "net"], optional = true }
 tokio-eventfd = { version = "0.2.0", optional = true }
 tokio-util = { version = "0.7.4", features = ["codec", "io"], optional = true }
 url = { version = "2.3.1", features = ["serde"], optional = true }
@@ -142,7 +142,7 @@ anyhow = { version = "1.0.66", features = ["backtrace"] }
 memfd = "0.6.1"
 proptest = "1.0.0"
 serde_json = "1.0.87"
-tokio = { version = "1.22.0", features = ["test-util"] }
+tokio = { version = "1.23.0", features = ["test-util"] }
 tokio-test = "0.4.2"
 toml = "0.5.9"
 
