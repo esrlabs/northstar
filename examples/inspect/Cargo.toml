@@ -7,4 +7,4 @@ license = "Apache-2.0"
 
 [dependencies]
 caps = "0.5.5"
-nix = { version = "0.25.0", default-features = false, features = [ "process", "user", "signal" ] }
+nix = { version = "0.26.1", default-features = false, features = [ "process", "user", "signal" ] }
