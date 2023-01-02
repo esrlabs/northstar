@@ -20,7 +20,7 @@ fn generate_seccomp() {
             .collect();
 
         let out_path = path::PathBuf::from(env::var("OUT_DIR")?);
-        let mut f = fs::File::create(&out_path.join("syscall_bindings.rs"))?;
+        let mut f = fs::File::create(out_path.join("syscall_bindings.rs"))?;
 
         f.write_all(lines.join("\n").as_bytes())?;
         writeln!(f)?;
@@ -76,7 +76,7 @@ fn generate_seccomp() {
             .allowlist_var("AUDIT_ARCH_AARCH64")
             .generate()
             .expect("failed to generate seccomp bindings")
-            .write_to_file(&out_path.join("seccomp_bindings.rs"))?;
+            .write_to_file(out_path.join("seccomp_bindings.rs"))?;
         Ok(())
     }
 

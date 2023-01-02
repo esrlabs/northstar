@@ -49,8 +49,8 @@ fn create_test_manifest(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
 
 fn generate_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
     npk::generate_key(TEST_KEY_NAME, key_dir).expect("Generate key pair");
-    let prv_key = key_dir.join(&TEST_KEY_NAME).with_extension("key");
-    let pub_key = key_dir.join(&TEST_KEY_NAME).with_extension("pub");
+    let prv_key = key_dir.join(TEST_KEY_NAME).with_extension("key");
+    let pub_key = key_dir.join(TEST_KEY_NAME).with_extension("pub");
     assert!(prv_key.exists());
     assert!(pub_key.exists());
     (pub_key, prv_key)

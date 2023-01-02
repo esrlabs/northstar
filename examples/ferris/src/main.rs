@@ -9,7 +9,7 @@ const FERRIS: &str = r#"
 
 fn main() -> std::io::Result<()> {
     for arg in std::env::args().skip(1) {
-        let greet = std::fs::read_to_string(&arg)?;
+        let greet = std::fs::read_to_string(arg)?;
         println!("{}", greet);
         println!("{}", FERRIS);
     }
