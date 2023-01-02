@@ -14,7 +14,7 @@ base64 = "0.13.1"
 clap = { version = "4.0.18", features = ["derive"] }
 colored = "2.0.0"
 ed25519-dalek = "1.0.1"
-env_logger = "0.9.1"
+env_logger = "0.10.0"
 log = "0.4.17"
 northstar-runtime = { version = "^0.7.1-pre", path = "../northstar-runtime", features = ["npk"] }
 tempfile = "3.3.0"
