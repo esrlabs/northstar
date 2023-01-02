@@ -33,7 +33,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "70e4060d910a7ba63769526d9d263b0264e8be2f268f9ab1bc03d021c34cfb50"
 dependencies = [
  "bytes",
- "env_logger",
+ "env_logger 0.9.3",
  "lazy_static",
  "libc",
  "log",
@@ -735,8 +735,18 @@ version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
 dependencies = [
- "atty",
+ "log",
+ "regex",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
+dependencies = [
  "humantime",
+ "is-terminal",
  "log",
  "regex",
  "termcolor",
@@ -1415,7 +1425,7 @@ dependencies = [
  "android-logd-logger",
  "anyhow",
  "clap 4.0.32",
- "env_logger",
+ "env_logger 0.10.0",
  "log",
  "nix 0.26.1",
  "northstar-runtime",
@@ -1527,7 +1537,7 @@ dependencies = [
  "clap 4.0.32",
  "colored",
  "ed25519-dalek",
- "env_logger",
+ "env_logger 0.10.0",
  "log",
  "northstar-runtime",
  "tempfile",
@@ -1540,7 +1550,7 @@ version = "0.7.1-pre"
 dependencies = [
  "anyhow",
  "clap 4.0.32",
- "env_logger",
+ "env_logger 0.10.0",
  "futures",
  "humantime",
  "itertools",
@@ -1558,7 +1568,7 @@ name = "northstar-tests"
 version = "0.7.1-pre"
 dependencies = [
  "anyhow",
- "env_logger",
+ "env_logger 0.10.0",
  "escargot",
  "futures",
  "lazy_static",
