@@ -273,7 +273,7 @@ impl Builder {
 
         // Add required syscalls (e.g. for execve)
         for syscall in REQUIRED_SYSCALLS {
-            builder.allow_syscall_nr(*syscall as u32, None);
+            builder.allow_syscall_nr(*syscall, None);
         }
         builder
     }

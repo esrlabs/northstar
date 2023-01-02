@@ -124,7 +124,7 @@ impl VerityHeader {
 /// to the given file.
 pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest> {
     let (level_offsets, tree_size) =
-        calculate_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE as usize);
+        calculate_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE);
     let (salt, root_hash, hash_tree) =
         generate_hash_tree(fsimg, fsimg_size, &level_offsets, tree_size)?;
     append_superblock_and_hashtree(fsimg, fsimg_size, &salt, &hash_tree)?;

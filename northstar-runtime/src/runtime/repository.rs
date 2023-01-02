@@ -167,7 +167,7 @@ impl Repository for DirRepository {
                     // Check if capacity limit is reached.
                     written += r.len() as u64;
                     if let Some(size) = self.capacity_size {
-                        if written + current_size_sum > size as u64 {
+                        if written + current_size_sum > size {
                             drop(file);
                             fs::remove_file(&dest)
                                 .await
