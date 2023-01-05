@@ -1,6 +1,6 @@
 # Northstar
 
-![CI Status](https://img.shields.io/github/workflow/status/esrlabs/northstar/Northstar%20CI)
+![CI Status](https://img.shields.io/github/actions/workflow/status/esrlabs/northstar/ci.yml?branch=main)
 [![Docs](https://img.shields.io/badge/docs-passing-brightgreen)](https://docs.rs/crate/northstar-runtime/latest)
 ![License](https://img.shields.io/github/license/esrlabs/northstar)
 ![Issues](https://img.shields.io/github/issues/esrlabs/northstar)
