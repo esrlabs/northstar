@@ -31,10 +31,10 @@ use tokio_util::sync::CancellationToken;
 /// Default runtime hierarchy that yields only implemented and supported controllers
 /// instead of the default list.
 fn hierarchy() -> Box<dyn Hierarchy> {
-    Box::new(RuntimeHierarchy::new())
+    Box::new(RuntimeHierarchy::default())
 }
 
-/// Create the top level cgroups used by northstar
+/// Create the top level cgroups used by Northstar
 pub async fn init(name: &Path) -> Result<()> {
     // TODO: Add check for supported controllers
 
@@ -60,9 +60,8 @@ struct RuntimeHierarchy {
     inner: Box<dyn Hierarchy>,
 }
 
-impl RuntimeHierarchy {
-    /// Create a new instance
-    fn new() -> RuntimeHierarchy {
+impl Default for RuntimeHierarchy {
+    fn default() -> RuntimeHierarchy {
         RuntimeHierarchy {
             inner: cgroups_rs::hierarchies::auto(),
         }
@@ -74,7 +73,7 @@ impl Hierarchy for RuntimeHierarchy {
     fn subsystems(&self) -> Vec<cgroups_rs::Subsystem> {
         self.inner
             .subsystems()
-            .drain(..)
+            .into_iter()
             .filter(|s| match s {
                 cgroups_rs::Subsystem::Pid(_) => false,
                 cgroups_rs::Subsystem::Mem(_) => true,
@@ -111,7 +110,7 @@ impl Hierarchy for RuntimeHierarchy {
 pub struct CGroups {
     container: Container,
     cgroup: cgroups_rs::Cgroup,
-    memory_monitor: MemoryMonitor,
+    oom_monitor: Option<MemoryMonitor>,
 }
 
 impl CGroups {
@@ -124,8 +123,18 @@ impl CGroups {
     ) -> Result<CGroups> {
         debug!("Creating cgroups for {}", container);
         let name: &str = container.name().as_ref();
-        let cgroup: cgroups_rs::Cgroup =
-            cgroups_rs::Cgroup::new(hierarchy(), Path::new(top_level_dir).join(name));
+        let path = if let Some(parent) = &config.parent {
+            parent.join(name)
+        } else {
+            Path::new(top_level_dir).join(name)
+        };
+        debug!(
+            "CGroup path of container {} is {}",
+            container,
+            path.display()
+        );
+
+        let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(hierarchy(), path);
 
         let resources = cgroups_rs::Resources {
             memory: config.memory.clone().map(Into::into).unwrap_or_default(),
@@ -136,10 +145,29 @@ impl CGroups {
             hugepages: cgroups_rs::HugePageResources::default(),
             blkio: config.blkio.clone().map(Into::into).unwrap_or_default(),
         };
-
         cgroup
             .apply(&resources)
             .context("failed to configure cgroups")?;
+
+        let oom_monitor = if config
+            .memory
+            .as_ref()
+            .map(|m| m.oom_monitor)
+            .unwrap_or(false)
+        {
+            let memory_controller = cgroup
+                .controller_of::<MemController>()
+                .expect("failed to get memory controller");
+            let memory_path = memory_controller.path();
+            let memory_monitor = if cgroup.v2() {
+                MemoryMonitor::new_v2(container.clone(), memory_path, tx).await
+            } else {
+                MemoryMonitor::new_v1(container.clone(), memory_path, tx).await
+            };
+            Some(memory_monitor)
+        } else {
+            None
+        };
 
         // If adding the task fails it's a fault of the runtime or it's integration
         // and not of the container
@@ -147,26 +175,18 @@ impl CGroups {
             .add_task(cgroups_rs::CgroupPid::from(pid as u64))
             .expect("failed to assign pid");
 
-        let memory_controller = cgroup
-            .controller_of::<MemController>()
-            .expect("failed to get memory controller");
-        let memory_path = memory_controller.path();
-        let memory_monitor = if cgroup.v2() {
-            MemoryMonitor::new_v2(container.clone(), memory_path, tx).await
-        } else {
-            MemoryMonitor::new_v1(container.clone(), memory_path, tx).await
-        };
-
         Ok(CGroups {
             container: container.clone(),
             cgroup,
-            memory_monitor,
+            oom_monitor,
         })
     }
 
     pub async fn destroy(self) {
-        debug!("Stopping oom monitor of {}", self.container);
-        self.memory_monitor.stop().await;
+        if let Some(oom_monitor) = self.oom_monitor {
+            debug!("Stopping oom monitor of {}", self.container);
+            oom_monitor.stop().await;
+        }
 
         info!("Destroying cgroup of {}", self.container);
         assert!(self.cgroup.tasks().is_empty());

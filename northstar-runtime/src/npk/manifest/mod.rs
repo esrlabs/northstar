@@ -232,6 +232,7 @@ seccomp:
     waitpid: any
 cgroups:
     memory:
+      oom_monitor: true
       memory_hard_limit: 1000000
       memory_soft_limit: 1000000
       swappiness: 0

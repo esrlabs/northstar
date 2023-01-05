@@ -6,9 +6,11 @@ gid: 1000
 env:
   THREADS: 4
 cgroups:
+  # Add a cgroup in the parent cgroup "cpu-intense". If "cpu-intense"
+  # doesn't exist - it is created.
+  parent: cpu-intense
   cpu:
     shares: 100
-    attrs: {}
 mounts:
   /dev:
     type: dev

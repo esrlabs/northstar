@@ -5,9 +5,9 @@ uid: 1000
 gid: 1000
 cgroups:
     memory:
+      oom_monitor: true
       memory_hard_limit: 10000000
       swappiness: 0
-      attrs: {}
 mounts:
   /dev:
     type: dev
