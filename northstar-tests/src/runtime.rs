@@ -237,7 +237,7 @@ impl Client {
 
     /// Install the test container and wait for the notification
     pub async fn install_test_container(&mut self) -> Result<()> {
-        self.install(TEST_CONTAINER_NPK, "mem")
+        self.install(&TEST_CONTAINER_NPK, "mem")
             .await
             .context("failed to install test container")?;
 
@@ -259,7 +259,7 @@ impl Client {
 
     /// Install the test resource and wait for the notification
     pub async fn install_test_resource(&mut self) -> Result<()> {
-        self.install(TEST_RESOURCE_NPK, "mem")
+        self.install(&TEST_RESOURCE_NPK, "mem")
             .await
             .context("failed to install test resource")?;
         self.assume_notification(|n| matches!(n, Notification::Install { .. }), 15)

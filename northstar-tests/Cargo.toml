@@ -21,8 +21,3 @@ regex = "1.7.1"
 tempfile = "3.3.0"
 tokio = { version = "1.25.0", features = ["fs", "time"] }
 url = "2.3.1"
-
-[build-dependencies]
-escargot = "0.5.7"
-rayon = "1.5.3"
-tempfile = "3.3.0"

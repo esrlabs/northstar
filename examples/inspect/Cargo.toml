@@ -8,3 +8,15 @@ license = "Apache-2.0"
 [dependencies]
 caps = "0.5.5"
 nix = { version = "0.26.1", default-features = false, features = [ "process", "user", "signal" ] }
+
+[package.metadata.npk]
+manifest = "manifest.yaml"
+
+[package.metadata.npk.target.'aarch64-unknown-linux-gnu']
+use_cross = true
+
+[package.metadata.npk.target.'aarch64-unknown-linux-musl']
+use_cross = true
+
+[package.metadata.npk.target.'aarch64-linux-android']
+use_cross = true

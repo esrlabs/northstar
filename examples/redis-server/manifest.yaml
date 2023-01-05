@@ -1,6 +1,6 @@
 name: redis
 version: 0.0.1
-init: /redis
+init: /redis-server
 uid: 1000
 gid: 1000
 io:

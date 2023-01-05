@@ -1,3 +1,22 @@
+use std::{fs, io::Read, os::unix::fs::MetadataExt};
+
+use lazy_static::lazy_static;
+
+macro_rules! npk {
+    ($x:expr) => {{
+        fs::File::open($x)
+            .and_then(|file| file.metadata().map(|m| m.size()).map(|m| (file, m)))
+            .and_then(|(mut file, size)| {
+                let mut data = Vec::with_capacity(size as usize);
+                file.read_to_end(&mut data).map(|_| data)
+            })
+            .expect(&format!(
+                "failed to read {}. Have you build the examples?",
+                $x
+            ))
+    }};
+}
+
 pub const EXAMPLE_CONSOLE: &str = "console:0.0.1";
 pub const EXAMPLE_CPUEATER: &str = "cpueater:0.0.1";
 pub const EXAMPLE_CRASHING: &str = "crashing:0.0.1";
@@ -18,39 +37,43 @@ pub const EXAMPLE_TOKEN_SERVER: &str = "token-server:0.0.1";
 pub const TEST_CONTAINER: &str = "test-container:0.0.1";
 pub const TEST_RESOURCE: &str = "test-resource:0.0.1";
 
-pub static EXAMPLE_CONSOLE_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/console-0.0.1.npk"));
-pub static EXAMPLE_CPUEATER_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/cpueater-0.0.1.npk"));
-pub static EXAMPLE_CRASHING_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/crashing-0.0.1.npk"));
-pub static EXAMPLE_FERRIS_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/ferris-0.0.1.npk"));
-pub static EXAMPLE_HELLO_FERRIS_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/hello-ferris-0.0.1.npk"));
-pub static EXAMPLE_HELLO_RESOURCE_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/hello-resource-0.0.1.npk"));
-pub static EXAMPLE_INSPECT_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/inspect-0.0.1.npk"));
-pub static EXAMPLE_NETNS_NPK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/netns-0.0.1.npk"));
-pub static EXAMPLE_MEMEATER_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/memeater-0.0.1.npk"));
-pub static EXAMPLE_MESSAGE_0_0_1_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.1.npk"));
-pub static EXAMPLE_MESSAGE_0_0_2_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/message-0.0.2.npk"));
-pub static EXAMPLE_PERSISTENCE_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/persistence-0.0.1.npk"));
-pub static EXAMPLE_REDIS_NPK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/redis-0.0.1.npk"));
-pub static EXAMPLE_REDIS_CLIENT_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/redis-client-0.0.1.npk"));
-pub static EXAMPLE_SECCOMP_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/seccomp-0.0.1.npk"));
-pub static EXAMPLE_TOKEN_CLIENT_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/token-client-0.0.1.npk"));
-pub static EXAMPLE_TOKEN_SERVER_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/token-server-0.0.1.npk"));
-pub static TEST_CONTAINER_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/test-container-0.0.1.npk"));
-pub static TEST_RESOURCE_NPK: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/test-resource-0.0.1.npk"));
+lazy_static! {
+    pub static ref EXAMPLE_CONSOLE_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/console-0.0.1.npk");
+    pub static ref EXAMPLE_CPUEATER_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/cpueater-0.0.1.npk");
+    pub static ref EXAMPLE_CRASHING_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/crashing-0.0.1.npk");
+    pub static ref EXAMPLE_FERRIS_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/ferris-0.0.1.npk");
+    pub static ref EXAMPLE_HELLO_FERRIS_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/hello-ferris-0.0.1.npk");
+    pub static ref EXAMPLE_HELLO_RESOURCE_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/hello-resource-0.0.1.npk");
+    pub static ref EXAMPLE_INSPECT_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/inspect-0.0.1.npk");
+    pub static ref EXAMPLE_NETNS_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/netns-0.0.1.npk");
+    pub static ref EXAMPLE_MEMEATER_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/memeater-0.0.1.npk");
+    pub static ref EXAMPLE_MESSAGE_0_0_1_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/message-0.0.1.npk");
+    pub static ref EXAMPLE_MESSAGE_0_0_2_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/message-0.0.2.npk");
+    pub static ref EXAMPLE_PERSISTENCE_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/persistence-0.0.1.npk");
+    pub static ref EXAMPLE_REDIS_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/redis-0.0.1.npk");
+    pub static ref EXAMPLE_REDIS_CLIENT_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/redis-client-0.0.1.npk");
+    pub static ref EXAMPLE_SECCOMP_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/seccomp-0.0.1.npk");
+    pub static ref EXAMPLE_TOKEN_CLIENT_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/token-client-0.0.1.npk");
+    pub static ref EXAMPLE_TOKEN_SERVER_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/token-server-0.0.1.npk");
+    pub static ref TEST_CONTAINER_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/test-container-0.0.1.npk");
+    pub static ref TEST_RESOURCE_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/test-resource-0.0.1.npk");
+}

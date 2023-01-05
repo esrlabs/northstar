@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "cargo-npk",
     "examples/console",
     "examples/cpueater",
     "examples/crashing",
@@ -9,9 +10,10 @@ members = [
     "examples/inspect",
     "examples/memeater",
     "examples/persistence",
-    "examples/redis",
     "examples/redis-client",
+    "examples/redis-server",
     "examples/seccomp",
+    "examples/test-container",
     "examples/token-client",
     "examples/token-server",
     "northstar",
@@ -22,5 +24,4 @@ members = [
     "northstar-stress",
     "northstar-tests",
     "northstar-tests/northstar-tests-derive",
-    "northstar-tests/test-container",
 ]

@@ -5,4 +5,14 @@ authors = ["ESRLabs"]
 edition = "2021"
 license = "Apache-2.0"
 
-[dependencies]
+[package.metadata.npk]
+manifest = "manifest.yaml"
+
+[package.metadata.npk.target.'aarch64-unknown-linux-gnu']
+use_cross = true
+
+[package.metadata.npk.target.'aarch64-unknown-linux-musl']
+use_cross = true
+
+[package.metadata.npk.target.'aarch64-linux-android']
+use_cross = true

@@ -1,0 +1,113 @@
+[config]
+default_to_workspace = false
+
+[tasks.default]
+alias = "examples"
+
+[tasks.examples]
+dependencies = [
+    "console",
+    "cpueater",
+    "crashing",
+    "ferris",
+    "hello-ferris",
+    "hello-resource",
+    "hello-world",
+    "inspect",
+    "memeater",
+    "message001",
+    "message002",
+    "netns",
+    "persistence",
+    "redis-client",
+    "redis-server",
+    "seccomp",
+    "test-container",
+    "test-resource",
+    "token-client",
+    "token-server",
+]
+
+[tasks.console]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "console" ]
+
+[tasks.cpueater]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "cpueater" ]
+
+[tasks.crashing]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "crashing" ]
+
+[tasks.ferris]
+script = [
+    "cargo build --bin ferris",
+    "ROOT=`mktemp -d`",
+    "cp target/debug/ferris $ROOT",
+    "cargo run --bin northstar-sextant pack --out target/northstar/repository --key examples/northstar.key --manifest-path examples/ferris/manifest.yaml --root $ROOT"
+]
+
+[tasks.hello-ferris]
+command = "cargo"
+args = [ "run", "--bin", "northstar-sextant", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "--manifest-path", "examples/hello-ferris/manifest.yaml" ]
+
+[tasks.hello-resource]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "hello-resource" ]
+
+[tasks.hello-world]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "hello-world" ]
+
+[tasks.inspect]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "inspect" ]
+
+[tasks.memeater]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "memeater" ]
+
+[tasks.message001]
+command = "cargo"
+args = [ "run", "--bin", "northstar-sextant", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "--manifest-path", "examples/message-0.0.1/manifest.yaml", "--root", "examples/message-0.0.1/root" ]
+
+[tasks.message002]
+command = "cargo"
+args = [ "run", "--bin", "northstar-sextant", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "--manifest-path", "examples/message-0.0.2/manifest.yaml", "--root", "examples/message-0.0.2/root" ]
+
+[tasks.netns]
+command = "cargo"
+args = [ "run", "--bin", "northstar-sextant", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "--manifest-path", "examples/netns/manifest.yaml" ]
+
+[tasks.persistence]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "persistence" ]
+
+[tasks.redis-client]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "redis-client" ]
+
+[tasks.redis-server]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "redis-server" ]
+
+[tasks.seccomp]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "seccomp" ]
+
+[tasks.test-container]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "test-container" ]
+
+[tasks.test-resource]
+command = "cargo"
+args = [ "run", "--bin", "northstar-sextant", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "--manifest-path", "examples/test-resource/manifest.yaml", "--root", "examples/test-resource/root" ]
+
+[tasks.token-client]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "token-client" ]
+
+[tasks.token-server]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "token-server" ]

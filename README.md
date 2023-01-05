@@ -22,6 +22,7 @@ Northstar is an embedded container runtime prototype for Linux.
   - [Configuration](#configuration)
     - [Repositories](#repositories)
   - [Console](#console)
+  - [cargo-npk](#cargo-npk)
   - [Integration tests](#integration-tests)
   - [Integration](#integration)
   - [Container launch sequence](#container-launch-sequence)
@@ -74,7 +75,7 @@ Northstar container contains:
 * Northstar manifest with process configuration and container meta information
 
 Northstar containers can be created with the Northstar utility
-[sextant](northstar-sextant/README.md).
+[sextant](northstar-sextant/README.md) or the [cargo-npk](cargo-npk) subcommand.
 
 ### Processes
 
@@ -105,7 +106,7 @@ subsystems and features:
 ## Quickstart
 
 Northstar is written in [Rust](https://www.rust-lang.org). The minimum supported
-Rust version (MSRV) is *1.63*. Rust is best installed and managed by the rustup
+Rust version (MSRV) is *1.66.1*. Rust is best installed and managed by the rustup
 tool. Rust has a 6-week rapid release process and supports a great number of
 platforms, so there are many builds of Rust available at any time. rustup
 manages these builds in a consistent way on every platform that Rust supports,
@@ -130,7 +131,7 @@ the Northstar features. Building the example binaries and packing its
 corresponding NPKs is done via:
 
 ```sh
-./examples/build_examples.sh
+./examples/build.sh
 ```
 
 Building and starting the [example runtime main](./northstar/src/main.rs) is
@@ -278,6 +279,26 @@ runtime.
 Details about the model used as json payload are found
 [here](https://docs.rs/northstar-runtime/latest/northstar_runtime/api/model/index.html).
 
+## cargo-npk
+
+The [cargo-npk](cargo-npk) subcommand is a `cargo` subcommand for building npks
+from Rust binary crates. The manifest can be either fully specified (target
+specific) in the cargo manifest or linked:
+
+```toml
+[package.metadata.npk]
+# Default manifest
+manifest = "manifest.yaml"
+```
+
+See e.g the [hello-world](examples/hello-world/Cargo.toml) for a full example:
+
+```sh
+cargo npk pack --target aarch64-unknown-linux-gnu --release --manifest-path examples/hello-world/Cargo.toml
+ls target/aarch64-unknown-linux-gnu/release/hello-world-0.0.1.npk 
+  target/aarch64-unknown-linux-gnu/release/hello-world-0.0.1.npk
+```
+
 ## Integration tests
 
 Integration tests start a runtime instance and assert on log output of
@@ -285,6 +306,7 @@ container of notification sent from the runtime. The testsuite is invoked by the
 Rust test system:
 
 ```sh
+./examples/build.sh
 cargo test -p northstar-tests
 ```
 

@@ -40,8 +40,8 @@ async fn install_duplicate() -> Result<()> {
 // Install a container that already exists in another repository
 #[runtime_test]
 async fn install_duplicate_other_repository() -> Result<()> {
-    client().install(TEST_CONTAINER_NPK, "mem").await?;
-    assert!(client().install(TEST_CONTAINER_NPK, "fs").await.is_err());
+    client().install(&TEST_CONTAINER_NPK, "mem").await?;
+    assert!(client().install(&TEST_CONTAINER_NPK, "fs").await.is_err());
     Ok(())
 }
 
@@ -50,7 +50,10 @@ async fn install_duplicate_other_repository() -> Result<()> {
 async fn install_invalid_repository() -> Result<()> {
     let client: &mut northstar_client::Client<_> = &mut *client();
     let size = TEST_CONTAINER_NPK.len() as u64;
-    match client.install(TEST_CONTAINER_NPK, size, "whooha").await {
+    match client
+        .install(TEST_CONTAINER_NPK.as_slice(), size, "whooha")
+        .await
+    {
         Err(northstar_client::error::RequestError::Runtime(model::Error::InvalidRepository {
             ..
         })) => Ok(()),
@@ -62,10 +65,10 @@ async fn install_invalid_repository() -> Result<()> {
 #[runtime_test]
 async fn install_hit_num_limit_mem() -> Result<()> {
     client()
-        .install(TEST_CONTAINER_NPK, "limited_capacity_num_mem")
+        .install(&TEST_CONTAINER_NPK, "limited_capacity_num_mem")
         .await?;
     assert!(client()
-        .install(TEST_RESOURCE_NPK, "limited_capacity_num_mem")
+        .install(&TEST_RESOURCE_NPK, "limited_capacity_num_mem")
         .await
         .is_err());
     Ok(())
@@ -75,10 +78,10 @@ async fn install_hit_num_limit_mem() -> Result<()> {
 #[runtime_test]
 async fn install_hit_num_limit_fs() -> Result<()> {
     client()
-        .install(TEST_CONTAINER_NPK, "limited_capacity_num_fs")
+        .install(&TEST_CONTAINER_NPK, "limited_capacity_num_fs")
         .await?;
     assert!(client()
-        .install(TEST_RESOURCE_NPK, "limited_capacity_num_fs")
+        .install(&TEST_RESOURCE_NPK, "limited_capacity_num_fs")
         .await
         .is_err());
     Ok(())
@@ -91,7 +94,7 @@ async fn install_hit_size_limit_mem() -> Result<()> {
     // limit lower than the npk to be installed.
     assert!(TEST_CONTAINER_NPK.len() > 1000);
     assert!(client()
-        .install(TEST_RESOURCE_NPK, "limited_capacity_size_mem")
+        .install(&TEST_RESOURCE_NPK, "limited_capacity_size_mem")
         .await
         .is_err());
     Ok(())
@@ -104,7 +107,7 @@ async fn install_hit_size_limit_fs() -> Result<()> {
     // limit lower than the npk to be installed.
     assert!(TEST_CONTAINER_NPK.len() > 1000);
     assert!(client()
-        .install(TEST_RESOURCE_NPK, "limited_capacity_size_fs")
+        .install(&TEST_RESOURCE_NPK, "limited_capacity_size_fs")
         .await
         .is_err());
     Ok(())
@@ -115,7 +118,7 @@ async fn install_hit_size_limit_fs() -> Result<()> {
 async fn install_uninstall_to_fs_repository() -> Result<()> {
     client().install_test_resource().await?;
     for _ in 0u32..5 {
-        client().install(TEST_CONTAINER_NPK, "fs").await?;
+        client().install(&TEST_CONTAINER_NPK, "fs").await?;
         client().start_with_args(TEST_CONTAINER, ["sleep"]).await?;
         assume("Sleeping", 5u64).await?;
         client().stop(TEST_CONTAINER, 5).await?;
@@ -150,22 +153,22 @@ async fn start_stop() -> Result<()> {
 // Install and uninstall the example npks
 #[runtime_test]
 async fn install_uninstall_examples() -> Result<()> {
-    client().install(EXAMPLE_CPUEATER_NPK, "mem").await?;
-    client().install(EXAMPLE_CONSOLE_NPK, "mem").await?;
-    client().install(EXAMPLE_CRASHING_NPK, "mem").await?;
-    client().install(EXAMPLE_FERRIS_NPK, "mem").await?;
-    client().install(EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
-    client().install(EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
-    client().install(EXAMPLE_INSPECT_NPK, "mem").await?;
-    client().install(EXAMPLE_MEMEATER_NPK, "mem").await?;
-    client().install(EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
-    client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
-    client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
-    client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
-    client().install(EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
-    client().install(EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
-    client().install(TEST_CONTAINER_NPK, "mem").await?;
-    client().install(TEST_RESOURCE_NPK, "mem").await?;
+    client().install(&EXAMPLE_CPUEATER_NPK, "mem").await?;
+    client().install(&EXAMPLE_CONSOLE_NPK, "mem").await?;
+    client().install(&EXAMPLE_CRASHING_NPK, "mem").await?;
+    client().install(&EXAMPLE_FERRIS_NPK, "mem").await?;
+    client().install(&EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
+    client().install(&EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
+    client().install(&EXAMPLE_INSPECT_NPK, "mem").await?;
+    client().install(&EXAMPLE_MEMEATER_NPK, "mem").await?;
+    client().install(&EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
+    client().install(&EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
+    client().install(&EXAMPLE_PERSISTENCE_NPK, "mem").await?;
+    client().install(&EXAMPLE_SECCOMP_NPK, "mem").await?;
+    client().install(&EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
+    client().install(&EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
+    client().install(&TEST_CONTAINER_NPK, "mem").await?;
+    client().install(&TEST_RESOURCE_NPK, "mem").await?;
 
     client().uninstall(EXAMPLE_CPUEATER, false).await?;
     client().uninstall(EXAMPLE_CONSOLE, false).await?;
@@ -189,22 +192,22 @@ async fn install_uninstall_examples() -> Result<()> {
 // Mount and umount all containers known to the client()
 #[runtime_test]
 async fn mount_umount() -> Result<()> {
-    client().install(EXAMPLE_CPUEATER_NPK, "mem").await?;
-    client().install(EXAMPLE_CONSOLE_NPK, "mem").await?;
-    client().install(EXAMPLE_CRASHING_NPK, "mem").await?;
-    client().install(EXAMPLE_FERRIS_NPK, "mem").await?;
-    client().install(EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
-    client().install(EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
-    client().install(EXAMPLE_INSPECT_NPK, "mem").await?;
-    client().install(EXAMPLE_MEMEATER_NPK, "mem").await?;
-    client().install(EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
-    client().install(EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
-    client().install(EXAMPLE_PERSISTENCE_NPK, "mem").await?;
-    client().install(EXAMPLE_SECCOMP_NPK, "mem").await?;
-    client().install(EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
-    client().install(EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
-    client().install(TEST_CONTAINER_NPK, "mem").await?;
-    client().install(TEST_RESOURCE_NPK, "mem").await?;
+    client().install(&EXAMPLE_CPUEATER_NPK, "mem").await?;
+    client().install(&EXAMPLE_CONSOLE_NPK, "mem").await?;
+    client().install(&EXAMPLE_CRASHING_NPK, "mem").await?;
+    client().install(&EXAMPLE_FERRIS_NPK, "mem").await?;
+    client().install(&EXAMPLE_HELLO_FERRIS_NPK, "mem").await?;
+    client().install(&EXAMPLE_HELLO_RESOURCE_NPK, "mem").await?;
+    client().install(&EXAMPLE_INSPECT_NPK, "mem").await?;
+    client().install(&EXAMPLE_MEMEATER_NPK, "mem").await?;
+    client().install(&EXAMPLE_MESSAGE_0_0_1_NPK, "mem").await?;
+    client().install(&EXAMPLE_MESSAGE_0_0_2_NPK, "mem").await?;
+    client().install(&EXAMPLE_PERSISTENCE_NPK, "mem").await?;
+    client().install(&EXAMPLE_SECCOMP_NPK, "mem").await?;
+    client().install(&EXAMPLE_TOKEN_CLIENT_NPK, "mem").await?;
+    client().install(&EXAMPLE_TOKEN_SERVER_NPK, "mem").await?;
+    client().install(&TEST_CONTAINER_NPK, "mem").await?;
+    client().install(&TEST_RESOURCE_NPK, "mem").await?;
 
     let containers = client().list().await?;
     client().mount_all(containers.clone()).await?;
@@ -229,7 +232,7 @@ async fn try_to_mount_unknown_container() -> Result<()> {
 // Try to mount a known and unknown container
 #[runtime_test]
 async fn try_to_mount_known_and_unknown_container() -> Result<()> {
-    client().install(TEST_RESOURCE_NPK, "mem").await?;
+    client().install(&TEST_RESOURCE_NPK, "mem").await?;
     let unknown = "foo:0.0.1";
     let result = client().mount_all([TEST_RESOURCE, unknown]).await?;
     assert!(result.len() == 2);
