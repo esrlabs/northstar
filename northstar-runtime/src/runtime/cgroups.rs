@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 /// Default runtime hierarchy that yields only implemented and supported controllers
 /// instead of the default list.
 fn hierarchy() -> Box<dyn Hierarchy> {
-    Box::new(RuntimeHierarchy::default())
+    Box::<RuntimeHierarchy>::default()
 }
 
 /// Create the top level cgroups used by Northstar
