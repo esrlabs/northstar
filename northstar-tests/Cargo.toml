@@ -19,7 +19,7 @@ northstar-runtime = { path = "../northstar-runtime", features = ["api", "runtime
 northstar-tests-derive = { path = "northstar-tests-derive" }
 regex = "1.6.0"
 tempfile = "3.3.0"
-tokio = { version = "1.23.0", features = ["fs", "time"] }
+tokio = { version = "1.23.1", features = ["fs", "time"] }
 url = "2.3.1"
 
 [build-dependencies]
