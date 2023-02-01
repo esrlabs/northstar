@@ -39,7 +39,7 @@ pub async fn init(name: &Path) -> Result<()> {
     // TODO: Add check for supported controllers
 
     info!("Initializing cgroups with name {}", name.display());
-    let cgroup = cgroups_rs::Cgroup::new(hierarchy(), name);
+    let cgroup = cgroups_rs::Cgroup::new(hierarchy(), name)?;
     debug!(
         "Using cgroups version {}",
         if cgroup.v2() { "2" } else { "1" }
@@ -49,7 +49,7 @@ pub async fn init(name: &Path) -> Result<()> {
 
 /// Shutdown the cgroups config by removing the dir
 pub async fn shutdown(dir: &Path) -> Result<()> {
-    cgroups_rs::Cgroup::new(hierarchy(), dir)
+    cgroups_rs::Cgroup::new(hierarchy(), dir)?
         .delete()
         .with_context(|| format!("failed to delete {} cgroup", dir.display()))
 }
@@ -104,6 +104,10 @@ impl Hierarchy for RuntimeHierarchy {
     fn v2(&self) -> bool {
         self.inner.v2()
     }
+
+    fn parent_control_group(&self, path: &str) -> cgroups_rs::Cgroup {
+        self.inner.parent_control_group(path)
+    }
 }
 
 #[derive(Debug)]
@@ -134,7 +138,7 @@ impl CGroups {
             path.display()
         );
 
-        let cgroup: cgroups_rs::Cgroup = cgroups_rs::Cgroup::new(hierarchy(), path);
+        let cgroup = cgroups_rs::Cgroup::new(hierarchy(), path)?;
 
         let resources = cgroups_rs::Resources {
             memory: config.memory.clone().map(Into::into).unwrap_or_default(),
@@ -172,7 +176,7 @@ impl CGroups {
         // If adding the task fails it's a fault of the runtime or it's integration
         // and not of the container
         cgroup
-            .add_task(cgroups_rs::CgroupPid::from(pid as u64))
+            .add_task_by_tgid(cgroups_rs::CgroupPid::from(pid as u64))
             .expect("failed to assign pid");
 
         Ok(CGroups {
