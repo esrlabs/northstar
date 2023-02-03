@@ -72,7 +72,7 @@ pub async fn run(
                         }
                     }
                     Some(Message::ExecRequest { container, path, args, env }) => {
-                        let (pid, message_stream) = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {}", container));
+                        let (pid, message_stream) = inits.remove(&container).unwrap_or_else(|| panic!("failed to find init process for {container}"));
                         // There's a init - let's exec!
                         let (response, exit) = exec(pid, message_stream, container, path, args, env).await;
 
@@ -166,7 +166,7 @@ async fn create(
     let trampoline_pid = unistd::Pid::from_raw(trampoline_pid as i32);
     match waitpid(Some(trampoline_pid), None) {
         Ok(_) | Err(Errno::ECHILD) => (), // Ok - or already reaped
-        Err(e) => panic!("failed to wait for the trampoline process: {}", e),
+        Err(e) => panic!("failed to wait for the trampoline process: {e}"),
     }
 
     debug!("Created container {} with pid {}", container, pid);

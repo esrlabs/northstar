@@ -27,8 +27,7 @@ pub(crate) fn inspect_short(npk: &Path) -> Result<()> {
     let npk_version = npk.version();
     let is_resource_container = manifest.init.as_ref().map_or("yes", |_| "no");
     println!(
-        "name: {}, version: {}, NPK version: {}, resource container: {}",
-        name, version, npk_version, is_resource_container
+        "name: {name}, version: {version}, NPK version: {npk_version}, resource container: {is_resource_container}",
     );
 
     Ok(())
@@ -49,14 +48,14 @@ pub(crate) fn inspect_long(npk: &Path, unsquashfs: &Path) -> Result<()> {
         format!("# inspection of '{}'", &npk.display()).green()
     );
     println!("{}", "## NPK Content".to_string().green());
-    zip.file_names().for_each(|f| println!("{}", f));
+    zip.file_names().for_each(|f| println!("{f}"));
     println!();
 
     // print manifest
     let mut man = zip
         .by_name(MANIFEST_NAME)
         .context("failed to find manifest in NPK")?;
-    println!("{}", format!("## {}", MANIFEST_NAME).green());
+    println!("{}", format!("## {MANIFEST_NAME}").green());
     man.read_to_string(&mut print_buf)
         .with_context(|| "failed to read manifest")?;
     println!("{}", &print_buf);
@@ -67,7 +66,7 @@ pub(crate) fn inspect_long(npk: &Path, unsquashfs: &Path) -> Result<()> {
     // print signature
     match zip.by_name(SIGNATURE_NAME) {
         Ok(mut sig) => {
-            println!("{}", format!("## {}", SIGNATURE_NAME).green());
+            println!("{}", format!("## {SIGNATURE_NAME}").green());
             sig.read_to_string(&mut print_buf)
                 .with_context(|| "failed to read signature")?;
             println!("{}", &print_buf);

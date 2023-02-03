@@ -7,7 +7,7 @@ fn main() {
         .parse::<i32>()
         .expect("invalid thread count");
 
-    println!("Eating CPU with {} threads (v{})!", threads, version);
+    println!("Eating CPU with {threads} threads (v{version})!");
 
     for _ in 0..(threads - 1) {
         std::thread::spawn(move || loop {

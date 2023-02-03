@@ -21,7 +21,9 @@ lazy_static! {
     static ref START: time::Instant = {
         #[cfg(test)]
         {
-            time::Instant::now() - time::Duration::from_secs(120)
+            time::Instant::now()
+                .checked_sub(time::Duration::from_secs(120))
+                .expect("unreachable")
         }
         #[cfg(not(test))]
         {

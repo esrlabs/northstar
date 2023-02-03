@@ -548,7 +548,7 @@ impl State {
 
         let env = env
             .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{k}={v}"))
             .chain(once(format!("{}={}", env::CONTAINER, container)))
             .chain(once(format!("{}={}", env::NAME, container.name())))
             .chain(once(format!("{}={}", env::VERSION, container.version())))

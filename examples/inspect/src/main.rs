@@ -3,11 +3,11 @@ use nix::unistd::{self, Gid};
 use std::{env, fs};
 
 fn dump(file: &str) {
-    println!("{}:", file);
+    println!("{file}:");
     fs::read_to_string(file)
-        .unwrap_or_else(|_| panic!("dump {}", file))
+        .unwrap_or_else(|_| panic!("dump {file}"))
         .lines()
-        .for_each(|l| println!("  {}", l));
+        .for_each(|l| println!("  {l}"));
 }
 
 fn main() {
@@ -53,7 +53,7 @@ fn main() {
     ] {
         println!(
             "caps {}: {:?}",
-            format!("{:?}", set).as_str().to_lowercase(),
+            format!("{set:?}").as_str().to_lowercase(),
             caps::read(None, *set).expect("failed to read caps")
         );
     }
@@ -63,7 +63,7 @@ fn main() {
     for entry in fs::read_dir("/proc/self/ns").expect("read_dir /proc/self/ns") {
         let entry = entry.unwrap().path();
         let link = std::fs::read_link(entry).unwrap();
-        println!("        {:?}", link);
+        println!("        {link:?}");
     }
     println!();
 
@@ -90,7 +90,7 @@ fn main() {
             .unwrap()
             .trim_start_matches('(')
             .trim_end_matches(')');
-        println!("{:>8}: {:>10}: {}", pid, name, cmdline);
+        println!("{pid:>8}: {name:>10}: {cmdline}");
     }
     println!();
 

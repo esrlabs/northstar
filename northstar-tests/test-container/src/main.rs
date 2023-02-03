@@ -77,7 +77,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let command = Opt::parse().command.unwrap_or(Command::Sleep);
-    println!("Executing \"{:?}\"", command);
+    println!("Executing \"{command:?}\"");
     match command {
         Command::CallDeleteModule { flags } => call_delete_module(flags)?,
         Command::Cat { path } => cat(&path)?,
@@ -101,11 +101,11 @@ fn sleep() {
 }
 
 fn dump(file: &str) {
-    println!("{}:", file);
+    println!("{file}:");
     fs::read_to_string(file)
-        .unwrap_or_else(|_| panic!("dump {}", file))
+        .unwrap_or_else(|_| panic!("dump {file}"))
         .lines()
-        .for_each(|l| println!("  {}", l));
+        .for_each(|l| println!("  {l}"));
 }
 
 fn cat(path: &Path) -> Result<()> {
@@ -124,8 +124,8 @@ fn crash() {
 
 fn print(message: &str, io: &Io) {
     match io {
-        Io::Stdout => println!("{}", message),
-        Io::Stderr => eprintln!("{}", message),
+        Io::Stdout => println!("{message}"),
+        Io::Stderr => eprintln!("{message}"),
     }
 }
 
@@ -148,7 +148,7 @@ fn touch(path: &Path) -> Result<()> {
 fn call_delete_module(option: String) -> Result<()> {
     let option = option.parse::<u32>().unwrap();
     let result = unsafe { libc::syscall(libc::SYS_delete_module, null_mut::<u32>(), option) };
-    println!("delete_module syscall was successful ({})", result);
+    println!("delete_module syscall was successful ({result})");
     Ok(())
 }
 
@@ -186,7 +186,7 @@ fn inspect() {
     ] {
         println!(
             "caps {}: {:?}",
-            format!("{:?}", set).as_str().to_lowercase(),
+            format!("{set:?}").as_str().to_lowercase(),
             caps::read(None, *set).expect("failed to read caps")
         );
     }

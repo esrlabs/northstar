@@ -42,10 +42,10 @@ impl ExitStatus {
 impl std::fmt::Display for ExitStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExitStatus::Exit(code) => write!(f, "Exit({})", code),
+            ExitStatus::Exit(code) => write!(f, "Exit({code})"),
             ExitStatus::Signalled(signal) => match sys::signal::Signal::try_from(*signal as i32) {
-                Ok(signal) => write!(f, "Signalled({})", signal),
-                Err(_) => write!(f, "Signalled({})", signal),
+                Ok(signal) => write!(f, "Signalled({signal})"),
+                Err(_) => write!(f, "Signalled({signal})"),
             },
         }
     }

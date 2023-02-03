@@ -136,7 +136,7 @@ async fn run(
                 }
                 Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => (),
                 Err(nix::Error::EINTR) => (),
-                e => panic!("failed to waitpid on {}: {:?}", pid, e),
+                e => panic!("failed to waitpid on {pid}: {e:?}"),
             }
         }
     });
@@ -215,7 +215,7 @@ async fn run(
                     break Err(e);
                 }
             }
-            exit_status = &mut join_forker => panic!("Forker exited with {:?}", exit_status),
+            exit_status = &mut join_forker => panic!("Forker exited with {exit_status:?}"),
         }
     }?;
 

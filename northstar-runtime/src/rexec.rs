@@ -59,10 +59,7 @@ pub fn rexec() -> Result<()> {
 
             let mut exe = io::BufReader::new(exe);
             io::copy(&mut exe, &mut memfd.as_file()).context("failed to copy exe")?;
-            memfd
-                .as_file()
-                .seek(std::io::SeekFrom::Start(0))
-                .context("failed to seek")?;
+            memfd.as_file().rewind().context("failed to seek")?;
             SEALS
                 .iter()
                 .try_for_each(|seal| memfd.add_seal(*seal))
@@ -73,7 +70,7 @@ pub fn rexec() -> Result<()> {
                 .collect::<Result<Vec<_>, _>>()
                 .context("failed to convert arg")?;
             let env: Vec<_> = env::vars()
-                .map(|(k, v)| format!("{}={}", k, v))
+                .map(|(k, v)| format!("{k}={v}"))
                 .map(CString::new)
                 .collect::<Result<Vec<_>, _>>()
                 .context("failed to convert env")?;

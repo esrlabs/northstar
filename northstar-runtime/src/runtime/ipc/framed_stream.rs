@@ -137,17 +137,11 @@ fn recv_control_msg<T: FromRawFd, const N: usize>(
         }
         Some(message) => Err(io::Error::new(
             io::ErrorKind::Other,
-            format!(
-                "failed to receive fd: unexpected control message: {:?}",
-                message
-            ),
+            format!("failed to receive fd: unexpected control message: {message:?}"),
         )),
         None => Err(io::Error::new(
             io::ErrorKind::Other,
-            format!(
-                "failed to receive fd: missing control message: {:?}",
-                message
-            ),
+            format!("failed to receive fd: missing control message: {message:?}"),
         )),
     }
 }
@@ -184,7 +178,7 @@ mod test {
     /// Write `s` to file and seek to the beginning
     fn write_seek_flush(file: &mut File, s: &str) {
         file.write_all(s.as_bytes()).unwrap();
-        file.seek(io::SeekFrom::Start(0)).unwrap();
+        file.rewind().unwrap();
         file.flush().unwrap();
     }
 

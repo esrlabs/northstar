@@ -37,7 +37,7 @@ fn generate_seccomp() {
             let mut split = l.split_ascii_whitespace();
             let var = split.nth(2).unwrap().trim_end_matches(':');
             let name = var.replace("SYS_", "");
-            writeln!(f, "        map.insert(\"{}\", {});", name, var)?;
+            writeln!(f, "        map.insert(\"{name}\", {var});")?;
             std::io::Result::Ok(())
         })?;
         writeln!(f, "        map")?;

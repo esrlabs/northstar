@@ -126,7 +126,7 @@ impl Forker {
             Some(Message::CreateResult { result }) => {
                 result.map_err(|e| Error::StartContainerFailed(container.clone(), e))
             }
-            Some(message) => panic!("unexpected message from forker: {:?}", message),
+            Some(message) => panic!("unexpected message from forker: {message:?}"),
             None => panic!("forker stream closed"),
         }
     }
@@ -151,7 +151,7 @@ impl Forker {
         // Response
         match self.channel.recv().await {
             Some(Message::ExecResult { .. }) => Ok(()),
-            Some(message) => panic!("unexpected message from forker: {:?}", message),
+            Some(message) => panic!("unexpected message from forker: {message:?}"),
             None => panic!("forker stream closed"),
         }
     }

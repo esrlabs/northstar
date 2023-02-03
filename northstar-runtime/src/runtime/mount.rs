@@ -120,7 +120,7 @@ impl MountControl {
         })
         .map(|r| match r {
             Ok(r) => r,
-            Err(e) => panic!("task error: {}", e),
+            Err(e) => panic!("task error: {e}"),
         })
     }
 
@@ -149,7 +149,7 @@ impl MountControl {
         })
         .map(|r| match r {
             Ok(r) => r,
-            Err(e) => panic!("Task error: {}", e),
+            Err(e) => panic!("Task error: {e}"),
         })
     }
 }
@@ -214,7 +214,7 @@ fn mount(
             (Some(header), Some(hashes)) => {
                 let major = loop_device.major()?;
                 let minor = loop_device.minor()?;
-                let loop_device_id = format!("{}:{}", major, minor);
+                let loop_device_id = format!("{major}:{minor}");
 
                 debug!("Using loop device id {}", loop_device_id);
 
@@ -285,7 +285,7 @@ fn mount(
         dm.device_remove(
             &DevId::Name(
                 DmName::new(dm_name)
-                    .with_context(|| format!("failed to create borrowed identifier {}", dm_name))?,
+                    .with_context(|| format!("failed to create borrowed identifier {dm_name}"))?,
             ),
             DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
         )?;

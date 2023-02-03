@@ -103,7 +103,7 @@ impl fmt::Display for Permissions {
             write!(f, "full")
         } else {
             let permissions = self.0.iter().format(", ");
-            write!(f, "{}", permissions)
+            write!(f, "{permissions}")
         }
     }
 }
@@ -125,8 +125,7 @@ impl<'de> Deserialize<'de> for Permissions {
                 match str_data.trim() {
                     "full" => Ok(Permissions(HashSet::from_iter(Permission::iter()))),
                     _ => Err(serde::de::Error::custom(format!(
-                        "invalid console permission: {}",
-                        str_data
+                        "invalid console permission: {str_data}"
                     ))),
                 }
             }
