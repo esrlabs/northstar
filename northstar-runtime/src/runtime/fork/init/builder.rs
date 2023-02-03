@@ -342,7 +342,7 @@ fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
     let target = root.join_strip(target);
     let fstype = "tmpfs";
     let flags = MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
-    let data = format!("size={},mode=1777", size);
+    let data = format!("size={size},mode=1777");
     Mount::new(None, target, Some(fstype), flags, Some(data))
 }
 

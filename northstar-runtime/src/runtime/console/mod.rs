@@ -585,7 +585,7 @@ impl From<tokio::net::unix::SocketAddr> for Peer {
             .as_pathname()
             .unwrap_or_else(|| Path::new("unnamed"))
             .display();
-        Url::parse(&format!("unix://{}", path))
+        Url::parse(&format!("unix://{path}"))
             .map(Peer::Extern)
             .expect("invalid url")
     }
@@ -594,8 +594,8 @@ impl From<tokio::net::unix::SocketAddr> for Peer {
 impl fmt::Display for Peer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Peer::Extern(url) => write!(f, "Remote({})", url),
-            Peer::Container(container) => write!(f, "Container({})", container),
+            Peer::Extern(url) => write!(f, "Remote({url})"),
+            Peer::Container(container) => write!(f, "Container({container})"),
         }
     }
 }

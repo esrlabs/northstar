@@ -10,19 +10,19 @@ use tokio::time;
 pub fn notification(notification: &Notification) {
     match notification {
         Notification::CGroup(container, notification) => {
-            println!("container {} memory event {:?}", container, notification)
+            println!("container {container} memory event {notification:?}")
         }
         Notification::Exit(container, status) => println!(
             "container {} exited with status {}",
             container,
             match status {
-                ExitStatus::Exit { code } => format!("exit code {}", code),
-                ExitStatus::Signalled { signal } => format!("signalled {}", signal),
+                ExitStatus::Exit { code } => format!("exit code {code}"),
+                ExitStatus::Signalled { signal } => format!("signalled {signal}"),
             }
         ),
-        Notification::Install(container) => println!("installed {}", container),
-        Notification::Uninstall(container) => println!("uninstalled {}", container),
-        Notification::Started(container) => println!("started {}", container),
+        Notification::Install(container) => println!("installed {container}"),
+        Notification::Uninstall(container) => println!("uninstalled {container}"),
+        Notification::Started(container) => println!("started {container}"),
         Notification::Shutdown => println!("shutting down"),
     }
 }
@@ -120,19 +120,19 @@ pub fn umounts(mounts: &[UmountResult]) {
 
 fn format_err(err: &model::Error) -> String {
     match err {
-        model::Error::Configuration { context } => format!("invalid configuration: {}", context),
+        model::Error::Configuration { context } => format!("invalid configuration: {context}"),
         model::Error::DuplicateContainer { container } => {
-            format!("duplicate container name and version {}", container)
+            format!("duplicate container name and version {container}")
         }
-        model::Error::InvalidContainer { container } => format!("invalid container {}", container),
-        model::Error::InvalidArguments { cause } => format!("invalid arguments {}", cause),
-        model::Error::MountBusy { container } => format!("container busy: {}", container),
-        model::Error::UmountBusy { container } => format!("container busy: {}", container),
+        model::Error::InvalidContainer { container } => format!("invalid container {container}"),
+        model::Error::InvalidArguments { cause } => format!("invalid arguments {cause}"),
+        model::Error::MountBusy { container } => format!("container busy: {container}"),
+        model::Error::UmountBusy { container } => format!("container busy: {container}"),
         model::Error::StartContainerStarted { container } => {
-            format!("failed to start container {}: already started", container)
+            format!("failed to start container {container}: already started")
         }
         model::Error::StartContainerResource { container } => {
-            format!("failed to start container {}: resource", container)
+            format!("failed to start container {container}: resource")
         }
         model::Error::StartContainerMissingResource {
             container,
@@ -140,29 +140,28 @@ fn format_err(err: &model::Error) -> String {
             version,
         } => {
             format!(
-                "failed to start container {}: missing resource {} version {}",
-                container, resource, version
+                "failed to start container {container}: missing resource {resource} version {version}",
             )
         }
         model::Error::StartContainerFailed { container, error } => {
-            format!("failed to start container {}: {}", container, error)
+            format!("failed to start container {container}: {error}")
         }
         model::Error::StopContainerNotStarted { container } => {
-            format!("failed to stop container {}: not started", container)
+            format!("failed to stop container {container}: not started")
         }
         model::Error::InvalidRepository { repository } => {
-            format!("invalid repository {}", repository)
+            format!("invalid repository {repository}")
         }
         model::Error::InstallDuplicate { container } => {
-            format!("failed to install {}: installed", container)
+            format!("failed to install {container}: installed")
         }
         model::Error::CriticalContainer { container, status } => {
             format!(
                 "critical container {} exited with: {}",
                 container,
                 match status {
-                    ExitStatus::Exit { code } => format!("exit code {}", code),
-                    ExitStatus::Signalled { signal } => format!("signaled {}", signal),
+                    ExitStatus::Exit { code } => format!("exit code {code}"),
+                    ExitStatus::Signalled { signal } => format!("signaled {signal}"),
                 }
             )
         }

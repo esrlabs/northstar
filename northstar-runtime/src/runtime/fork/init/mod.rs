@@ -136,7 +136,7 @@ impl Init {
                     if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
                         // Add the fd number to the environment of the application
                         let s = unsafe {
-                            NonNulString::from_string_unchecked(format!("NORTHSTAR_CONSOLE={}", fd))
+                            NonNulString::from_string_unchecked(format!("NORTHSTAR_CONSOLE={fd}"))
                         };
                         env.push(s);
                     }
@@ -189,7 +189,7 @@ impl Init {
                                 continue;
                             }
                             Err(nix::Error::EINTR) => continue,
-                            e => panic!("failed to waitpid on {}: {:?}", pid, e),
+                            e => panic!("failed to waitpid on {pid}: {e:?}"),
                         }
                     };
 
@@ -204,7 +204,7 @@ impl Init {
                     std::process::exit(0);
                 }
                 Ok(_) => unimplemented!("Unimplemented message"),
-                Err(e) => panic!("failed to receive message: {}", e),
+                Err(e) => panic!("failed to receive message: {e}"),
             }
         }
     }

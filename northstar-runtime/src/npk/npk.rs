@@ -306,10 +306,10 @@ fn manifest<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result
 fn read_to_string<R: Read + Seek>(zip: &mut Zip<R>, name: &str) -> Result<String, Error> {
     let mut file = zip
         .by_name(name)
-        .with_context(|| format!("failed to locate {} in ZIP file", name))?;
+        .with_context(|| format!("failed to locate {name} in ZIP file"))?;
     let mut content = String::with_capacity(file.size() as usize);
     file.read_to_string(&mut content)
-        .with_context(|| format!("failed to read from {}", name))?;
+        .with_context(|| format!("failed to read from {name}"))?;
     Ok(content)
 }
 
@@ -705,7 +705,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                     }
 
                     // Link fds
-                    pseudos.push(format!("/proc/self/fd d 777 {} {}", uid, gid));
+                    pseudos.push(format!("/proc/self/fd d 777 {uid} {gid}"));
                     for (link, name) in &[
                         ("/proc/self/fd", "fd"),
                         ("/proc/self/fd/0", "stdin"),
@@ -726,7 +726,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
         NamedTempFile::new().context("failed to create temporary file")?;
 
     pseudos.iter().try_for_each(|l| {
-        writeln!(pseudo_file_entries, "{}", l).context("failed to create pseudo files")
+        writeln!(pseudo_file_entries, "{l}").context("failed to create pseudo files")
     })?;
 
     Ok(pseudo_file_entries)
@@ -803,7 +803,7 @@ fn create_squashfs_img(
         .arg("-pf")
         .arg(pseudo_files.path());
     if let Some(block_size) = squashfs_opts.block_size {
-        cmd.arg("-b").arg(format!("{}", block_size));
+        cmd.arg("-b").arg(format!("{block_size}"));
     }
     cmd.output()
         .with_context(|| format!("failed to execute '{}'", mksquashfs.display()))?;

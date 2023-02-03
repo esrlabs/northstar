@@ -17,7 +17,7 @@ use std::{
     collections::HashMap,
     fmt,
     future::ready,
-    io::{BufReader, SeekFrom},
+    io::BufReader,
     os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
     path::{Path, PathBuf},
 };
@@ -212,7 +212,7 @@ impl Repository for DirRepository {
             bail!("{} already in {}", container, self.dir.display())
         } else {
             let old = dest;
-            let new = self.dir.join(format!("{}.npk", container));
+            let new = self.dir.join(format!("{container}.npk"));
             debug!("Moving {} to {}", old.display(), new.display());
             // Renaming a file with an open fd is ok if the file remains on the same fs.
             // The rename here is in the same directory, so it's ok.
@@ -301,7 +301,7 @@ impl Repository for MemRepository {
             file.write_all(&r).await.context("failed stream npk")?;
         }
 
-        file.seek(SeekFrom::Start(0)).await.context("failed seek")?;
+        file.rewind().await.context("failed seek")?;
         let npk_size = file.metadata().await?.len();
 
         // Check repository capacity limit

@@ -135,11 +135,11 @@ impl Strace {
                 match strace.output {
                     debug::StraceOutput::File => {
                         let mut stderr = stderr.into_inner();
-                        let mut filename = log_dir.join(format!("strace-{}-{}.strace", pid, name));
+                        let mut filename = log_dir.join(format!("strace-{pid}-{name}.strace"));
                         let mut n = 0u32;
                         while filename.exists() {
                             n += 1;
-                            let name = format!("strace-{}-{}-{}.strace", pid, name, n);
+                            let name = format!("strace-{pid}-{name}-{n}.strace");
                             filename = log_dir.join(name);
                         }
 

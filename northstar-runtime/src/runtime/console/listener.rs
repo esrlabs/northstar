@@ -21,7 +21,7 @@ impl Listener {
                     .socket_addrs(|| Some(4200))?
                     .first()
                     .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::Other, format!("invalid url: {}", url))
+                        io::Error::new(io::ErrorKind::Other, format!("invalid url: {url}"))
                     })?
                     .to_owned();
                 let listener = TcpListener::bind(&address).await?;

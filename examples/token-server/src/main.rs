@@ -37,10 +37,7 @@ async fn main() -> Result<()> {
             .and_then(|t| base64::decode(t).context("malformed token"))?;
         let token: Token = token.into();
 
-        println!(
-            "Verifying user \"{}\" from {} with shared \"{}\"",
-            container, addr, SHARED
-        );
+        println!("Verifying user \"{container}\" from {addr} with shared \"{SHARED}\"");
 
         match client.verify_token(&token, container, SHARED).await? {
             VerificationResult::Ok => {
@@ -53,11 +50,11 @@ async fn main() -> Result<()> {
                     let (mut rx, mut tx) = stream.split();
                     tx.write_all(&buffer).await?;
                     let bytes = io::copy(&mut rx, &mut tx).await?;
-                    println!("Echoed {} bytes for {}", bytes, addr);
+                    println!("Echoed {bytes} bytes for {addr}");
                     Result::<()>::Ok(())
                 });
             }
-            e => println!("Failed to verify: {:?}. Disconnecting...", e),
+            e => println!("Failed to verify: {e:?}. Disconnecting..."),
         }
     }
     Ok(())

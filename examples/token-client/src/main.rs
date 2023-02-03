@@ -26,10 +26,7 @@ async fn main() -> Result<()> {
     // Create a token that can be used to verify `shared`. Note that there's
     // no `user` argument here. The runtime know from which container the request
     // is from.
-    println!(
-        "Creating token for target \"{}\" with shared \"{}\"",
-        TARGET, SHARED,
-    );
+    println!("Creating token for target \"{TARGET}\" with shared \"{SHARED}\"",);
     let token = client.create_token(TARGET, SHARED).await?;
 
     // Connect to the token server
@@ -45,7 +42,7 @@ async fn main() -> Result<()> {
     // Send some more bytes and print the reply which should be
     // the same string as sent before.
     loop {
-        println!("Sending... {}", TEXT);
+        println!("Sending... {TEXT}");
         connection.send(TEXT).await?;
 
         let reply = connection
@@ -53,7 +50,7 @@ async fn main() -> Result<()> {
             .await
             .ok_or_else(|| anyhow!("failed to receive"))??;
         assert_eq!(TEXT, reply);
-        println!("Received: {}", reply);
+        println!("Received: {reply}");
 
         sleep(Duration::from_secs(1)).await;
     }

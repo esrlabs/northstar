@@ -102,7 +102,7 @@ impl FromStr for MountOption {
             "nosuid" => Ok(MountOption::NoSuid),
             "nodev" => Ok(MountOption::NoDev),
             "rec" => Ok(MountOption::Rec),
-            _ => Err(format!("invalid mount option {}", s)),
+            _ => Err(format!("invalid mount option {s}")),
         }
     }
 }

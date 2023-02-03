@@ -29,7 +29,7 @@ const DEFAULT_HOST: &str = "tcp://localhost:4200";
 
 /// About string for CLI
 fn about() -> &'static str {
-    Box::leak(Box::new(format!("Northstar API version {}", VERSION)))
+    Box::leak(Box::new(format!("Northstar API version {VERSION}")))
 }
 
 /// Subcommands
@@ -308,7 +308,7 @@ async fn main() -> Result<()> {
                 .start_with_args_env(container.clone(), args, env)
                 .await?;
             if !opt.json {
-                println!("started {}", container);
+                println!("started {container}");
             }
         }
         Subcommand::Kill { container, signal } => {
@@ -316,20 +316,20 @@ async fn main() -> Result<()> {
             let signal = signal.unwrap_or(15);
             client.kill(container.clone(), signal).await?;
             if !opt.json {
-                println!("signalled {} with signal {}", container, signal);
+                println!("signalled {container} with signal {signal}");
             }
         }
         Subcommand::Install { npk, repository } => {
             client.install_file(&npk, &repository).await?;
             if !opt.json {
-                println!("installed {} into {}", npk.display(), repository);
+                println!("installed {} into {repository}", npk.display());
             }
         }
         Subcommand::Uninstall { container, wipe } => {
             let container = resolve_container(&container, &mut client).await?;
             client.uninstall(container.clone(), wipe).await?;
             if !opt.json {
-                println!("uninstalled {}", container);
+                println!("uninstalled {container}");
             }
         }
         Subcommand::Shutdown => {
@@ -364,7 +364,7 @@ async fn main() -> Result<()> {
             let token: Token = token.into();
             let result = client.verify_token(&token, user, shared).await?;
             if !opt.json {
-                println!("{:?}", result);
+                println!("{result:?}");
             }
         }
         Subcommand::Notifications { number } => {

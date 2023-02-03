@@ -27,7 +27,7 @@ pub(crate) fn pack(
             let name = manifest.name.clone();
             let num = clones.to_string().chars().count();
             for n in 0..clones {
-                manifest.name = format!("{}-{:0m$}", name, n, m = num)
+                manifest.name = format!("{name}-{n:0num$}")
                     .try_into()
                     .context("failed to parse name")?;
                 let m = tmp.path().join(n.to_string());

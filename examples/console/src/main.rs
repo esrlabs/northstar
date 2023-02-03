@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
 
     // Request the identity of this container
     let ident = client.ident().await?;
-    println!("We are {}", ident);
+    println!("We are {ident}");
 
     // List repositories
     println!(

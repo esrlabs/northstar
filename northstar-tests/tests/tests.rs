@@ -54,7 +54,7 @@ async fn install_invalid_repository() -> Result<()> {
         Err(northstar_client::error::RequestError::Runtime(model::Error::InvalidRepository {
             ..
         })) => Ok(()),
-        e => panic!("Unexpected response: {:?}", e),
+        e => panic!("Unexpected response: {e:?}"),
     }
 }
 

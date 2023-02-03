@@ -75,5 +75,5 @@ pub async fn assume<T: ToString + fmt::Display>(pattern: T, timeout: u64) -> Res
         }
     })
     .await
-    .with_context(|| format!("timeout waiting for \"{}\"", pattern))?
+    .with_context(|| format!("timeout waiting for \"{pattern}\""))?
 }
