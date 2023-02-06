@@ -36,7 +36,7 @@ log = { version = "0.4.17", features = [ "serde", "max_level_trace", "release_ma
 loopdev = { version = "0.4.0", optional = true }
 memchr = "2.5.0"
 memfd = { version = "0.6.1", optional = true }
-memoffset = { version = "0.7.1", optional = true }
+memoffset = { version = "0.8.0", optional = true }
 nanoid = { version = "0.4.0", optional = true }
 nix = { version = "0.26.1", default-features = false, features = ["fs", "sched", "mount", "term", "uio", "socket", "net", "signal", "user"], optional = true }
 pkg-version = { version = "1.0.0", optional = true }
