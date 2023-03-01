@@ -17,7 +17,7 @@ itertools = "0.10.5"
 log = "0.4.17"
 northstar-client = { path = "../northstar-client" }
 rand = "0.8.5"
-tokio = { version = "1.24.2", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+tokio = { version = "1.25.0", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = { version = "0.1.11", features = ["time"] }
 tokio-util = "0.7.4"
 url = { version = "2.3.1", features = ["serde"] }
