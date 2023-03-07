@@ -13,5 +13,5 @@ anyhow = { version = "1.0.66", features = ["backtrace"] }
 futures = "0.3.24"
 northstar-runtime = { version = "^0.7.1-pre", path = "../northstar-runtime", features = ["api"] }
 thiserror = "1.0.37"
-tokio = "1.24.2"
+tokio = "1.25.0"
 
