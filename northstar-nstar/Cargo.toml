@@ -11,7 +11,7 @@ repository = "https://github.com/esrlabs/northstar"
 [dependencies]
 anyhow = { version = "1.0.66", features = ["backtrace"] }
 base64 = "0.13.1"
-clap = { version = "4.0.18", features = ["derive"] }
+clap = { version = "4.1.8", features = ["derive"] }
 clap_complete = "4.0.3"
 futures = { version = "0.3.24", default-features = false }
 humantime = "2.1.0"
