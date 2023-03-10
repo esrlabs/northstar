@@ -131,7 +131,7 @@ pub fn mounts(mounts: &HashMap<MountPoint, Mount>) -> Result<(), ValidationError
             "non bind mounts must not be recursive",
         )),
         Mount::Resource(m) if !m.dir.starts_with('/') => Err(ValidationError::new(
-            "resource directory options must not be absolute",
+            "resource directory options must be absolute",
         )),
         _ => Ok(()),
     })
