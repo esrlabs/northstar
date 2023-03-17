@@ -2562,7 +2562,7 @@ dependencies = [
  "anyhow",
  "caps",
  "clap 4.1.4",
- "nix 0.25.1",
+ "nix 0.26.2",
  "thiserror",
 ]
 
