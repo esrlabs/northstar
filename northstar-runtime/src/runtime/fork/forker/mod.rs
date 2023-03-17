@@ -72,7 +72,6 @@ pub fn start() -> Result<(Pid, Streams)> {
                 .build()
                 .expect("failed to start runtime")
                 .block_on(run);
-            exit(0);
         }
     };
 
