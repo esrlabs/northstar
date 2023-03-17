@@ -112,7 +112,7 @@ pub fn mounts(mounts: &HashMap<MountPoint, Mount>) -> Result<(), ValidationError
                 return Err(ValidationError::new("mount points must not be relative"));
             }
             // Check for overlapping bind mount paths by checking if one path is the prefix of the next one
-            let curr_comps: Vec<Component> = p.components().into_iter().collect();
+            let curr_comps: Vec<Component> = p.components().collect();
             let prev_too_short = prev_comps.len() <= 1; // Two mount paths both starting with '/' is not considered an overlap
             let prev_too_long = prev_comps.len() > curr_comps.len(); // A longer path cannot be the prefix of a shorter one
 

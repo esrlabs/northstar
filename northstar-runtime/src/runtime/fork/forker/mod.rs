@@ -21,10 +21,7 @@ use nix::{
     sys::signal::{signal, SigHandler, Signal},
     unistd,
 };
-use std::{
-    os::unix::{net::UnixStream, prelude::OwnedFd},
-    process::exit,
-};
+use std::os::unix::{net::UnixStream, prelude::OwnedFd};
 use tokio::runtime;
 
 mod channel;
@@ -72,7 +69,6 @@ pub fn start() -> Result<(Pid, Streams)> {
                 .build()
                 .expect("failed to start runtime")
                 .block_on(run);
-            exit(0);
         }
     };
 

@@ -11,10 +11,11 @@ pub struct Io {
 }
 
 /// Io redirection for stdout/stderr
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, Default)]
 pub enum Output {
     /// Discard output
     #[serde(rename = "discard")]
+    #[default]
     Discard,
     /// Forward output to the logging system with level and optional tag
     #[serde(rename = "pipe")]
@@ -22,10 +23,4 @@ pub enum Output {
     /// Inherit stdout/stderr from the runtime
     #[serde(rename = "inherit")]
     Inherit,
-}
-
-impl Default for Output {
-    fn default() -> Output {
-        Output::Discard
-    }
 }
