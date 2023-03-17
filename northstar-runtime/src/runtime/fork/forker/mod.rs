@@ -38,13 +38,23 @@ pub struct Streams {
 }
 
 /// Fork the forker process
+#[allow(unreachable_code)]
 pub fn start() -> Result<(Pid, Streams)> {
     let (command_first, command_second) = UnixStream::pair()?;
     let (socket_first, socket_second) = UnixStream::pair()?;
     let (notification_first, notification_second) = UnixStream::pair()?;
 
-    let pid = match unsafe { unistd::fork() }? {
-        unistd::ForkResult::Parent { child } => child.as_raw() as Pid,
+    match unsafe { unistd::fork() }? {
+        unistd::ForkResult::Parent { child } => {
+            let pid = child.as_raw() as Pid;
+            let forker = Streams {
+                command_stream: command_first,
+                socket_stream: socket_first,
+                notification_stream: notification_first,
+            };
+
+            Ok((pid, forker))
+        }
         unistd::ForkResult::Child => {
             util::set_child_subreaper(true);
             util::set_parent_death_signal(Signal::SIGKILL);
@@ -69,16 +79,9 @@ pub fn start() -> Result<(Pid, Streams)> {
                 .build()
                 .expect("failed to start runtime")
                 .block_on(run);
+            unreachable!()
         }
-    };
-
-    let forker = Streams {
-        command_stream: command_first,
-        socket_stream: socket_first,
-        notification_stream: notification_first,
-    };
-
-    Ok((pid, forker))
+    }
 }
 
 /// Handle to the forker process. This is used in the runtime to interface.
