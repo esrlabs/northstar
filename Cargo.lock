@@ -1568,7 +1568,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bincode",
- "bindgen 0.59.2",
+ "bindgen 0.63.0",
  "byteorder",
  "bytes",
  "bytesize",

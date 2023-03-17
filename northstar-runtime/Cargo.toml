@@ -150,7 +150,7 @@ toml = "0.5.9"
 
 [build-dependencies]
 anyhow = { version = "1.0.66", features = ["backtrace"] }
-bindgen = { version = "0.59.2", default-features = false, features = ["runtime"], optional = true }
+bindgen = { version = "0.63.0", default-features = false, features = ["runtime"], optional = true }
 
 [package.metadata.docs.rs]
 features = ["api", "npk", "runtime", "seccomp"]
