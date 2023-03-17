@@ -44,9 +44,15 @@ mod validation;
 pub enum Error {
     #[error("invalid manifest: {0}")]
     Validation(ValidationErrors),
-    #[error("failed to parse: {0}")]
+    #[error(transparent)]
     Yaml(#[from] serde_yaml::Error),
-    #[error("io error: {0}")]
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    TomlDe(#[from] toml::de::Error),
+    #[error(transparent)]
+    TomlSer(#[from] toml::ser::Error),
+    #[error(transparent)]
     Io(#[from] std::io::Error),
 }
 
@@ -129,32 +135,38 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Container that is specified in the manifest
+    /// Container that is specified in the manifest.
     pub fn container(&self) -> Container {
         Container::new(self.name.clone(), self.version.clone())
     }
 
-    /// Read a manifest from `reader`
-    pub fn from_reader<R: std::io::Read>(reader: R) -> Result<Self, Error> {
-        let manifest: Self = serde_yaml::from_reader(reader)?;
-        manifest.validate().map_err(Error::Validation)?;
-        Ok(manifest)
+    /// Read a manifest from `reader`.
+    pub fn from_reader<R: std::io::Read>(mut reader: R) -> Result<Self, Error> {
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf).map_err(Error::Io)?;
+        Manifest::from_slice(&buf)
     }
 
-    /// Write the manifest to `writer`
-    pub fn to_writer<W: std::io::Write>(&self, writer: W) -> Result<(), Error> {
-        serde_yaml::to_writer(writer, self)?;
-        Ok(())
+    /// Read a manifest from `slice`.
+    pub fn from_slice(s: &[u8]) -> Result<Self, Error> {
+        let manifest: Manifest = if let Ok(manifest) = serde_yaml::from_slice(s) {
+            manifest
+        } else if let Ok(manifest) = serde_json::from_slice(s) {
+            manifest
+        } else {
+            toml::from_slice(s)?
+        };
+
+        manifest.validate().map_err(Error::Validation)?;
+        Ok(manifest)
     }
 }
 
 impl FromStr for Manifest {
     type Err = Error;
 
-    fn from_str(s: &str) -> Result<Manifest, Self::Err> {
-        let manifest: Self = serde_yaml::from_str(s)?;
-        manifest.validate().map_err(Error::Validation)?;
-        Ok(manifest)
+    fn from_str(s: &str) -> Result<Self, Error> {
+        Manifest::from_slice(s.as_bytes())
     }
 }
 
@@ -524,9 +536,7 @@ mounts:
         Manifest::from_str(manifest).unwrap();
     }
 
-    #[test]
-    fn roundtrip() -> Result<()> {
-        let m = "
+    const ROUNDTRIP_MANIFEST: &str = "
 name: hello
 version: 0.0.0
 init: /binary
@@ -557,14 +567,7 @@ mounts:
     version: '>=1.0.0'
     dir: /bin/foo
     options: rw,nosuid,nodev,noexec
-  /tmp:
-    type: tmpfs
-    size: 42
 autostart: relaxed
-rlimits:
-  nproc:
-    soft: 100
-    hard: 1000
 seccomp:
   allow:
     fork: any
@@ -593,9 +596,32 @@ custom:
       - three
 ";
 
-        let manifest = serde_yaml::from_str::<Manifest>(m)?;
-        let deserialized = serde_yaml::from_str::<Manifest>(&serde_yaml::to_string(&manifest)?)?;
+    #[test]
+    fn roundtrip_yaml() -> Result<()> {
+        let manifest = serde_yaml::from_str::<Manifest>(ROUNDTRIP_MANIFEST)?;
+        let yaml = serde_yaml::to_string(&manifest)?;
+        let deserialized = serde_yaml::from_str::<Manifest>(&yaml)?;
+        assert_eq!(manifest, deserialized);
 
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_toml() -> Result<()> {
+        let manifest = serde_yaml::from_str::<Manifest>(ROUNDTRIP_MANIFEST)?;
+        let toml_value = toml::Value::try_from(&manifest)?;
+        let toml = toml::to_string(&toml_value)?;
+        println!("{toml}");
+        let deserialized = toml::from_str::<Manifest>(&toml)?;
+        assert_eq!(manifest, deserialized);
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_json() -> Result<()> {
+        let manifest = serde_yaml::from_str::<Manifest>(ROUNDTRIP_MANIFEST)?;
+        let json = serde_json::to_string(&manifest)?;
+        let deserialized = serde_json::from_str::<Manifest>(&json)?;
         assert_eq!(manifest, deserialized);
         Ok(())
     }

@@ -3,8 +3,6 @@ version: 0.0.1
 init: /hello-world
 uid: 1000
 gid: 1000
-env:
-  HELLO: northstar
 io:
   stdout: pipe
   stderr: pipe
@@ -19,6 +17,3 @@ mounts:
   /lib64:
     type: bind
     host: /lib64
-  /system:
-    type: bind
-    host: /system

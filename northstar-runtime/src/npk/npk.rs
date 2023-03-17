@@ -330,30 +330,30 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature> {
         .context("failed to parse signature ed25519 format")
 }
 
-struct Builder {
-    root: PathBuf,
-    manifest: Manifest,
-    key: Option<PathBuf>,
+struct Builder<'a> {
+    root: &'a Path,
+    manifest: &'a Manifest,
+    key: Option<&'a Path>,
     squashfs_options: SquashfsOptions,
 }
 
-impl Builder {
-    fn new(root: &Path, manifest: Manifest) -> Builder {
+impl<'a> Builder<'a> {
+    fn new(root: &'a Path, manifest: &'a Manifest) -> Builder<'a> {
         Builder {
-            root: PathBuf::from(root),
+            root,
             manifest,
             key: None,
             squashfs_options: SquashfsOptions::default(),
         }
     }
 
-    fn key(mut self, key: &Path) -> Builder {
-        self.key = Some(key.to_path_buf());
+    fn key(mut self, key: &'a Path) -> Builder<'a> {
+        self.key = Some(key);
         self
     }
 
-    fn squashfs_opts(mut self, opts: SquashfsOptions) -> Builder {
-        self.squashfs_options = opts;
+    fn squashfs_opts(mut self, opts: &'a SquashfsOptions) -> Builder<'a> {
+        self.squashfs_options = opts.clone();
         self
     }
 
@@ -362,14 +362,14 @@ impl Builder {
         let tmp = tempfile::TempDir::new().context("failed to create temporary directory")?;
         let meta = &Meta { version: VERSION };
         let fsimg = tmp.path().join(FS_IMG_NAME);
-        create_squashfs_img(&self.manifest, &self.root, &fsimg, &self.squashfs_options)?;
+        create_squashfs_img(self.manifest, self.root, &fsimg, &self.squashfs_options)?;
 
         // Sign and write NPK
         if let Some(key) = &self.key {
-            let signature = signature(key, meta, &fsimg, &self.manifest)?;
-            write_npk(writer, meta, &self.manifest, &fsimg, Some(&signature))
+            let signature = signature(key, meta, &fsimg, self.manifest)?;
+            write_npk(writer, meta, self.manifest, &fsimg, Some(&signature))
         } else {
-            write_npk(writer, meta, &self.manifest, &fsimg, None)
+            write_npk(writer, meta, self.manifest, &fsimg, None)
         }
     }
 }
@@ -377,7 +377,7 @@ impl Builder {
 /// Squashfs compression algorithm
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
-pub enum CompressionAlgorithm {
+pub enum Compression {
     Gzip,
     Lzma,
     Lzo,
@@ -385,28 +385,28 @@ pub enum CompressionAlgorithm {
     Zstd,
 }
 
-impl fmt::Display for CompressionAlgorithm {
+impl fmt::Display for Compression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CompressionAlgorithm::Gzip => write!(f, "gzip"),
-            CompressionAlgorithm::Lzma => write!(f, "lzma"),
-            CompressionAlgorithm::Lzo => write!(f, "lzo"),
-            CompressionAlgorithm::Xz => write!(f, "xz"),
-            CompressionAlgorithm::Zstd => write!(f, "zstd"),
+            Compression::Gzip => write!(f, "gzip"),
+            Compression::Lzma => write!(f, "lzma"),
+            Compression::Lzo => write!(f, "lzo"),
+            Compression::Xz => write!(f, "xz"),
+            Compression::Zstd => write!(f, "zstd"),
         }
     }
 }
 
-impl FromStr for CompressionAlgorithm {
+impl FromStr for Compression {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "gzip" => Ok(CompressionAlgorithm::Gzip),
-            "lzma" => Ok(CompressionAlgorithm::Lzma),
-            "lzo" => Ok(CompressionAlgorithm::Lzo),
-            "xz" => Ok(CompressionAlgorithm::Xz),
-            "zstd" => Ok(CompressionAlgorithm::Zstd),
+            "gzip" => Ok(Compression::Gzip),
+            "lzma" => Ok(Compression::Lzma),
+            "lzo" => Ok(Compression::Lzo),
+            "xz" => Ok(Compression::Xz),
+            "zstd" => Ok(Compression::Zstd),
             _ => Err(anyhow!("invalid compression algorithm").into()),
         }
     }
@@ -418,7 +418,7 @@ pub struct SquashfsOptions {
     /// Path to mksquashfs executable
     pub mksquashfs: PathBuf,
     /// The compression algorithm used (default gzip)
-    pub compression_algorithm: CompressionAlgorithm,
+    pub compression: Compression,
     /// Size of the blocks of data compressed separately
     pub block_size: Option<u32>,
 }
@@ -426,7 +426,7 @@ pub struct SquashfsOptions {
 impl Default for SquashfsOptions {
     fn default() -> Self {
         SquashfsOptions {
-            compression_algorithm: CompressionAlgorithm::Gzip,
+            compression: Compression::Gzip,
             block_size: None,
             mksquashfs: PathBuf::from(MKSQUASHFS),
         }
@@ -452,13 +452,18 @@ impl Default for SquashfsOptions {
 /// --root examples/hello/root \
 /// --out target/northstar/repository \
 /// --key examples/keys/northstar.key \
-pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Result<(), Error> {
-    pack_with(manifest, root, out, key, SquashfsOptions::default())
+pub fn pack(
+    manifest: &Path,
+    root: &Path,
+    out: &Path,
+    key: Option<&Path>,
+) -> Result<PathBuf, Error> {
+    pack_with(manifest, root, out, key, &SquashfsOptions::default())
 }
 
 /// Create an NPK with special `squashfs` options
-/// northstar-sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
-/// and packs the results into a zipped NPK file.
+///
+/// Returns the path to the created NPK.
 ///
 /// # Arguments
 /// * `manifest` - Path to the container's manifest file
@@ -467,25 +472,26 @@ pub fn pack(manifest: &Path, root: &Path, out: &Path, key: Option<&Path>) -> Res
 /// * `key` - Path to the key used to sign the package
 /// * `squashfs_opts` - Options for `mksquashfs`
 ///
-/// # Example
-///
-/// To build the 'hello' example container:
-///
-/// northstar-sextant pack \
-/// --manifest examples/hello/manifest.yaml \
-/// --root examples/hello/root \
-/// --out target/northstar/repository \
-/// --key examples/keys/northstar.key \
-/// --comp xz \
-/// --block-size 65536 \
 pub fn pack_with(
     manifest: &Path,
     root: &Path,
     out: &Path,
     key: Option<&Path>,
-    squashfs_opts: SquashfsOptions,
-) -> Result<(), Error> {
+    squashfs_opts: &SquashfsOptions,
+) -> Result<PathBuf, Error> {
     let manifest = read_manifest(manifest)?;
+    pack_with_manifest(&manifest, root, out, key, squashfs_opts)
+}
+
+/// Create an NPK.
+/// Returns the path to the created NPK.
+pub fn pack_with_manifest(
+    manifest: &Manifest,
+    root: &Path,
+    out: &Path,
+    key: Option<&Path>,
+    squashfs_opts: &SquashfsOptions,
+) -> Result<PathBuf, Error> {
     let name = manifest.name.clone();
     let version = manifest.version.clone();
     let mut builder = Builder::new(root, manifest);
@@ -503,7 +509,7 @@ pub fn pack_with(
     let npk = fs::File::create(&dest)
         .with_context(|| format!("failed to create NPK: '{}'", &dest.display()))?;
     builder.build(npk)?;
-    Ok(())
+    Ok(dest)
 }
 
 /// Extract the npk content to `out`
@@ -794,7 +800,7 @@ fn create_squashfs_img(
         .arg(&image.display().to_string())
         .arg("-no-progress")
         .arg("-comp")
-        .arg(squashfs_opts.compression_algorithm.to_string())
+        .arg(squashfs_opts.compression.to_string())
         .arg("-info")
         .arg("-force-uid")
         .arg(manifest.uid.to_string())

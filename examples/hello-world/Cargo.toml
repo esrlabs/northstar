@@ -4,3 +4,43 @@ version = "0.0.1"
 authors = ["ESRLabs"]
 edition = "2021"
 license = "Apache-2.0"
+
+[package.metadata.npk]
+# Default manifest
+manifest = "manifest.yaml"
+
+# aarch64-unknown-linux-gnu
+# Use manifest.yaml.
+[package.metadata.npk.target.'aarch64-unknown-linux-gnu']
+use_cross = true
+
+# aarch64-unknown-linux-musl
+# Use manifest.yaml.
+[package.metadata.npk.target.'aarch64-unknown-linux-musl']
+use_cross = true
+
+# Target aarch64-linux-android
+# Northstar manifest defined inline.
+[package.metadata.npk.target.'aarch64-linux-android']
+use_cross = true
+
+[package.metadata.npk.target.'aarch64-linux-android'.manifest]
+name = "hello-world"
+version = "0.0.1"
+init = "/bin/hello-world"
+uid = 1000
+gid = 1000
+
+[package.metadata.npk.target.'aarch64-linux-android'.manifest.io]
+stdout = "pipe"
+stderr = "pipe"
+
+[package.metadata.npk.target.'aarch64-linux-android'.manifest.mounts."/dev"]
+type = "dev"
+
+[package.metadata.npk.target.'aarch64-linux-android'.manifest.mounts."/proc"]
+type = "proc"
+
+[package.metadata.npk.target.'aarch64-linux-android'.manifest.mounts."/system"]
+type = "bind"
+host = "/system"

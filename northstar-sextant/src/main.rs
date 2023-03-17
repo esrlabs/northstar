@@ -4,15 +4,36 @@
 #![deny(missing_docs)]
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use northstar_runtime::npk::{
     self,
-    npk::{CompressionAlgorithm, SquashfsOptions},
+    npk::{Compression as NpkCompression, SquashfsOptions},
 };
 use std::path::PathBuf;
 
 mod inspect;
 mod pack;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Compression {
+    Gzip,
+    Lzma,
+    Lzo,
+    Xz,
+    Zstd,
+}
+
+impl From<Compression> for NpkCompression {
+    fn from(c: Compression) -> Self {
+        match c {
+            Compression::Gzip => NpkCompression::Gzip,
+            Compression::Lzma => NpkCompression::Lzma,
+            Compression::Lzo => NpkCompression::Lzo,
+            Compression::Xz => NpkCompression::Xz,
+            Compression::Zstd => NpkCompression::Zstd,
+        }
+    }
+}
 
 /// Northstar package tool
 #[derive(Debug, Parser)]
@@ -20,12 +41,12 @@ mod pack;
 enum Opt {
     /// Pack Northstar containers
     Pack {
-        /// Manifest path
-        #[arg(short, long)]
-        manifest: PathBuf,
+        /// Path to manifest in yaml, toml or json.
+        #[arg(short, long("manifest-path"))]
+        manifest_path: PathBuf,
         /// Container source directory
         #[arg(short, long)]
-        root: PathBuf,
+        root: Option<PathBuf>,
         /// Key file
         #[arg(short, long)]
         key: Option<PathBuf>,
@@ -34,14 +55,14 @@ enum Opt {
         out: PathBuf,
         /// Compression algorithm to use in squashfs (default gzip)
         #[arg(short, long, default_value = "gzip")]
-        compression_algorithm: CompressionAlgorithm,
+        compression: Compression,
         /// mksqushfs binary
         #[arg(long, default_value = "mksquashfs")]
         mksquashfs: PathBuf,
         /// Block size used by squashfs (default 128 KiB)
         #[arg(short, long)]
         block_size: Option<u32>,
-        /// Create n clones of the container
+        /// Create n clones of the container.
         #[arg(long)]
         clones: Option<u32>,
     },
@@ -82,26 +103,36 @@ fn main() -> Result<()> {
 
     match Opt::parse() {
         Opt::Pack {
-            manifest,
+            manifest_path,
             root,
             out,
             key,
-            compression_algorithm,
+            compression,
             mksquashfs,
             block_size,
             clones,
-        } => pack::pack(
-            &manifest,
-            &root,
-            &out,
-            key.as_deref(),
-            SquashfsOptions {
-                compression_algorithm,
-                mksquashfs,
-                block_size,
-            },
-            clones,
-        )?,
+        } => {
+            // Without a root argument create an empty tempdir that serves as root.
+            let (root, _tempdir) = if let Some(root) = root {
+                (root, None)
+            } else {
+                let tempdir = tempfile::tempdir()?;
+                (tempdir.path().to_owned(), Some(tempdir))
+            };
+
+            pack::pack(
+                &manifest_path,
+                &root,
+                &out,
+                key.as_deref(),
+                SquashfsOptions {
+                    compression: compression.into(),
+                    mksquashfs,
+                    block_size,
+                },
+                clones,
+            )?
+        }
         Opt::Unpack {
             npk,
             out,
