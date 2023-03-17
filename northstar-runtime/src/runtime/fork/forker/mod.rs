@@ -81,7 +81,7 @@ pub fn start() -> Result<(Pid, Streams)> {
     Ok((pid, forker))
 }
 
-/// Handle to the forker process. This is used in the runtime to interfact
+/// Handle to the forker process. This is used in the runtime to interface.
 /// with the forker process.
 #[derive(Debug)]
 pub struct Forker {
@@ -89,7 +89,7 @@ pub struct Forker {
 }
 
 impl Forker {
-    /// Create a new forker handle
+    /// Create a new forker handle.
     pub fn new(command_stream: UnixStream, socket_stream: UnixStream) -> Self {
         // Important: The AsyncFramedUnixStream *must* be constructed in the context
         // of the Tokio runtime that will poll the stream. This is the reason why
