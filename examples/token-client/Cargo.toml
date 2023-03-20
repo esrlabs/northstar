@@ -6,12 +6,12 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = { version = "1.0.66", features = ["backtrace"] }
+anyhow = { version = "1.0.70", features = ["backtrace"] }
 base64 = "0.21.0"
-futures = { version = "0.3.24", default-features = false }
+futures = { version = "0.3.27", default-features = false }
 northstar-client= { path = "../../northstar-client" }
-tokio = { version = "1.25.2", features = ["macros", "rt", "net"] }
-tokio-util = { version = "0.7.4", features = ["codec"] }
+tokio = { version = "1.26.0", features = ["macros", "rt", "net"] }
+tokio-util = { version = "0.7.7", features = ["codec"] }
 
 [package.metadata.npk]
 manifest = "manifest.yaml"

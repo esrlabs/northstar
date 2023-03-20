@@ -6,11 +6,11 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = { version = "1.0.66", features = ["backtrace"] }
-caps = "0.5.4"
-clap = { version = "4.0.18", features = ["derive"] }
+anyhow = { version = "1.0.70", features = ["backtrace"] }
+caps = "0.5.5"
+clap = { version = "4.1.11", features = ["derive"] }
 nix = { version = "0.26.2", default-features = false, features = ["process", "user"] }
-thiserror = "1.0.37"
+thiserror = "1.0.40"
 
 [package.metadata.npk]
 manifest = "manifest.yaml"
