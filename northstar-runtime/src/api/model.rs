@@ -387,15 +387,18 @@ impl<'de> Deserialize<'de> for Token {
 }
 
 mod base64 {
+    use base64::{engine::general_purpose::STANDARD as Base64, Engine as _};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     pub fn serialize<S: Serializer>(v: &Vec<u8>, s: S) -> Result<S::Ok, S::Error> {
-        let base64 = base64::encode(v);
+        let base64 = Base64.encode(v);
         String::serialize(&base64, s)
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
         let base64 = String::deserialize(d)?;
-        base64::decode(base64.as_bytes()).map_err(serde::de::Error::custom)
+        Base64
+            .decode(base64.as_bytes())
+            .map_err(serde::de::Error::custom)
     }
 }

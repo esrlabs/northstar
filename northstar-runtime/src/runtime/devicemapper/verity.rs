@@ -22,14 +22,14 @@ use super::data_model::DataInit;
 use anyhow::{bail, Context, Result};
 use std::{io::Write, mem::size_of, path::Path};
 
-use super::{util::*, DmTargetSpec};
+use super::DmTargetSpec;
 
 // The UAPI for the verity target is here.
 // https://www.kernel.org/doc/Documentation/device-mapper/verity.txt
 
 /// Device-Mapper’s “verity” target provides transparent integrity checking of block devices using
 /// a cryptographic digest provided by the kernel crypto API
-pub struct DmVerityTarget(Box<[u8]>);
+pub struct DmVerityTarget(pub Box<[u8]>);
 
 /// Version of the verity target spec.
 pub enum DmVerityVersion {
@@ -51,9 +51,11 @@ pub struct DmVerityTargetBuilder<'a> {
     version: DmVerityVersion,
     data_device: Option<&'a Path>,
     data_size: u64,
+    data_block_size: u64,
     hash_device: Option<&'a Path>,
+    hash_block_size: u64,
     hash_algorithm: DmVerityHashAlgorithm,
-    root_digest: Option<&'a [u8]>,
+    root_digest: Option<&'a str>,
     salt: Option<&'a [u8]>,
 }
 
@@ -70,7 +72,9 @@ impl<'a> Default for DmVerityTargetBuilder<'a> {
             version: DmVerityVersion::V1,
             data_device: None,
             data_size: 0,
+            data_block_size: 0,
             hash_device: None,
+            hash_block_size: 0,
             hash_algorithm: DmVerityHashAlgorithm::SHA256,
             root_digest: None,
             salt: None,
@@ -80,15 +84,17 @@ impl<'a> Default for DmVerityTargetBuilder<'a> {
 
 impl<'a> DmVerityTargetBuilder<'a> {
     /// Sets the device that will be used as the data device (i.e. providing actual data).
-    pub fn data_device(&mut self, p: &'a Path, size: u64) -> &mut Self {
+    pub fn data_device(&mut self, p: &'a Path, size: u64, block_size: u64) -> &mut Self {
         self.data_device = Some(p);
         self.data_size = size;
+        self.data_block_size = block_size;
         self
     }
 
     /// Sets the device that provides the merkle tree.
-    pub fn hash_device(&mut self, p: &'a Path) -> &mut Self {
+    pub fn hash_device(&mut self, p: &'a Path, block_size: u64) -> &mut Self {
         self.hash_device = Some(p);
+        self.hash_block_size = block_size;
         self
     }
 
@@ -99,7 +105,7 @@ impl<'a> DmVerityTargetBuilder<'a> {
     }
 
     /// Sets the root digest of the merkle tree. The format is hexadecimal string.
-    pub fn root_digest(&mut self, digest: &'a [u8]) -> &mut Self {
+    pub fn root_digest(&mut self, digest: &'a str) -> &mut Self {
         self.root_digest = Some(digest);
         self
     }
@@ -129,8 +135,7 @@ impl<'a> DmVerityTargetBuilder<'a> {
             .context("data device is not set")?
             .to_str()
             .context("data device path is not encoded in utf8")?;
-        let stat = fstat(self.data_device.unwrap())?; // safe; checked just above
-        let data_block_size = stat.st_blksize as u64;
+        let data_block_size = self.data_block_size;
         let data_size = self.data_size;
         let num_data_blocks = data_size / data_block_size;
 
@@ -139,8 +144,7 @@ impl<'a> DmVerityTargetBuilder<'a> {
             .context("hash device is not set")?
             .to_str()
             .context("hash device path is not encoded in utf8")?;
-        let stat = fstat(self.data_device.unwrap())?; // safe; checked just above
-        let hash_block_size = stat.st_blksize;
+        let hash_block_size = self.hash_block_size;
 
         let hash_algorithm = match self.hash_algorithm {
             DmVerityHashAlgorithm::SHA256 => "sha256",
@@ -148,15 +152,15 @@ impl<'a> DmVerityTargetBuilder<'a> {
         };
 
         let root_digest = if let Some(root_digest) = self.root_digest {
-            hexstring_from(root_digest)
+            root_digest
         } else {
             bail!("root digest is not set")
         };
 
-        let salt = if self.salt.is_none() || self.salt.unwrap().is_empty() {
-            "-".to_string() // Note. It's not an empty string!
-        } else {
-            hexstring_from(self.salt.unwrap())
+        let salt = match self.salt {
+            Some(salt) if salt.is_empty() => hex::encode(salt),
+            Some(salt) => hex::encode(salt),
+            None => "-".into(),
         };
 
         // Step2: serialize the information according to the spec, which is ...
@@ -169,7 +173,7 @@ impl<'a> DmVerityTargetBuilder<'a> {
         // null terminator
 
         // TODO(jiyong): support the optional parameters... if needed.
-        let mut body = String::new();
+        let mut body = String::with_capacity(4096);
         use std::fmt::Write;
         write!(&mut body, "{} ", version)?;
         write!(&mut body, "{} ", data_device_path)?;
@@ -177,7 +181,7 @@ impl<'a> DmVerityTargetBuilder<'a> {
         write!(&mut body, "{} ", data_block_size)?;
         write!(&mut body, "{} ", hash_block_size)?;
         write!(&mut body, "{} ", num_data_blocks)?;
-        write!(&mut body, "{} ", 0)?; // hash_start_block
+        write!(&mut body, "{} ", num_data_blocks + 1)?; // hash_start_block.
         write!(&mut body, "{} ", hash_algorithm)?;
         write!(&mut body, "{} ", root_digest)?;
         write!(&mut body, "{}", salt)?;

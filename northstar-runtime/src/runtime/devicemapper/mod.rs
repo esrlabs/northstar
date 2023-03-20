@@ -37,7 +37,7 @@ use std::{
     io::Write,
     mem::size_of,
     os::unix::io::AsRawFd,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
 ///// Exposes DmCryptTarget & related builder
@@ -46,15 +46,12 @@ use std::{
 pub mod util;
 /// Exposes the DmVerityTarget & related builder
 pub mod verity;
-// Expose loopdevice
-pub mod loopdevice;
 // Data model
 pub mod data_model;
 
 mod sys;
 use sys::*;
 use util::*;
-use verity::DmVerityTarget;
 
 nix::ioctl_readwrite!(_dm_dev_create, DM_IOCTL, Cmd::DM_DEV_CREATE, DmIoctl);
 nix::ioctl_readwrite!(_dm_dev_suspend, DM_IOCTL, Cmd::DM_DEV_SUSPEND, DmIoctl);
@@ -104,7 +101,8 @@ unsafe impl DataInit for DmTargetSpec {}
 impl DmTargetSpec {
     fn new(target_type: &str) -> Result<Self> {
         // safe because the size of the array is the same as the size of the struct
-        let mut spec: Self = *DataInit::from_mut_slice(&mut [0; size_of::<Self>()]).unwrap();
+        let mut spec: Self = *DataInit::from_mut_slice(&mut [0; size_of::<Self>()])
+            .expect("failed to init DmTargetSpec");
         spec.target_type
             .as_mut()
             .write_all(target_type.as_bytes())?;
@@ -115,7 +113,8 @@ impl DmTargetSpec {
 impl DmIoctl {
     fn new(name: &str) -> Result<DmIoctl> {
         // safe because the size of the array is the same as the size of the struct
-        let mut data: Self = *DataInit::from_mut_slice(&mut [0; size_of::<Self>()]).unwrap();
+        let mut data: Self =
+            *DataInit::from_mut_slice(&mut [0; size_of::<Self>()]).expect("failed to init DmIoctl");
         data.version[0] = DM_VERSION_MAJOR;
         data.version[1] = DM_VERSION_MINOR;
         data.version[2] = DM_VERSION_PATCHLEVEL;
@@ -139,13 +138,13 @@ pub struct DeviceMapper(File);
 
 #[cfg(not(target_os = "android"))]
 const MAPPER_CONTROL: &str = "/dev/mapper/control";
-#[cfg(not(target_os = "android"))]
-const MAPPER_DEV_ROOT: &str = "/dev/mapper";
-
 #[cfg(target_os = "android")]
 const MAPPER_CONTROL: &str = "/dev/device-mapper";
+
+#[cfg(not(target_os = "android"))]
+const DEVICE_MAPPER_DEV: &str = "/dev/dm-";
 #[cfg(target_os = "android")]
-const MAPPER_DEV_ROOT: &str = "/dev/block/mapper";
+const DEVICE_MAPPER_DEV: &str = "/dev/block/dm-";
 
 impl DeviceMapper {
     /// Constructs a new `DeviceMapper` entrypoint. This is essentially the same as opening
@@ -159,16 +158,10 @@ impl DeviceMapper {
         Ok(DeviceMapper(f))
     }
 
-    // /// Creates a (crypt) device and configure it according to the `target` specification.
-    // /// The path to the generated device is "/dev/mapper/<name>".
-    // pub fn create_crypt_device(&self, name: &str, target: &DmCryptTarget) -> Result<PathBuf> {
-    //     self.create_device(name, target.as_slice(), uuid("crypto".as_bytes())?, true)
-    // }
-
     /// Creates a (verity) device and configure it according to the `target` specification.
     /// The path to the generated device is "/dev/mapper/<name>".
-    pub fn create_verity_device(&self, name: &str, target: &DmVerityTarget) -> Result<PathBuf> {
-        self.create_device(name, target.as_slice(), uuid("apkver".as_bytes())?, false)
+    pub fn create_verity_device(&self, name: &str, target: &[u8]) -> Result<PathBuf> {
+        self.create_device(name, target, uuid(), false)
     }
 
     /// Removes a mapper device.
@@ -195,6 +188,11 @@ impl DeviceMapper {
             &name
         ))?;
 
+        // Extract the device minor number from the ioctl data.
+        let device_minor = unsafe { libc::minor(data.dev) };
+        #[cfg(target_os = "android")]
+        let device_minor = device_minor as u32;
+
         // Step 2: load table onto the device
         let payload_size = size_of::<DmIoctl>() + target.len();
 
@@ -218,14 +216,14 @@ impl DeviceMapper {
         let mut data = DmIoctl::new(name)?;
         dm_dev_suspend(self, &mut data).context("failed to activate")?;
 
-        // Step 4: wait unti the device is created and return the device path
-        let path = Path::new(MAPPER_DEV_ROOT).join(name);
+        // Step 4: wait until the device is created and return the device path
+        let path = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, device_minor));
         wait_for_path(&path)?;
         Ok(path)
     }
 }
 
 /// Used to derive a UUID that uniquely identifies a device mapper device when creating it.
-fn uuid(node_id: &[u8]) -> Result<String> {
-    Ok(uuid::Uuid::new_v4().to_string())
+fn uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
 }

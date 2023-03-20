@@ -4,6 +4,7 @@
 #![deny(missing_docs)]
 
 use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as Base64, Engine as _};
 use clap::{self, Parser};
 use futures::StreamExt;
 use northstar_client::{
@@ -350,7 +351,7 @@ async fn main() -> Result<()> {
             let shared = shared.as_bytes().to_vec();
             let token = client.create_token(target, &shared).await?;
             if !opt.json {
-                println!("created token {}", base64::encode(token))
+                println!("created token {}", Base64.encode(token))
             }
         }
         Subcommand::VerifyToken {
@@ -360,7 +361,7 @@ async fn main() -> Result<()> {
         } => {
             let user = Name::try_from(user)?;
             let shared = shared.as_bytes().to_vec();
-            let token = base64::decode(token.as_bytes()).context("invalid token")?;
+            let token = Base64.decode(token.as_bytes()).context("invalid token")?;
             let token: Token = token.into();
             let result = client.verify_token(&token, user, shared).await?;
             if !opt.json {

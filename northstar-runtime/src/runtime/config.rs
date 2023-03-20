@@ -31,9 +31,6 @@ pub struct Config {
     /// Notification buffer size
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
-    /// Device mapper device timeout
-    #[serde(with = "humantime_serde", default = "default_device_mapper_timeout")]
-    pub device_mapper_device_timeout: time::Duration,
     /// Loop device timeout
     #[serde(with = "humantime_serde", default = "default_loop_device_timeout")]
     pub loop_device_timeout: time::Duration,
@@ -202,10 +199,6 @@ where
     } else {
         Ok(None)
     }
-}
-
-const fn default_device_mapper_timeout() -> time::Duration {
-    time::Duration::from_secs(10)
 }
 
 const fn default_loop_device_timeout() -> time::Duration {

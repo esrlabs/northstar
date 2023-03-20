@@ -10,8 +10,6 @@ cgroup = "northstar"
 event_buffer_size = 256
 # Notification buffer size
 notification_buffer_size = 64
-# Device mapper device timeout
-device_mapper_device_timeout = "2s"
 # Token timeout
 token_validity = "1m"
 # Loop device timeout

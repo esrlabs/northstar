@@ -9,6 +9,7 @@ use crate::{
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as Base64, Engine as _};
 use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand_core::{OsRng, RngCore};
@@ -323,8 +324,9 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature> {
     let de: SerdeSignature = serde_yaml::from_str::<SerdeSignature>(s)
         .context("failed to parse signature YAML format")?;
 
-    let signature =
-        base64::decode(de.signature).context("failed to decode signature base 64 format")?;
+    let signature = Base64
+        .decode(de.signature)
+        .context("failed to decode signature base 64 format")?;
 
     ed25519_dalek::Signature::from_bytes(&signature)
         .context("failed to parse signature ed25519 format")
@@ -634,7 +636,7 @@ fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &Manifest) -> Resu
 
     let key_pair = read_keypair(key)?;
     let signature = key_pair.sign(hashes_yaml.as_bytes());
-    let signature_base64 = base64::encode(signature);
+    let signature_base64 = Base64.encode(signature);
     let signature_yaml = { format!("{}---\nsignature: {}", &hashes_yaml, &signature_base64) };
 
     Ok(signature_yaml)
