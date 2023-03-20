@@ -119,12 +119,9 @@ impl State {
         let repositories = HashMap::new();
         let containers = HashMap::new();
         let mount_control = Arc::new(
-            MountControl::new(
-                config.device_mapper_device_timeout,
-                config.loop_device_timeout,
-            )
-            .await
-            .expect("failed to initialize mount control"),
+            MountControl::new(config.loop_device_timeout)
+                .await
+                .expect("failed to initialize mount control"),
         );
 
         let mut state = State {

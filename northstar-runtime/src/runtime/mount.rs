@@ -1,12 +1,14 @@
 use crate::{
-    common::version::Version,
+    common::container::Container,
     npk::{dm_verity::VerityHeader, manifest::selinux::Selinux, npk::Hashes},
-    runtime::{key::PublicKey, repository::Npk},
+    runtime::{
+        devicemapper::{self, verity::DmVerityHashAlgorithm},
+        key::PublicKey,
+        repository::Npk,
+    },
 };
 use anyhow::{anyhow, bail, Context, Result};
-use devicemapper::{DevId, DmName, DmOptions};
 use futures::{Future, FutureExt};
-use humantime::format_duration;
 use log::{debug, warn};
 use loopdev::LoopControl;
 use std::{
@@ -20,18 +22,11 @@ pub use nix::mount::MsFlags as MountFlags;
 
 const FS_TYPE: &str = "squashfs";
 
-#[cfg(not(target_os = "android"))]
-const DEVICE_MAPPER_DEV: &str = "/dev/dm-";
-#[cfg(target_os = "android")]
-const DEVICE_MAPPER_DEV: &str = "/dev/block/dm-";
-
 pub(super) struct MountControl {
-    /// Timeout for dm device setup
-    dm_timeout: time::Duration,
     /// Timeout for lo device setup
     lo_timeout: time::Duration,
     /// Device mapper handle
-    dm: Arc<devicemapper::DM>,
+    dm: Arc<devicemapper::DeviceMapper>,
     /// Loop device control
     lc: Arc<loopdev::LoopControl>,
 }
@@ -43,23 +38,13 @@ impl std::fmt::Debug for MountControl {
 }
 
 impl MountControl {
-    pub(super) async fn new(
-        dm_timeout: time::Duration,
-        lo_timeout: time::Duration,
-    ) -> Result<MountControl> {
+    pub(super) async fn new(lo_timeout: time::Duration) -> Result<MountControl> {
         debug!("Opening loop control");
         let lc = LoopControl::open().context("failed to open loop control")?;
         debug!("Opening device mapper control");
-        let dm = devicemapper::DM::new().context("failed to open device mapper")?;
-
-        let dm_version = dm
-            .version()
-            .map(Version::from)
-            .context("failed to parse device mapper version")?;
-        debug!("Device mapper version is {}", dm_version);
+        let dm = devicemapper::DeviceMapper::new().context("failed to open device mapper")?;
 
         Ok(MountControl {
-            dm_timeout,
             lo_timeout,
             lc: Arc::new(lc),
             dm: Arc::new(dm),
@@ -80,41 +65,33 @@ impl MountControl {
         let fd = npk.as_raw_fd();
         let fsimg_size = npk.fsimg_size();
         let fsimg_offset = npk.fsimg_offset();
-        let name = npk.manifest().name.clone();
-        let version = npk.manifest().version.clone();
+        let container = npk.manifest().container();
         let verity_header = npk.verity_header().cloned();
         let selinux = npk.manifest().selinux.clone();
         let hashes = npk.hashes().cloned();
-        let dm_timeout = self.dm_timeout;
         let lo_timeout = self.lo_timeout;
 
         task::spawn_blocking(move || {
             let start = time::Instant::now();
 
-            debug!("Mounting {}:{}", name, version);
+            debug!("Mounting {container}");
             mount(
+                &container,
                 dm,
                 lc,
                 fd,
                 fsimg_offset,
                 fsimg_size,
-                &version,
                 verity_header,
                 selinux,
                 hashes,
                 &target,
                 key.is_some(),
-                dm_timeout,
                 lo_timeout,
             )?;
 
             let duration = start.elapsed();
-            debug!(
-                "Finished mount of {}:{} in {}",
-                name,
-                version,
-                format_duration(duration)
-            );
+            debug!("Finished mount of {container} in {duration:?}");
 
             Ok(())
         })
@@ -139,11 +116,7 @@ impl MountControl {
                 .with_context(|| format!("failed to remove {}", target.display()))?;
 
             let duration = start.elapsed();
-            debug!(
-                "Finished umount of {} in {}",
-                target.display(),
-                format_duration(duration)
-            );
+            debug!("Finished umount of {} in {duration:?}", target.display(),);
 
             Ok(())
         })
@@ -156,18 +129,17 @@ impl MountControl {
 
 #[allow(clippy::too_many_arguments)]
 fn mount(
-    dm: Arc<devicemapper::DM>,
+    container: &Container,
+    dm: Arc<devicemapper::DeviceMapper>,
     lc: Arc<LoopControl>,
     fd: RawFd,
     fsimg_offset: u64,
     fsimg_size: u64,
-    version: &Version,
     verity_header: Option<VerityHeader>,
     selinux: Option<Selinux>,
     hashes: Option<Hashes>,
     target: &Path,
     verity: bool,
-    dm_timeout: time::Duration,
     lo_timeout: time::Duration,
 ) -> Result<()> {
     // Acquire a loop device and attach the backing file. This operation is racy because
@@ -195,10 +167,7 @@ fn mount(
             break loop_device;
         }
         if start.elapsed() > lo_timeout {
-            bail!(
-                "failed to acquire loop device: timeout after {}",
-                format_duration(lo_timeout)
-            );
+            bail!("failed to acquire loop device: timeout after {lo_timeout:?}");
         }
     };
 
@@ -210,28 +179,24 @@ fn mount(
         (path, None)
     } else {
         let name = format!("northstar-{}", nanoid::nanoid!());
+        let data_device = loop_device
+            .path()
+            .ok_or_else(|| anyhow!("failed to get loop device path"))?;
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
-                let major = loop_device.major()?;
-                let minor = loop_device.minor()?;
-                let loop_device_id = format!("{major}:{minor}");
-
-                debug!("Using loop device id {}", loop_device_id);
-
+                debug!("Using loop device {}", data_device.display());
                 dmsetup(
                     dm.clone(),
-                    &loop_device_id,
+                    &data_device,
                     header,
                     &name,
-                    hashes.fs_verity_hash.as_str(),
+                    &hashes.fs_verity_hash,
                     hashes.fs_verity_offset,
-                    dm_timeout,
                 )?
             }
             _ => {
                 warn!(
-                    "Cannot mount {}:{} without verity information from a repository with key",
-                    name, version
+                    "Cannot mount {container} without verity information from a repository with key",
                 );
 
                 // The loopdevice has been attached before. Ensure that it is detached in order
@@ -281,90 +246,38 @@ fn mount(
     // Set the device to auto-remove. If the above mount operation failed the verity device is removed.
     // If the deferred removal fail the runtime panics in order to avoid leaking the verity device.
     if let Some(ref dm_name) = dm_name {
-        debug!("Enabling deferred removal of device {}", dm_name);
-        dm.device_remove(
-            &DevId::Name(
-                DmName::new(dm_name)
-                    .with_context(|| format!("failed to create borrowed identifier {dm_name}"))?,
-            ),
-            DmOptions::default().set_flags(devicemapper::DmFlags::DM_DEFERRED_REMOVE),
-        )?;
+        dm.delete_device_deferred(dm_name)?;
     }
 
     mount_result.map_err(Into::into)
 }
 
 fn dmsetup(
-    dm: Arc<devicemapper::DM>,
-    dev: &str,
+    dm: Arc<devicemapper::DeviceMapper>,
+    dev: &Path,
     verity: &VerityHeader,
     name: &str,
     verity_hash: &str,
-    size: u64,
-    timeout: time::Duration,
+    data_size: u64,
 ) -> Result<PathBuf> {
     let start = time::Instant::now();
 
-    let alg_no_pad = std::str::from_utf8(&verity.algorithm[0..VerityHeader::ALGORITHM.len()])
-        .context("failed to read verity algorithm")?;
-    let hex_salt = hex::encode(&verity.salt[..(verity.salt_size as usize)]);
-    let verity_table = format!(
-        "{} {} {} {} {} {} {} {} {} {}",
-        verity.version,
-        dev,
-        dev,
-        verity.data_block_size,
-        verity.hash_block_size,
-        verity.data_blocks,
-        verity.data_blocks + 1,
-        alg_no_pad,
-        verity_hash,
-        hex_salt
-    );
-    let table = [(0, size / 512, "verity".to_string(), verity_table)];
-    let name = DmName::new(name)?;
-    let id = DevId::Name(name);
+    let salt = &verity.salt[..(verity.salt_size as usize)];
+    let target = devicemapper::verity::DmVerityTargetBuilder::default()
+        .data_device(dev, data_size, verity.data_block_size as u64)
+        .hash_device(dev, verity.hash_block_size as u64)
+        .root_digest(verity_hash)
+        .salt(salt)
+        .hash_algorithm(DmVerityHashAlgorithm::SHA256)
+        .build()?;
 
-    debug!("Creating verity device {}", name);
-    let dm_device = dm.device_create(
-        name,
-        None,
-        DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
-    )?;
-
-    let load = || {
-        dm.table_load(
-            &id,
-            &table,
-            DmOptions::default().set_flags(devicemapper::DmFlags::DM_READONLY),
-        )?;
-
-        let device = PathBuf::from(format!("{}{}", DEVICE_MAPPER_DEV, dm_device.device().minor));
-
-        debug!("Resuming verity device {}", device.display(),);
-        dm.device_suspend(&id, DmOptions::default())?;
-
-        debug!("Waiting for verity device {}", device.display(),);
-        while !device.exists() {
-            // This code runs on a dedicated blocking thread
-            std::thread::sleep(time::Duration::from_millis(1));
-
-            if start.elapsed() > timeout {
-                bail!(
-                    "timed out while waiting for verity device {}",
-                    device.display()
-                );
-            }
-        }
-        Ok(device)
-    };
-
-    let device = match load() {
+    debug!("Creating verity device of {}", dev.display());
+    let device = match dm.create_verity_device(name, target.as_slice()) {
         Ok(device) => device,
         Err(e) => {
             warn!("failed to setup {}", name);
             debug!("Trying to remove device {}", name);
-            if let Err(e) = dm.device_remove(&id, DmOptions::default()) {
+            if let Err(e) = dm.delete_device_deferred(name) {
                 warn!("failed to remove {} with {}", name, e);
             }
             return Err(e);

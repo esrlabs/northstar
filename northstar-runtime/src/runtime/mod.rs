@@ -1,6 +1,7 @@
 mod cgroups;
 mod console;
 mod debug;
+mod devicemapper;
 mod env;
 mod error;
 mod events;

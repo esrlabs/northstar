@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD as Base64, Engine as _};
 use northstar_client::{
     model::{Token, VerificationResult},
     Client,
@@ -34,7 +35,7 @@ async fn main() -> Result<()> {
         let token = split
             .next()
             .ok_or_else(|| anyhow!("missing token"))
-            .and_then(|t| base64::decode(t).context("malformed token"))?;
+            .and_then(|t| Base64.decode(t).context("malformed token"))?;
         let token: Token = token.into();
 
         println!("Verifying user \"{container}\" from {addr} with shared \"{SHARED}\"");

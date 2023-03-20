@@ -126,7 +126,6 @@ impl Runtime {
             log_dir,
             event_buffer_size: 128,
             notification_buffer_size: 128,
-            device_mapper_device_timeout: time::Duration::from_secs(10),
             loop_device_timeout: time::Duration::from_secs(10),
             token_validity: time::Duration::from_secs(60),
             cgroup: NonNulString::try_from(format!("northstar-{}", nanoid!())).unwrap(),

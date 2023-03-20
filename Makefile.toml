@@ -28,6 +28,11 @@ dependencies = [
     "token-server",
 ]
 
+[tasks.test]
+dependencies = [ "examples" ]
+command = "cargo"
+args = [ "nextest", "run" ]
+
 [tasks.console]
 command = "cargo"
 args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "console" ]
