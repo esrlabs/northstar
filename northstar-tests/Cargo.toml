@@ -1,6 +1,6 @@
 [package]
 name = "northstar-tests"
-version = "0.7.1"
+version = "0.7.2-pre"
 authors = ["ESRLabs"]
 edition = "2021"
 license = "Apache-2.0"
