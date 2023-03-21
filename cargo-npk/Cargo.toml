@@ -1,6 +1,6 @@
 [package]
 name = "cargo-npk"
-version = "0.7.1-pre"
+version = "0.7.1"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -12,7 +12,7 @@ cargo_metadata = "0.15.3"
 clap = { version = "4.1.11", features = ["derive"] }
 human_bytes = "0.4.1"
 humantime = "2.1.0"
-northstar-runtime = { version = "^0.7.1-pre", path = "../northstar-runtime", features = ["npk"] }
+northstar-runtime = { version = "^0.7.1", path = "../northstar-runtime", features = ["npk"] }
 serde = { version = "1.0.158", features = ["derive"] }
 tempfile = "3.4.0"
 termcolor = "1.2.0"
