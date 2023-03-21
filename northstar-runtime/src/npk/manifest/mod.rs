@@ -142,23 +142,11 @@ impl Manifest {
 
     /// Read a manifest from `reader`.
     pub fn from_reader<R: std::io::Read>(mut reader: R) -> Result<Self, Error> {
-        let mut buf = Vec::new();
-        reader.read_to_end(&mut buf).map_err(Error::Io)?;
-        Manifest::from_slice(&buf)
-    }
-
-    /// Read a manifest from `slice`.
-    pub fn from_slice(s: &[u8]) -> Result<Self, Error> {
-        let manifest: Manifest = if let Ok(manifest) = serde_yaml::from_slice(s) {
-            manifest
-        } else if let Ok(manifest) = serde_json::from_slice(s) {
-            manifest
-        } else {
-            toml::from_slice(s)?
-        };
-
-        manifest.validate().map_err(Error::Validation)?;
-        Ok(manifest)
+        let mut buf = String::new();
+        reader
+            .read_to_string(&mut buf)
+            .map_err(Error::Io)
+            .and_then(|_| Manifest::from_str(&buf))
     }
 }
 
@@ -166,7 +154,16 @@ impl FromStr for Manifest {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Error> {
-        Manifest::from_slice(s.as_bytes())
+        let manifest: Manifest = if let Ok(manifest) = serde_yaml::from_str(s) {
+            manifest
+        } else if let Ok(manifest) = serde_json::from_str(s) {
+            manifest
+        } else {
+            toml::de::from_str(s).map_err(Error::TomlDe)?
+        };
+
+        manifest.validate().map_err(Error::Validation)?;
+        Ok(manifest)
     }
 }
 

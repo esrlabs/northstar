@@ -9,9 +9,9 @@ readme = "../README.md"
 repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
-anyhow = { version = "1.0.66", features = ["backtrace"] }
-futures = "0.3.24"
+anyhow = { version = "1.0.70", features = ["backtrace"] }
+futures = "0.3.27"
 northstar-runtime = { version = "^0.7.1-pre", path = "../northstar-runtime", features = ["api"] }
-thiserror = "1.0.37"
-tokio = "1.25.0"
+thiserror = "1.0.40"
+tokio = "1.26.0"
 

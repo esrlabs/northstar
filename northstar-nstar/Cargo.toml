@@ -9,11 +9,11 @@ readme = "../README.md"
 repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
-anyhow = { version = "1.0.66", features = ["backtrace"] }
+anyhow = { version = "1.0.70", features = ["backtrace"] }
 base64 = "0.21.0"
-clap = { version = "4.0.18", features = ["derive"] }
-clap_complete = "4.0.3"
-futures = { version = "0.3.24", default-features = false }
+clap = { version = "4.1.11", features = ["derive"] }
+clap_complete = "4.1.5"
+futures = { version = "0.3.27", default-features = false }
 humantime = "2.1.0"
 itertools = "0.10.5"
 northstar-client = { version = "^0.7.1-pre", path = "../northstar-client" }
@@ -21,9 +21,9 @@ northstar-runtime = { version = "^0.7.1-pre", path = "../northstar-runtime", fea
 pin-project-lite = "0.2.9"
 prettytable-rs = "0.10.0"
 regex = "1.7.1"
-serde = "1.0.148"
-serde_json = "1.0.87"
-serde_yaml = "0.9.17"
-tokio = { version = "1.25.0", features = ["fs", "io-std", "io-util", "macros", "net", "rt", "time"] }
-tokio-util = "0.7.4"
+serde = "1.0.158"
+serde_json = "1.0.94"
+serde_yaml = "0.9.19"
+tokio = { version = "1.26.0", features = ["fs", "io-std", "io-util", "macros", "net", "rt", "time"] }
+tokio-util = "0.7.7"
 url = "2.3.1"
