@@ -3,6 +3,10 @@ name = "cargo-npk"
 version = "0.7.1"
 edition = "2021"
 license = "Apache-2.0"
+description = "Northstar is an container runtime for Linux targetting embedded systems"
+readme = "../README.md"
+repository = "https://github.com/esrlabs/northstar"
+rust-version = "1.63.0"
 
 [dependencies]
 anyhow = "1.0.70"
