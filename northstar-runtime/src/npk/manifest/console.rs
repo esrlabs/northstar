@@ -6,7 +6,7 @@ use serde::{
 };
 use serde_with::skip_serializing_none;
 use std::{collections::HashSet, fmt};
-use strum::{EnumCount, IntoEnumIterator};
+use strum::{EnumCount as _, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 
 /// Console Quality of Service
