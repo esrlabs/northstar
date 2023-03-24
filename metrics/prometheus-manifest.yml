@@ -1,0 +1,21 @@
+name: prometheus
+version: 2.53.0
+init: /prometheus
+uid: 1000
+gid: 1000
+autostart: relaxed
+args: [--config.file, prometheus-config.yml]
+network: host
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /etc:
+    type: bind
+    host: /etc
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /data:
+    type: persist

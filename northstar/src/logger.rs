@@ -4,7 +4,7 @@ pub fn init() {
     android_logd_logger::builder()
         .tag("northstar")
         .prepend_module(false)
-        .parse_filters("northstar=debug")
+        .parse_filters("northstar=debug,northstar-runtime=debug")
         .init();
 }
 
@@ -33,7 +33,7 @@ pub fn init() {
     }
 
     let mut builder = env_logger::Builder::new();
-    builder.parse_filters("debug");
+    builder.parse_filters("northstar=debug,northstar-runtime=debug");
 
     builder.format(|buf, record| {
         let timestamp = buf.timestamp_millis().to_string();

@@ -23,6 +23,7 @@ Northstar is an embedded container runtime prototype for Linux.
     - [Repositories](#repositories)
   - [Console](#console)
   - [cargo-npk](#cargo-npk)
+  - [Metrics](#metrics)
   - [Integration tests](#integration-tests)
   - [Integration](#integration)
   - [Container launch sequence](#container-launch-sequence)
@@ -229,6 +230,14 @@ type = { fs = { dir = "target/northstar/repository" }}
 key = "examples/northstar.pub"
 # Mount the containers from this repository on runtime start. Default: false
 mount_on_start = true
+key = "examples/northstar.pub"
+type = { fs = { dir = "target/northstar/repository" }}
+
+[metrics]
+# Prometheus metrics endpoint
+url = "http://localhost:8080/metrics"
+# Prometheus scrape interval
+scrape_interval = "1s"
 ```
 
 ### Repositories
@@ -298,6 +307,18 @@ cargo npk pack --target aarch64-unknown-linux-gnu --release --manifest-path exam
 ls target/aarch64-unknown-linux-gnu/release/hello-world-0.0.1.npk 
   target/aarch64-unknown-linux-gnu/release/hello-world-0.0.1.npk
 ```
+
+## Metrics
+
+Northstar can expose `CGroup` attributes of all containers via
+[Prometheus](https://prometheus.io). This is enabled by the feature `metrics`.
+See the [build.sh](metrics/build.sh) script for examples, how to pack
+[Prometheus](https://prometheus.io) and [Grafana](https://grafana.com) in
+Northstar containers. See
+`northstar-runtime::runtime::config::MetricsConfiguration` for configuration
+options (url, interval).
+
+![Northstar Grafana](doc/grafana.png)
 
 ## Integration tests
 

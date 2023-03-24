@@ -198,6 +198,7 @@ impl CGroups {
     }
 
     /// Gather statistics from controllers
+    #[cfg(feature = "metrics")]
     pub(super) fn stats(&self) -> ContainerStats {
         let mut stats = HashMap::new();
         for c in self.cgroup.subsystems() {
@@ -229,6 +230,51 @@ impl CGroups {
         }
 
         stats
+    }
+
+    #[allow(unused)]
+    #[cfg(feature = "metrics")]
+    pub(super) fn stats_blkio(&self) -> Result<serde_json::Value> {
+        use cgroups_rs::blkio::BlkIoController;
+        let controller = self
+            .cgroup
+            .controller_of::<BlkIoController>()
+            .ok_or_else(|| anyhow::anyhow!("failed to get memory controller"))?;
+        to_value(controller.blkio()).context("failed to encode blkio stats")
+    }
+
+    #[allow(unused)]
+    #[cfg(feature = "metrics")]
+    pub(super) fn stats_cpu(&self) -> Result<serde_json::Value> {
+        use cgroups_rs::cpu::CpuController;
+        let controller = self
+            .cgroup
+            .controller_of::<CpuController>()
+            .ok_or_else(|| anyhow::anyhow!("failed to get cpu controller"))?;
+        to_value(controller.cpu()).context("failed to encode cpuacct stats")
+    }
+
+    #[allow(unused)]
+    #[cfg(feature = "metrics")]
+    pub(super) fn stats_memory(&self) -> Result<serde_json::Value> {
+        let controller = self
+            .cgroup
+            .controller_of::<MemController>()
+            .ok_or_else(|| anyhow::anyhow!("failed to get memory controller"))?;
+        let mut memory = HashMap::with_capacity(4);
+        memory.insert(
+            "memory".to_string(),
+            to_value(controller.memory_stat()).context("failed to encode memory stats")?,
+        );
+        memory.insert(
+            "kmem".to_string(),
+            to_value(controller.kmem_stat()).context("failed to encode kmem stats")?,
+        );
+        memory.insert(
+            "kmem_tcp".to_string(),
+            to_value(controller.kmem_tcp_stat()).context("failed to encode kmem_tcp stats")?,
+        );
+        to_value(memory).context("failed to encode memory stats")
     }
 }
 
