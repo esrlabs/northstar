@@ -1,5 +1,6 @@
 run_dir = "/data/northstar/run"
 data_dir = "/data/northstar/data"
+socket_dir = "/dev/socket/northstar"
 cgroup = "northstar"
 
 # Debug TCP console on localhost with full access

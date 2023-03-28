@@ -82,8 +82,9 @@ fn init() -> Result<Config, Error> {
     let config: Config = toml::from_str(&config)
         .with_context(|| format!("failed to read configuration file {}", opt.config.display()))?;
 
-    fs::create_dir_all(&config.run_dir).context("failed to create run_dir")?;
     fs::create_dir_all(&config.data_dir).context("failed to create data_dir")?;
+    fs::create_dir_all(&config.run_dir).context("failed to create run_dir")?;
+    fs::create_dir_all(&config.socket_dir).context("failed to create socket directory")?;
 
     // Skip mount namespace setup in case it's disabled for debugging purposes
     if !opt.disable_mount_namespace {

@@ -39,6 +39,8 @@ impl Runtime {
         std::fs::create_dir(&run_dir)?;
         let data_dir = tmpdir.path().join("data");
         std::fs::create_dir(&data_dir)?;
+        let socket_dir = tmpdir.path().join("sockets");
+        std::fs::create_dir(&socket_dir)?;
         let test_repository = tmpdir.path().join("test");
         std::fs::create_dir(&test_repository)?;
         let test_repository_limited_num = tmpdir.path().join("test_limited_num");
@@ -121,6 +123,7 @@ impl Runtime {
         let config = config::Config {
             run_dir,
             data_dir,
+            socket_dir,
             event_buffer_size: 128,
             notification_buffer_size: 128,
             loop_device_timeout: time::Duration::from_secs(10),
