@@ -3,7 +3,7 @@ run_dir = "target/northstar/run"
 # Directory for `persist` mounts of containers
 data_dir = "target/northstar/data"
 # Socket directory
-socket_dir = "target/northstar/logs"
+socket_dir = "target/northstar/sockets"
 # Top level cgroup name
 cgroup = "northstar"
 # Event loop buffer size

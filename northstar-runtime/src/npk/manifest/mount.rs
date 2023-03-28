@@ -61,6 +61,9 @@ pub enum Mount {
     /// Mount proc
     #[serde(rename = "proc")]
     Proc,
+    /// Mount a tmpfs with size
+    #[serde(rename = "sockets")]
+    Sockets,
     /// Mount sysfs
     #[serde(rename = "sysfs")]
     Sysfs,

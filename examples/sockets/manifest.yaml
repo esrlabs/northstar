@@ -17,6 +17,8 @@ mounts:
   /lib64:
     type: bind
     host: /lib64
+  /sock:
+    type: sockets
 sockets:
   hello:
     type: datagram

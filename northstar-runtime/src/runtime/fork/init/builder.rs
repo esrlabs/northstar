@@ -119,6 +119,9 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
             }
             mount::Mount::Proc => mounts.push(proc(root, target.as_ref())),
             mount::Mount::Sysfs => mounts.push(sysfs(root, target.as_ref())),
+            mount::Mount::Sockets => {
+                mounts.push(sockets(&config.socket_dir, root, target.as_ref()))
+            }
             mount::Mount::Resource(requirement) => {
                 let container = manifest.container();
                 let dependency = State::match_container(
@@ -171,6 +174,18 @@ fn sysfs(root: &Path, target: &Path) -> Mount {
     const FSTYPE: Option<&'static str> = Some("sysfs");
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
     Mount::new(Some(source), target, FSTYPE, flags, None)
+}
+
+fn sockets(socket_dir: &Path, root: &Path, target: &Path) -> Mount {
+    log::debug!("Adding sockets on {}", target.display());
+    let target = root.join_strip(target);
+    Mount::new(
+        Some(socket_dir.to_owned()),
+        target.to_owned(),
+        None,
+        MsFlags::MS_BIND,
+        None,
+    )
 }
 
 fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) -> Vec<Mount> {
