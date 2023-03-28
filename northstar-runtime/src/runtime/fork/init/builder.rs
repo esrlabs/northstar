@@ -40,6 +40,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     let rlimits = manifest.rlimits.clone();
     let seccomp = seccomp_filter(manifest);
     let uid = manifest.uid;
+    let sockets = manifest.sockets.clone();
 
     Ok(Init {
         container,
@@ -53,6 +54,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         rlimits,
         seccomp,
         console,
+        sockets,
     })
 }
 
@@ -181,7 +183,7 @@ fn sockets(socket_dir: &Path, root: &Path, target: &Path) -> Mount {
     let target = root.join_strip(target);
     Mount::new(
         Some(socket_dir.to_owned()),
-        target.to_owned(),
+        target,
         None,
         MsFlags::MS_BIND,
         None,

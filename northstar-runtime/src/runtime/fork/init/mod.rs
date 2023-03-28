@@ -4,6 +4,7 @@ use crate::{
         capabilities::Capability,
         network::Network,
         rlimit::{RLimitResource, RLimitValue},
+        socket::Socket,
     },
     runtime::{
         exit_status::ExitStatus,
@@ -69,6 +70,7 @@ pub struct Init {
     pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
     pub console: bool,
+    pub sockets: HashMap<String, Socket>,
 }
 
 impl Init {

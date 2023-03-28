@@ -55,10 +55,10 @@ pub async fn run(
         select! {
             request = channel.recv() => {
                 match request {
-                    Some(Message::CreateRequest { init, console, io }) => {
+                    Some(Message::CreateRequest { init, console, io, sockets }) => {
                         debug!("Creating init process for {}", init.container);
                         let container = init.container.clone();
-                        match create(init, io, console).await {
+                        match create(init, io, console, &sockets).await {
                             Ok((pid, stream)) => {
                                 debug_assert!(!inits.contains_key(&container));
                                 inits.insert(container, (pid, stream));
@@ -104,9 +104,14 @@ async fn create(
     init: Init,
     io: [OwnedFd; 3],
     console: Option<OwnedFd>,
+    sockets: &[OwnedFd],
 ) -> Result<(Pid, FramedUnixStream)> {
     let container = init.container.clone();
     debug!("Creating container {}", container);
+
+    if !sockets.is_empty() {
+        panic!("Sockets are not supported yet");
+    }
 
     let (stream_parent, stream_child) =
         UnixStream::pair().context("failed to create socket pair")?;

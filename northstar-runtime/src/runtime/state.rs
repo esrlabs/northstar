@@ -496,12 +496,16 @@ impl State {
             .await
             .expect("IO setup error");
 
+        let sockets = vec![];
+
         // Create container
         let config = &self.config;
         let containers = self.containers.keys();
         let pid = self
             .forker
-            .create(container, config, &manifest, io, console_fd, containers)
+            .create(
+                container, config, &manifest, io, console_fd, sockets, containers,
+            )
             .await?;
 
         // Debug
