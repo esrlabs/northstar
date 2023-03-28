@@ -1,0 +1,25 @@
+name: sockets
+version: 0.0.1
+init: /sockets
+uid: 1000
+gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
+mounts:
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+sockets:
+  hello:
+    type: datagram
+    mode: 0o777
+    uid: 1000
+    gid: 1000
