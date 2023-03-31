@@ -452,7 +452,8 @@ where
                 target,
                 hex::encode(&shared)
             );
-            let token: Vec<u8> = Token::new(token_validity, user, target, shared).into();
+            let token: Vec<u8> =
+                Token::new(token_validity, user, target.as_ref().as_bytes(), shared).into();
             let token = api::model::Token::from(token);
             let response = api::model::Response::Token(token);
             reply_tx.send(response).ok();
@@ -475,7 +476,9 @@ where
             );
             // The token has a valid length - verified by serde::deserialize
             let token = Token::from((token_validity, token.as_ref().to_vec()));
-            let result = token.verify(user, target, &shared).into();
+            let result = token
+                .verify(user.as_ref().as_bytes(), target, &shared)
+                .into();
             let response = api::model::Response::TokenVerification(result);
             reply_tx.send(response).ok();
         }

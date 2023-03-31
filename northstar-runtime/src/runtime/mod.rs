@@ -14,6 +14,7 @@ mod mount;
 mod repository;
 #[allow(clippy::module_inception)]
 mod runtime;
+mod sockets;
 mod state;
 mod stats;
 mod token;

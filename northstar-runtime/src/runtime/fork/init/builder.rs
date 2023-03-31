@@ -9,6 +9,7 @@ use crate::{
     seccomp,
 };
 use anyhow::Context;
+use itertools::Itertools;
 use log::warn;
 use nix::{mount::MsFlags, unistd};
 use std::{
@@ -40,7 +41,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     let rlimits = manifest.rlimits.clone();
     let seccomp = seccomp_filter(manifest);
     let uid = manifest.uid;
-    let sockets = manifest.sockets.clone();
+    let sockets = manifest.sockets.keys().cloned().sorted().collect();
 
     Ok(Init {
         container,

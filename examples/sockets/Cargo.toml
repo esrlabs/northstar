@@ -44,3 +44,6 @@ type = "proc"
 [package.metadata.npk.target.'aarch64-linux-android'.manifest.mounts."/system"]
 type = "bind"
 host = "/system"
+
+[dependencies]
+anyhow = "1.0.70"

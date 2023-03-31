@@ -1,3 +1,5 @@
+use std::fmt::{self, Display};
+
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
@@ -13,20 +15,30 @@ pub enum Type {
     SeqPacket,
 }
 
+impl Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::Stream => write!(f, "stream"),
+            Type::Datagram => write!(f, "datagram"),
+            Type::SeqPacket => write!(f, "seqpacket"),
+        }
+    }
+}
+
 /// Listening socket.
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
 pub struct Socket {
     /// Socket type.
-    r#type: Type,
+    pub r#type: Type,
     ///p Socket permissions.
-    mode: u32,
+    pub mode: u32,
     /// User.
     #[validate(range(min = 1, message = "uid must be greater than 0"))]
-    uid: Option<u32>,
+    pub uid: Option<u32>,
     /// Group.
     #[validate(range(min = 1, message = "gid must be greater than 0"))]
-    gid: Option<u32>,
+    pub gid: Option<u32>,
 }
 
 #[test]

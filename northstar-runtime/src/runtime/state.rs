@@ -20,6 +20,7 @@ use crate::{
         mount::MountControl,
         repository::{DirRepository, MemRepository, Npk, RepositoryId},
         runtime::{NotificationTx, Pid},
+        sockets,
     },
 };
 use anyhow::{Context, Result};
@@ -50,6 +51,8 @@ use tokio::{
     time,
 };
 use tokio_util::sync::CancellationToken;
+
+use super::sockets::Sockets;
 
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
@@ -86,6 +89,7 @@ pub(super) struct ContainerContext {
     pid: Pid,
     started: time::Instant,
     cgroups: cgroups::CGroups,
+    sockets: Sockets,
     stop: CancellationToken,
     /// Resources used by this container. This list differs from
     /// manifest because the manifest just containers version
@@ -98,6 +102,8 @@ impl ContainerContext {
         // Stop console if there's any any
         self.stop.cancel();
         self.cgroups.destroy().await;
+
+        self.sockets.destroy().await;
     }
 }
 
@@ -491,20 +497,27 @@ impl State {
             None
         };
 
-        // Open a file handle for stdin, stdout and stderr according to the manifest
+        // Open a file handle for stdin, stdout and stderr according to the manifest.
         let ContainerIo { io } = io::open(container, &manifest.io.clone().unwrap_or_default())
             .await
             .expect("IO setup error");
 
-        let sockets = vec![];
+        // Open sockets if any configured in manifest.
+        let (socket_fds, sockets) = sockets::open(
+            self.config.socket_dir.as_path(),
+            container,
+            &manifest.sockets,
+        )
+        .await
+        .expect("Socket setup error");
 
-        // Create container
+        // Create container.
         let config = &self.config;
         let containers = self.containers.keys();
         let pid = self
             .forker
             .create(
-                container, config, &manifest, io, console_fd, sockets, containers,
+                container, config, &manifest, io, console_fd, socket_fds, containers,
             )
             .await?;
 
@@ -583,6 +596,7 @@ impl State {
             pid,
             started,
             cgroups,
+            sockets,
             stop,
             resources,
         });
@@ -772,10 +786,7 @@ impl State {
         exit_status: &ExitStatus,
         is_shutdown: bool,
     ) -> Result<(), Error> {
-        let autostart = self
-            .manifest(container)
-            .ok()
-            .and_then(|manfiest| manfiest.autostart.clone());
+        let autostart = self.manifest(container)?.autostart.clone();
 
         if let Ok(state) = self.state_mut(container) {
             if let Some(process) = state.process.take() {

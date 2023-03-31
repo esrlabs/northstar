@@ -7,9 +7,6 @@ pub trait RawFdExt: AsRawFd {
 
     /// Set non-blocking mode.
     fn set_nonblocking(&self, value: bool) -> Result<()>;
-
-    /// Set close-on-exec flag.
-    fn set_cloexec(&self, value: bool) -> Result<()>;
 }
 
 impl<T: AsRawFd> RawFdExt for T {
@@ -26,23 +23,6 @@ impl<T: AsRawFd> RawFdExt for T {
         flags.set(fcntl::OFlag::O_NONBLOCK, nonblocking);
 
         fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_SETFL(flags))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            .map(drop)
-    }
-
-    fn set_cloexec(&self, value: bool) -> Result<()> {
-        let flags = fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_GETFD)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        let mut flags = fcntl::FdFlag::from_bits(flags).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                "failed to parse file descriptor flags",
-            )
-        })?;
-        flags.set(fcntl::FdFlag::FD_CLOEXEC, value);
-
-        fcntl::fcntl(self.as_raw_fd(), fcntl::FcntlArg::F_SETFD(flags))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
             .map(drop)
     }

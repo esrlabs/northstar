@@ -44,7 +44,6 @@ impl FramedUnixStream {
     /// Send file descriptors over the unix socket connection
     #[allow(unused)]
     pub fn send_fds<T: AsRawFd>(&self, fds: &[T]) -> io::Result<()> {
-        log::info!("Sending fds: {}", fds.len());
         let buf = &[0u8];
         let iov = &[IoSlice::new(buf)];
         let fds = fds.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>();

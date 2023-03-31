@@ -4,7 +4,6 @@ use crate::{
         capabilities::Capability,
         network::Network,
         rlimit::{RLimitResource, RLimitValue},
-        socket::Socket,
     },
     runtime::{
         exit_status::ExitStatus,
@@ -70,11 +69,16 @@ pub struct Init {
     pub rlimits: HashMap<RLimitResource, RLimitValue>,
     pub seccomp: Option<AllowList>,
     pub console: bool,
-    pub sockets: HashMap<String, Socket>,
+    pub sockets: Vec<String>,
 }
 
 impl Init {
-    pub fn run(self, mut stream: FramedUnixStream, console: Option<OwnedFd>) -> ! {
+    pub fn run(
+        self,
+        mut stream: FramedUnixStream,
+        console: Option<OwnedFd>,
+        sockets: Vec<OwnedFd>,
+    ) -> ! {
         // Become a subreaper
         set_child_subreaper(true);
 
@@ -100,7 +104,6 @@ impl Init {
         self.mount();
 
         // Set the root to the containers root mount point
-        debug!("Pivot rooting to {}", self.root.display());
         self.pivot_rootfs(&self.root);
 
         // Set current working directory to root
@@ -124,24 +127,35 @@ impl Init {
 
         loop {
             match stream.recv() {
-                Ok(Some(Message::Exec {
-                    path,
-                    args,
-                    mut env,
-                })) => {
-                    debug!("Execing {} {}", path, args.iter().join(" "));
-
+                Ok(Some(Message::Exec { path, args, env })) => {
                     // The init process got adopted by the forker after the trampoline exited. It is
                     // safe to set the parent death signal now.
                     util::set_parent_death_signal(Signal::SIGKILL);
 
-                    if let Some(fd) = console.as_ref().map(AsRawFd::as_raw_fd) {
-                        // Add the fd number to the environment of the application
-                        let s = unsafe {
-                            NonNulString::from_string_unchecked(format!("NORTHSTAR_CONSOLE={fd}"))
-                        };
-                        env.push(s);
-                    }
+                    let path = CString::from(path);
+                    let args: Vec<_> = args.into_iter().map_into::<CString>().collect();
+                    let env: Vec<_> = {
+                        let env = env.into_iter().map_into::<CString>();
+
+                        // Console fd env variable (if present).
+                        let console = console
+                            .as_ref()
+                            .map(AsRawFd::as_raw_fd)
+                            .map(|fd| format!("NORTHSTAR_CONSOLE={fd}"))
+                            .map(|var| unsafe { NonNulString::from_string_unchecked(var) })
+                            .into_iter()
+                            .map(Into::into);
+
+                        // Set socket env variables.
+                        let sockets = self.sockets.iter().zip(&sockets).map(|(name, fd)| {
+                            let fd = fd.as_raw_fd();
+                            let var = format!("NORTHSTAR_SOCKET_{name}={fd}");
+                            let var = unsafe { NonNulString::from_string_unchecked(var) };
+                            var.into()
+                        });
+
+                        env.chain(console).chain(sockets).collect()
+                    };
 
                     // Start new process inside the container
                     let pid = match unsafe { fork().expect("failed to fork") } {
@@ -154,10 +168,6 @@ impl Init {
                                 filter.apply().expect("failed to apply seccomp filter.");
                             }
 
-                            let path = CString::from(path);
-                            let args: Vec<_> = args.into_iter().map_into::<CString>().collect();
-                            let env: Vec<_> = env.into_iter().map_into::<CString>().collect();
-
                             panic!(
                                 "execve: {:?} {:?}: {:?}",
                                 &path,
@@ -167,12 +177,19 @@ impl Init {
                         }
                     };
 
-                    // Close the console fd used in the container binary only.
+                    // Close the console fd. Used in the container binary only.
                     drop(console);
 
+                    // Close sockets in init.
+                    drop(sockets);
+
+                    // Free some memory.
+                    drop((path, args, env));
+
                     // Inform the forker that we forked.
-                    let message = Message::Forked { pid };
-                    stream.send(&message).expect("failed to send fork result");
+                    stream
+                        .send(&Message::Forked { pid })
+                        .expect("failed to send fork result");
 
                     // Wait for the child to exit
                     let exit_status = loop {
@@ -361,6 +378,8 @@ impl Init {
     /// Set the rootfs to `path`. Thanks to the `youki` project where this code borrowed from.
     /// https://github.com/containers/youki.
     fn pivot_rootfs(&self, path: &Path) {
+        debug!("Pivot rooting to {}", self.root.display());
+
         // Open the path as directory and read only
         let newroot = fcntl::open(
             path,

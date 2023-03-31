@@ -17,11 +17,22 @@ mounts:
   /lib64:
     type: bind
     host: /lib64
-  /sock:
+  # Cannot use `/sockets` here because of a mksquashfs bug....
+  /unix-sockets:
     type: sockets
 sockets:
-  hello:
+  hello-dgram:
     type: datagram
-    mode: 0o777
+    mode: 0o666
+    uid: 1000
+    gid: 1000
+  hello-stream:
+    type: stream
+    mode: 0o666
+    uid: 1000
+    gid: 1000
+  hello-seq-packet:
+    type: seq_packet 
+    mode: 0o666
     uid: 1000
     gid: 1000

@@ -183,8 +183,8 @@ const fn default_token_validity() -> time::Duration {
 #[allow(clippy::unwrap_used)]
 fn console_url() {
     let config = r#"
-run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
 socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
 
@@ -196,8 +196,8 @@ console = "tcp://localhost:4200"
 
     // Invalid url
     let config = r#"
-run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
 socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
 
@@ -212,8 +212,8 @@ console = "http://localhost:4200"
 #[allow(clippy::unwrap_used)]
 fn repository_size() {
     let config = r#"
-run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
 socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
 

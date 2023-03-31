@@ -146,3 +146,15 @@ fn token() -> Result<()> {
     assume("Received: yay!", 5).await?;
     Ok(())
 }
+
+// Sockets
+#[runtime_test]
+fn sockets() -> Result<()> {
+    client().install(&EXAMPLE_SOCKETS_NPK, "mem").await?;
+    client().start(EXAMPLE_SOCKETS).await?;
+    assume("Saying hello!", 5).await?;
+    assume("Received hello!", 5).await?;
+    assume("Saying hello!", 5).await?;
+    assume("Received hello!", 5).await?;
+    Ok(())
+}

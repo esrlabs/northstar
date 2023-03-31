@@ -40,7 +40,7 @@ impl Channel {
                 self.command
                     .send(message)
                     .await
-                    .expect("failed to send response");
+                    .expect("failed to send create request");
 
                 // Send file descriptors. The console fd is optional.
                 if let Some(console) = console {
@@ -52,7 +52,6 @@ impl Channel {
                     self.socket.send_fds(&fds).expect("failed to send fds");
                 } else {
                     let fds: Vec<_> = io.into_iter().chain(sockets.into_iter()).collect();
-                    log::info!("Sending fds: {}", fds.len());
                     self.socket.send_fds(&fds).expect("failed to send fds");
                 }
             }
