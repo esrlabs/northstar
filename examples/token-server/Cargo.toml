@@ -9,7 +9,7 @@ license = "Apache-2.0"
 anyhow = { version = "1.0.70", features = ["backtrace"] }
 base64 = "0.21.0"
 northstar-client = { path = "../../northstar-client" }
-tokio = { version = "1.26.0", features = ["macros", "rt", "net"] }
+tokio = { version = "1.27.0", features = ["macros", "rt", "net"] }
 
 [package.metadata.npk]
 manifest = "manifest.yaml"
