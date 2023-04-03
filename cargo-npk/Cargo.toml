@@ -17,7 +17,7 @@ clap = { version = "4.1.11", features = ["derive"] }
 human_bytes = "0.4.1"
 humantime = "2.1.0"
 northstar-runtime = { version = "^0.7.2-pre", path = "../northstar-runtime", features = ["npk"] }
-serde = { version = "1.0.158", features = ["derive"] }
+serde = { version = "1.0.159", features = ["derive"] }
 tempfile = "3.4.0"
 termcolor = "1.2.0"
 toml = "0.7.3"
