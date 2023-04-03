@@ -17,7 +17,7 @@ nix = { version = "0.26.2", default-features = false }
 northstar-client = { path = "../northstar-client" }
 northstar-runtime = { path = "../northstar-runtime", features = ["api", "runtime"] }
 northstar-tests-derive = { path = "northstar-tests-derive" }
-regex = "1.7.1"
+regex = "1.7.3"
 tempfile = "3.4.0"
 tokio = { version = "1.27.0", features = ["fs", "time"] }
 url = "2.3.1"
