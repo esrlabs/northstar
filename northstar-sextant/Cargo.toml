@@ -17,5 +17,5 @@ ed25519-dalek = "1.0.1"
 env_logger = "0.10.0"
 log = "0.4.17"
 northstar-runtime = { version = "^0.7.2-pre", path = "../northstar-runtime", features = ["npk"] }
-tempfile = "3.4.0"
+tempfile = "3.5.0"
 zip = { version = "0.6.4", default-features = false }
