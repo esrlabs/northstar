@@ -8,6 +8,6 @@ license = "Apache-2.0"
 proc-macro = true
 
 [dependencies]
-proc-macro2 = "1.0.52"
+proc-macro2 = "1.0.56"
 quote = "1.0.26"
 syn = { version = "2.0.12", features = ["full"] }
