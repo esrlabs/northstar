@@ -1,18 +1,17 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Error, Result};
 use clap::Parser;
-use nix::{
-    libc,
-    unistd::{self, Gid},
-};
+use nix::libc;
 use std::{
-    env, fs,
+    fs,
     io::{self, Write},
     path::{Path, PathBuf},
     ptr::null_mut,
     str::FromStr,
-    thread, time,
+    thread,
 };
-use thiserror::Error;
+
+mod inspect;
+mod sockets;
 
 /// Northstar test container
 #[derive(Debug, Parser)]
@@ -28,12 +27,6 @@ enum Io {
     Stderr,
 }
 
-#[derive(Error, Debug)]
-enum Error {
-    #[error("invalid io: {0}")]
-    ParseError(String),
-}
-
 impl FromStr for Io {
     type Err = Error;
 
@@ -41,13 +34,16 @@ impl FromStr for Io {
         match s {
             "stdout" => Ok(Io::Stdout),
             "stderr" => Ok(Io::Stderr),
-            _ => Err(Error::ParseError(s.to_string())),
+            _ => Err(anyhow!("failed to parse")),
         }
     }
 }
 
 #[derive(Debug, Parser)]
 enum Command {
+    CallDeleteModule {
+        flags: u32,
+    },
     Cat {
         #[arg()]
         path: PathBuf,
@@ -62,16 +58,16 @@ enum Command {
         #[arg(short, long, default_value = "stdout")]
         io: Io,
     },
+    Sleep,
+    Socket {
+        socket: String,
+    },
     Touch {
         path: PathBuf,
     },
-    Sleep,
     Write {
         message: String,
         path: PathBuf,
-    },
-    CallDeleteModule {
-        flags: String,
     },
 }
 
@@ -82,8 +78,9 @@ fn main() -> Result<()> {
         Command::CallDeleteModule { flags } => call_delete_module(flags)?,
         Command::Cat { path } => cat(&path)?,
         Command::Crash => crash(),
+        Command::Socket { socket } => sockets::run(&socket)?,
         Command::Exit { code } => exit(code),
-        Command::Inspect => inspect(),
+        Command::Inspect => inspect::run(),
         Command::Print { message, io } => print(&message, &io),
         Command::Sleep => (),
         Command::Touch { path } => touch(&path)?,
@@ -97,21 +94,20 @@ fn main() -> Result<()> {
 
 fn sleep() {
     println!("Sleeping...");
-    thread::sleep(time::Duration::from_secs(u64::MAX));
+    thread::park();
 }
 
-fn dump(file: &str) {
-    println!("{file}:");
-    fs::read_to_string(file)
-        .unwrap_or_else(|_| panic!("dump {file}"))
-        .lines()
-        .for_each(|l| println!("  {l}"));
+fn dump(file: &Path) {
+    println!("{file:?}");
+    fs::File::open(file)
+        .and_then(|mut file| io::copy(&mut file, &mut io::stdout()))
+        .unwrap_or_else(|_| panic!("dump {}", file.display()));
 }
 
 fn cat(path: &Path) -> Result<()> {
     let mut input =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let mut output = std::io::stdout();
+    let mut output = io::stdout();
     io::copy(&mut input, &mut output)
         .map(drop)
         .with_context(|| format!("failed to cat {}", path.display()))?;
@@ -139,73 +135,13 @@ fn write(input: &str, path: &Path) -> Result<()> {
 }
 
 fn touch(path: &Path) -> Result<()> {
-    fs::File::create(path)?;
-    Ok(())
+    fs::File::create(path).map(drop).map_err(Into::into)
 }
 
 /// Call the 'delete_module' syscall with an empty module name. This has no effect and just returns -1.
 /// Since the call is not allowed by the default seccomp profile it is used to test seccomp.
-fn call_delete_module(option: String) -> Result<()> {
-    let option = option.parse::<u32>().unwrap();
+fn call_delete_module(option: u32) -> Result<()> {
     let result = unsafe { libc::syscall(libc::SYS_delete_module, null_mut::<u32>(), option) };
     println!("delete_module syscall was successful ({result})");
     Ok(())
-}
-
-fn inspect() {
-    println!("getpid: {}", unistd::getpid());
-    println!("getppid: {}", unistd::getppid());
-    println!("getuid: {}", unistd::getuid());
-    println!("getgid: {}", unistd::getgid());
-    println!("getsid: {}", unistd::getsid(None).unwrap());
-    println!("getpgid: {}", unistd::getpgid(None).unwrap());
-    println!(
-        "getgroups: {:?}",
-        unistd::getgroups()
-            .expect("getgroups")
-            .iter()
-            .cloned()
-            .map(Gid::as_raw)
-            .collect::<Vec<_>>()
-    );
-    println!(
-        "pwd: {}",
-        env::current_dir().expect("current_dir").display()
-    );
-    println!(
-        "exe: {}",
-        env::current_exe().expect("current_exe").display()
-    );
-
-    for set in &[
-        caps::CapSet::Ambient,
-        caps::CapSet::Bounding,
-        caps::CapSet::Effective,
-        caps::CapSet::Inheritable,
-        caps::CapSet::Permitted,
-    ] {
-        println!(
-            "caps {}: {:?}",
-            format!("{set:?}").as_str().to_lowercase(),
-            caps::read(None, *set).expect("failed to read caps")
-        );
-    }
-
-    println!("/proc/self/fd:");
-    fs::read_dir("/proc/self/fd")
-        .expect("read_dir /proc/self/fd")
-        .map(|e| e.unwrap().path())
-        .map(|p| (p.clone(), fs::read_link(p).expect("readlink entry")))
-        .filter(|(_, l)| l != &PathBuf::from(format!("/proc/{}/fd", std::process::id())))
-        .for_each(|(p, l)| {
-            println!("    {}: {}", p.display(), l.display());
-        });
-    // Substract the ReadDir fd
-    println!(
-        "    total: {}",
-        fs::read_dir("/proc/self/fd").unwrap().count() - 1
-    );
-
-    dump("/proc/self/mounts");
-    dump("/proc/self/limits");
 }

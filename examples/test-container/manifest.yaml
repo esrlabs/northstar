@@ -38,6 +38,8 @@ mounts:
     version: '>=0.0.1'
     dir: /
     options: nosuid,nodev,noexec
+  /unix-sockets:
+    type: sockets
 rlimits:
   nproc:
     soft: 10000
@@ -52,5 +54,27 @@ seccomp:
           1,
       ]
       mask: 0x06
+    clone: any # Needed for socket tests.
 selinux:
   context: unconfined_u:object_r:user_home_t:s0
+sockets:
+  datagram:
+    type: datagram
+    mode: 0o666
+    uid: 1000
+    gid: 1000
+  stream:
+    type: stream
+    mode: 0o666
+    uid: 1000
+    gid: 1000
+  seq-packet:
+    type: seq_packet 
+    mode: 0o666
+    uid: 1000
+    gid: 1000
+  # Socket with permission for the test container. Accesing the
+  # socket should fail with EACCES.
+  no_permission:
+    type: datagram
+    mode: 0o000
