@@ -131,7 +131,7 @@ pub struct Manifest {
     pub rlimits: HashMap<rlimit::RLimitResource, rlimit::RLimitValue>,
     /// Sockets.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub sockets: HashMap<String, socket::Socket>,
+    pub sockets: HashMap<NonNulString, socket::Socket>,
     /// IO configuration
     #[serde(default)]
     pub io: Option<io::Io>,
@@ -247,6 +247,16 @@ seccomp:
 sockets:
   foo:
     type: stream
+    mode: 0o600
+    uid: 100
+    gid: 1000
+  bar:
+    type: datagram
+    mode: 0o600
+    uid: 100
+    gid: 1000
+  baz:
+    type: seq_packet
     mode: 0o600
     uid: 100
     gid: 1000

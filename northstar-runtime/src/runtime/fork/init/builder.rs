@@ -41,7 +41,13 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     let rlimits = manifest.rlimits.clone();
     let seccomp = seccomp_filter(manifest);
     let uid = manifest.uid;
-    let sockets = manifest.sockets.keys().cloned().sorted().collect();
+    let sockets = manifest
+        .sockets
+        .keys()
+        .cloned()
+        .map(Into::into)
+        .sorted()
+        .collect();
 
     Ok(Init {
         container,

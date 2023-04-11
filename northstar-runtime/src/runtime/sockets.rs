@@ -13,7 +13,7 @@ use std::{
 use tokio::fs;
 
 use crate::{
-    common::container::Container,
+    common::{container::Container, non_nul_string::NonNulString},
     npk::manifest::socket::{Socket, Type},
 };
 
@@ -37,7 +37,7 @@ impl Sockets {
 pub(crate) async fn open(
     socket_dir: &Path,
     container: &Container,
-    socket_configuration: &HashMap<String, Socket>,
+    socket_configuration: &HashMap<NonNulString, Socket>,
 ) -> Result<(Vec<OwnedFd>, Sockets)> {
     let mut fds = Vec::with_capacity(socket_configuration.len());
     let dir = socket_dir.join(container.name().as_ref());

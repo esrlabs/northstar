@@ -91,6 +91,12 @@ impl From<NonNulString> for CString {
     }
 }
 
+impl Into<String> for NonNulString {
+    fn into(self) -> String {
+        self.0
+    }
+}
+
 impl TryFrom<String> for NonNulString {
     type Error = InvalidNulChar;
 
