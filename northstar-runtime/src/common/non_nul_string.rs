@@ -91,9 +91,9 @@ impl From<NonNulString> for CString {
     }
 }
 
-impl Into<String> for NonNulString {
-    fn into(self) -> String {
-        self.0
+impl From<NonNulString> for String {
+    fn from(s: NonNulString) -> String {
+        s.0
     }
 }
 

@@ -297,4 +297,22 @@ impl Client {
             }
         }
     }
+
+    /// Wait for a notification that `container` exited with `exit_status`.
+    pub async fn assume_exit(
+        &mut self,
+        container: &str,
+        exit_status: ExitStatus,
+        timeout: u64,
+    ) -> Result<()> {
+        let container = Container::try_from(container)?;
+        let n = |n: &Notification| matches!(n, Notification::Exit(c, s) if container == *c && exit_status == *s);
+        client().assume_notification(n, timeout).await
+    }
+
+    /// Wait for a notification that `container` exited with exit code 0.
+    pub async fn assume_exit_success(&mut self, container: &str, timeout: u64) -> Result<()> {
+        let exit_status = ExitStatus::Exit { code: 0 };
+        self.assume_exit(container, exit_status, timeout).await
+    }
 }
