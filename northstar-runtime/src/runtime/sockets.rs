@@ -51,6 +51,7 @@ pub(crate) async fn open(
         .iter()
         .sorted_by_key(|(name, _)| name.as_str())
     {
+        let ty = &socket_config.r#type;
         let path = dir.join(name);
 
         if path.exists() {
@@ -59,7 +60,7 @@ pub(crate) async fn open(
                 .context("failed to remove stale socket")?;
         }
 
-        let r#type = match socket_config.r#type {
+        let r#type = match ty {
             Type::Stream => SockType::Stream,
             Type::Datagram => SockType::Datagram,
             Type::SeqPacket => SockType::SeqPacket,
@@ -71,14 +72,11 @@ pub(crate) async fn open(
         debug!("Created socket {name} ({}) for {container}", socket);
 
         let addr = UnixAddr::new(&path).context("invalid unix path")?;
-        debug!(
-            "Binding socket {name} for {container} ({})",
-            socket_config.r#type
-        );
+        debug!("Binding socket {name} for {container} ({ty})",);
         socket::bind(socket, &addr).context("failed to bind")?;
 
-        // Streaming sockets need to be listen()ed on.
-        if r#type == SockType::Stream {
+        // Streaming and seqpacket sockets need to be listened on.
+        if matches!(ty, Type::Stream | Type::SeqPacket) {
             socket::listen(socket, 100).context("failed to listen")?;
         }
 
