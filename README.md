@@ -165,71 +165,8 @@ usecase. See [console](./doc/console.md) for details why.
 ## Configuration
 
 The example executable `northstar` reads a configuration file that represents
-`northstar_runtime::runtime::config::Config`.
-
-```toml
-# Directory where containers are mounted
-run_dir = "target/northstar/run"
-# Directory for `persist` mounts of containers
-data_dir = "target/northstar/data"
-# Log directory for debug logs and traces
-log_dir = "target/northstar/logs"
-# Top level cgroup name
-cgroup = "northstar"
-# Event loop buffer size
-event_buffer_size = 256
-# Notification buffer size
-notification_buffer_size = 64
-# Device mapper device timeout
-device_mapper_device_timeout = "2s"
-# Token validity
-token_validity = "1m"
-# Loop device timeout
-loop_device_timeout = "2s"
-
-# Debug TCP console on localhost with full access
-# [debug]
-# console = "tcp://localhost:4200"
-# Start a `strace -p PID ...` instance after a container is started.
-# The execution of the application is deferred until strace is attached.
-[debug.strace]
-# Configure the output of the strace instance attached to a started
-# application. "file" for a file named strace-<PID>-name.log or "log"
-# to forward the strace output to the runtimes log.
-output = "log"
-# Optional additional flags passed to `strace`
-flags = "-f -s 256"
-# Optional path to the strace binary
-path = /bin/strace
-# Include the runtime system calls prior to exeve
-include_runtime = true
-
-# Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
-# after a container is started.
-[debug.perf]
-# Optional path to the perf binary
-path = "/bin/perf"
-# Optional additional flags passed to `perf`
-flags = ""
-
-# NPK Repository `memory` configuration. This is a not persistent in memory repository
-[repositories.memory]
-type = "mem"
-# Optional key for this repository.
-key = "examples/northstar.pub"
-# Maximum number of containers that can be stored in this repository.
-capacity_num = 10
-# Maximum total size of all containers in this repository.
-capacity_size = "10 MB"
-
-# NPK Repository `default` in `dir`
-[repositories.default]
-type = { fs = { dir = "target/northstar/repository" }}
-# Optional key for this repository.
-key = "examples/northstar.pub"
-# Mount the containers from this repository on runtime start. Default: false
-mount_on_start = true
-```
+[northstar_runtime::config::Config](https://docs.rs/northstar-runtime/latest/northstar_runtime/runtime/config/index.html).
+ Example with comments [here](northstar.toml).
 
 ### Repositories
 
