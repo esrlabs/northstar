@@ -63,18 +63,22 @@ sockets:
     mode: 0o666
     uid: 1000
     gid: 1000
+    passcred: true
   stream:
     type: stream
     mode: 0o666
     uid: 1000
     gid: 1000
+    passcred: true
   seq-packet:
     type: seq_packet 
     mode: 0o666
     uid: 1000
     gid: 1000
+    passcred: true
   # Socket with permission for the test container. Accesing the
   # socket should fail with EACCES.
   no_permission:
     type: datagram
     mode: 0o000
+    passcred: false

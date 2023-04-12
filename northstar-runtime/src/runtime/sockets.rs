@@ -3,7 +3,7 @@ use itertools::Itertools;
 use log::debug;
 use nix::sys::{
     socket,
-    socket::{AddressFamily, SockFlag, SockType, UnixAddr},
+    socket::{sockopt, AddressFamily, SockFlag, SockType, UnixAddr},
 };
 use std::{
     collections::HashMap,
@@ -66,13 +66,18 @@ pub(crate) async fn open(
             Type::SeqPacket => SockType::SeqPacket,
         };
 
+        debug!("Creating socket {name}");
         let socket = socket::socket(AddressFamily::Unix, r#type, SockFlag::empty(), None)
             .context("failed to create socket")?;
 
-        debug!("Created socket {name} ({}) for {container}", socket);
+        if socket_config.passcred == Some(true) {
+            debug!("Setting SO_PASSCRED on socket {name}");
+            socket::setsockopt(socket, sockopt::PassCred, &true)
+                .context("failed to set SO_PASSCRED")?;
+        }
 
         let addr = UnixAddr::new(&path).context("invalid unix path")?;
-        debug!("Binding socket {name} for {container} ({ty})",);
+        debug!("Binding socket {name} ({ty})",);
         socket::bind(socket, &addr).context("failed to bind")?;
 
         // Streaming and seqpacket sockets need to be listened on.

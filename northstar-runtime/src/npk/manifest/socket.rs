@@ -34,11 +34,16 @@ pub struct Socket {
     ///p Socket permissions.
     pub mode: u32,
     /// User.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, message = "uid must be greater than 0"))]
     pub uid: Option<u32>,
     /// Group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, message = "gid must be greater than 0"))]
     pub gid: Option<u32>,
+    /// Set SO_PASSCRED
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passcred: Option<bool>,
 }
 
 #[test]
