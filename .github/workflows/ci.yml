@@ -111,10 +111,15 @@ jobs:
         uses: rui314/setup-mold@v1
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Containers
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - name: Build containers
         run: cargo make
       - name: Test
-        run: cargo test --all-features
+        uses: actions-rs/cargo@v1
+        with:
+          command: nextest
+          args: run
 
   doc:
     name: Documentation
