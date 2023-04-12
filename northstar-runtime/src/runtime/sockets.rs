@@ -1,9 +1,13 @@
 use anyhow::{Context, Result};
 use itertools::Itertools;
 use log::debug;
-use nix::sys::{
-    socket,
-    socket::{sockopt, AddressFamily, SockFlag, SockType, UnixAddr},
+use nix::{
+    sys::{
+        socket,
+        socket::{sockopt, AddressFamily, SockFlag, SockType, UnixAddr},
+        stat::{fchmod, Mode},
+    },
+    unistd::{fchown, Gid, Uid},
 };
 use std::{
     collections::HashMap,
@@ -47,11 +51,11 @@ pub(crate) async fn open(
         fs::create_dir_all(&dir).await?;
     }
 
-    for (name, socket_config) in socket_configuration
+    for (name, descriptor) in socket_configuration
         .iter()
         .sorted_by_key(|(name, _)| name.as_str())
     {
-        let ty = &socket_config.r#type;
+        let ty = &descriptor.r#type;
         let path = dir.join(name);
 
         if path.exists() {
@@ -70,7 +74,7 @@ pub(crate) async fn open(
         let socket = socket::socket(AddressFamily::Unix, r#type, SockFlag::empty(), None)
             .context("failed to create socket")?;
 
-        if socket_config.passcred == Some(true) {
+        if descriptor.passcred == Some(true) {
             debug!("Setting SO_PASSCRED on socket {name}");
             socket::setsockopt(socket, sockopt::PassCred, &true)
                 .context("failed to set SO_PASSCRED")?;
@@ -83,6 +87,24 @@ pub(crate) async fn open(
         // Streaming and seqpacket sockets need to be listened on.
         if matches!(ty, Type::Stream | Type::SeqPacket) {
             socket::listen(socket, 100).context("failed to listen")?;
+        }
+
+        debug!("Setting socket mode {:o} on {name}", descriptor.mode);
+        fchmod(socket, Mode::from_bits_truncate(descriptor.mode))
+            .context("failed to set socket mode")?;
+
+        if descriptor.uid.is_some() || descriptor.gid.is_some() {
+            debug!(
+                "Setting socket ownership {}:{} on {name}",
+                descriptor.uid.map(|d| d.to_string()).unwrap_or("-".into()),
+                descriptor.gid.map(|d| d.to_string()).unwrap_or("-".into()),
+            );
+            fchown(
+                socket,
+                descriptor.uid.map(Uid::from_raw),
+                descriptor.gid.map(Gid::from_raw),
+            )
+            .context("failed to set socket ownership")?;
         }
 
         let socket = unsafe { OwnedFd::from_raw_fd(socket) };
