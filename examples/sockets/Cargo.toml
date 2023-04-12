@@ -27,7 +27,7 @@ use_cross = true
 [package.metadata.npk.target.'aarch64-linux-android'.manifest]
 name = "sockets"
 version = "0.0.1"
-init = "/bin/hello-world"
+init = "/bin/sockets"
 uid = 1000
 gid = 1000
 

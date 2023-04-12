@@ -21,18 +21,8 @@ mounts:
   /unix-sockets:
     type: sockets
 sockets:
-  hello-dgram:
+  hello:
     type: datagram
-    mode: 0o666
-    uid: 1000
-    gid: 1000
-  hello-stream:
-    type: stream
-    mode: 0o666
-    uid: 1000
-    gid: 1000
-  hello-seq-packet:
-    type: seq_packet 
     mode: 0o666
     uid: 1000
     gid: 1000
