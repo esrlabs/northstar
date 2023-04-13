@@ -22,6 +22,7 @@ Northstar is an embedded container runtime prototype for Linux.
   - [Configuration](#configuration)
     - [Repositories](#repositories)
   - [Console](#console)
+  - [Debugging](#debugging)
   - [cargo-npk](#cargo-npk)
   - [Integration tests](#integration-tests)
   - [Integration](#integration)
@@ -216,6 +217,12 @@ runtime.
 Details about the model used as json payload are found
 [here](https://docs.rs/northstar-runtime/latest/northstar_runtime/api/model/index.html).
 
+## Debugging
+
+Debugging containers can be hard. Most useful information can be obtained by
+configuring various debug commands that are spawned with the container e.g `strace`.
+Check the `debug` section of the [runtime configuration](northstar.toml) for examples.
+
 ## cargo-npk
 
 The [cargo-npk](cargo-npk) subcommand is a `cargo` subcommand for building npks
@@ -254,7 +261,7 @@ recommends [nextest](https://nexte.st) 🙂.
 
 ## Integration
 
-Notes about integrating Northstar into an ebemdded Linux system can be found [here](./doc/integration.md).
+Notes about integrating Northstar into an embedded Linux system can be found [here](./doc/integration.md).
 
 ## Container launch sequence
 

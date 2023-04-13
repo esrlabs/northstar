@@ -84,7 +84,6 @@ fn init() -> Result<Config, Error> {
 
     fs::create_dir_all(&config.run_dir).context("failed to create run_dir")?;
     fs::create_dir_all(&config.data_dir).context("failed to create data_dir")?;
-    fs::create_dir_all(&config.log_dir).context("failed to create log dir")?;
 
     // Skip mount namespace setup in case it's disabled for debugging purposes
     if !opt.disable_mount_namespace {

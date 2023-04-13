@@ -2,8 +2,6 @@
 run_dir = "target/northstar/run"
 # Directory for `persist` mounts of containers
 data_dir = "target/northstar/data"
-# Log directory for debug logs and traces
-log_dir = "target/northstar/logs"
 # Top level cgroup name
 cgroup = "northstar"
 # Event loop buffer size
@@ -18,27 +16,17 @@ loop_device_timeout = "5s"
 # Debug TCP console on localhost
 [debug]
 console = "tcp://localhost:4200"
-# Start a `strace -p PID ...` instance after a container is started.
-# The execution of the application is deferred until strace is attached.
-# [debug.strace]
-# Configure the output of the strace instance attached to a started
-# application. "file" for a file named strace-<PID>-name.log or "log"
-# to forward the strace output to the runtimes log.
-# output = "log"
-# Optional additional flags passed to `strace`
-# flags = "-f -s 256"
-# Optional path to the strace binary
-# path = /bin/strace
-# Include the runtime system calls prior to exeve
-# include_runtime = true
-
-# Start a `perf record -p PID -o LOG_DIR/perf-PID-NAME.perf FLAGS` instance
-# after a container is started.
-# [debug.perf]
-# Optional path to the perf binary
-# path = "/bin/perf"
-# Optional additional flags passed to `perf`
-# flags = ""
+# Start a set of commands after a container is started.
+# <PID> is replaced with the init PID of the container.
+# <CONTAINER> is replaced with the container name.
+# stdout and stderr are redirected to the runtime log.
+# The spawned commands are *not* killed when the container is stopped.
+commands = [
+    # "sudo strace -f -s 256 -p <PID>", # strace to log
+    # "sudo strace -c -p <PID>", # strace to log and count syscalls
+    # "sudo strace -f -s 256 -p <PID> -o /tmp/strace-<CONTAINER>-<PID>.log" # strace to file
+    # "sudo perf record -p <PID> -o /tmp/perf-<PID>-<CONTAINER>.perf -g -F 99" # perf to file
+]
 
 # NPK Repository `memory` configuration. This is a not persistent in memory repository
 [repositories.memory]

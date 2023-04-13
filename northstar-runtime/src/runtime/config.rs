@@ -21,8 +21,6 @@ pub struct Config {
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored
     pub data_dir: PathBuf,
-    /// Directory for logfile
-    pub log_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNulString,
     /// Event loop buffer size
@@ -83,50 +81,12 @@ pub struct Debug {
     /// Console configuration
     #[serde(deserialize_with = "console")]
     pub console: Url,
-    /// Strace options
-    pub strace: Option<debug::Strace>,
-    /// perf options
-    pub perf: Option<debug::Perf>,
-}
 
-/// Container debug facilities
-pub mod debug {
-    use serde::Deserialize;
-    use std::path::PathBuf;
-
-    /// strace output configuration
-    #[derive(Clone, Debug, Deserialize)]
-    #[serde(rename_all(deserialize = "snake_case"))]
-    pub enum StraceOutput {
-        /// Log to a file in log_dir
-        File,
-        /// Log the runtimes logging system
-        Log,
-    }
-
-    /// Strace debug options
-    #[derive(Clone, Debug, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct Strace {
-        /// Log to a file in log_dir
-        pub output: StraceOutput,
-        /// Path to the strace binary
-        pub path: Option<PathBuf>,
-        /// Additional strace command line flags options
-        pub flags: Option<String>,
-        /// Include strace output before final execve
-        pub include_runtime: Option<bool>,
-    }
-
-    /// perf profiling options
-    #[derive(Clone, Debug, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct Perf {
-        /// Path to the perf binary
-        pub path: Option<PathBuf>,
-        /// Optional additional flags
-        pub flags: Option<String>,
-    }
+    /// Commands to run before the container is started.
+    //  <CONTAINER> is replaced with the container name.
+    //  <PID> is replaced with the container init pid.
+    #[serde(default)]
+    pub commands: Vec<String>,
 }
 
 impl Config {
@@ -134,7 +94,6 @@ impl Config {
     pub(crate) fn check(&self) -> anyhow::Result<()> {
         check_rw_directory(&self.run_dir).context("checking run_dir")?;
         check_rw_directory(&self.data_dir).context("checking data_dir")?;
-        check_rw_directory(&self.log_dir).context("checking log_dir")?;
         Ok(())
     }
 }
@@ -223,7 +182,6 @@ fn console_url() {
     let config = r#"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
-log_dir = "target/northstar/logs"
 cgroup = "northstar"
 
 [debug]
@@ -236,7 +194,6 @@ console = "tcp://localhost:4200"
     let config = r#"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
-log_dir = "target/northstar/logs"
 cgroup = "northstar"
 
 [debug]
@@ -252,7 +209,6 @@ fn repository_size() {
     let config = r#"
 run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
-log_dir = "target/northstar/logs"
 cgroup = "northstar"
 
 [repositories.memory]

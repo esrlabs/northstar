@@ -85,7 +85,6 @@ impl ContainerState {
 pub(super) struct ContainerContext {
     pid: Pid,
     started: time::Instant,
-    debug: super::debug::Debug,
     cgroups: cgroups::CGroups,
     stop: CancellationToken,
     /// Resources used by this container. This list differs from
@@ -98,12 +97,6 @@ impl ContainerContext {
     async fn destroy(self) {
         // Stop console if there's any any
         self.stop.cancel();
-
-        self.debug
-            .destroy()
-            .await
-            .expect("failed to destroy debug utilities");
-
         self.cgroups.destroy().await;
     }
 }
@@ -507,7 +500,7 @@ impl State {
             .await?;
 
         // Debug
-        let debug = super::debug::Debug::new(&self.config, &manifest, pid).await?;
+        super::debug::start(&self.config, container, pid).await?;
 
         // CGroups
         let cgroups = {
@@ -567,10 +560,7 @@ impl State {
         // Send exec request to launcher
         if let Err(e) = self.forker.exec(container.clone(), init, args, env).await {
             warn!("Failed to exec {} ({}): {}", container, pid, e);
-
             stop.cancel();
-
-            debug.destroy().await.expect("failed to destroy debug");
             cgroups.destroy().await;
             return Err(e);
         }
@@ -583,7 +573,6 @@ impl State {
         container_state.process = Some(ContainerContext {
             pid,
             started,
-            debug,
             cgroups,
             stop,
             resources,
