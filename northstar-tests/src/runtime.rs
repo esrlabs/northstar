@@ -132,9 +132,7 @@ impl Runtime {
             repositories,
             debug: Some(config::Debug {
                 console: console_url(),
-                commands: vec!(
-                    "sudo strace -f -s 256 -p <PID>".into(),
-                )
+                commands: vec!["sudo strace -c -p <PID>".into()],
             }),
         };
         let runtime = Northstar::new(config)?;
