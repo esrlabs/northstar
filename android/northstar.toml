@@ -1,6 +1,5 @@
 run_dir = "/data/northstar/run"
 data_dir = "/data/northstar/data"
-log_dir = "/data/northstar/logs"
 cgroup = "northstar"
 
 # Debug TCP console on localhost with full access
@@ -10,8 +9,3 @@ console = "tcp://localhost:4200"
 [repositories.system]
 key = "/system/etc/northstar/system.pub"
 type = { fs = { dir = "/system/northstar/system" }}
-
-#[debug.strace]
-#output = "file"
-#flags = "-f -s 256"
-#include_runtime = true
