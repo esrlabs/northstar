@@ -16,7 +16,7 @@ use std::{
     ffi::{c_void, CString},
     os::unix::prelude::PermissionsExt,
     path::{Path, PathBuf},
-    ptr::null,
+    ptr::null, fs::Permissions,
 };
 use tokio::fs;
 
@@ -282,12 +282,7 @@ async fn persist(
     ))?;
 
     log::debug!("Chmod {} to 700", source.display());
-    let mut permissions = fs::metadata(&source)
-        .await
-        .with_context(|| format!("failed to get permissions of {}", source.display()))?
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&source, permissions)
+    fs::set_permissions(&source, Permissions::from_mode(0o755))
         .await
         .with_context(|| format!("failed to set permission on {}", source.display()))?;
 
