@@ -20,4 +20,3 @@ northstar-runtime = { version = "^0.7.2-pre", path = "../northstar-runtime", fea
 serde = { version = "1.0.159", features = ["derive"] }
 tempfile = "3.5.0"
 termcolor = "1.2.0"
-toml = "0.7.3"
