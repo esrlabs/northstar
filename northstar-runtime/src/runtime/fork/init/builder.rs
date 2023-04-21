@@ -14,9 +14,10 @@ use log::warn;
 use nix::{mount::MsFlags, unistd};
 use std::{
     ffi::{c_void, CString},
+    fs::Permissions,
     os::unix::prelude::PermissionsExt,
     path::{Path, PathBuf},
-    ptr::null, fs::Permissions,
+    ptr::null,
 };
 use tokio::fs;
 
