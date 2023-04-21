@@ -5,7 +5,7 @@
 
 use anyhow::{anyhow, Context, Error};
 use clap::Parser;
-use log::{debug, info, warn};
+use log::{debug, info};
 use nix::{
     mount::{mount, MsFlags},
     sched::unshare,
@@ -138,7 +138,7 @@ async fn run(northstar: Northstar) -> Result<(), Error> {
     match status {
         Ok(_) => exit(0),
         Err(e) => {
-            warn!("Runtime exited with {:?}", e);
+            eprintln!("Runtime exited with {:?}", e);
             exit(1);
         }
     }
