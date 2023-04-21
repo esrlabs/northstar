@@ -18,6 +18,7 @@ use crate::{
         io,
         io::ContainerIo,
         mount::MountControl,
+        persistence,
         repository::{DirRepository, MemRepository, Npk, RepositoryId},
         runtime::{NotificationTx, Pid},
         sockets,
@@ -510,6 +511,9 @@ impl State {
         )
         .await
         .expect("Socket setup error");
+
+        // Setup persistent storage (if any)
+        persistence::setup(&self.config, &manifest).await?;
 
         // Create container.
         let config = &self.config;

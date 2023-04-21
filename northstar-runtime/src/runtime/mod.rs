@@ -11,6 +11,7 @@ mod io;
 mod ipc;
 mod key;
 mod mount;
+mod persistence;
 mod repository;
 #[allow(clippy::module_inception)]
 mod runtime;

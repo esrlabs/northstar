@@ -1625,6 +1625,7 @@ dependencies = [
  "tokio-test",
  "tokio-util",
  "toml 0.7.3",
+ "umask",
  "url",
  "uuid",
  "validator",
@@ -2804,6 +2805,15 @@ name = "typenum"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
+
+[[package]]
+name = "umask"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec9a46c2549e35c054e0ffe281a3a6ec0007793db4df106604d37ed3f4d73d1c"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "unarray"
