@@ -212,6 +212,7 @@ impl State {
     }
 
     async fn autostart(&mut self) -> Result<(), Error> {
+        let start = time::Instant::now();
         // List of containers from all repositories with the autostart flag set
         let mut autostarts = Vec::with_capacity(self.containers.len());
         // List of containers that need to be mounted
@@ -257,15 +258,19 @@ impl State {
             self.mount_all(&to_mount).await;
         }
 
-        for (container, autostart) in autostarts {
+        for (container, autostart) in &autostarts {
             info!("Autostarting {} ({:?})", container, autostart);
-            if let Err(e) = self
-                .start(&container, &[], &HashMap::with_capacity(0))
-                .await
-            {
-                Self::warn_autostart_failure(&container, &autostart, e)?
+            if let Err(e) = self.start(container, &[], &HashMap::with_capacity(0)).await {
+                Self::warn_autostart_failure(container, autostart, e)?
             }
         }
+
+        let duration = start.elapsed();
+        info!(
+            "Successfully started {} container(s) in {}",
+            autostarts.len(),
+            format_duration(duration)
+        );
 
         Ok(())
     }
