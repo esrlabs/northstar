@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Result};
 use futures::{Future, FutureExt};
 use log::{debug, warn};
-use loopdev::LoopControl;
+use loopdev::{LoopControl, LoopDevice};
 use std::{
     os::unix::{io::AsRawFd, prelude::RawFd},
     path::{Path, PathBuf},
@@ -142,52 +142,27 @@ fn mount(
     verity: bool,
     lo_timeout: time::Duration,
 ) -> Result<()> {
-    // Acquire a loop device and attach the backing file. This operation is racy because
-    // getting the next free index and attaching is not atomic. Retry the operation in a
-    // loop until successful or timeout.
-    let start = time::Instant::now();
-
     if !target.exists() {
         debug!("Creating mount point {}", target.display());
         std::fs::create_dir_all(target)
             .with_context(|| format!("failed to create directory {}", target.display()))?;
     }
 
-    let loop_device = loop {
-        let loop_device = lc.next_free()?;
-        if loop_device
-            .with()
-            .offset(fsimg_offset)
-            .size_limit(fsimg_size)
-            .read_only(true)
-            .autoclear(true)
-            .attach_fd(fd)
-            .is_ok()
-        {
-            break loop_device;
-        }
-        if start.elapsed() > lo_timeout {
-            bail!("failed to acquire loop device: timeout after {lo_timeout:?}");
-        }
-    };
+    // losetup
+    let (loopdevice, loopdevice_path) =
+        losetup(container, &lc, fd, fsimg_offset, fsimg_size, lo_timeout)?;
 
     let (device, dm_name) = if !verity {
         // We're done. Use the loop device path e.g. /dev/loop4
-        let path = loop_device
-            .path()
-            .ok_or_else(|| anyhow!("failed to get loop device path"))?;
-        (path, None)
+        (loopdevice_path, None)
     } else {
         let name = format!("northstar-{}", nanoid::nanoid!());
-        let data_device = loop_device
-            .path()
-            .ok_or_else(|| anyhow!("failed to get loop device path"))?;
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
-                debug!("Using loop device {}", data_device.display());
+                debug!("Using loop device {}", loopdevice_path.display());
                 dmsetup(
                     dm.clone(),
-                    &data_device,
+                    &loopdevice_path,
                     header,
                     &name,
                     &hashes.fs_verity_hash,
@@ -202,11 +177,11 @@ fn mount(
                 // The loopdevice has been attached before. Ensure that it is detached in order
                 // to avoid leaking the loop device. If the detach failed something is really
                 // broken and probably best is to propagate the error with a panic.
-                let path = loop_device
-                    .path()
-                    .ok_or_else(|| anyhow!("failed to get loop device path"))?;
-                warn!("Detaching {} because of failed dmsetup", path.display());
-                loop_device
+                warn!(
+                    "Detaching {} because of failed dmsetup",
+                    loopdevice_path.display()
+                );
+                loopdevice
                     .detach()
                     .expect("failed to detach loopback device");
 
@@ -250,6 +225,49 @@ fn mount(
     }
 
     mount_result.map_err(Into::into)
+}
+
+fn losetup(
+    container: &Container,
+    lc: &LoopControl,
+    fd: RawFd,
+    offset: u64,
+    size: u64,
+    timeout: time::Duration,
+) -> Result<(LoopDevice, PathBuf)> {
+    let start = time::Instant::now();
+
+    // Acquire a loop device and attach the backing file. This operation is racy because
+    // getting the next free index and attaching is not atomic. Retry the operation in a
+    // loop until successful or timeout.
+    for n in 1..u64::MAX {
+        let loop_device = lc.next_free()?;
+        if loop_device
+            .with()
+            .offset(offset)
+            .size_limit(size)
+            .read_only(true)
+            .autoclear(true)
+            .attach_fd(fd)
+            .is_ok()
+        {
+            let path = loop_device
+                .path()
+                .ok_or_else(|| anyhow!("failed to get loop device path"))?;
+            debug!(
+                "Attached {container} to {} after {n} attempt(s) in {:?}",
+                path.display(),
+                start.elapsed()
+            );
+            return Ok((loop_device, path));
+        }
+
+        if start.elapsed() > timeout {
+            bail!("failed to acquire loop device for {container} within {timeout:?}");
+        }
+    }
+
+    unreachable!()
 }
 
 fn dmsetup(
