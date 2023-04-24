@@ -152,7 +152,7 @@ fn token() -> Result<()> {
 fn sockets() -> Result<()> {
     client().install(&EXAMPLE_SOCKETS_NPK, "mem").await?;
     client().start(EXAMPLE_SOCKETS).await?;
-    assume("Connecting to /unix-sockets/sockets/hello", 5).await?;
+    assume("Connecting to /unix-sockets/sockets:0.0.1:hello", 5).await?;
     assume("Received Hello!", 5).await?;
     Ok(())
 }

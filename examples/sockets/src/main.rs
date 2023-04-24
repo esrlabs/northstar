@@ -36,7 +36,7 @@ fn server() {
 // The code below normally runs in a different container...
 fn client() {
     // Socket path.
-    let path = Path::new("/unix-sockets").join("sockets").join("hello");
+    let path = Path::new("/unix-sockets").join("sockets:0.0.1:hello");
 
     println!("Connecting to {}", path.display());
     let socket = UnixDatagram::unbound().expect("failed to create socket");

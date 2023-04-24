@@ -31,9 +31,8 @@ unsafe fn fd(socket: &str) -> Result<OwnedFd> {
 }
 
 fn connect(socket: &str) -> Result<()> {
-    let path = Path::new("/unix-sockets")
-        .join("test-container")
-        .join(socket);
+    let socket_filename = format!("test-container:0.0.1:{}", socket);
+    let path = Path::new("/unix-sockets").join(socket_filename);
 
     println!("Connecting to {}", path.display());
 

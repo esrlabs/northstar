@@ -18,6 +18,8 @@ pub(crate) async fn setup(config: &config::Config, manifest: &Manifest) -> Resul
         .iter()
         .any(|(_, mount)| matches!(mount, Mount::Persist))
     {
+        // The directory is the data directory + the container name. The version is not included
+        // because the persist directory is shared between versions.
         let dir = config.data_dir.join(manifest.name.as_ref());
 
         // mkdir
@@ -30,9 +32,9 @@ pub(crate) async fn setup(config: &config::Config, manifest: &Manifest) -> Resul
 
         // chmod
         debug!(
-            "Chmod {} to {}",
+            "Setting directory mode {} on {}",
+            umask::Mode::from(PERSIST_DIR_PERMISSIONS),
             dir.display(),
-            umask::Mode::from(PERSIST_DIR_PERMISSIONS)
         );
         fs::set_permissions(&dir, Permissions::from_mode(PERSIST_DIR_PERMISSIONS))
             .await

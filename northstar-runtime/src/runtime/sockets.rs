@@ -5,13 +5,16 @@ use nix::{
     sys::{
         socket,
         socket::{sockopt, AddressFamily, SockFlag, SockType, UnixAddr},
-        stat::{fchmod, Mode},
     },
     unistd::{fchown, Gid, Uid},
 };
 use std::{
     collections::HashMap,
-    os::fd::{FromRawFd, OwnedFd},
+    fs::Permissions,
+    os::{
+        fd::{FromRawFd, OwnedFd},
+        unix::prelude::PermissionsExt,
+    },
     path::{Path, PathBuf},
 };
 use tokio::fs;
@@ -25,14 +28,16 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct Sockets {
     /// Parent directory of sockets.
-    dir: PathBuf,
+    sockets: Vec<PathBuf>,
 }
 
 impl Sockets {
     pub async fn destroy(self) {
-        if self.dir.exists() {
-            debug!("Removing socket directory {}", self.dir.display());
-            fs::remove_dir_all(self.dir).await.ok();
+        for socket in self.sockets {
+            debug!("Removing socket {}", socket.display());
+            fs::remove_file(socket)
+                .await
+                .expect("failed to remove socket");
         }
     }
 }
@@ -44,20 +49,22 @@ pub(crate) async fn open(
     socket_configuration: &HashMap<NonNulString, Socket>,
 ) -> Result<(Vec<OwnedFd>, Sockets)> {
     let mut fds = Vec::with_capacity(socket_configuration.len());
-    let dir = socket_dir.join(container.name().as_ref());
-
-    if !socket_configuration.is_empty() && !dir.exists() {
-        debug!("Creating socket directory for {container}");
-        fs::create_dir_all(&dir).await?;
-    }
+    let mut sockets = Vec::with_capacity(socket_configuration.len());
 
     for (name, descriptor) in socket_configuration
         .iter()
         .sorted_by_key(|(name, _)| name.as_str())
+        .map(|(name, descriptor)| {
+            (
+                format!("{}:{}:{name}", container.name(), container.version()),
+                descriptor,
+            )
+        })
     {
         let ty = &descriptor.r#type;
-        let path = dir.join(name);
+        let path = socket_dir.join(&name);
 
+        // Remove stale sockets.
         if path.exists() {
             fs::remove_file(&path)
                 .await
@@ -89,9 +96,13 @@ pub(crate) async fn open(
             socket::listen(socket, 100).context("failed to listen")?;
         }
 
-        debug!("Setting socket mode {:o} on {name}", descriptor.mode);
-        fchmod(socket, Mode::from_bits_truncate(descriptor.mode))
-            .context("failed to set socket mode")?;
+        debug!(
+            "Setting socket mode {} on {name}",
+            umask::Mode::from(descriptor.mode)
+        );
+        fs::set_permissions(&path, Permissions::from_mode(descriptor.mode)).await?;
+
+        sockets.push(path);
 
         if descriptor.uid.is_some() || descriptor.gid.is_some() {
             debug!(
@@ -111,5 +122,5 @@ pub(crate) async fn open(
         fds.push(socket);
     }
 
-    Ok((fds, Sockets { dir }))
+    Ok((fds, Sockets { sockets }))
 }
