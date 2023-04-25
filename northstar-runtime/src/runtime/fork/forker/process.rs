@@ -55,10 +55,10 @@ pub async fn run(
         select! {
             request = channel.recv() => {
                 match request {
-                    Some(Message::CreateRequest { init, console, io }) => {
+                    Some(Message::CreateRequest { init, console, io, sockets }) => {
                         debug!("Creating init process for {}", init.container);
                         let container = init.container.clone();
-                        match create(init, io, console).await {
+                        match create(init, io, console, sockets).await {
                             Ok((pid, stream)) => {
                                 debug_assert!(!inits.contains_key(&container));
                                 inits.insert(container, (pid, stream));
@@ -104,6 +104,7 @@ async fn create(
     init: Init,
     io: [OwnedFd; 3],
     console: Option<OwnedFd>,
+    sockets: Vec<OwnedFd>,
 ) -> Result<(Pid, FramedUnixStream)> {
     let container = init.container.clone();
     debug!("Creating container {}", container);
@@ -139,7 +140,7 @@ async fn create(
                     // Wait until the forker process received our pid sent
                     // over by the trampoline.
                     drop(stream.recv::<()>());
-                    init.run(stream, console)
+                    init.run(stream, console, sockets)
                 }
             };
 
@@ -151,6 +152,12 @@ async fn create(
 
     // Ensure to close the socket pair end of the child.
     drop(stream_child);
+
+    // Close console (if present).
+    drop(console);
+
+    // Close sockets.
+    drop(sockets);
 
     // Wait for the trampoline to send over the PID of init.
     debug!("Waiting for init pid of container {}", container);

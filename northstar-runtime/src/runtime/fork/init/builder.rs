@@ -8,16 +8,14 @@ use crate::{
     runtime::{config::Config, error::Error, state::State},
     seccomp,
 };
-use anyhow::Context;
+use itertools::Itertools;
 use log::warn;
-use nix::{mount::MsFlags, unistd};
+use nix::mount::MsFlags;
 use std::{
     ffi::{c_void, CString},
-    os::unix::prelude::PermissionsExt,
     path::{Path, PathBuf},
     ptr::null,
 };
-use tokio::fs;
 
 trait PathExt {
     fn join_strip<T: AsRef<Path>>(&self, w: T) -> PathBuf;
@@ -40,6 +38,13 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     let rlimits = manifest.rlimits.clone();
     let seccomp = seccomp_filter(manifest);
     let uid = manifest.uid;
+    let sockets = manifest
+        .sockets
+        .keys()
+        .cloned()
+        .map(Into::into)
+        .sorted()
+        .collect();
 
     Ok(Init {
         container,
@@ -53,6 +58,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         rlimits,
         seccomp,
         console,
+        sockets,
     })
 }
 
@@ -105,20 +111,13 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
                 mounts.extend(bind(root, target.as_ref(), host.as_ref(), options));
             }
             mount::Mount::Persist => {
-                mounts.push(
-                    persist(
-                        config,
-                        manifest,
-                        root,
-                        target.as_ref(),
-                        manifest.uid,
-                        manifest.gid,
-                    )
-                    .await?,
-                );
+                mounts.push(persist(config, manifest, root, target.as_ref()).await?);
             }
             mount::Mount::Proc => mounts.push(proc(root, target.as_ref())),
             mount::Mount::Sysfs => mounts.push(sysfs(root, target.as_ref())),
+            mount::Mount::Sockets => {
+                mounts.push(sockets(&config.socket_dir, root, target.as_ref()))
+            }
             mount::Mount::Resource(requirement) => {
                 let container = manifest.container();
                 let dependency = State::match_container(
@@ -171,6 +170,18 @@ fn sysfs(root: &Path, target: &Path) -> Mount {
     const FSTYPE: Option<&'static str> = Some("sysfs");
     let flags = MsFlags::MS_RDONLY | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
     Mount::new(Some(source), target, FSTYPE, flags, None)
+}
+
+fn sockets(socket_dir: &Path, root: &Path, target: &Path) -> Mount {
+    log::debug!("Adding sockets on {}", target.display());
+    let target = root.join_strip(target);
+    Mount::new(
+        Some(socket_dir.to_owned()),
+        target,
+        None,
+        MsFlags::MS_BIND,
+        None,
+    )
 }
 
 fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) -> Vec<Mount> {
@@ -230,42 +241,10 @@ async fn persist(
     manifest: &Manifest,
     root: &Path,
     target: &Path,
-    uid: u16,
-    gid: u16,
 ) -> Result<Mount, Error> {
     // Note that the version is intentionally not part of the path. This allows
     // upgrades with persistent data migration
-    let source = config.data_dir.join(manifest.name.to_string());
-
-    if !source.exists() {
-        log::debug!("Creating {}", source.display());
-        fs::create_dir_all(&source)
-            .await
-            .with_context(|| format!("failed to create directory {}", source.display()))?;
-    }
-
-    log::debug!("Chowning {} to {}:{}", source.display(), uid, gid);
-    unistd::chown(
-        source.as_os_str(),
-        Some(unistd::Uid::from_raw(uid.into())),
-        Some(unistd::Gid::from_raw(gid.into())),
-    )
-    .context(format!(
-        "failed to chown {} to {}:{}",
-        source.display(),
-        uid,
-        gid
-    ))?;
-
-    log::debug!("Chmod {} to 700", source.display());
-    let mut permissions = fs::metadata(&source)
-        .await
-        .with_context(|| format!("failed to get permissions of {}", source.display()))?
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&source, permissions)
-        .await
-        .with_context(|| format!("failed to set permission on {}", source.display()))?;
+    let source = config.data_dir.join(manifest.name.as_ref());
 
     log::debug!(
         "Adding {} on {} with options nodev, nosuid and noexec",
@@ -275,13 +254,7 @@ async fn persist(
 
     let target = root.join_strip(target);
     let flags = MsFlags::MS_BIND | MsFlags::MS_NODEV | MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC;
-    Ok(Mount::new(
-        Some(source.to_owned()),
-        target,
-        None,
-        flags,
-        None,
-    ))
+    Ok(Mount::new(Some(source), target, None, flags, None))
 }
 
 fn resource(

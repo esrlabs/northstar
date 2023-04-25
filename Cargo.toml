@@ -13,6 +13,7 @@ members = [
     "examples/redis-client",
     "examples/redis-server",
     "examples/seccomp",
+    "examples/sockets",
     "examples/test-container",
     "examples/token-client",
     "examples/token-server",

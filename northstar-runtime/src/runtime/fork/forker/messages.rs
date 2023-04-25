@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Messages exchanged between the runtime and the forker process.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Message {
     /// Request from the runtime to the forker process to create a new init process
     /// for a container. The console fd is optional and only present if configured
@@ -17,6 +18,7 @@ pub enum Message {
         init: Init,
         io: [OwnedFd; 3],
         console: Option<OwnedFd>,
+        sockets: Vec<OwnedFd>,
     },
     /// Result of a container creation.
     CreateResult { result: Result<Pid, String> },

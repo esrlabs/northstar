@@ -35,6 +35,8 @@ pub mod network;
 pub mod rlimit;
 /// SE Linux
 pub mod selinux;
+/// Sockets
+pub mod socket;
 
 mod validation;
 
@@ -127,6 +129,9 @@ pub struct Manifest {
         deserialize_with = "maps_duplicate_key_is_error::deserialize"
     )]
     pub rlimits: HashMap<rlimit::RLimitResource, rlimit::RLimitValue>,
+    /// Sockets.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub sockets: HashMap<NonNulString, socket::Socket>,
     /// IO configuration
     #[serde(default)]
     pub io: Option<io::Io>,
@@ -239,17 +244,33 @@ seccomp:
   allow:
     fork: any
     waitpid: any
+sockets:
+  foo:
+    type: stream
+    mode: 0o600
+    uid: 100
+    gid: 1000
+  bar:
+    type: datagram
+    mode: 0o600
+    uid: 100
+    gid: 1000
+  baz:
+    type: seq_packet
+    mode: 0o600
+    uid: 100
+    gid: 1000
 cgroups:
-    memory:
-      oom_monitor: true
-      memory_hard_limit: 1000000
-      memory_soft_limit: 1000000
-      swappiness: 0
-      attrs: {}
-    cpu:
-      cpus: 0,1
-      shares: 1024
-      attrs: {}
+  memory:
+    oom_monitor: true
+    memory_hard_limit: 1000000
+    memory_soft_limit: 1000000
+    swappiness: 0
+    attrs: {}
+  cpu:
+    cpus: 0,1
+    shares: 1024
+    attrs: {}
 ";
 
         let manifest = Manifest::from_str(manifest)?;

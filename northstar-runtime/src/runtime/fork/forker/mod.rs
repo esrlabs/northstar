@@ -104,6 +104,7 @@ impl Forker {
     }
 
     /// Send a request to the forker process to create a new container.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create<'a, I: Iterator<Item = &'a Container> + Clone>(
         &mut self,
         container: &Container,
@@ -111,13 +112,19 @@ impl Forker {
         manifest: &Manifest,
         io: [OwnedFd; 3],
         console: Option<OwnedFd>,
+        sockets: Vec<OwnedFd>,
         containers: I,
     ) -> Result<Pid, Error> {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
         // Request
         let init = init::build(config, manifest, containers).await?;
-        let request = Message::CreateRequest { init, io, console };
+        let request = Message::CreateRequest {
+            init,
+            io,
+            console,
+            sockets,
+        };
         self.channel.send(request).await;
 
         // Response

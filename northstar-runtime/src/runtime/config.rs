@@ -21,6 +21,8 @@ pub struct Config {
     pub run_dir: PathBuf,
     /// Directory where rw data of container shall be stored
     pub data_dir: PathBuf,
+    /// Directory for sockets
+    pub socket_dir: PathBuf,
     /// Top level cgroup name
     pub cgroup: NonNulString,
     /// Event loop buffer size
@@ -94,6 +96,7 @@ impl Config {
     pub(crate) fn check(&self) -> anyhow::Result<()> {
         check_rw_directory(&self.run_dir).context("checking run_dir")?;
         check_rw_directory(&self.data_dir).context("checking data_dir")?;
+        check_rw_directory(&self.socket_dir).context("checking socket_dir")?;
         Ok(())
     }
 }
@@ -180,8 +183,9 @@ const fn default_token_validity() -> time::Duration {
 #[allow(clippy::unwrap_used)]
 fn console_url() {
     let config = r#"
-run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
+socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
 
 [debug]
@@ -192,8 +196,9 @@ console = "tcp://localhost:4200"
 
     // Invalid url
     let config = r#"
-run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
+socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
 
 [debug]
@@ -207,8 +212,9 @@ console = "http://localhost:4200"
 #[allow(clippy::unwrap_used)]
 fn repository_size() {
     let config = r#"
-run_dir = "target/northstar/run"
 data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
+socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
 
 [repositories.memory]

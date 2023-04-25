@@ -39,6 +39,8 @@ impl Runtime {
         std::fs::create_dir(&run_dir)?;
         let data_dir = tmpdir.path().join("data");
         std::fs::create_dir(&data_dir)?;
+        let socket_dir = tmpdir.path().join("sockets");
+        std::fs::create_dir(&socket_dir)?;
         let test_repository = tmpdir.path().join("test");
         std::fs::create_dir(&test_repository)?;
         let test_repository_limited_num = tmpdir.path().join("test_limited_num");
@@ -121,6 +123,7 @@ impl Runtime {
         let config = config::Config {
             run_dir,
             data_dir,
+            socket_dir,
             event_buffer_size: 128,
             notification_buffer_size: 128,
             loop_device_timeout: time::Duration::from_secs(10),
@@ -129,7 +132,7 @@ impl Runtime {
             repositories,
             debug: Some(config::Debug {
                 console: console_url(),
-                commands: Vec::new(),
+                commands: vec!["sudo strace -c -p <PID>".into()],
             }),
         };
         let runtime = Northstar::new(config)?;
@@ -293,5 +296,23 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// Wait for a notification that `container` exited with `exit_status`.
+    pub async fn assume_exit(
+        &mut self,
+        container: &str,
+        exit_status: ExitStatus,
+        timeout: u64,
+    ) -> Result<()> {
+        let container = Container::try_from(container)?;
+        let n = |n: &Notification| matches!(n, Notification::Exit(c, s) if container == *c && exit_status == *s);
+        client().assume_notification(n, timeout).await
+    }
+
+    /// Wait for a notification that `container` exited with exit code 0.
+    pub async fn assume_exit_success(&mut self, container: &str, timeout: u64) -> Result<()> {
+        let exit_status = ExitStatus::Exit { code: 0 };
+        self.assume_exit(container, exit_status, timeout).await
     }
 }

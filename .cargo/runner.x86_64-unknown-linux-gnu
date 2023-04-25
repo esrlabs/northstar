@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 #
 # cap_chown: change ownership of container directories
-# cap_dac_override: lazy workaround for permissions on /dev/mapper/control and cgrousp. Do not use in production.
+# cap_dac_override: lazy workaround for permissions on /dev/mapper/control and cgroups. Do not use in production.
+# cap_fowner: persistence directory setup
 # cap_kill: send signals to container inits
 # cap_setgid: supplementary groups
 # cap_setpcap: drop caps
 # cap_sys_admin: mount, umount, setns
 # cap_sys_resource: increase rlimits (init)
 
-binary_name=`basename $1`
-
-if [[ $binary_name =~ ^(northstar|(tests|examples|console)-[a-z0-9]{16})$ ]]; then
-    if [ -z ${GITHUB_ACTIONS+x} ]; then
-        sudo setcap "cap_chown,cap_dac_override,cap_kill,cap_setgid,cap_setpcap,cap_setuid,cap_sys_admin,cap_sys_resource=eip" $1
-        # wrap in a sudo to ensure all fds are set CLOEXEC
-        sudo -u $USER $@
-    else
-        sudo $@
-    fi
+if [[ $CARGO_PKG_NAME =~ ^(northstar|northstar-tests)$ ]]; then
+    sudo setcap "cap_chown,cap_dac_override,cap_fowner,cap_kill,cap_setgid,cap_setpcap,cap_setuid,cap_sys_admin,cap_sys_resource=eip" $1
+    # Ensure to set all fds to CLOEXEC.
+    sudo -E -u $USER $@
 else
     eval $@
 fi
+

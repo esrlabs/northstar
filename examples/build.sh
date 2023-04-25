@@ -53,6 +53,7 @@ ${CARGO_NPK_PACK} -p persistence
 ${CARGO_NPK_PACK} -p redis-client
 ${CARGO_NPK_PACK} -p redis-server
 ${CARGO_NPK_PACK} -p seccomp
+${CARGO_NPK_PACK} -p sockets
 ${CARGO_NPK_PACK} -p test-container
 ${CARGO_NPK_PACK} -p token-client
 ${CARGO_NPK_PACK} -p token-server

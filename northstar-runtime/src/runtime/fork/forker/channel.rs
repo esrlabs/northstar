@@ -30,19 +30,29 @@ impl Channel {
     /// Send Message via command and socket stream.
     pub async fn send(&mut self, message: Message) {
         match message {
-            Message::CreateRequest { init, io, console } => {
+            Message::CreateRequest {
+                init,
+                io,
+                console,
+                sockets,
+            } => {
                 let message = SerdeMessage::CreateRequest { init };
                 self.command
                     .send(message)
                     .await
-                    .expect("failed to send response");
+                    .expect("failed to send create request");
 
                 // Send file descriptors. The console fd is optional.
                 if let Some(console) = console {
-                    let fds: Vec<_> = io.into_iter().chain(once(console)).collect();
+                    let fds: Vec<_> = io
+                        .into_iter()
+                        .chain(once(console))
+                        .chain(sockets.into_iter())
+                        .collect();
                     self.socket.send_fds(&fds).expect("failed to send fds");
                 } else {
-                    self.socket.send_fds(&io).expect("failed to send fds");
+                    let fds: Vec<_> = io.into_iter().chain(sockets.into_iter()).collect();
+                    self.socket.send_fds(&fds).expect("failed to send fds");
                 }
             }
             m => {
@@ -58,27 +68,40 @@ impl Channel {
     pub async fn recv(&mut self) -> Option<Message> {
         match self.command.recv().await.ok()?? {
             SerdeMessage::CreateRequest { init } => {
-                // Receive file descriptors.
-                if init.console {
-                    let mut fds = self
-                        .socket
-                        .recv_fds::<OwnedFd, 4>()
-                        .expect("failed to receive fds");
-                    let console = fds.pop();
-                    let io = fds.try_into().expect("invalid number of fds");
-                    Some(Message::CreateRequest { init, io, console })
+                let mut num_fds = 3;
+                num_fds += if init.console { 1 } else { 0 };
+                num_fds += init.sockets.len();
+                let fds = self
+                    .socket
+                    .recv_fds::<OwnedFd>(num_fds)
+                    .expect("failed to receive fds");
+                let mut fds = fds.into_iter();
+
+                // The first three fds are always io fds.
+                let io = {
+                    let mut io = Vec::with_capacity(3);
+                    for _ in 0..3 {
+                        io.push(fds.next().expect("failed to receive io fd"));
+                    }
+                    io.try_into().expect("failed to convert io fds")
+                };
+
+                // Console is optional.
+                let console = if init.console {
+                    Some(fds.next().expect("failed to receive console fd"))
                 } else {
-                    let io = self
-                        .socket
-                        .recv_fds::<OwnedFd, 3>()
-                        .expect("failed to receive fds");
-                    let io = io.try_into().expect("invalid number of fds received");
-                    Some(Message::CreateRequest {
-                        init,
-                        io,
-                        console: None,
-                    })
-                }
+                    None
+                };
+
+                // The rest are sockets.
+                let sockets = fds.collect();
+
+                Some(Message::CreateRequest {
+                    init,
+                    io,
+                    console,
+                    sockets,
+                })
             }
             message => Some(message.into()),
         }
@@ -87,6 +110,7 @@ impl Channel {
 
 /// Message type that implements Serialize and Deserialize (wihout OwnedFd fields).
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 enum SerdeMessage {
     CreateRequest {
         init: Init,

@@ -32,6 +32,7 @@ pub const EXAMPLE_PERSISTENCE: &str = "persistence:0.0.1";
 pub const EXAMPLE_REDIS: &str = "redis:0.0.1";
 pub const EXAMPLE_REDIS_CLIENT: &str = "redis-client:0.0.1";
 pub const EXAMPLE_SECCOMP: &str = "seccomp:0.0.1";
+pub const EXAMPLE_SOCKETS: &str = "sockets:0.0.1";
 pub const EXAMPLE_TOKEN_CLIENT: &str = "token-client:0.0.1";
 pub const EXAMPLE_TOKEN_SERVER: &str = "token-server:0.0.1";
 pub const TEST_CONTAINER: &str = "test-container:0.0.1";
@@ -68,6 +69,8 @@ lazy_static! {
         npk!("../target/northstar/repository/redis-client-0.0.1.npk");
     pub static ref EXAMPLE_SECCOMP_NPK: Vec<u8> =
         npk!("../target/northstar/repository/seccomp-0.0.1.npk");
+    pub static ref EXAMPLE_SOCKETS_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/sockets-0.0.1.npk");
     pub static ref EXAMPLE_TOKEN_CLIENT_NPK: Vec<u8> =
         npk!("../target/northstar/repository/token-client-0.0.1.npk");
     pub static ref EXAMPLE_TOKEN_SERVER_NPK: Vec<u8> =

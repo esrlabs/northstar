@@ -22,6 +22,7 @@ dependencies = [
     "redis-client",
     "redis-server",
     "seccomp",
+    "sockets",
     "test-container",
     "test-resource",
     "token-client",
@@ -100,6 +101,10 @@ args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/
 [tasks.seccomp]
 command = "cargo"
 args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "seccomp" ]
+
+[tasks.sockets]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "sockets" ]
 
 [tasks.test-container]
 command = "cargo"

@@ -664,6 +664,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     let pseudos = manifest
         .mounts
         .iter()
+        .sorted_by(|(a, _), (b, _)| a.cmp(b))
         .flat_map(|(target, mount)| {
             match mount {
                 Mount::Bind(Bind { options: flags, .. }) => {
@@ -677,6 +678,7 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
                 Mount::Persist => pseudo_directory(target.as_ref(), 755),
                 Mount::Proc | Mount::Sysfs => pseudo_directory(target.as_ref(), 444),
                 Mount::Resource { .. } => pseudo_directory(target.as_ref(), 555),
+                Mount::Sockets => pseudo_directory(target.as_ref(), 755),
                 Mount::Tmpfs { .. } => pseudo_directory(target.as_ref(), 755),
                 Mount::Dev => {
                     // Create a minimal set of chardevs:

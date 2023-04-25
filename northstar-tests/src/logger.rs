@@ -38,25 +38,20 @@ pub fn init() {
             let elapsed = START.elapsed();
             let timestamp = format!("{}.{:06}s", elapsed.as_secs(), elapsed.subsec_micros());
             let level = buf.default_styled_level(record.metadata().level());
+            let target = record
+                .target()
+                .strip_prefix("northstar_runtime::")
+                .unwrap_or(record.target());
+            let tgid = std::process::id();
+            let args = record.args().to_string();
 
             let tx = &QUEUE.0;
-            tx.send(record.args().to_string()).expect("channel error");
+            tx.send(args.clone()).expect("channel error");
 
-            if let Some(module_path) = record
-                .module_path()
-                .and_then(|module_path| module_path.find("::").map(|p| &module_path[p + 2..]))
-            {
-                writeln!(
-                    buf,
-                    "{}: {:<5}: {} {}",
-                    timestamp,
-                    level,
-                    module_path,
-                    record.args(),
-                )
-            } else {
-                writeln!(buf, "{}: {:<5}: {}", timestamp, level, record.args(),)
-            }
+            writeln!(
+                buf,
+                "{timestamp} {target:>30} {tgid:>8}  {level:<5}: {args}",
+            )
         })
         .init()
 }

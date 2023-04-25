@@ -2,10 +2,8 @@ use bincode::{DefaultOptions, Options};
 use byteorder::{BigEndian, WriteBytesExt};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use nix::{
-    cmsg_space,
-    sys::socket::{self, recvmsg, sendmsg, ControlMessageOwned, SockaddrIn6},
-};
+use libc::CMSG_SPACE;
+use nix::sys::socket::{self, recvmsg, sendmsg, ControlMessageOwned, SockaddrIn6};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     io::{self, ErrorKind, IoSlice, IoSliceMut, Read},
@@ -58,17 +56,18 @@ impl FramedUnixStream {
     }
 
     /// Receive a file descriptor via the socket
-    pub fn recv_fds<T: FromRawFd, const N: usize>(&self) -> io::Result<Vec<T>> {
+    pub fn recv_fds<T: FromRawFd>(&self, num: usize) -> io::Result<Vec<T>> {
         let mut buf = [0u8];
         let iov = &mut [IoSliceMut::new(&mut buf)];
-        let mut control_message_buffer = cmsg_space!([RawFd; N]);
+        let space = unsafe { CMSG_SPACE((num * std::mem::size_of::<RawFd>()) as u32) };
+        let mut control_message_buffer = Vec::<u8>::with_capacity(space as usize);
         let control_message_buffer = Some(&mut control_message_buffer);
         let fd = self.0.as_raw_fd();
         const FLAGS: socket::MsgFlags = socket::MsgFlags::empty();
 
         let message =
             recvmsg::<SockaddrIn6>(fd, iov, control_message_buffer, FLAGS).map_err(os_err)?;
-        recv_control_msg::<T, N>(message.cmsgs().next())
+        recv_control_msg::<T>(message.cmsgs().next(), num)
     }
 
     /// Into UnixStream
@@ -123,8 +122,9 @@ fn os_err(err: nix::Error) -> io::Error {
     io::Error::from_raw_os_error(err as i32)
 }
 
-fn recv_control_msg<T: FromRawFd, const N: usize>(
+fn recv_control_msg<T: FromRawFd>(
     message: Option<ControlMessageOwned>,
+    num: usize,
 ) -> io::Result<Vec<T>> {
     match message {
         Some(socket::ControlMessageOwned::ScmRights(fds)) => {
@@ -132,7 +132,7 @@ fn recv_control_msg<T: FromRawFd, const N: usize>(
                 .into_iter()
                 .map(|fd| unsafe { T::from_raw_fd(fd) })
                 .collect();
-            assert_eq!(result.len(), N);
+            assert_eq!(result.len(), num);
             Ok(result)
         }
         Some(message) => Err(io::Error::new(
@@ -261,7 +261,7 @@ mod test {
 
                 for _ in 0..ITERATIONS {
                     stream.send_fds(&files).unwrap();
-                    files = stream.recv_fds::<File, 2>().unwrap();
+                    files = stream.recv_fds::<File>(2).unwrap();
                 }
 
                 read_assert(&mut files[0], "hello");
@@ -272,7 +272,7 @@ mod test {
                 let stream = FramedUnixStream::new(second);
 
                 for _ in 0..ITERATIONS {
-                    let mut files = stream.recv_fds::<File, 2>().unwrap();
+                    let mut files = stream.recv_fds::<File>(2).unwrap();
                     write_seek_flush(&mut files[0], "hello");
                     write_seek_flush(&mut files[1], "again");
                     stream.send_fds(&files).unwrap();

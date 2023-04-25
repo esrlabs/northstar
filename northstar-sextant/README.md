@@ -36,10 +36,10 @@ hello-world-0.0.1.npk
 
 ## Packing a signed NPK
 
-NPKs can be signed using [Ed25519](https://ed25519.cr.yp.to/) signatures.  If
-your runtime is configured to check NPK signatures, containers with missing or
-invalid signatures will be rejected.  To pack a signed version of the
-`hello-world` example container, a private key has to be provided:
+NPKs can be signed using `Ed25519` signatures. If the runtime is configured to
+check NPK signatures, containers with missing or invalid signatures will be
+rejected. To pack a signed version of the `hello-world` example container, a
+private key has to be provided:
 
 ```bash
 $ target/debug/northstar-sextant pack \
