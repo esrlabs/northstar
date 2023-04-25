@@ -7,7 +7,7 @@ use northstar_runtime::api::{
     self,
     model::{self, Container},
 };
-use northstar_tests::{runtime::client, runtime_test};
+use northstar_tests::runtime_test;
 use tokio::{net::UnixStream, time::Duration};
 
 // Connect with exact version
@@ -27,7 +27,7 @@ async fn api_version_match() -> Result<()> {
         model::Message::ConnectAck { .. } => (),
         _ => panic!("unexpected message"),
     }
-    client().list().await?;
+    client.list().await?;
     Ok(())
 }
 

@@ -80,9 +80,10 @@ pub fn runtime_test(_args: TokenStream, mut item: TokenStream) -> TokenStream {
         let runtime = northstar_tests::runtime::Runtime::new().expect("failed to start runtime");
 
         // The test code within the async context
-        let body = async {
-            let runtime = runtime.start().await?;
+        let body = async move {
+            let (runtime, mut client) = runtime.start().await?;
             let result: anyhow::Result<()> = #body;
+            client.shutdown().await?;
             runtime.shutdown().await?;
             result
         };
