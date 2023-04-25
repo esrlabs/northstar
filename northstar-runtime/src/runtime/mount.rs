@@ -1,6 +1,7 @@
 use crate::{
+    api::model::NonNulString,
     common::container::Container,
-    npk::{dm_verity::VerityHeader, manifest::selinux::Selinux, npk::Hashes},
+    npk::{dm_verity::VerityHeader, npk::Hashes},
     runtime::{
         devicemapper::{self, verity::DmVerityHashAlgorithm},
         key::PublicKey,
@@ -11,10 +12,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use futures::{Future, FutureExt};
 use log::{debug, warn};
 use loopdev::{LoopControl, LoopDevice};
+use nix::libc::{EAGAIN, EBUSY};
 use std::{
+    fs,
     os::unix::{io::AsRawFd, prelude::RawFd},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 use tokio::{task, time};
 
@@ -22,13 +26,27 @@ pub use nix::mount::MsFlags as MountFlags;
 
 const FS_TYPE: &str = "squashfs";
 
+/// Mount metadata.
+struct Mount<'a> {
+    container: &'a Container,
+    fd: RawFd,
+    fsimg_offset: u64,
+    fsimg_size: u64,
+    verity_header: Option<&'a VerityHeader>,
+    selinux_context: Option<&'a NonNulString>,
+    hashes: Option<&'a Hashes>,
+    target: &'a Path,
+    key: Option<&'a PublicKey>,
+    lo_timeout: Duration,
+}
+
 pub(super) struct MountControl {
     /// Timeout for lo device setup
     lo_timeout: time::Duration,
     /// Device mapper handle
     dm: Arc<devicemapper::DeviceMapper>,
     /// Loop device control
-    lc: Arc<loopdev::LoopControl>,
+    lc: Arc<Mutex<loopdev::LoopControl>>,
 }
 
 impl std::fmt::Debug for MountControl {
@@ -46,7 +64,7 @@ impl MountControl {
 
         Ok(MountControl {
             lo_timeout,
-            lc: Arc::new(lc),
+            lc: Arc::new(Mutex::new(lc)),
             dm: Arc::new(dm),
         })
     }
@@ -67,33 +85,25 @@ impl MountControl {
         let fsimg_offset = npk.fsimg_offset();
         let container = npk.manifest().container();
         let verity_header = npk.verity_header().cloned();
-        let selinux = npk.manifest().selinux.clone();
+        let selinux_context = npk.manifest().selinux.as_ref().map(|s| s.context.clone());
         let hashes = npk.hashes().cloned();
         let lo_timeout = self.lo_timeout;
 
         task::spawn_blocking(move || {
-            let start = time::Instant::now();
-
-            debug!("Mounting {container}");
-            mount(
-                &container,
-                dm,
-                lc,
+            let mount_info = Mount {
+                container: &container,
                 fd,
                 fsimg_offset,
                 fsimg_size,
-                verity_header,
-                selinux,
-                hashes,
-                &target,
-                key.is_some(),
+                verity_header: verity_header.as_ref(),
+                selinux_context: selinux_context.as_ref(),
+                hashes: hashes.as_ref(),
+                target: &target,
+                key: key.as_ref(),
                 lo_timeout,
-            )?;
-
-            let duration = start.elapsed();
-            debug!("Finished mount of {container} in {duration:?}");
-
-            Ok(())
+            };
+            debug!("Mounting {container}");
+            mount(dm, lc, mount_info).map(drop)
         })
         .map(|r| match r {
             Ok(r) => r,
@@ -106,17 +116,12 @@ impl MountControl {
         let target = target.to_owned();
 
         task::spawn_blocking(move || {
-            let start = time::Instant::now();
-
             debug!("Unmounting {}", target.display());
             nix::mount::umount(&target)?;
 
             debug!("Removing mountpoint {}", target.display());
-            std::fs::remove_dir(&target)
+            fs::remove_dir(&target)
                 .with_context(|| format!("failed to remove {}", target.display()))?;
-
-            let duration = start.elapsed();
-            debug!("Finished umount of {} in {duration:?}", target.display(),);
 
             Ok(())
         })
@@ -127,32 +132,36 @@ impl MountControl {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn mount(
-    container: &Container,
     dm: Arc<devicemapper::DeviceMapper>,
-    lc: Arc<LoopControl>,
-    fd: RawFd,
-    fsimg_offset: u64,
-    fsimg_size: u64,
-    verity_header: Option<VerityHeader>,
-    selinux: Option<Selinux>,
-    hashes: Option<Hashes>,
-    target: &Path,
-    verity: bool,
-    lo_timeout: time::Duration,
+    lc: Arc<Mutex<LoopControl>>,
+    mount_info: Mount,
 ) -> Result<()> {
+    let Mount {
+        container,
+        fd,
+        fsimg_offset,
+        fsimg_size,
+        verity_header,
+        selinux_context,
+        hashes,
+        target,
+        key,
+        lo_timeout,
+    } = mount_info;
     if !target.exists() {
         debug!("Creating mount point {}", target.display());
-        std::fs::create_dir_all(target)
+        fs::create_dir_all(target)
             .with_context(|| format!("failed to create directory {}", target.display()))?;
     }
 
-    // losetup
-    let (loopdevice, loopdevice_path) =
-        losetup(container, &lc, fd, fsimg_offset, fsimg_size, lo_timeout)?;
+    let (loopdevice, loopdevice_path) = {
+        let lc = lc.lock().expect("failed to lock loop control");
+        losetup(container, &lc, fd, fsimg_offset, fsimg_size, lo_timeout)
+            .context("losetup failed")?
+    };
 
-    let (device, dm_name) = if !verity {
+    let (device, dm_name) = if key.is_none() {
         // We're done. Use the loop device path e.g. /dev/loop4
         (loopdevice_path, None)
     } else {
@@ -160,14 +169,8 @@ fn mount(
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
                 debug!("Using loop device {}", loopdevice_path.display());
-                dmsetup(
-                    dm.clone(),
-                    &loopdevice_path,
-                    header,
-                    &name,
-                    &hashes.fs_verity_hash,
-                    hashes.fs_verity_offset,
-                )?
+                dmsetup(&dm, &loopdevice_path, header, &name, hashes)
+                    .context("failed to setup dm device")?
             }
             _ => {
                 warn!(
@@ -201,9 +204,9 @@ fn mount(
     let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
     let source = Some(&device);
     let fstype = Some(FS_TYPE);
-    let data = if let Some(selinux) = selinux {
+    let data = if let Some(selinux_context) = selinux_context {
         if Path::new("/sys/fs/selinux/enforce").exists() {
-            Some(format!("{}{}", "context=", selinux.context.as_str()))
+            Some(format!("{}{}", "context=", selinux_context.as_str()))
         } else {
             warn!("Failed to determine SELinux status of host system. SELinux is disabled.");
             None
@@ -235,35 +238,47 @@ fn losetup(
     size: u64,
     timeout: time::Duration,
 ) -> Result<(LoopDevice, PathBuf)> {
-    let start = time::Instant::now();
+    let start = Instant::now();
 
     // Acquire a loop device and attach the backing file. This operation is racy because
     // getting the next free index and attaching is not atomic. Retry the operation in a
     // loop until successful or timeout.
     for n in 1..u64::MAX {
-        let loop_device = lc.next_free()?;
-        if loop_device
+        let loop_device = match lc.next_free() {
+            Ok(loop_device) => loop_device,
+            Err(e) => match e.raw_os_error() {
+                Some(EBUSY) | Some(EAGAIN) => continue,
+                _ => return Err(e.into()),
+            },
+        };
+
+        let path = loop_device
+            .path()
+            .ok_or_else(|| anyhow!("failed to get loop device path"))?;
+
+        match loop_device
             .with()
             .offset(offset)
             .size_limit(size)
             .read_only(true)
             .autoclear(true)
             .attach_fd(fd)
-            .is_ok()
         {
-            let path = loop_device
-                .path()
-                .ok_or_else(|| anyhow!("failed to get loop device path"))?;
-            debug!(
-                "Attached {container} to {} after {n} attempt(s) in {:?}",
-                path.display(),
-                start.elapsed()
-            );
-            return Ok((loop_device, path));
-        }
-
-        if start.elapsed() > timeout {
-            bail!("failed to acquire loop device for {container} within {timeout:?}");
+            Ok(_) => {
+                debug!(
+                    "Attached {container} to {} after {n} attempt(s)",
+                    path.display(),
+                );
+                return Ok((loop_device, path));
+            }
+            Err(e) => match e.raw_os_error() {
+                Some(EBUSY) | Some(EAGAIN) => {
+                    if start.elapsed() > timeout {
+                        bail!("failed to acquire loop device for {container} within {timeout:?}");
+                    }
+                }
+                _ => return Err(e.into()),
+            },
         }
     }
 
@@ -271,19 +286,20 @@ fn losetup(
 }
 
 fn dmsetup(
-    dm: Arc<devicemapper::DeviceMapper>,
+    dm: &devicemapper::DeviceMapper,
     dev: &Path,
     verity: &VerityHeader,
     name: &str,
-    verity_hash: &str,
-    data_size: u64,
+    hashes: &Hashes,
 ) -> Result<PathBuf> {
-    let start = time::Instant::now();
-
+    let verity_hash = &hashes.fs_verity_hash;
+    let data_size = hashes.fs_verity_offset;
+    let hash_block_size = verity.hash_block_size as u64;
+    let data_block_size = verity.data_block_size as u64;
     let salt = &verity.salt[..(verity.salt_size as usize)];
     let target = devicemapper::verity::DmVerityTargetBuilder::default()
-        .data_device(dev, data_size, verity.data_block_size as u64)
-        .hash_device(dev, verity.hash_block_size as u64)
+        .data_device(dev, data_size, data_block_size)
+        .hash_device(dev, hash_block_size)
         .root_digest(verity_hash)
         .salt(salt)
         .hash_algorithm(DmVerityHashAlgorithm::SHA256)
@@ -301,13 +317,6 @@ fn dmsetup(
             return Err(e);
         }
     };
-
-    let duration = start.elapsed().as_secs_f32();
-    debug!(
-        "Finishing verity device setup of {} after {:.03}s",
-        device.display(),
-        duration,
-    );
 
     Ok(device)
 }

@@ -71,7 +71,7 @@ impl DirRepository {
             info!(
                 "Loading repository {} with key {}",
                 dir.display(),
-                dir.display()
+                key.display()
             );
             Some(key::load(key).await.context("failed to load key")?)
         } else {

@@ -217,9 +217,9 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.59.2"
+version = "0.63.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+checksum = "36d860121800b2a9a94f9b5604b332d5cffb234ce17609ea479d723dbc9d3885"
 dependencies = [
  "bitflags 1.3.2",
  "cexpr",
@@ -232,6 +232,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1399,11 +1400,10 @@ dependencies = [
 
 [[package]]
 name = "loopdev"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bfa0855b04611e38acaff718542e9e809cddfc16535d39f9d9c694ab19f7388"
+version = "0.5.0"
+source = "git+https://github.com/mdaffin/loopdev.git?rev=53e9799#53e9799efc89dfb1479688429bceded24ee8e4ba"
 dependencies = [
- "bindgen 0.59.2",
+ "bindgen 0.63.0",
  "errno 0.2.8",
  "libc",
 ]
@@ -1606,7 +1606,6 @@ dependencies = [
  "hex",
  "hmac",
  "humanize-rs",
- "humantime",
  "humantime-serde",
  "inotify",
  "itertools",
