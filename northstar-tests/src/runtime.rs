@@ -12,15 +12,12 @@ use northstar_runtime::{
         Runtime as Northstar,
     },
 };
-use std::convert::{TryFrom, TryInto};
+use std::{
+    convert::{TryFrom, TryInto},
+    fs,
+};
 use tempfile::TempDir;
 use tokio::{fs::remove_file, net::UnixStream, pin, select, time};
-
-pub static mut CLIENT: Option<Client> = None;
-
-pub fn client() -> &'static mut Client {
-    unsafe { CLIENT.as_mut().unwrap() }
-}
 
 pub fn console_url() -> url::Url {
     let console = std::env::temp_dir().join(format!("northstar-{}-full", std::process::id()));
@@ -36,19 +33,19 @@ impl Runtime {
     pub fn new() -> Result<Runtime> {
         let tmpdir = tempfile::Builder::new().prefix("northstar-").tempdir()?;
         let run_dir = tmpdir.path().join("run");
-        std::fs::create_dir(&run_dir)?;
+        fs::create_dir(&run_dir)?;
         let data_dir = tmpdir.path().join("data");
-        std::fs::create_dir(&data_dir)?;
+        fs::create_dir(&data_dir)?;
         let socket_dir = tmpdir.path().join("sockets");
-        std::fs::create_dir(&socket_dir)?;
+        fs::create_dir(&socket_dir)?;
         let test_repository = tmpdir.path().join("test");
-        std::fs::create_dir(&test_repository)?;
+        fs::create_dir(&test_repository)?;
         let test_repository_limited_num = tmpdir.path().join("test_limited_num");
-        std::fs::create_dir(&test_repository_limited_num)?;
+        fs::create_dir(&test_repository_limited_num)?;
         let test_repository_limited_size = tmpdir.path().join("test_limited_size");
-        std::fs::create_dir(&test_repository_limited_size)?;
+        fs::create_dir(&test_repository_limited_size)?;
         let example_key = tmpdir.path().join("key.pub");
-        std::fs::write(&example_key, include_bytes!("../../examples/northstar.pub"))?;
+        fs::write(&example_key, include_bytes!("../../examples/northstar.pub"))?;
 
         let repositories = [
             (
@@ -140,32 +137,27 @@ impl Runtime {
         Ok(Runtime::Created(runtime, tmpdir))
     }
 
-    pub async fn start(self) -> Result<Runtime> {
+    pub async fn start(self) -> Result<(Runtime, Client)> {
         if let Runtime::Created(launcher, tmpdir) = self {
             let runtime = launcher.start().await?;
             logger::assume("Runtime up and running", 10u64).await?;
 
-            unsafe {
-                CLIENT = Some(Client::new().await?);
-            }
+            let client = Client::connect(&console_url()).await?;
 
-            Ok(Runtime::Started(runtime, tmpdir))
+            Ok((Runtime::Started(runtime, tmpdir), client))
         } else {
             anyhow::bail!("Runtime is already started")
         }
     }
 
     pub async fn shutdown(self) -> Result<()> {
-        client().shutdown().await?;
         drop(self);
-
         remove_file(console_url().path()).await?;
         Ok(())
     }
 }
 
 pub struct Client {
-    /// Client instance
     client: northstar_client::Client<UnixStream>,
 }
 
@@ -185,9 +177,9 @@ impl std::ops::DerefMut for Client {
 
 impl Client {
     /// Launches an instance of Northstar
-    pub async fn new() -> Result<Client> {
+    pub async fn connect(url: &url::Url) -> Result<Client> {
         // Connect to the runtime
-        let io = UnixStream::connect(console_url().path())
+        let io = UnixStream::connect(url.path())
             .await
             .expect("failed to connect to console");
         let client =
@@ -307,7 +299,7 @@ impl Client {
     ) -> Result<()> {
         let container = Container::try_from(container)?;
         let n = |n: &Notification| matches!(n, Notification::Exit(c, s) if container == *c && exit_status == *s);
-        client().assume_notification(n, timeout).await
+        self.assume_notification(n, timeout).await
     }
 
     /// Wait for a notification that `container` exited with exit code 0.
