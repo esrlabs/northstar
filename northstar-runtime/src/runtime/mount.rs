@@ -10,11 +10,11 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use futures::{Future, FutureExt};
-use log::{debug, warn};
-use loopdev::{LoopControl, LoopDevice};
-use nix::libc::{EAGAIN, EBUSY};
+use log::{debug, info, warn};
+use loopdev::LoopDevice;
+use nix::libc::{EAGAIN, EBUSY, ENOENT};
 use std::{
-    fs,
+    fs, io,
     os::unix::{io::AsRawFd, prelude::RawFd},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -40,13 +40,53 @@ struct Mount<'a> {
     lo_timeout: Duration,
 }
 
+/// Loop control wrapper that automatically adds a loop device if none is available.
+#[derive(Debug)]
+struct LoopControl {
+    loop_control: loopdev::LoopControl,
+}
+
+impl LoopControl {
+    /// Opens the loop control device.
+    pub fn open() -> io::Result<Self> {
+        loopdev::LoopControl::open().map(|loop_control| LoopControl { loop_control })
+    }
+
+    /// Finds and opens the next available loop device.
+    pub fn next_free(&mut self) -> io::Result<LoopDevice> {
+        loop {
+            match self.loop_control.next_free() {
+                Ok(loopdevice) => return Ok(loopdevice),
+                Err(e) if e.raw_os_error() == Some(ENOENT) => {
+                    // Scan /sys/block/loop* to find the next free loop device candidate.
+                    let n = (0..u32::MAX)
+                        .find(|n| !Path::new(&format!("/sys/block/loop{}", n)).exists())
+                        .expect("no free loop device found");
+
+                    debug!("Trying to add a loop device {}", n);
+                    match self.loop_control.add(n) {
+                        Ok(loop_device) => {
+                            info!("Added loop device");
+                            return Ok(loop_device);
+                        }
+                        Err(_) => {
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+}
+
 pub(super) struct MountControl {
     /// Timeout for lo device setup
     lo_timeout: time::Duration,
     /// Device mapper handle
     dm: Arc<devicemapper::DeviceMapper>,
     /// Loop device control
-    lc: Arc<Mutex<loopdev::LoopControl>>,
+    lc: Arc<Mutex<LoopControl>>,
 }
 
 impl std::fmt::Debug for MountControl {
@@ -156,9 +196,19 @@ fn mount(
     }
 
     let (loopdevice, loopdevice_path) = {
-        let lc = lc.lock().expect("failed to lock loop control");
-        losetup(container, &lc, fd, fsimg_offset, fsimg_size, lo_timeout)
-            .context("losetup failed")?
+        let mut lc = lc.lock().expect("failed to lock loop control");
+        match losetup(container, &mut lc, fd, fsimg_offset, fsimg_size, lo_timeout)
+            .context("losetup failed")
+        {
+            Ok((loopdevice, loop_device_path)) => (loopdevice, loop_device_path),
+            Err(e) => {
+                warn!("Failed to setup loop device: {}", e);
+                debug!("Unlinking mount point {}", target.display());
+                fs::remove_dir(target)
+                    .with_context(|| format!("failed to unlink directory {}", target.display()))?;
+                return Err(e);
+            }
+        }
     };
 
     let (device, dm_name) = if key.is_none() {
@@ -169,8 +219,18 @@ fn mount(
         let device = match (&verity_header, hashes) {
             (Some(header), Some(hashes)) => {
                 debug!("Using loop device {}", loopdevice_path.display());
-                dmsetup(&dm, &loopdevice_path, header, &name, hashes)
-                    .context("failed to setup dm device")?
+                match dmsetup(&dm, &loopdevice_path, header, &name, hashes)
+                    .context("failed to setup dm device")
+                {
+                    Ok(device) => device,
+                    Err(e) => {
+                        debug!("Unlinking mount point {}", target.display());
+                        fs::remove_dir(target).with_context(|| {
+                            format!("failed to unlink directory {}", target.display())
+                        })?;
+                        return Err(e);
+                    }
+                }
             }
             _ => {
                 warn!(
@@ -232,7 +292,7 @@ fn mount(
 
 fn losetup(
     container: &Container,
-    lc: &LoopControl,
+    lc: &mut LoopControl,
     fd: RawFd,
     offset: u64,
     size: u64,
@@ -248,7 +308,7 @@ fn losetup(
             Ok(loop_device) => loop_device,
             Err(e) => match e.raw_os_error() {
                 Some(EBUSY) | Some(EAGAIN) => continue,
-                _ => return Err(e.into()),
+                _ => return Err(dbg!(e).into()),
             },
         };
 
