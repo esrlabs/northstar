@@ -16,7 +16,7 @@ use bytes::{Buf, Bytes};
 use futures::{
     future::join_all,
     stream::{self, FuturesUnordered},
-    Future, StreamExt,
+    Stream, StreamExt,
 };
 use listener::Listener;
 use log::{debug, info, trace, warn};
@@ -89,18 +89,17 @@ impl Console {
         let configuration = configuration.clone();
         // Stop token for self *and* the connections
         let stop = self.stop.clone();
+        let permissions = &configuration.container.permissions;
 
-        debug!(
-            "Starting console on {} with permissions \"{}\"",
-            url, configuration.container.permissions
-        );
-        let task = match Listener::new(url)
+        debug!("Starting console on {url} with permissions \"{permissions}\"",);
+        let listener = Listener::new(url)
             .await
-            .context("failed to start console listener")?
-        {
+            .context("failed to start console listener")?;
+
+        let task = match listener {
             Listener::Tcp(listener) => task::spawn(async move {
                 serve(
-                    || listener.accept(),
+                    Box::pin(stream! { loop { yield listener.accept().await; } }),
                     event_tx,
                     notification_tx,
                     stop,
@@ -110,7 +109,7 @@ impl Console {
             }),
             Listener::Unix(listener) => task::spawn(async move {
                 serve(
-                    || listener.accept(),
+                    Box::pin(stream! { loop { yield listener.accept().await; } }),
                     event_tx,
                     notification_tx,
                     stop,
@@ -497,27 +496,27 @@ where
 /// these tasks terminate, they are removed from the connections container. Once a stop is issued,
 /// the termination of the remaining connections will be awaited.
 ///
-async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
-    accept: AcceptFun,
+async fn serve<C, S, A>(
+    connections_stream: C,
     event_tx: EventTx,
-    notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
+    notification_tx: NotificationTx,
     stop: CancellationToken,
     configuration: Configuration,
 ) where
-    AcceptFun: Fn() -> AcceptFuture,
-    AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
-    Stream: AsyncWrite + AsyncRead + Unpin + Send + 'static,
-    Addr: Into<Peer>,
+    C: Stream<Item = Result<(S, A), io::Error>> + Unpin,
+    S: AsyncWrite + AsyncRead + Unpin + Send + 'static,
+    A: Into<Peer>,
 {
+    let mut connections_stream = Box::pin(connections_stream);
     let mut connections = FuturesUnordered::new();
     loop {
         select! {
-            _ = connections.next(), if !connections.is_empty() => (), // removes closed connections
+            _ = connections.next(), if !connections.is_empty() => (), // Removes closed connections
             // If event_tx is closed then the runtime is shutting down therefore no new connections
-            // are accepted
-            connection = accept(), if !event_tx.is_closed() && !stop.is_cancelled() => {
+            // are accepted.
+            connection = connections_stream.next(), if !event_tx.is_closed() && !stop.is_cancelled() => {
                 match connection {
-                    Ok((stream, client)) => {
+                    Some(Ok((stream, client))) => {
                         connections.push(
                         task::spawn(Console::connection(
                             stream,
@@ -530,10 +529,11 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
                             Some(time::Duration::from_secs(10)),
                         )));
                     }
-                    Err(e) => {
+                    Some(Err(e)) => {
                         warn!("Error listening: {:?}", e);
                         break;
                     }
+                    None => break,
                 }
             }
             _ = stop.cancelled() => {
