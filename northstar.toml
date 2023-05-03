@@ -10,10 +10,20 @@ cgroup = "northstar"
 event_buffer_size = 256
 # Notification buffer size
 notification_buffer_size = 64
-# Token timeout
-token_validity = "1m"
 # Loop device timeout
 loop_device_timeout = "5s"
+
+[console]
+# Token validity
+token_validity = "1m"
+# Limits the number of requests processed per second
+max_requests_per_sec = 10
+# Maximum request size in characters
+max_request_size = "1M"
+# Maximum npk size in bytes
+max_npk_install_size = "100MB"
+# NPK stream timeout 
+npk_stream_timeout = "5s"
 
 # Debug TCP console on localhost
 [debug]

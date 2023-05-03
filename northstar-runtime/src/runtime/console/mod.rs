@@ -31,25 +31,28 @@ use tokio::{
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
-pub use crate::npk::manifest::console::{Configuration, Permission, Permissions};
+pub use crate::npk::manifest::console::{
+    Configuration as ContainerConfiguration, Permission, Permissions,
+};
+use crate::runtime::config::Console as RuntimeConfiguration;
 
 mod listener;
 mod throttle;
-
-/// Default maximum requests per second
-const DEFAULT_REQUESTS_PER_SECOND: usize = 1024;
-/// Default maximum length per request
-const DEFAULT_MAX_REQUEST_SIZE: usize = 1024 * 1024;
-/// Default maximum NPK size
-const DEFAULT_MAX_INSTALL_STREAM_SIZE: u64 = 256 * 1_000_000;
-/// Default timeout between two npks stream chunks
-const DEFAULT_NPK_STREAM_TIMEOUT: u64 = 5;
 
 // Request from the main loop to the console
 #[derive(Debug)]
 pub(crate) enum Request {
     Request(model::Request),
     Install(RepositoryId, mpsc::Receiver<Bytes>),
+}
+
+/// Console configuration.
+#[derive(Clone, Debug)]
+pub(crate) struct Configuration {
+    /// Container specific console configuration.
+    pub container: ContainerConfiguration,
+    /// Runtime global configuration.
+    pub runtime: RuntimeConfiguration,
 }
 
 /// A console is responsible for monitoring and serving incoming client connections
@@ -80,12 +83,7 @@ impl Console {
 
     /// Spawn a task that listens on `url` for new connections. Spawn a task for
     /// each client
-    pub(super) async fn listen(
-        &mut self,
-        url: &Url,
-        configuration: &Configuration,
-        token_validity: time::Duration,
-    ) -> Result<()> {
+    pub(super) async fn listen(&mut self, url: &Url, configuration: &Configuration) -> Result<()> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
         let configuration = configuration.clone();
@@ -94,7 +92,7 @@ impl Console {
 
         debug!(
             "Starting console on {} with permissions \"{}\"",
-            url, configuration.permissions
+            url, configuration.container.permissions
         );
         let task = match Listener::new(url)
             .await
@@ -107,7 +105,6 @@ impl Console {
                     notification_tx,
                     stop,
                     configuration,
-                    token_validity,
                 )
                 .await
             }),
@@ -118,7 +115,6 @@ impl Console {
                     notification_tx,
                     stop,
                     configuration,
-                    token_validity,
                 )
                 .await
             }),
@@ -143,12 +139,11 @@ impl Console {
         stop: CancellationToken,
         container: Option<Container>,
         configuration: Configuration,
-        token_validity: time::Duration,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
     ) -> Result<()> {
-        let permissions = &configuration.permissions;
+        let permissions = &configuration.container.permissions;
         if let Some(container) = &container {
             debug!(
                 "Container {} connected with permissions {}",
@@ -159,17 +154,13 @@ impl Console {
         }
 
         // Get a framed stream and sink interface.
-        let max_request_size = configuration
-            .max_request_size
-            .unwrap_or(DEFAULT_MAX_REQUEST_SIZE);
-        let stream = api::codec::framed_with_max_length(stream, max_request_size);
+        let max_request_size = configuration.runtime.max_request_size;
+        let stream = api::codec::framed_with_max_length(stream, max_request_size.try_into()?);
 
         // Limit requests per second
-        let max_requests_per_sec = configuration
-            .max_requests_per_sec
-            .unwrap_or(DEFAULT_REQUESTS_PER_SECOND);
-        let mut stream =
-            throttle::Throttle::new(stream, max_requests_per_sec, time::Duration::from_secs(1));
+        let max_requests_per_sec = configuration.runtime.max_requests_per_sec;
+        const SECOND: time::Duration = time::Duration::from_secs(1);
+        let mut stream = throttle::Throttle::new(stream, max_requests_per_sec, SECOND);
 
         // Wait for a connect message within timeout
         let connect = stream.next();
@@ -243,7 +234,7 @@ impl Console {
 
         // Looks good - send ConnectAck
         let connect_ack = model::ConnectAck {
-            configuration: configuration.clone(),
+            configuration: configuration.container.clone(),
         };
         let message = model::Message::ConnectAck { connect_ack };
         if let Err(e) = stream.send(message).await {
@@ -294,7 +285,7 @@ impl Console {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut stream, &stop, &configuration, &event_tx, token_validity, request).await {
+                            let response = match process_request(&peer, &mut stream, &stop, &configuration, &event_tx, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -341,7 +332,6 @@ async fn process_request<S>(
     stop: &CancellationToken,
     configuration: &Configuration,
     event_loop: &EventTx,
-    token_validity: time::Duration,
     request: model::Request,
 ) -> Result<model::Message>
 where
@@ -368,7 +358,7 @@ where
         model::Request::Uninstall { .. } => Permission::Uninstall,
     };
 
-    let permissions = &configuration.permissions;
+    let permissions = &configuration.container.permissions;
     if !permissions.contains(&required_permission) {
         return Ok(model::Message::Response {
             response: model::Response::PermissionDenied(request),
@@ -397,9 +387,7 @@ where
             );
 
             // Check the installation request size
-            let max_install_stream_size = configuration
-                .max_npk_install_size
-                .unwrap_or(DEFAULT_MAX_INSTALL_STREAM_SIZE);
+            let max_install_stream_size = configuration.runtime.max_npk_install_size;
             if size > max_install_stream_size {
                 bail!("npk size too large");
             }
@@ -427,11 +415,7 @@ where
 
             // If the connections breaks: just break. If the receiver is dropped: just break.
             let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-            let timeout = time::Duration::from_secs(
-                configuration
-                    .npk_stream_timeout
-                    .unwrap_or(DEFAULT_NPK_STREAM_TIMEOUT),
-            );
+            let timeout = configuration.runtime.npk_stream_timeout;
             while let Some(buf) = time::timeout(timeout, take.next())
                 .await
                 .context("npk stream timeout")?
@@ -452,6 +436,7 @@ where
                 target,
                 hex::encode(&shared)
             );
+            let token_validity = configuration.runtime.token_validity;
             let token: Vec<u8> =
                 Token::new(token_validity, user, target.as_ref().as_bytes(), shared).into();
             let token = api::model::Token::from(token);
@@ -475,6 +460,7 @@ where
                 hex::encode(&shared)
             );
             // The token has a valid length - verified by serde::deserialize
+            let token_validity = configuration.runtime.token_validity;
             let token = Token::from((token_validity, token.as_ref().to_vec()));
             let result = token
                 .verify(user.as_ref().as_bytes(), target, &shared)
@@ -517,7 +503,6 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
     notification_tx: broadcast::Sender<(Container, ContainerEvent)>,
     stop: CancellationToken,
     configuration: Configuration,
-    token_validity: time::Duration,
 ) where
     AcceptFun: Fn() -> AcceptFuture,
     AcceptFuture: Future<Output = Result<(Stream, Addr), io::Error>>,
@@ -540,7 +525,6 @@ async fn serve<AcceptFun, AcceptFuture, Stream, Addr>(
                             stop.clone(),
                             None,
                             configuration.clone(),
-                            token_validity,
                             event_tx.clone(),
                             notification_tx.subscribe(),
                             Some(time::Duration::from_secs(10)),

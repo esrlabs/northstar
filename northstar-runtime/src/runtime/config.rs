@@ -31,17 +31,53 @@ pub struct Config {
     /// Notification buffer size
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
+    /// Console configuration.
+    #[serde(default)]
+    pub console: Console,
     /// Loop device timeout
     #[serde(with = "humantime_serde", default = "default_loop_device_timeout")]
     pub loop_device_timeout: time::Duration,
-    /// Token validity
-    #[serde(with = "humantime_serde", default = "default_token_validity")]
-    pub token_validity: time::Duration,
     /// Repositories
     #[serde(default)]
     pub repositories: HashMap<RepositoryId, Repository>,
     /// Debugging options
     pub debug: Option<Debug>,
+}
+
+/// Console Quality of Service
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Console {
+    /// Token validity duration.
+    #[serde(with = "humantime_serde", default = "default_token_validity")]
+    pub token_validity: time::Duration,
+    /// Limits the number of requests processed per second.
+    #[serde(default = "default_max_requests_per_second")]
+    pub max_requests_per_sec: usize,
+    /// Maximum request size in bytes
+    #[serde(deserialize_with = "bytesize", default = "default_max_request_size")]
+    pub max_request_size: u64,
+    /// Maximum npk size in bytes.
+    #[serde(
+        deserialize_with = "bytesize",
+        default = "default_max_npk_install_size"
+    )]
+    pub max_npk_install_size: u64,
+    /// NPK stream timeout in seconds.
+    #[serde(with = "humantime_serde", default = "default_npk_stream_timeout")]
+    pub npk_stream_timeout: time::Duration,
+}
+
+impl Default for Console {
+    fn default() -> Self {
+        Self {
+            token_validity: default_token_validity(),
+            max_requests_per_sec: default_max_requests_per_second(),
+            max_request_size: default_max_request_size(),
+            max_npk_install_size: default_max_npk_install_size(),
+            npk_stream_timeout: default_npk_stream_timeout(),
+        }
+    }
 }
 
 /// Repository type
@@ -147,36 +183,53 @@ where
 }
 
 /// Parse human readable byte sizes.
-fn bytesize<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+fn bytesize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
+    T: From<u64>,
 {
-    let size: Option<String> = Option::<String>::deserialize(deserializer)?;
-    if let Some(size) = size {
-        Ok(Some(
-            size.parse::<ByteSize>()
-                .map_err(D::Error::custom)
-                .map(|s| s.as_u64())?,
-        ))
-    } else {
-        Ok(None)
-    }
+    String::deserialize(deserializer)
+        .and_then(|s| s.parse::<ByteSize>().map_err(D::Error::custom))
+        .map(|s| s.as_u64().into())
 }
 
+/// Default loop device timeout.
 const fn default_loop_device_timeout() -> time::Duration {
     time::Duration::from_secs(10)
 }
 
+/// Default event buffer size.
 const fn default_event_buffer_size() -> usize {
     256
 }
 
+/// Default notification buffer size.
 const fn default_notification_buffer_size() -> usize {
     128
 }
 
+/// Default token validity time.
 const fn default_token_validity() -> time::Duration {
     time::Duration::from_secs(60)
+}
+
+/// Default maximum requests per second.
+const fn default_max_requests_per_second() -> usize {
+    1000
+}
+
+/// Default maximum NPK size.
+const fn default_max_npk_install_size() -> u64 {
+    256 * 1024 * 1024
+}
+/// Default timeout between two npks stream chunks.
+const fn default_npk_stream_timeout() -> time::Duration {
+    time::Duration::from_secs(10)
+}
+
+/// Default maximum length per request in bytes.
+const fn default_max_request_size() -> u64 {
+    1024 * 1024
 }
 
 #[test]
@@ -209,7 +262,6 @@ console = "http://localhost:4200"
 }
 
 #[test]
-#[allow(clippy::unwrap_used)]
 fn repository_size() {
     let config = r#"
 data_dir = "target/northstar/data"
@@ -223,5 +275,12 @@ key = "examples/northstar.pub"
 capacity_num = 10
 capacity_size = "100MB"
 "#;
-    toml::from_str::<Config>(config).unwrap();
+    let config = toml::from_str::<Config>(config).expect("failed to parse config");
+    let memory = config
+        .repositories
+        .get("memory")
+        .expect("failed to find memory repository");
+    assert_eq!(memory.key, Some("examples/northstar.pub".into()));
+    assert_eq!(memory.capacity_num, Some(10));
+    assert_eq!(memory.capacity_size, Some(100000000));
 }

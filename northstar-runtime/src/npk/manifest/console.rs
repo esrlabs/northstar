@@ -16,14 +16,6 @@ use strum_macros::{EnumCount, EnumIter};
 pub struct Configuration {
     /// Permissions
     pub permissions: Permissions,
-    /// Limits the number of requests processed per second
-    pub max_requests_per_sec: Option<usize>,
-    /// Maximum request size in characters
-    pub max_request_size: Option<usize>,
-    /// Maximum npk size in bytes
-    pub max_npk_install_size: Option<u64>,
-    /// NPK stream timeout in seconds
-    pub npk_stream_timeout: Option<u64>,
 }
 
 /// Console features. Matches the api request struct and notifications

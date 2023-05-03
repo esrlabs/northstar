@@ -3,8 +3,7 @@ use crate::{
     runtime::{
         cgroups,
         config::Config,
-        console,
-        console::{Configuration, Permissions},
+        console::{self, Configuration, Permissions},
         events::{ContainerEvent, Event},
         exit_status::ExitStatus,
         fork,
@@ -150,12 +149,12 @@ async fn run(
         let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
         // Default debug console configuration with full access and no limits.
         let configuration = Configuration {
-            permissions: Permissions::full(),
-            ..Default::default()
+            container: crate::npk::manifest::console::Configuration {
+                permissions: Permissions::full(),
+            },
+            runtime: config.console.clone(),
         };
-        console
-            .listen(url, &configuration, config.token_validity)
-            .await?;
+        console.listen(url, &configuration).await?;
         Some(console)
     } else {
         None
