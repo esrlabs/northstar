@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
-anyhow = { version = "1.0.70", features = ["backtrace"] }
+anyhow = { version = "1.0.71", features = ["backtrace"] }
 clap = { version = "4.2.5", features = ["derive"] }
 env_logger = "0.10.0"
 futures = { version = "0.3.27", default-features = false }
