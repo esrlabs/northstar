@@ -22,6 +22,7 @@ use crate::{
         repository::{DirRepository, MemRepository, Npk, RepositoryId},
         runtime::{NotificationTx, Pid},
         sockets,
+        sockets::Sockets,
     },
 };
 use anyhow::{Context, Result};
@@ -52,8 +53,6 @@ use tokio::{
     time,
 };
 use tokio_util::sync::CancellationToken;
-
-use super::sockets::Sockets;
 
 /// Repository
 type Repository = Box<dyn super::repository::Repository + Send + Sync>;
@@ -478,13 +477,18 @@ impl State {
             let events_tx = self.events_tx.clone();
             let stop = stop.clone();
             let container = Some(container.clone());
+            let configuration = {
+                crate::runtime::console::Configuration {
+                    container: configuration,
+                    runtime: self.config.console.clone(),
+                }
+            };
             let connection = Console::connection(
                 runtime,
                 peer,
                 stop,
                 container,
                 configuration,
-                self.config.token_validity,
                 events_tx,
                 notifications,
                 None,

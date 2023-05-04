@@ -124,7 +124,7 @@ impl Runtime {
             event_buffer_size: 128,
             notification_buffer_size: 128,
             loop_device_timeout: time::Duration::from_secs(10),
-            token_validity: time::Duration::from_secs(60),
+            console: config::Console::default(),
             cgroup: NonNulString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,
             debug: Some(config::Debug {
