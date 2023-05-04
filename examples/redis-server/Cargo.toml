@@ -7,7 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 mini-redis = "0.4.1"
-tokio = { version = "1.27.0", features = ["macros", "rt", "net", "signal"] }
+tokio = { version = "1.28.0", features = ["macros", "rt", "net", "signal"] }
 
 [package.metadata.npk]
 manifest = "manifest.yaml"
