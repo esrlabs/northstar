@@ -1119,9 +1119,9 @@ dependencies = [
 
 [[package]]
 name = "human_bytes"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39b528196c838e8b3da8b665e08c30958a6f2ede91d79f2ffcd0d4664b9c64eb"
+checksum = "27e2b089f28ad15597b48d8c0a8fe94eeb1c1cb26ca99b6f66ac9582ae10c5e6"
 
 [[package]]
 name = "humanize-rs"
