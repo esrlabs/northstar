@@ -8,7 +8,7 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 caps = "0.5.5"
-clap = { version = "4.2.5", features = ["derive"] }
+clap = { version = "4.2.7", features = ["derive"] }
 nix = { version = "0.26.2", default-features = false, features = ["process", "user", "socket"] }
 
 [package.metadata.npk]

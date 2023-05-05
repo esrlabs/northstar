@@ -351,7 +351,7 @@ dependencies = [
  "atty",
  "cargo-subcommand",
  "cargo_metadata",
- "clap 4.2.5",
+ "clap 4.2.7",
  "human_bytes",
  "humantime",
  "northstar-runtime",
@@ -375,7 +375,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1898fe3af1534e8c90d4695c1f39d2d01e21fa4268cc941d769ae895bf8cdac6"
 dependencies = [
- "clap 4.2.5",
+ "clap 4.2.7",
  "current_platform",
  "dunce",
  "glob",
@@ -473,9 +473,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.2.5"
+version = "4.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a1f23fa97e1d1641371b51f35535cb26959b8e27ab50d167a8b996b5bada819"
+checksum = "34d21f9bf1b425d2968943631ec91202fe5e837264063503708b83013f8fc938"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -484,9 +484,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.2.5"
+version = "4.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdc5d93c358224b4d6867ef1356d740de2303e9892edc06c5340daeccd96bab"
+checksum = "914c8c79fb560f238ef6429439a30023c862f7a28e688c58f7203f12b29970bd"
 dependencies = [
  "anstream",
  "anstyle",
@@ -501,7 +501,7 @@ version = "4.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a19591b2ab0e3c04b588a0e04ddde7b9eaa423646d1b4a8092879216bf47473"
 dependencies = [
- "clap 4.2.5",
+ "clap 4.2.7",
 ]
 
 [[package]]
@@ -1527,7 +1527,7 @@ dependencies = [
  "android-logd-logger",
  "anyhow",
  "bincode",
- "clap 4.2.5",
+ "clap 4.2.7",
  "console 0.15.5",
  "log",
  "nix 0.26.2",
@@ -1555,7 +1555,7 @@ version = "0.7.2-pre"
 dependencies = [
  "anyhow",
  "base64 0.21.0",
- "clap 4.2.5",
+ "clap 4.2.7",
  "clap_complete",
  "futures",
  "humantime",
@@ -1639,7 +1639,7 @@ name = "northstar-sextant"
 version = "0.7.2-pre"
 dependencies = [
  "anyhow",
- "clap 4.2.5",
+ "clap 4.2.7",
  "colored",
  "env_logger",
  "northstar-runtime",
@@ -1652,7 +1652,7 @@ name = "northstar-stress"
 version = "0.7.2-pre"
 dependencies = [
  "anyhow",
- "clap 4.2.5",
+ "clap 4.2.7",
  "env_logger",
  "futures",
  "humantime",
@@ -2496,7 +2496,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "caps",
- "clap 4.2.5",
+ "clap 4.2.7",
  "nix 0.26.2",
 ]
 
