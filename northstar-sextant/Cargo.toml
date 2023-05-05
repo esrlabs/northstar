@@ -10,7 +10,7 @@ repository = "https://github.com/esrlabs/northstar"
 
 [dependencies]
 anyhow = { version = "1.0.71", features = ["backtrace"] }
-clap = { version = "4.2.5", features = ["derive"] }
+clap = { version = "4.2.7", features = ["derive"] }
 colored = "2.0.0"
 env_logger = "0.10.0"
 northstar-runtime = { version = "^0.7.2-pre", path = "../northstar-runtime", features = ["npk"] }
