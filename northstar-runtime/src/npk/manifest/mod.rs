@@ -33,6 +33,8 @@ pub mod mount;
 pub mod network;
 /// Linux resource limits
 pub mod rlimit;
+/// Scheduling
+pub mod sched;
 /// SE Linux
 pub mod selinux;
 /// Sockets
@@ -86,6 +88,9 @@ pub struct Manifest {
     /// GID
     #[validate(range(min = 1, message = "gid must be greater than 0"))]
     pub gid: u16,
+    /// Scheduling parameter.
+    #[validate]
+    pub sched: Option<sched::Sched>,
     /// List of bind mounts and resources
     #[serde(
         default,
@@ -210,6 +215,9 @@ env:
   LD_LIBRARY_PATH: /lib
 uid: 1000
 gid: 1001
+sched:
+  policy: other
+  nice: 10
 suppl_groups:
   - inet
   - log
@@ -567,6 +575,9 @@ args:
   - two
 env:
   LD_LIBRARY_PATH: /lib
+sched:
+  policy: other
+  nice: 10
 mounts:
   /dev:
     type: dev
@@ -627,10 +638,12 @@ custom:
     #[test]
     fn roundtrip_toml() -> Result<()> {
         let manifest = serde_yaml::from_str::<Manifest>(ROUNDTRIP_MANIFEST)?;
+        manifest.validate()?;
         let toml_value = toml::Value::try_from(&manifest)?;
         let toml = toml::to_string(&toml_value)?;
         println!("{toml}");
         let deserialized = toml::from_str::<Manifest>(&toml)?;
+        deserialized.validate()?;
         assert_eq!(manifest, deserialized);
         Ok(())
     }
@@ -638,8 +651,10 @@ custom:
     #[test]
     fn roundtrip_json() -> Result<()> {
         let manifest = serde_yaml::from_str::<Manifest>(ROUNDTRIP_MANIFEST)?;
+        manifest.validate()?;
         let json = serde_json::to_string(&manifest)?;
         let deserialized = serde_json::from_str::<Manifest>(&json)?;
+        deserialized.validate()?;
         assert_eq!(manifest, deserialized);
         Ok(())
     }
