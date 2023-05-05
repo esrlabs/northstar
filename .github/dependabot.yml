@@ -3,8 +3,13 @@
 
 version: 2
 updates:
+- package-ecosystem: github-actions
+  directory: /
+  schedule:
+    interval: monthly
+    time: "12:00"
 - package-ecosystem: cargo
-  directory: "/"
+  directory: /
   schedule:
     interval: monthly
     time: "12:00"
