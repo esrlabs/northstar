@@ -196,12 +196,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
-
-[[package]]
-name = "base64"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
@@ -1554,7 +1548,7 @@ name = "northstar-nstar"
 version = "0.7.2-pre"
 dependencies = [
  "anyhow",
- "base64 0.21.0",
+ "base64",
  "clap 4.2.7",
  "clap_complete",
  "futures",
@@ -1579,7 +1573,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "base64 0.21.0",
+ "base64",
  "bincode",
  "bindgen 0.65.1",
  "bitflags 2.2.1",
@@ -2246,11 +2240,11 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.3.3"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07ff71d2c147a7b57362cead5e22f772cd52f6ab31cfcd9edcd7f6aeb2a0afbe"
+checksum = "9f02d8aa6e3c385bf084924f660ce2a3a6bd333ba55b35e8590b321f35d88513"
 dependencies = [
- "base64 0.13.1",
+ "base64",
  "chrono",
  "hex",
  "indexmap",
@@ -2262,9 +2256,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "2.3.3"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881b6f881b17d13214e5d494c939ebab463d01264ce1811e9d4ac3a882e7695f"
+checksum = "edc7d5d3932fb12ce722ee5e64dd38c504efba37567f0c402f6ca728c3b8b070"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -2586,7 +2580,7 @@ name = "token-client"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64 0.21.0",
+ "base64",
  "futures",
  "northstar-client",
  "tokio",
@@ -2598,7 +2592,7 @@ name = "token-server"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64 0.21.0",
+ "base64",
  "northstar-client",
  "tokio",
 ]
