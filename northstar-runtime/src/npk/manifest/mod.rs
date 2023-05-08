@@ -13,7 +13,7 @@ use std::{
     str::FromStr,
 };
 use thiserror::Error;
-use validator::{Validate, ValidationErrors};
+use validator::{Validate, ValidationError, ValidationErrors};
 
 use self::network::Network;
 
@@ -41,6 +41,11 @@ pub mod selinux;
 pub mod socket;
 
 mod validation;
+
+/// Maximum number of supplementary groups
+const MAX_SUPPL_GROUPS: usize = 64;
+/// Max length of a supplementary group name
+const MAX_SUPPL_GROUP_LENGTH: usize = 64;
 
 /// Manifest parsing error
 #[derive(Error, Debug)]
@@ -125,7 +130,7 @@ pub struct Manifest {
         skip_serializing_if = "HashSet::is_empty",
         deserialize_with = "sets_duplicate_value_is_error::deserialize"
     )]
-    #[validate(custom = "validation::suppl_groups")]
+    #[validate(custom = "validate_suppl_groups")]
     pub suppl_groups: HashSet<NonNulString>,
     /// Resource limits
     #[serde(
@@ -185,6 +190,22 @@ impl ToString for Manifest {
         // we can safely use .unwrap() here.
         serde_yaml::to_string(self).expect("failed to serialize manifest")
     }
+}
+
+/// Validate supplementary groups for number and length
+pub fn validate_suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationError> {
+    if groups.len() > MAX_SUPPL_GROUPS {
+        return Err(ValidationError::new(
+            "supplementary groups exceeds max length",
+        ));
+    }
+
+    if groups.iter().any(|g| g.len() > MAX_SUPPL_GROUP_LENGTH) {
+        return Err(ValidationError::new(
+            "supplementary group name exceeds max length",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

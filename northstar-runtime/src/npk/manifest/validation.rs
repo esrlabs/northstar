@@ -4,7 +4,7 @@ use crate::{
 };
 use itertools::Itertools;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Component, Component::RootDir, Path},
 };
 use validator::ValidationError;
@@ -20,10 +20,6 @@ const MAX_ENV_VARS: usize = 64;
 const MAX_ENV_VAR_NAME_LENGTH: usize = 64;
 /// Maximum length of a environment variable value
 const MAX_ENV_VAR_VALUE_LENTH: usize = 1024;
-/// Maximum number of supplementary groups
-const MAX_SUPPL_GROUPS: usize = 64;
-/// Max length of a supplementary group name
-const MAX_SUPPL_GROUP_LENGTH: usize = 64;
 
 /// Environment varibables used by the runtime and not available to the user.
 const RESERVED_ENV_VARIABLES: &[&str] = &[
@@ -152,22 +148,6 @@ pub fn seccomp(seccomp: &Seccomp) -> Result<(), ValidationError> {
                 }
             }
         }
-    }
-    Ok(())
-}
-
-/// Validate supplementary groups for number and length
-pub fn suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationError> {
-    if groups.len() > MAX_SUPPL_GROUPS {
-        return Err(ValidationError::new(
-            "supplementary groups exceeds max length",
-        ));
-    }
-
-    if groups.iter().any(|g| g.len() > MAX_SUPPL_GROUP_LENGTH) {
-        return Err(ValidationError::new(
-            "supplementary group name exceeds max length",
-        ));
     }
     Ok(())
 }
