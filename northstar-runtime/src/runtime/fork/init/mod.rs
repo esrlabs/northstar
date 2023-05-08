@@ -4,6 +4,7 @@ use crate::{
         capabilities::Capability,
         network::Network,
         rlimit::{RLimitResource, RLimitValue},
+        sched::{Policy, Sched},
     },
     runtime::{
         exit_status::ExitStatus,
@@ -33,7 +34,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     env,
-    ffi::CString,
+    ffi::{c_int, CString},
+    io,
     os::unix::prelude::{AsRawFd, OwnedFd},
     path::{Path, PathBuf},
     process::exit,
@@ -62,6 +64,7 @@ pub struct Init {
     pub root: PathBuf,
     pub uid: u16,
     pub gid: u16,
+    pub sched: Option<Sched>,
     pub mounts: Vec<Mount>,
     pub groups: Vec<u32>,
     pub network: Option<Network>,
@@ -85,6 +88,9 @@ impl Init {
         // Set the process name to init. This process inherited the process name
         // from the runtime
         set_process_name(&format!("init-{}", self.container));
+
+        // Apply scheduler settings
+        //self.set_scheduler();
 
         // Become a session group leader
         debug!("Setting session id");
@@ -118,12 +124,6 @@ impl Init {
 
         // Apply resource limits
         self.set_rlimits();
-
-        // No new privileges
-        Self::set_no_new_privs(true);
-
-        // Capabilities
-        self.drop_privileges();
 
         loop {
             match stream.recv() {
@@ -163,10 +163,20 @@ impl Init {
                         ForkResult::Child => {
                             util::set_parent_death_signal(Signal::SIGKILL);
 
+                            // Apply scheduling parameters. The parameters shall not be applied to
+                            // the init process and therefore this is done *after* fork.
+                            self.set_scheduler_policy().expect("failed to set scheduler policy");
+
                             // Set seccomp filter
                             if let Some(ref filter) = self.seccomp {
                                 filter.apply().expect("failed to apply seccomp filter.");
                             }
+
+                            // No new privileges
+                            Self::set_no_new_privs(true);
+
+                            // Capabilities
+                            self.drop_privileges();
 
                             panic!(
                                 "execve: {:?} {:?}: {:?}",
@@ -418,6 +428,55 @@ impl Init {
         // Change directory to root
         unistd::fchdir(newroot).expect("failed to fchdir");
         unistd::close(newroot).expect("failed to close");
+    }
+
+    /// Set the scheduling policy.
+    fn set_scheduler_policy(&self) -> io::Result<()> {
+        let policy = if let Some(ref sched) = self.sched {
+            &sched.policy
+        } else {
+            return Ok(());
+        };
+
+        #[inline]
+        fn set_scheduler(policy: c_int, priority: c_int) -> io::Result<()> {
+            let params = libc::sched_param {
+                sched_priority: priority,
+            };
+            let params_ptr: *const libc::sched_param = &params;
+
+            match unsafe { libc::sched_setscheduler(0, policy, params_ptr) } {
+                0 => Ok(()),
+                _ => Err(io::Error::last_os_error()),
+            }
+        }
+
+        /// Renice a process.
+        #[inline]
+        fn nice(nice: i32) -> io::Result<()> {
+            match unsafe { libc::nice(nice) } {
+                0 => Ok(()),
+                _ => Err(io::Error::last_os_error()),
+            }
+        }
+
+        /// Does not exist in libc yet for some reason.
+        const SCHED_DEADLINE: c_int = 6;
+
+        match policy {
+            Policy::Other { nice: n } => {
+                set_scheduler(libc::SCHED_OTHER, 0)?;
+                nice(*n as i32)
+            }
+            Policy::Fifo { priority } => set_scheduler(libc::SCHED_FIFO, *priority as c_int),
+            Policy::Batch { nice: n } => {
+                set_scheduler(libc::SCHED_BATCH, 0)?;
+                nice(*n as i32)
+            }
+            Policy::RoundRobin { priority } => set_scheduler(libc::SCHED_RR, *priority as c_int),
+            Policy::Idle => set_scheduler(libc::SCHED_IDLE, 0),
+            Policy::Deadline => set_scheduler(SCHED_DEADLINE, 0),
+        }
     }
 }
 

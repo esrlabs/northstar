@@ -24,8 +24,9 @@ env:
 uid: 1000
 gid: 1001
 sched:
-  policy: other
-  nice: 10
+  policy:
+    !other
+      nice: 10
 suppl_groups:
   - inet
   - log
@@ -404,8 +405,7 @@ args:
 env:
   LD_LIBRARY_PATH: /lib
 sched:
-  policy: other
-  nice: 10
+  policy: idle
 mounts:
   /dev:
     type: dev

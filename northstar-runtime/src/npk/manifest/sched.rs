@@ -6,7 +6,10 @@ use validator::{Validate, ValidationError};
 #[serde(rename_all = "snake_case")]
 pub enum Policy {
     /// The standard round-robin time-sharing policy.
-    Other,
+    Other {
+        /// Nice level. +19 (low priority) to -20 (high
+        nice: i8,
+    },
     /// First-in, first-out policy.
     Fifo {
         /// Priority of the process.
@@ -18,7 +21,10 @@ pub enum Policy {
         priority: u32,
     },
     /// Batch style execution of processes.
-    Batch,
+    Batch {
+        /// Nice level. +19 (low priority) to -20 (high
+        nice: i8,
+    },
     /// Running very low priority background jobs.
     Idle,
     /// Deadline policy.
@@ -26,20 +32,22 @@ pub enum Policy {
 }
 
 /// Scheduling policy.
-#[derive(Clone, Default, Eq, PartialEq, Debug, Serialize, Validate, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Debug, Serialize, Validate, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Sched {
     /// Scheduling policy.
     #[validate(custom = "validate_policy")]
-    pub policy: Option<Policy>,
-    /// Nice level. +19 (low priority) to -20 (high
-    #[validate(range(min = -20, max = 19, message = "nice value must be between -20 and 19"))]
-    pub nice: Option<i8>,
+    pub policy: Policy,
 }
 
 fn validate_policy(policy: &Policy) -> Result<(), ValidationError> {
     match policy {
-        Policy::Fifo { priority } if !(1u32..=99).contains(priority) => {
+        Policy::Other { nice } if !(-20..=19).contains(nice) => {
+            let mut error = ValidationError::new("nice must be between -20 and 19");
+            error.add_param("nice".into(), nice);
+            Err(error)
+        }
+        Policy::Fifo { priority } if !(1..=99).contains(priority) => {
             let mut error = ValidationError::new("fifo priority must be between 1 and 99");
             error.add_param("priority".into(), priority);
             Err(error)
@@ -47,6 +55,11 @@ fn validate_policy(policy: &Policy) -> Result<(), ValidationError> {
         Policy::RoundRobin { priority } => {
             let mut error = ValidationError::new("round robing priority must be between 1 and 99");
             error.add_param("priority".into(), priority);
+            Err(error)
+        }
+        Policy::Batch { nice } if !(-20..=19).contains(nice) => {
+            let mut error = ValidationError::new("nice must be between -20 and 19");
+            error.add_param("nice".into(), nice);
             Err(error)
         }
         _ => Ok(()),
@@ -62,10 +75,9 @@ mod test {
     #[test]
     fn parse_other() -> Result<()> {
         assert_eq!(
-            serde_yaml::from_str::<Sched>("policy: other")?,
+            serde_yaml::from_str::<Sched>("policy:\n  !other\n    nice: 0")?,
             Sched {
-                policy: Some(Policy::Other),
-                nice: None
+                policy: Policy::Other { nice: 0 },
             }
         );
         Ok(())
@@ -74,10 +86,9 @@ mod test {
     #[test]
     fn parse_other_with_nice_value() -> Result<()> {
         assert_eq!(
-            serde_yaml::from_str::<Sched>("policy: other\nnice: 10")?,
+            serde_yaml::from_str::<Sched>("policy:\n  !other\n    nice: 10")?,
             Sched {
-                policy: Some(Policy::Other),
-                nice: Some(10)
+                policy: Policy::Other { nice: 10 },
             }
         );
         Ok(())
@@ -85,14 +96,14 @@ mod test {
 
     #[test]
     fn parse_other_with_too_big_nice_value() -> Result<()> {
-        let policy = serde_yaml::from_str::<Sched>("policy: other\nnice: 55")?;
+        let policy = serde_yaml::from_str::<Sched>("policy:\n  !other\n    nice: 55")?;
         assert!(policy.validate().is_err());
         Ok(())
     }
 
     #[test]
     fn parse_other_with_too_small_nice_value() -> Result<()> {
-        let policy = serde_yaml::from_str::<Sched>("policy: other\nnice: -40")?;
+        let policy = serde_yaml::from_str::<Sched>("policy:\n  !other\n    nice: -40")?;
         assert!(policy.validate().is_err());
         Ok(())
     }
@@ -102,8 +113,7 @@ mod test {
         assert_eq!(
             serde_yaml::from_str::<Sched>("policy:\n  !fifo\n    priority: 10")?,
             Sched {
-                policy: Some(Policy::Fifo { priority: 10 }),
-                nice: None
+                policy: Policy::Fifo { priority: 10 },
             }
         );
         Ok(())

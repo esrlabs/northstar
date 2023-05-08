@@ -32,6 +32,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     let capabilities = manifest.capabilities.clone();
     let console = manifest.console.is_some();
     let gid = manifest.gid;
+    let sched = manifest.sched.clone();
     let network = manifest.network.clone();
     let groups = groups(manifest);
     let mounts = prepare_mounts(config, &root, manifest, containers).await?;
@@ -51,6 +52,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         root,
         uid,
         gid,
+        sched,
         mounts,
         groups,
         network,
