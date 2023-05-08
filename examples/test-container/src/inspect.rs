@@ -1,4 +1,7 @@
-use nix::unistd::{self, Gid};
+use nix::{
+    libc,
+    unistd::{self, Gid},
+};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -30,6 +33,17 @@ pub fn run() {
         "exe: {}",
         env::current_exe().expect("current_exe").display()
     );
+    println!("sched_getscheduler: {}", unsafe {
+        libc::sched_getscheduler(0)
+    });
+    println!("sched_priority: {}", unsafe {
+        let mut params = libc::sched_param { sched_priority: 0 };
+        assert_eq!(
+            libc::sched_getparam(0, &mut params as *mut libc::sched_param),
+            0
+        );
+        params.sched_priority
+    });
 
     for set in &[
         caps::CapSet::Ambient,

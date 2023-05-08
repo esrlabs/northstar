@@ -3,6 +3,10 @@ version: 0.0.1
 init: /test-container
 uid: 1000
 gid: 1000
+sched:
+  policy:
+    !fifo
+      priority: 11
 io:
   stdout: pipe
   stderr: pipe
