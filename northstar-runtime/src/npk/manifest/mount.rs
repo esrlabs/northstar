@@ -3,7 +3,13 @@ use serde::{
     de::{Deserializer, Visitor},
     Deserialize, Serialize, Serializer,
 };
-use std::{collections::HashSet, fmt, str::FromStr};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    path::{Component, Path},
+    str::FromStr,
+};
+use validator::ValidationError;
 
 use crate::common::{name::Name, non_nul_string::NonNulString, version::VersionReq};
 
@@ -211,4 +217,43 @@ fn deserialize_tmpfs_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<
     }
 
     deserializer.deserialize_any(SizeVisitor)
+}
+
+pub(crate) fn validate(mounts: &HashMap<MountPoint, Mount>) -> Result<(), ValidationError> {
+    // Check for relative and overlapping bind mounts
+    let mut prev_comps = vec![Component::RootDir];
+    mounts
+        .iter()
+        .filter(|(_, m)| matches!(m, Mount::Bind(_)))
+        .map(|(p, _)| p)
+        .sorted()
+        .try_for_each(|p| {
+            let p: &Path = p.as_ref();
+            if p.is_relative() {
+                return Err(ValidationError::new("mount points must not be relative"));
+            }
+            // Check for overlapping bind mount paths by checking if one path is the prefix of the next one
+            let curr_comps: Vec<Component> = p.components().collect();
+            let prev_too_short = prev_comps.len() <= 1; // Two mount paths both starting with '/' is not considered an overlap
+            let prev_too_long = prev_comps.len() > curr_comps.len(); // A longer path cannot be the prefix of a shorter one
+
+            if !prev_too_short && !prev_too_long && prev_comps == curr_comps[..prev_comps.len()] {
+                Err(ValidationError::new("mount points must not overlap"))
+            } else {
+                prev_comps = curr_comps;
+                Ok(())
+            }
+        })?;
+
+    // Check for recursive non bind mounts
+    mounts.iter().map(|(_, m)| m).try_for_each(|m| match m {
+        // Recursive bind mounts are allowed but not resources
+        Mount::Resource(m) if m.options.contains(&MountOption::Rec) => Err(ValidationError::new(
+            "non bind mounts must not be recursive",
+        )),
+        Mount::Resource(m) if !m.dir.starts_with('/') => Err(ValidationError::new(
+            "resource directory options must be absolute",
+        )),
+        _ => Ok(()),
+    })
 }

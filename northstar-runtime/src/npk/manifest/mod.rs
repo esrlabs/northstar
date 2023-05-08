@@ -102,7 +102,7 @@ pub struct Manifest {
         skip_serializing_if = "HashMap::is_empty",
         deserialize_with = "maps_duplicate_key_is_error::deserialize"
     )]
-    #[validate(custom = "validation::mounts")]
+    #[validate(custom = "mount::validate")]
     pub mounts: HashMap<mount::MountPoint, mount::Mount>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<autostart::Autostart>,
