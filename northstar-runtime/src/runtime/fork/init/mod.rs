@@ -165,7 +165,8 @@ impl Init {
 
                             // Apply scheduling parameters. The parameters shall not be applied to
                             // the init process and therefore this is done *after* fork.
-                            self.set_scheduler_policy().expect("failed to set scheduler policy");
+                            self.set_scheduler_policy()
+                                .expect("failed to set scheduler policy");
 
                             // Set seccomp filter
                             if let Some(ref filter) = self.seccomp {
