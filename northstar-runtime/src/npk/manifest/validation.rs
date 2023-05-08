@@ -11,7 +11,6 @@ use validator::ValidationError;
 
 use super::{
     mount::{Mount, MountOption, MountPoint},
-    network::Network,
     Manifest,
 };
 
@@ -25,8 +24,6 @@ const MAX_ENV_VAR_VALUE_LENTH: usize = 1024;
 const MAX_SUPPL_GROUPS: usize = 64;
 /// Max length of a supplementary group name
 const MAX_SUPPL_GROUP_LENGTH: usize = 64;
-/// Max length of a network namespace
-const MAX_NET_NAMESPACE_LENGTH: usize = 256;
 
 /// Environment varibables used by the runtime and not available to the user.
 const RESERVED_ENV_VARIABLES: &[&str] = &[
@@ -173,13 +170,4 @@ pub fn suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationErro
         ));
     }
     Ok(())
-}
-
-/// Validate network namespace setting
-pub fn network(network: &Network) -> Result<(), ValidationError> {
-    match network {
-        Network::Host => Ok(()),
-        Network::Namespace(netns) if netns.len() <= MAX_NET_NAMESPACE_LENGTH => Ok(()),
-        Network::Namespace(_) => Err(ValidationError::new("network namespace exceeds max length")),
-    }
 }

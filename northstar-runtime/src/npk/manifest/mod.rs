@@ -104,7 +104,7 @@ pub struct Manifest {
     /// CGroup configuration
     pub cgroups: Option<self::cgroups::CGroups>,
     /// Network configuration. Unshare the network if omitted.
-    #[validate(custom = "validation::network")]
+    #[validate(custom = "network::validate")]
     pub network: Option<Network>,
     /// Seccomp configuration
     #[validate(custom = "validation::seccomp")]
