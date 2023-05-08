@@ -110,7 +110,7 @@ pub struct Manifest {
     #[validate(custom = "validation::seccomp")]
     pub seccomp: Option<Seccomp>,
     /// SELinux configuration
-    #[validate(custom = "validation::selinux")]
+    #[validate]
     pub selinux: Option<selinux::Selinux>,
     /// Capabilities
     #[serde(
@@ -377,7 +377,7 @@ cgroups:
     #[test]
     fn invalid_selinux_context() -> Result<()> {
         let manifest =
-            "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1\ngid: 1\nselinux_context: fo@o";
+            "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1\ngid: 1\nselinux:\n    context: fo@o";
         assert!(Manifest::from_str(manifest).is_err());
         Ok(())
     }

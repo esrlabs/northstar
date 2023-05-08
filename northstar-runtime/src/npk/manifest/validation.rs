@@ -12,7 +12,6 @@ use validator::ValidationError;
 use super::{
     mount::{Mount, MountOption, MountPoint},
     network::Network,
-    selinux::Selinux,
     Manifest,
 };
 
@@ -135,29 +134,6 @@ pub fn mounts(mounts: &HashMap<MountPoint, Mount>) -> Result<(), ValidationError
         )),
         _ => Ok(()),
     })
-}
-
-/// Validate selinux settings
-pub fn selinux(selinux: &Selinux) -> Result<(), ValidationError> {
-    // Maximum length since at least Linux v3.7
-    // (https://elixir.bootlin.com/linux/v3.7/source/include/uapi/linux/limits.h)
-    const XATTR_SIZE_MAX: usize = 65536;
-
-    if selinux.context.len() >= XATTR_SIZE_MAX {
-        return Err(ValidationError::new("Selinux context too long"));
-    }
-
-    if !selinux
-        .context
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '_')
-    {
-        return Err(ValidationError::new(
-            "Selinux context must consist of alphanumeric ASCII characters, '?' or '_'",
-        ));
-    }
-
-    Ok(())
 }
 
 /// Validate seccomp rules
