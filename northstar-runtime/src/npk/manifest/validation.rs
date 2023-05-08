@@ -15,8 +15,6 @@ use super::{
     Manifest,
 };
 
-/// Max length of init in characters
-const MAX_LENGTH_INIT: usize = 4096;
 /// Maximum number of environment variables
 const MAX_ENV_VARS: usize = 64;
 /// Maximum length of a environment variable name
@@ -57,16 +55,6 @@ pub fn manifest(manifest: &Manifest) -> Result<(), ValidationError> {
     }
 
     Ok(())
-}
-
-/// Validate the map of environment variables. They shall not contain reserved variable names
-/// that are used by the runtime.
-pub fn init(init: &NonNulString) -> Result<(), ValidationError> {
-    if init.len() > MAX_LENGTH_INIT {
-        Err(ValidationError::new("init exceeds max length"))
-    } else {
-        Ok(())
-    }
 }
 
 /// Validate the map of environment variables. They shall not contain reserved variable names

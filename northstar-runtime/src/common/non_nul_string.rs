@@ -7,6 +7,7 @@ use std::{
     path::Path,
 };
 use thiserror::Error;
+use validator::HasLen;
 
 /// String that does not contain null bytes
 #[derive(Clone, Eq, PartialOrd, Ord, PartialEq, Hash)]
@@ -146,6 +147,13 @@ impl<'de> Deserialize<'de> for NonNulString {
         }
 
         deserializer.deserialize_str(Visitor)
+    }
+}
+
+/// Implement HasLen for NonNulString to allow validation of the length.
+impl HasLen for &NonNulString {
+    fn length(&self) -> u64 {
+        self.0.len() as u64
     }
 }
 

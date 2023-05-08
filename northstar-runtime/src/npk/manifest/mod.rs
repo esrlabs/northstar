@@ -73,7 +73,7 @@ pub struct Manifest {
     /// Pass a console fd number in NORTHSTAR_CONSOLE
     pub console: Option<console::Configuration>,
     /// Path to init
-    #[validate(custom = "validation::init")]
+    #[validate(length(min = 1, max = 4096))]
     pub init: Option<NonNulString>,
     /// Additional arguments for the application invocation
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -357,9 +357,29 @@ cgroups:
         Ok(())
     }
 
+    /// Invalid init too short.
+    #[test]
+    fn invalid_init_too_short() -> Result<()> {
+        let manifest = "name: hello\nversion: 0.0.0\ninit: \"\"\nuid: 1\ngid: 1001";
+        assert!(Manifest::from_str(manifest).is_err());
+        Ok(())
+    }
+
+    /// Invalid init too long.
+    #[test]
+    fn invalid_init_too_long() -> Result<()> {
+        let manifest = format!(
+            "name: hello\nversion: 0.0.0\ninit: {}\nuid: 1\ngid: 1001",
+            "b".repeat(4097)
+        );
+
+        assert!(dbg!(Manifest::from_str(&manifest)).is_err());
+        Ok(())
+    }
+
     /// Invalid uid
     #[test]
-    fn invalid_uid() -> Result<()> {
+    fn invalid_uid_zero() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 0\ngid: 1001";
         assert!(Manifest::from_str(manifest).is_err());
         Ok(())
@@ -367,7 +387,7 @@ cgroups:
 
     /// Invalid gid
     #[test]
-    fn invalid_gid() -> Result<()> {
+    fn invalid_gid_zero() -> Result<()> {
         let manifest = "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1\ngid: 0";
         assert!(Manifest::from_str(manifest).is_err());
         Ok(())
