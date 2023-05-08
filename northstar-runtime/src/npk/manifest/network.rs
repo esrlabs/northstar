@@ -22,7 +22,7 @@ pub enum Network {
 }
 
 /// Validate network namespace setting
-pub fn validate(network: &Network) -> Result<(), ValidationError> {
+pub(crate) fn validate(network: &Network) -> Result<(), ValidationError> {
     match network {
         Network::Host => Ok(()),
         Network::Namespace(netns) if netns.len() <= MAX_NET_NAMESPACE_LENGTH => Ok(()),

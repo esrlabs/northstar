@@ -12,7 +12,7 @@ pub struct Selinux {
 }
 
 /// Validate selinux settings
-pub fn validate_context(context: &NonNulString) -> Result<(), ValidationError> {
+fn validate_context(context: &NonNulString) -> Result<(), ValidationError> {
     // Maximum length since at least Linux v3.7
     // (https://elixir.bootlin.com/linux/v3.7/source/include/uapi/linux/limits.h)
     const XATTR_SIZE_MAX: usize = 65536;

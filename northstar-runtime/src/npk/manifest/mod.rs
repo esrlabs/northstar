@@ -35,17 +35,30 @@ pub mod network;
 pub mod rlimit;
 /// Scheduling
 pub mod sched;
+/// Seccomp
+pub mod seccomp;
 /// SE Linux
 pub mod selinux;
 /// Sockets
 pub mod socket;
 
-mod validation;
-
 /// Maximum number of supplementary groups
 const MAX_SUPPL_GROUPS: usize = 64;
 /// Max length of a supplementary group name
 const MAX_SUPPL_GROUP_LENGTH: usize = 64;
+/// Maximum number of environment variables
+const MAX_ENV_VARS: usize = 64;
+/// Maximum length of a environment variable name
+const MAX_ENV_VAR_NAME_LENGTH: usize = 64;
+/// Maximum length of a environment variable value
+const MAX_ENV_VAR_VALUE_LENTH: usize = 1024;
+/// Environment varibables used by the runtime and not available to the user.
+const RESERVED_ENV_VARIABLES: &[&str] = &[
+    "NORTHSTAR_NAME",
+    "NORTHSTAR_VERSION",
+    "NORTHSTAR_CONTAINER",
+    "NORTHSTAR_CONSOLE",
+];
 
 /// Manifest parsing error
 #[derive(Error, Debug)]
@@ -69,7 +82,7 @@ pub enum Error {
 #[skip_serializing_none]
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize, Validate)]
 #[serde(deny_unknown_fields)]
-#[validate(schema(function = "validation::manifest"))]
+#[validate(schema(function = "validate"))]
 pub struct Manifest {
     /// Name of container
     pub name: Name,
@@ -85,7 +98,7 @@ pub struct Manifest {
     pub args: Vec<NonNulString>,
     /// Environment passed to container
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    #[validate(custom = "validation::env")]
+    #[validate(custom = "validate_env")]
     pub env: HashMap<NonNulString, NonNulString>,
     /// UID
     #[validate(range(min = 1, message = "uid must be greater than 0"))]
@@ -112,7 +125,7 @@ pub struct Manifest {
     #[validate(custom = "network::validate")]
     pub network: Option<Network>,
     /// Seccomp configuration
-    #[validate(custom = "validation::seccomp")]
+    #[validate(custom = "seccomp::validate")]
     pub seccomp: Option<Seccomp>,
     /// SELinux configuration
     #[validate]
@@ -192,8 +205,30 @@ impl ToString for Manifest {
     }
 }
 
-/// Validate supplementary groups for number and length
-pub fn validate_suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationError> {
+/// Validate manifest.
+fn validate(manifest: &Manifest) -> Result<(), ValidationError> {
+    // Most optionals in the manifest are not valid for a resource container
+    if manifest.init.is_none()
+        && (!manifest.args.is_empty()
+            || !manifest.capabilities.is_empty()
+            || !manifest.env.is_empty()
+            || !manifest.suppl_groups.is_empty()
+            || manifest.autostart.is_some()
+            || manifest.cgroups.is_some()
+            || manifest.io.is_some()
+            || manifest.seccomp.is_some())
+    {
+        return Err(ValidationError::new(
+            "resource containers must not define any of the following manifest entries:\
+                args, env, autostart, cgroups, seccomp, capabilities, suppl_groups, io",
+        ));
+    }
+
+    Ok(())
+}
+
+/// Validate supplementary groups for number and length.
+fn validate_suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), ValidationError> {
     if groups.len() > MAX_SUPPL_GROUPS {
         return Err(ValidationError::new(
             "supplementary groups exceeds max length",
@@ -206,6 +241,34 @@ pub fn validate_suppl_groups(groups: &HashSet<NonNulString>) -> Result<(), Valid
         ));
     }
     Ok(())
+}
+
+/// Validate the map of environment variables. They shall not contain reserved variable names
+/// that are used by the runtime.
+fn validate_env(env: &HashMap<NonNulString, NonNulString>) -> Result<(), ValidationError> {
+    // Check the number of env variables
+    if env.len() > MAX_ENV_VARS {
+        return Err(ValidationError::new("env exceeds max length"));
+    }
+
+    // Check the lenght of each env variable name
+    if env.keys().any(|k| k.len() > MAX_ENV_VAR_NAME_LENGTH) {
+        return Err(ValidationError::new("env variable name exceeds max length"));
+    }
+
+    // Check the lenght of each env variable value
+    if env.values().any(|v| v.len() > MAX_ENV_VAR_VALUE_LENTH) {
+        return Err(ValidationError::new("env value exceeds max length"));
+    }
+
+    // Check for reserved env variable names
+    if RESERVED_ENV_VARIABLES.iter().any(|key| {
+        env.contains_key(unsafe { &NonNulString::from_str_unchecked(key) }) // safe - constants
+    }) {
+        Err(ValidationError::new("reserved env variable name"))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
