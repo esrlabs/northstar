@@ -441,9 +441,25 @@ impl Init {
 
         #[inline]
         fn set_scheduler(policy: c_int, priority: c_int) -> io::Result<()> {
+            #[cfg(not(target_env = "musl"))]
             let params = libc::sched_param {
                 sched_priority: priority,
             };
+            #[cfg(target_env = "musl")]
+            let params = libc::sched_param {
+                sched_priority: priority,
+                sched_ss_low_priority: 0,
+                sched_ss_repl_period: libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                },
+                sched_ss_init_budget: libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: 0,
+                },
+                sched_ss_max_repl: 0,
+            };
+
             let params_ptr: *const libc::sched_param = &params;
 
             match unsafe { libc::sched_setscheduler(0, policy, params_ptr) } {

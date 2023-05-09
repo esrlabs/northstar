@@ -37,7 +37,22 @@ pub fn run() {
         libc::sched_getscheduler(0)
     });
     println!("sched_priority: {}", unsafe {
+        #[cfg(not(target_env = "musl"))]
         let mut params = libc::sched_param { sched_priority: 0 };
+        #[cfg(target_env = "musl")]
+        let mut params = libc::sched_param {
+            sched_priority: 0,
+            sched_ss_low_priority: 0,
+            sched_ss_repl_period: libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            sched_ss_init_budget: libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            },
+            sched_ss_max_repl: 0,
+        };
         assert_eq!(
             libc::sched_getparam(0, &mut params as *mut libc::sched_param),
             0
