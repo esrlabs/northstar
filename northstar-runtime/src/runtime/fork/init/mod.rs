@@ -464,9 +464,14 @@ impl Init {
         /// Does not exist in libc yet for some reason.
         const SCHED_DEADLINE: c_int = 6;
 
+        #[cfg(target_os = "android")]
+        const SCHED_OTHER: libc::c_int = libc::SCHED_NORMAL;
+        #[cfg(not(target_os = "android"))]
+        use libc::SCHED_OTHER;
+
         match policy {
             Policy::Other { nice: n } => {
-                set_scheduler(libc::SCHED_OTHER, 0)?;
+                set_scheduler(SCHED_OTHER, 0)?;
                 nice(*n as i32)
             }
             Policy::Fifo { priority } => set_scheduler(libc::SCHED_FIFO, *priority as c_int),
