@@ -1,5 +1,7 @@
 MD004: false
 MD013: # Line length
   code_blocks: false
+MD024: false # Multiple headers with the same content
+MD025: false # Multiple top level headers in the same document
 MD033: false # Allow inline html
 MD041: false # First line in a file should be a top-level
