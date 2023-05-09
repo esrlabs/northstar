@@ -7,6 +7,7 @@ This release bumps the MSRV of Northstar to 1.66.1. ([#884]).
 - doc: Add changelog ([#972])
 - proj: Add dependabot for gh actions ([#963])
 - runtime: Android init like socket configuration for containers ([#932])
+- runtime: Scheduling policy by manifest ([#970])
 
 ## Changed
 
@@ -77,6 +78,7 @@ This release bumps the MSRV of Northstar to 1.66.1. ([#884]).
 [#967]: https://github.com/esrlabs/northstar/pull/967
 [#968]: https://github.com/esrlabs/northstar/pull/968
 [#969]: https://github.com/esrlabs/northstar/pull/969
+[#970]: https://github.com/esrlabs/northstar/pull/970
 [#972]: https://github.com/esrlabs/northstar/pull/972
 
 # 0.7.1 (March 21th, 2023)

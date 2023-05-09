@@ -680,3 +680,44 @@ mod socket {
         test(&mut client, "no_permission").await
     }
 }
+
+mod sched {
+    use anyhow::Result;
+    use northstar_runtime::npk::manifest::sched::Policy;
+    use northstar_tests::{containers::TEST_CONTAINER, logger::assume, runtime_test};
+
+    /// Check that the scheduler policy is set to fifo.
+    #[runtime_test]
+    async fn policy_is_fifo() -> Result<()> {
+        client.install_test_container().await?;
+        client.install_test_resource().await?;
+        const ARGS: [&str; 1] = ["inspect"];
+        client.start_with_args(TEST_CONTAINER, ARGS).await?;
+
+        assume(&format!("sched_getscheduler: {}", nix::libc::SCHED_FIFO), 5).await?;
+        Ok(())
+    }
+
+    /// Check that the scheduler priority matches the manifest. Assuming policy is FIFO.
+    #[runtime_test]
+    async fn priority_matches_manifest() -> Result<()> {
+        client.install_test_container().await?;
+        client.install_test_resource().await?;
+
+        let manifest_priority = match client
+            .inspect(TEST_CONTAINER)
+            .await?
+            .manifest
+            .sched
+            .unwrap()
+            .policy
+        {
+            Policy::Fifo { priority } => priority,
+            _ => panic!("unexpected scheduler policy"),
+        };
+        const ARGS: [&str; 1] = ["inspect"];
+        client.start_with_args(TEST_CONTAINER, ARGS).await?;
+        assume(&format!("sched_priority: {manifest_priority}"), 5).await?;
+        Ok(())
+    }
+}
