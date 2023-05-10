@@ -1,5 +1,13 @@
 # 0.8.1 (Unreleased)
 
+This release lowers the MSRV of Northstar to 1.65.0. ([#975]).
+
+## Changed
+
+- proj: Lower MSRV to 1.65.0 ([#975])
+
+[#975]: https://github.com/esrlabs/northstar/pull/975
+
 # 0.8.0 (May 10th, 2023)
 
 This release bumps the MSRV of Northstar to 1.66.1. ([#884]).

@@ -1,9 +1,9 @@
 use std::{
     env,
     io::{self, Read, Write},
-    os::{
-        fd::{FromRawFd, IntoRawFd, OwnedFd},
-        unix::net::{UnixDatagram, UnixListener, UnixStream},
+    os::unix::{
+        net::{UnixDatagram, UnixListener, UnixStream},
+        prelude::*,
     },
     path::Path,
     process, thread,
