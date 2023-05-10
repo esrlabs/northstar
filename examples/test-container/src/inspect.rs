@@ -59,6 +59,14 @@ pub fn run() {
         );
         params.sched_priority
     });
+    #[cfg(any(target_env = "musl", target_os = "android"))]
+    println!("getpriority: {}", unsafe {
+        libc::getpriority(0, libc::PRIO_PROCESS.try_into().unwrap())
+    });
+    #[cfg(all(not(target_env = "musl"), not(target_os = "android")))]
+    println!("getpriority: {}", unsafe {
+        libc::getpriority(0, libc::PRIO_PROCESS)
+    });
 
     for set in &[
         caps::CapSet::Ambient,
