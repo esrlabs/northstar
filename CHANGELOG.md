@@ -10,6 +10,7 @@ This release bumps the MSRV of Northstar to 1.66.1. ([#884]).
 - runtime: Scheduling policy by manifest ([#970])
 - tests: Patch manifest of prebuilt container (`northstar_tests::containers::with_manifest`)
   ([#973])
+- ci: Add [cargo-hack](https://github.com/taiki-e/cargo-hack) ([#974])
 
 ## Changed
 
@@ -82,6 +83,7 @@ This release bumps the MSRV of Northstar to 1.66.1. ([#884]).
 [#970]: https://github.com/esrlabs/northstar/pull/970
 [#972]: https://github.com/esrlabs/northstar/pull/972
 [#973]: https://github.com/esrlabs/northstar/pull/973
+[#974]: https://github.com/esrlabs/northstar/pull/974
 
 # 0.7.1 (March 21th, 2023)
 

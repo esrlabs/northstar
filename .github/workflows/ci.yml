@@ -92,6 +92,24 @@ jobs:
           command: check
           args: --all-features
 
+  hack:
+    name: Hack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Hack
+        run: cargo hack --feature-powerset check
+
   test:
     name: Tests
     runs-on: ubuntu-latest
