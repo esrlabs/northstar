@@ -1,4 +1,4 @@
-# 0.8.0 (Unreleased)
+# 0.8.0 (May 10th, 2023)
 
 This release bumps the MSRV of Northstar to 1.66.1. ([#884]).
 
