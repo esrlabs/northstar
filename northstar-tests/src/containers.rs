@@ -1,9 +1,4 @@
-use std::{
-    fs,
-    io::Read,
-    os::unix::fs::MetadataExt,
-    path::{Path},
-};
+use std::{fs, io::Read, os::unix::fs::MetadataExt, path::Path};
 
 use anyhow::Context;
 use lazy_static::lazy_static;

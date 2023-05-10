@@ -59,7 +59,9 @@ pub fn run() {
         );
         params.sched_priority
     });
-    println!("getpriority: {}", unsafe { libc::getpriority(0, libc::PRIO_PROCESS) });
+    println!("getpriority: {}", unsafe {
+        libc::getpriority(0, libc::PRIO_PROCESS)
+    });
 
     for set in &[
         caps::CapSet::Ambient,
