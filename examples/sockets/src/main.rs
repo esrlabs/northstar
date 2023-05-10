@@ -1,6 +1,6 @@
 use std::{
     env,
-    os::{fd::FromRawFd, unix::net::UnixDatagram},
+    os::unix::{io::FromRawFd, net::UnixDatagram},
     path::Path,
     thread,
 };

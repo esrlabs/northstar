@@ -11,10 +11,7 @@ use nix::{
 use std::{
     collections::HashMap,
     fs::Permissions,
-    os::{
-        fd::{FromRawFd, OwnedFd},
-        unix::prelude::PermissionsExt,
-    },
+    os::unix::prelude::*,
     path::{Path, PathBuf},
 };
 use tokio::fs;
