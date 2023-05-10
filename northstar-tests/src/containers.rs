@@ -112,7 +112,7 @@ where
     for mount_point in manifest.mounts.keys() {
         let mount_point = tmpdir
             .path()
-            .join(mount_point.strip_prefix("/").unwrap_or(mount_point));
+            .join(mount_point.strip_prefix('/').unwrap_or(mount_point));
         fs::remove_dir_all(mount_point).ok();
     }
 
