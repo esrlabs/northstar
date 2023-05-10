@@ -4,7 +4,7 @@ use anyhow::Result;
 use log::debug;
 use northstar_runtime::api::model::ExitStatus;
 use northstar_tests::{
-    containers::{TEST_CONTAINER, TEST_RESOURCE},
+    containers::{with_manifest, TEST_CONTAINER, TEST_CONTAINER_NPK, TEST_RESOURCE},
     logger::assume,
     runtime_test,
 };
@@ -131,7 +131,7 @@ async fn container_crash_exit() -> Result<()> {
 // Check uid. In the manifest of the test container the uid
 // is set to 1000
 #[runtime_test]
-async fn container_uses_correct_uid() -> Result<()> {
+async fn container_uses_manifest_uid() -> Result<()> {
     client.install_test_container().await?;
     client.install_test_resource().await?;
 
@@ -142,15 +142,35 @@ async fn container_uses_correct_uid() -> Result<()> {
     client.stop(TEST_CONTAINER, 5).await
 }
 
+/// Path the test-container with various uids.
+#[runtime_test]
+async fn container_uses_correct_uid_multiple() -> Result<()> {
+    client.install_test_resource().await?;
+    for uid in [10, 1000, 3000] {
+        let test_container = with_manifest(&TEST_CONTAINER_NPK, |m| m.uid = uid)?;
+        client.install(&test_container, "mem").await?;
+        client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+        assume(&format!("getuid: {uid}"), 5).await?;
+        client.stop(&TEST_CONTAINER, 5).await?;
+        client.uninstall_test_container().await?;
+    }
+    Ok(())
+}
+
 // Check gid. In the manifest of the test container the gid
 // is set to 1000
 #[runtime_test]
 async fn container_uses_correct_gid() -> Result<()> {
-    client.install_test_container().await?;
     client.install_test_resource().await?;
-    client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
-    assume("getgid: 1000", 5).await?;
-    client.stop(TEST_CONTAINER, 5).await
+    for gid in [10, 1000, 3000] {
+        let test_container = with_manifest(&TEST_CONTAINER_NPK, |m| m.gid = gid)?;
+        client.install(&test_container, "mem").await?;
+        client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+        assume(&format!("getgid: {gid}"), 5).await?;
+        client.stop(&TEST_CONTAINER, 5).await?;
+        client.uninstall_test_container().await?;
+    }
+    Ok(())
 }
 
 // Check parent pid. Northstar starts an init process which must have pid 1.
@@ -683,18 +703,57 @@ mod socket {
 
 mod sched {
     use anyhow::Result;
-    use northstar_runtime::npk::manifest::sched::Policy;
-    use northstar_tests::{containers::TEST_CONTAINER, logger::assume, runtime_test};
+    use nix::libc;
+    use northstar_runtime::npk::manifest::sched::{Policy, Sched};
+    use northstar_tests::{
+        containers::{with_manifest, TEST_CONTAINER, TEST_CONTAINER_NPK},
+        logger::assume,
+        runtime_test,
+    };
 
     /// Check that the scheduler policy is set to fifo.
     #[runtime_test]
     async fn policy_is_fifo() -> Result<()> {
         client.install_test_container().await?;
         client.install_test_resource().await?;
-        const ARGS: [&str; 1] = ["inspect"];
-        client.start_with_args(TEST_CONTAINER, ARGS).await?;
+        client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
 
-        assume(&format!("sched_getscheduler: {}", nix::libc::SCHED_FIFO), 5).await?;
+        assume(&format!("sched_getscheduler: {}", libc::SCHED_FIFO), 5).await?;
+        Ok(())
+    }
+
+    /// Check that the scheduler policy is set to idle.
+    #[runtime_test]
+    async fn policy_is_idle() -> Result<()> {
+        let test_container = with_manifest(&TEST_CONTAINER_NPK, |m| {
+            m.sched = Some(Sched {
+                policy: Policy::Idle,
+            });
+        })?;
+        client.install(&test_container, "mem").await?;
+        client.install_test_resource().await?;
+
+        client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+
+        assume(&format!("sched_getscheduler: {}", libc::SCHED_IDLE), 5).await?;
+        Ok(())
+    }
+
+    /// Check that the scheduler policy is set to other with niche value 0.
+    #[runtime_test]
+    async fn policy_other() -> Result<()> {
+        let test_container = with_manifest(&TEST_CONTAINER_NPK, |m| {
+            m.sched = Some(Sched {
+                policy: Policy::Other { nice: 0 },
+            })
+        })?;
+        client.install(&test_container, "mem").await?;
+        client.install_test_resource().await?;
+
+        client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
+
+        assume(&format!("sched_getscheduler: {}", libc::SCHED_OTHER), 5).await?;
+        assume("getpriority: 0", 5).await?;
         Ok(())
     }
 
