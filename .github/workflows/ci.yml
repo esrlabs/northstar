@@ -127,8 +127,6 @@ jobs:
         uses: rui314/setup-mold@v1
       - name: Cache
         uses: Swatinem/rust-cache@v1
-      - name: Mold
-        uses: rui314/setup-mold@v1
       - name: Checkout
         uses: actions/checkout@v3
       - name: Install nextest
@@ -213,8 +211,6 @@ jobs:
         uses: rui314/setup-mold@v1
       - name: Cache
         uses: Swatinem/rust-cache@v1
-      - name: Mold
-        uses: rui314/setup-mold@v1
       - name: Checkout
         uses: actions/checkout@v3
       - name: Install northstar-nstar
