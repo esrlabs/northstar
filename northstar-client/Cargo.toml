@@ -1,6 +1,6 @@
 [package]
 name = "northstar-client"
-version = "0.8.0"
+version = "0.8.1-pre"
 authors = ["ESRLabs"]
 description = "Northstar is an container runtime for Linux targetting embedded systems"
 edition = "2021"
@@ -11,7 +11,7 @@ repository = "https://github.com/esrlabs/northstar"
 [dependencies]
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 futures = "0.3.27"
-northstar-runtime = { version = "^0.8.0", path = "../northstar-runtime", features = ["api"] }
+northstar-runtime = { version = "^0.8.1-pre", path = "../northstar-runtime", features = ["api"] }
 thiserror = "1.0.40"
 tokio = "1.28.0"
 
