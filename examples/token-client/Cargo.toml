@@ -10,7 +10,7 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 base64 = "0.21.0"
 futures = { version = "0.3.27", default-features = false }
 northstar-client= { path = "../../northstar-client" }
-tokio = { version = "1.28.0", features = ["macros", "rt", "net"] }
+tokio = { version = "1.28.2", features = ["macros", "rt", "net"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
 
 [package.metadata.npk]
