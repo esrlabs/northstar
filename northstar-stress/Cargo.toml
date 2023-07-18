@@ -16,7 +16,7 @@ humantime = "2.1.0"
 log = "0.4.19"
 northstar-client = { path = "../northstar-client" }
 rand = "0.8.5"
-tokio = { version = "1.28.0", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+tokio = { version = "1.29.1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = { version = "0.1.14", features = ["time"] }
 tokio-util = "0.7.8"
 url = { version = "2.3.1", features = ["serde"] }
