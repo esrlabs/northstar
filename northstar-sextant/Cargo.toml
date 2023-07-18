@@ -15,4 +15,4 @@ colored = "2.0.0"
 env_logger = "0.10.0"
 northstar-runtime = { version = "^0.8.2-pre", path = "../northstar-runtime", features = ["npk"] }
 tempfile = "3.5.0"
-zip = { version = "0.6.4", default-features = false }
+zip = { version = "0.6.6", default-features = false }
