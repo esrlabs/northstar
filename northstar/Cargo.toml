@@ -15,7 +15,7 @@ clap = { version = "4.2.7", features = ["derive"] }
 log = "0.4.17"
 nix = { version = "0.26.2", default-features = false, features = ["sched", "mount"] }
 northstar-runtime = { version = "^0.8.2-pre", path = "../northstar-runtime", features = ["runtime", "rexec"] }
-tokio = { version = "1.28.0", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1.29.1", features = ["rt-multi-thread", "macros", "signal"] }
 toml = "0.7.3"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
