@@ -377,9 +377,11 @@ impl<'a> Builder<'a> {
 }
 
 /// Squashfs compression algorithm
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[allow(missing_docs)]
 pub enum Compression {
+    None,
+    #[default]
     Gzip,
     Lzma,
     Lzo,
@@ -390,6 +392,7 @@ pub enum Compression {
 impl fmt::Display for Compression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Compression::None => write!(f, "none"),
             Compression::Gzip => write!(f, "gzip"),
             Compression::Lzma => write!(f, "lzma"),
             Compression::Lzo => write!(f, "lzo"),
@@ -775,7 +778,7 @@ fn create_squashfs_img(
         .unwrap_or_default();
     let minor = major_minor.next().unwrap_or_default();
     let minor = minor.parse::<u64>().unwrap_or_else(|_| {
-        // remove trailing subversion if present (e.g. 4.4-e0485802)
+        // Remove trailing subversion if present (e.g. 4.4-e0485802)
         minor
             .split(|c: char| !c.is_numeric())
             .next()
@@ -804,8 +807,6 @@ fn create_squashfs_img(
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
         .arg("-no-progress")
-        .arg("-comp")
-        .arg(squashfs_opts.compression.to_string())
         .arg("-info")
         .arg("-force-uid")
         .arg(manifest.uid.to_string())
@@ -813,6 +814,20 @@ fn create_squashfs_img(
         .arg(manifest.gid.to_string())
         .arg("-pf")
         .arg(pseudo_files.path());
+
+    match &squashfs_opts.compression {
+        Compression::None => {
+            cmd.arg("-noI")
+                .arg("-noD")
+                .arg("-noF")
+                .arg("-noX")
+                .arg("-no-fragments");
+        }
+        compression => {
+            cmd.arg("-comp").arg(compression.to_string());
+        }
+    }
+
     if let Some(block_size) = squashfs_opts.block_size {
         cmd.arg("-b").arg(format!("{block_size}"));
     }

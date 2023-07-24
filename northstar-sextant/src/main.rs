@@ -14,8 +14,10 @@ use std::path::PathBuf;
 mod inspect;
 mod pack;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum Compression {
+    None,
+    #[default]
     Gzip,
     Lzma,
     Lzo,
@@ -26,6 +28,7 @@ enum Compression {
 impl From<Compression> for NpkCompression {
     fn from(c: Compression) -> Self {
         match c {
+            Compression::None => NpkCompression::None,
             Compression::Gzip => NpkCompression::Gzip,
             Compression::Lzma => NpkCompression::Lzma,
             Compression::Lzo => NpkCompression::Lzo,

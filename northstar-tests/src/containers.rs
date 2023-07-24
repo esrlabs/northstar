@@ -125,7 +125,7 @@ where
         &out,
         Some(key),
         &SquashfsOptions {
-            compression: Compression::Gzip,
+            compression: Compression::None,
             ..Default::default()
         },
     )
