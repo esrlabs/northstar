@@ -354,7 +354,7 @@ impl<'a> Builder<'a> {
         self
     }
 
-    fn squashfs_opts(mut self, opts: &'a SquashfsOptions) -> Builder<'a> {
+    fn squashfs_opts(mut self, opts: &SquashfsOptions) -> Builder<'a> {
         self.squashfs_options = opts.clone();
         self
     }
@@ -497,8 +497,6 @@ pub fn pack_with_manifest(
     key: Option<&Path>,
     squashfs_opts: &SquashfsOptions,
 ) -> Result<PathBuf, Error> {
-    let name = manifest.name.clone();
-    let version = manifest.version.clone();
     let mut builder = Builder::new(root, manifest);
     if let Some(key) = key {
         builder = builder.key(key);
@@ -506,9 +504,9 @@ pub fn pack_with_manifest(
     builder = builder.squashfs_opts(squashfs_opts);
 
     let mut dest = out.to_path_buf();
-    // Append filename from manifest if only a directory path was given
+    // Append filename from manifest if only a directory path was given. Otherwise use the given filename.
     if Path::is_dir(out) {
-        dest.push(format!("{}-{}.", &name, &version));
+        dest.push(format!("{}-{}.", &manifest.name, &manifest.version));
         dest.set_extension(NPK_EXT);
     }
     let npk = fs::File::create(&dest)
@@ -523,13 +521,28 @@ pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 }
 
 /// Extract the npk content to `out` with a give unsquashfs binary
-pub fn unpack_with(npk: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
-    let mut zip = open(npk)?;
+pub fn unpack_with(path: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
+    // Open zip archive.
+    let npk =
+        fs::File::open(path).with_context(|| format!("failed to open {}", &path.display()))?;
+    let mut zip = ZipArchive::new(BufReader::new(npk))
+        .with_context(|| format!("failed to parse ZIP format: {}", &path.display()))?;
+
+    // Extract zip archive.
     zip.extract(out)
         .with_context(|| format!("failed to extract NPK to {}", &out.display()))?;
+
+    // Unpack squashfs image.
     let fsimg = out.join(FS_IMG_NAME);
-    unpack_squashfs(&fsimg, out, unsquashfs)?;
+    let root = out.join("root");
+
+    let mut cmd = Command::new(unsquashfs);
+    cmd.arg("-dest")
+        .arg(&root.display().to_string())
+        .arg(&fsimg.display().to_string());
+    cmd.output().context("failed to unsquashfs")?;
     fs::remove_file(&fsimg).with_context(|| format!("failed to remove {}", &fsimg.display()))?;
+
     Ok(())
 }
 
@@ -844,23 +857,6 @@ fn create_squashfs_img(
     Ok(())
 }
 
-fn unpack_squashfs(image: &Path, out: &Path, unsquashfs: &Path) -> Result<()> {
-    let squashfs_root = out.join("root");
-
-    if !image.exists() {
-        bail!("Squashfs image '{}' does not exist", &image.display());
-    }
-    let mut cmd = Command::new(unsquashfs);
-    cmd.arg("-dest")
-        .arg(&squashfs_root.display().to_string())
-        .arg(&image.display().to_string());
-
-    cmd.output()
-        .with_context(|| format!("Error while executing '{}'", unsquashfs.display(),))?;
-
-    Ok(())
-}
-
 fn write_npk<W: Write + Seek>(
     npk: W,
     meta: &Meta,
@@ -868,43 +864,36 @@ fn write_npk<W: Write + Seek>(
     fsimg: &Path,
     signature: Option<&str>,
 ) -> Result<()> {
-    let mut fsimg =
-        fs::File::open(fsimg).with_context(|| format!("failed to open '{}'", &fsimg.display()))?;
+    // Create zip.
     let options =
         zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    let manifest_string =
-        serde_yaml::to_string(&manifest).context("failed to serialize manifest")?;
-    let meta_string = serde_yaml::to_string(&meta).context("failed to serialize meta")?;
-
     let mut zip = zip::ZipWriter::new(npk);
+
+    // Write meta data to zip comment.
+    let meta_string = serde_yaml::to_string(&meta).context("failed to serialize meta")?;
     zip.set_comment(&meta_string);
 
+    // Add signature.
     if let Some(signature) = signature {
         zip.start_file(SIGNATURE_NAME, options)?;
         zip.write_all(signature.as_bytes())
             .context("failed to write signature to NPK")?;
     }
 
+    // Add manifest.
     zip.start_file(MANIFEST_NAME, options)
         .context("failed to write manifest to NPK")?;
-    zip.write_all(manifest_string.as_bytes())
-        .context("failed to convert manifest to NPK")?;
+    serde_yaml::to_writer(&mut zip, &manifest).context("failed to serialize manifest")?;
 
     // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
     // 'extra data' to inflate the header of the ZIP file.
     // See chapter 4.3.6 of APPNOTE.TXT
     // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
     zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
-        .context("Could create aligned zip-file")?;
+        .context("failed to create aligned zip-file")?;
+    let mut fsimg =
+        fs::File::open(fsimg).with_context(|| format!("failed to open {}", &fsimg.display()))?;
     io::copy(&mut fsimg, &mut zip)
         .context("failed to write the filesystem image to the archive")?;
     Ok(())
-}
-
-/// Open a Zip file
-fn open(path: &Path) -> Result<Zip<BufReader<fs::File>>> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open '{}'", &path.display()))?;
-    ZipArchive::new(BufReader::new(file))
-        .with_context(|| format!("failed to parse ZIP format: '{}'", &path.display()))
 }
