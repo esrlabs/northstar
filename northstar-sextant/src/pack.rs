@@ -27,13 +27,13 @@ pub(crate) fn pack(
                 manifest.name = format!("{name}-{n:0num$}")
                     .try_into()
                     .context("failed to parse name")?;
-                pack_with_manifest(&manifest, root, out, key, &squashfs_options)?;
+                pack_with_manifest(&manifest, root, out, key, Some(&squashfs_options))?;
             }
         } else {
-            pack_with_manifest(&manifest, root, out, key, &squashfs_options)?;
+            pack_with_manifest(&manifest, root, out, key, Some(&squashfs_options))?;
         }
     } else {
-        pack_with_manifest(&manifest, root, out, key, &squashfs_options)?;
+        pack_with_manifest(&manifest, root, out, key, Some(&squashfs_options))?;
     }
 
     Ok(())

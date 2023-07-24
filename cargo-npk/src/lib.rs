@@ -164,7 +164,7 @@ fn pack(
             manifest.name = format!("{name}-{n:0num$}")
                 .try_into()
                 .context("failed to parse name")?;
-            let npk = pack_with_manifest(&manifest, &root, &out, key, &squashfs_opts)?;
+            let npk = pack_with_manifest(&manifest, &root, &out, key, Some(&squashfs_opts))?;
             let npk_size = human_bytes(fs::metadata(&npk)?.len() as f64);
             let msg = format!("{} [{}, {}]", npk.display(), npk_size, compression);
             log("Packed", &msg)?;
@@ -172,7 +172,7 @@ fn pack(
         let duration = format_duration(time::Duration::from_secs(start.elapsed().as_secs()));
         log("Finished", &format!("{clones} clones in {duration}"))?;
     } else {
-        let npk = pack_with_manifest(northstar_manifest, &root, &out, key, &squashfs_opts)?;
+        let npk = pack_with_manifest(northstar_manifest, &root, &out, key, Some(&squashfs_opts))?;
         let npk_size = human_bytes(fs::metadata(&npk)?.len() as f64);
         let duration = format_duration(time::Duration::from_secs(start.elapsed().as_secs()));
         let msg = format!(

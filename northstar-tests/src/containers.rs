@@ -124,10 +124,10 @@ where
         &root,
         &out,
         Some(key),
-        &SquashfsOptions {
+        Some(&SquashfsOptions {
             compression: Compression::None,
             ..Default::default()
-        },
+        }),
     )
     .context("failed to pack")?;
 

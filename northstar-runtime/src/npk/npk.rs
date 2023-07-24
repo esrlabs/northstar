@@ -332,50 +332,6 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature> {
         .context("failed to parse signature ed25519 format")
 }
 
-struct Builder<'a> {
-    root: &'a Path,
-    manifest: &'a Manifest,
-    key: Option<&'a Path>,
-    squashfs_options: SquashfsOptions,
-}
-
-impl<'a> Builder<'a> {
-    fn new(root: &'a Path, manifest: &'a Manifest) -> Builder<'a> {
-        Builder {
-            root,
-            manifest,
-            key: None,
-            squashfs_options: SquashfsOptions::default(),
-        }
-    }
-
-    fn key(mut self, key: &'a Path) -> Builder<'a> {
-        self.key = Some(key);
-        self
-    }
-
-    fn squashfs_opts(mut self, opts: &SquashfsOptions) -> Builder<'a> {
-        self.squashfs_options = opts.clone();
-        self
-    }
-
-    fn build<W: Write + Seek>(&self, writer: W) -> Result<()> {
-        // Create squashfs image
-        let tmp = tempfile::TempDir::new().context("failed to create temporary directory")?;
-        let meta = &Meta { version: VERSION };
-        let fsimg = tmp.path().join(FS_IMG_NAME);
-        create_squashfs_img(self.manifest, self.root, &fsimg, &self.squashfs_options)?;
-
-        // Sign and write NPK
-        if let Some(key) = &self.key {
-            let signature = signature(key, meta, &fsimg, self.manifest)?;
-            write_npk(writer, meta, self.manifest, &fsimg, Some(&signature))
-        } else {
-            write_npk(writer, meta, self.manifest, &fsimg, None)
-        }
-    }
-}
-
 /// Squashfs compression algorithm
 #[derive(Clone, Debug, Default)]
 #[allow(missing_docs)]
@@ -463,7 +419,7 @@ pub fn pack(
     out: &Path,
     key: Option<&Path>,
 ) -> Result<PathBuf, Error> {
-    pack_with(manifest, root, out, key, &SquashfsOptions::default())
+    pack_with(manifest, root, out, key, None)
 }
 
 /// Create an NPK with special `squashfs` options
@@ -475,17 +431,20 @@ pub fn pack(
 /// * `root` - Path to the container's root directory
 /// * `out` - Target directory or filename of the packed NPK
 /// * `key` - Path to the key used to sign the package
-/// * `squashfs_opts` - Options for `mksquashfs`
+/// * `squashfs_options` - Options for `mksquashfs`
 ///
 pub fn pack_with(
     manifest: &Path,
     root: &Path,
     out: &Path,
     key: Option<&Path>,
-    squashfs_opts: &SquashfsOptions,
+    squashfs_options: Option<&SquashfsOptions>,
 ) -> Result<PathBuf, Error> {
-    let manifest = read_manifest(manifest)?;
-    pack_with_manifest(&manifest, root, out, key, squashfs_opts)
+    let file = fs::File::open(manifest)
+        .with_context(|| format!("failed to open {}", &manifest.display()))?;
+    let manifest = Manifest::from_reader(&file)
+        .with_context(|| format!("failed to parse {}", &manifest.display()))?;
+    pack_with_manifest(&manifest, root, out, key, squashfs_options)
 }
 
 /// Create an NPK.
@@ -495,24 +454,61 @@ pub fn pack_with_manifest(
     root: &Path,
     out: &Path,
     key: Option<&Path>,
-    squashfs_opts: &SquashfsOptions,
+    squashfs_opts: Option<&SquashfsOptions>,
 ) -> Result<PathBuf, Error> {
-    let mut builder = Builder::new(root, manifest);
-    if let Some(key) = key {
-        builder = builder.key(key);
-    }
-    builder = builder.squashfs_opts(squashfs_opts);
+    // Use a tmpdir for building the npk in order to avoid partial npk files in case of errors.
+    let tmpdir = tempfile::tempdir().context("failed to create tmpdir")?;
+    let dir = tmpdir.path();
 
-    let mut dest = out.to_path_buf();
-    // Append filename from manifest if only a directory path was given. Otherwise use the given filename.
-    if Path::is_dir(out) {
-        dest.push(format!("{}-{}.", &manifest.name, &manifest.version));
-        dest.set_extension(NPK_EXT);
+    // Default squashfs options if not provieded.
+    let squashfs_options = if let Some(squashfs_options) = squashfs_opts {
+        squashfs_options.clone()
+    } else {
+        SquashfsOptions::default()
+    };
+
+    // Create squashfs image.
+    let fsimg = dir.join(FS_IMG_NAME);
+    create_squashfs_img(manifest, root, &fsimg, &squashfs_options)?;
+
+    // Create intermediate npk file.
+    let npk_path = dir.join("npk");
+    let mut npk = fs::File::create(&npk_path)
+        .with_context(|| format!("failed to create {}", npk_path.display()))?;
+
+    // Serialize manifest.
+    let manifest_str = manifest.to_string();
+
+    // Serialize meta.
+    let meta = &Meta { version: VERSION };
+    let meta_str = serde_yaml::to_string(&meta).context("failed to serialize meta")?;
+
+    // Sign and write NPK
+    if let Some(key) = &key {
+        let signature = signature(key, meta, &fsimg, &manifest_str)?;
+        create_npk_zip(&mut npk, &meta_str, &manifest_str, &fsimg, Some(&signature))?;
+    } else {
+        create_npk_zip(&mut npk, &meta_str, &manifest_str, &fsimg, None)?;
     }
-    let npk = fs::File::create(&dest)
-        .with_context(|| format!("failed to create NPK: '{}'", &dest.display()))?;
-    builder.build(npk)?;
-    Ok(dest)
+
+    // Sync npk to disk.
+    drop(npk);
+
+    // Append filename from manifest if only a directory path was given.
+    // Otherwise use the given filename.
+    let out = if Path::is_dir(out) {
+        let mut out = out.to_path_buf();
+        out.push(format!("{}-{}.", &manifest.name, &manifest.version));
+        out.set_extension(NPK_EXT);
+        out
+    } else {
+        out.to_path_buf()
+    };
+
+    fs::copy(&npk_path, &out)
+        .with_context(|| format!("failed to create NPK: '{}'", &out.display()))?;
+
+    Ok(out)
 }
 
 /// Extract the npk content to `out`
@@ -582,12 +578,6 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_manifest(path: &Path) -> Result<Manifest> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open '{}'", &path.display()))?;
-    Manifest::from_reader(&file).with_context(|| format!("failed to parse '{}'", &path.display()))
-}
-
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     fs::File::open(key_file)
@@ -634,10 +624,10 @@ fn hashes_yaml(
 }
 
 /// Try to construct the signature yaml file
-fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
+fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &str) -> Result<String, Error> {
     let meta_hash =
         Sha256::digest(serde_yaml::to_string(&meta).context("failed to encode metadata")?);
-    let manifest_hash = Sha256::digest(manifest.to_string().as_bytes());
+    let manifest_hash = Sha256::digest(manifest.as_bytes());
 
     // The size of the fs image is the offset of the verity block. The verity block
     // is appended to the fs.img
@@ -857,10 +847,10 @@ fn create_squashfs_img(
     Ok(())
 }
 
-fn write_npk<W: Write + Seek>(
+fn create_npk_zip<W: Write + Seek>(
     npk: W,
-    meta: &Meta,
-    manifest: &Manifest,
+    meta: &str,
+    manifest: &str,
     fsimg: &Path,
     signature: Option<&str>,
 ) -> Result<()> {
@@ -870,8 +860,7 @@ fn write_npk<W: Write + Seek>(
     let mut zip = zip::ZipWriter::new(npk);
 
     // Write meta data to zip comment.
-    let meta_string = serde_yaml::to_string(&meta).context("failed to serialize meta")?;
-    zip.set_comment(&meta_string);
+    zip.set_comment(meta);
 
     // Add signature.
     if let Some(signature) = signature {
@@ -883,7 +872,8 @@ fn write_npk<W: Write + Seek>(
     // Add manifest.
     zip.start_file(MANIFEST_NAME, options)
         .context("failed to write manifest to NPK")?;
-    serde_yaml::to_writer(&mut zip, &manifest).context("failed to serialize manifest")?;
+    zip.write_all(manifest.as_bytes())
+        .context("failed to write manifest to NPK")?;
 
     // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
     // 'extra data' to inflate the header of the ZIP file.
