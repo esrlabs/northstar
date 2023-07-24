@@ -523,9 +523,10 @@ pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 pub fn unpack_with(npk: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
     let mut zip = open(npk)?;
     zip.extract(out)
-        .with_context(|| format!("failed to extract NPK to '{}'", &out.display()))?;
+        .with_context(|| format!("failed to extract NPK to {}", &out.display()))?;
     let fsimg = out.join(FS_IMG_NAME);
     unpack_squashfs(&fsimg, out, unsquashfs)?;
+    fs::remove_file(&fsimg).with_context(|| format!("failed to remove {}", &fsimg.display()))?;
     Ok(())
 }
 
@@ -829,7 +830,7 @@ fn create_squashfs_img(
 }
 
 fn unpack_squashfs(image: &Path, out: &Path, unsquashfs: &Path) -> Result<()> {
-    let squashfs_root = out.join("squashfs-root");
+    let squashfs_root = out.join("root");
 
     if !image.exists() {
         bail!("Squashfs image '{}' does not exist", &image.display());

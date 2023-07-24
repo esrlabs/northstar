@@ -93,12 +93,13 @@ where
     F: FnOnce(&mut Manifest),
 {
     let tmpdir = tempdir()?;
+    let dir = tmpdir.path();
     let key = Path::new("../examples/northstar.key");
-    let src = tmpdir.path().join("src.npk");
-    let unpacked = tmpdir.path().join("unpacked");
+    let src = dir.join("src.npk");
+    let unpacked = dir.join("unpacked");
     let manifest = unpacked.join("manifest.yaml");
-    let out = tmpdir.path().join("out.npk");
-    let root = unpacked.join("squashfs-root");
+    let out = dir.join("out.npk");
+    let root = unpacked.join("root");
 
     // Dump container to disk and unpack it.
     fs::write(&src, container)?;
@@ -110,9 +111,7 @@ where
 
     // Remove existing mountpoints that are created while packing.
     for mount_point in manifest.mounts.keys() {
-        let mount_point = tmpdir
-            .path()
-            .join(mount_point.strip_prefix('/').unwrap_or(mount_point));
+        let mount_point = root.join(mount_point.strip_prefix('/').unwrap_or(mount_point));
         fs::remove_dir_all(mount_point).ok();
     }
 
