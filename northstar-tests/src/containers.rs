@@ -1,13 +1,18 @@
-use std::{fs, io::Read, os::unix::fs::MetadataExt, path::Path};
+use anyhow::anyhow;
+use std::{
+    fs,
+    io::{self, Read},
+    os::unix::fs::MetadataExt,
+    path::Path,
+    str::FromStr,
+};
 
 use anyhow::Context;
 use lazy_static::lazy_static;
 use northstar_runtime::npk::{
     manifest::Manifest,
-    npk::{self, Compression, SquashfsOptions},
+    npk::{Hashes, NpkBuilder, FS_IMG_NAME, MANIFEST_NAME, SIGNATURE_NAME},
 };
-use tempfile::tempdir;
-
 macro_rules! npk {
     ($x:expr) => {{
         fs::File::open($x)
@@ -92,50 +97,52 @@ pub fn with_manifest<F>(container: &[u8], patch: F) -> anyhow::Result<Vec<u8>>
 where
     F: FnOnce(&mut Manifest),
 {
-    let tmpdir = tempdir()?;
-    let dir = tmpdir.path();
     let key = Path::new("../examples/northstar.key");
-    let src = dir.join("src.npk");
-    let unpacked = dir.join("unpacked");
-    let manifest = unpacked.join("manifest.yaml");
-    let out = dir.join("out.npk");
-    let root = unpacked.join("root");
 
-    // Dump container to disk and unpack it.
-    fs::write(&src, container)?;
-    npk::unpack(&src, &unpacked)?;
-
-    // Load manifest
-    let manifest = fs::File::open(&manifest).context("failed to open manifest")?;
-    let mut manifest = Manifest::from_reader(manifest).context("failed to parse manifest")?;
-
-    // Remove existing mountpoints that are created while packing.
-    for mount_point in manifest.mounts.keys() {
-        let mount_point = root.join(mount_point.strip_prefix('/').unwrap_or(mount_point));
-        fs::remove_dir_all(mount_point).ok();
-    }
+    // Open zip archive.
+    let mut zip =
+        zip::ZipArchive::new(io::Cursor::new(container)).context("failed to parse ZIP")?;
 
     // Apply manifest patch.
+    let manifest = zip
+        .by_name(MANIFEST_NAME)
+        .context("failed to find manifest")?;
+    let mut manifest = Manifest::from_reader(manifest).context("failed to parse manifest")?;
     patch(&mut manifest);
 
-    // Repack
-    npk::pack_with_manifest(
-        &manifest,
-        &root,
-        &out,
-        Some(key),
-        Some(&SquashfsOptions {
-            compression: Compression::None,
-            ..Default::default()
-        }),
-    )
-    .context("failed to pack")?;
+    // Read hashes to obtain the length of the fs image without the verity block.
+    let fsimg_size = {
+        let mut signature = zip
+            .by_name(SIGNATURE_NAME)
+            .context("failed to find hashes")?;
+        let mut content = String::with_capacity(signature.size() as usize);
+        signature
+            .read_to_string(&mut content)
+            .context("failed to read hashes")?;
+        let mut documents = content.split("---");
+        let hashes_str = documents
+            .next()
+            .ok_or_else(|| anyhow!("malformed signatures file"))?;
+        let hashes = Hashes::from_str(hashes_str)?;
+        hashes.fs_verity_offset
+    };
 
-    // Load repacked container.
-    let mut buf = Vec::new();
-    fs::File::open(&out)
-        .context("failed to open npk")?
-        .read_to_end(&mut buf)
-        .context("failed to read npk")
-        .map(|_| buf)
+    let fsimg = zip
+        .by_name(FS_IMG_NAME)
+        .context("failed to find manifest")?;
+    let mut fsimage_tmp = tempfile::NamedTempFile::new().context("failed to create tempfile")?;
+    io::copy(&mut fsimg.take(fsimg_size), &mut fsimage_tmp).context("failed to copy fsimg")?;
+
+    // Output buffer.
+    let mut npk = io::Cursor::new(Vec::new());
+
+    // Repack.
+    NpkBuilder::default()
+        .fsimage(fsimage_tmp.path())
+        .manifest(&manifest)
+        .key(key)
+        .to_writer(&mut npk)?;
+    drop(fsimage_tmp);
+
+    Ok(npk.into_inner())
 }

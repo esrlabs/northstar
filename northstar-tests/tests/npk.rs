@@ -1,10 +1,16 @@
-use northstar_runtime::npk::npk;
+use anyhow::Result;
+use northstar_runtime::npk::{
+    manifest::Manifest,
+    npk::{self, Compression, NpkBuilder, FS_IMG_NAME, MANIFEST_NAME},
+};
 use std::{
-    fs::{self, File},
-    io::Write,
+    fs::{self},
+    io,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 use tempfile::TempDir;
+use zip::ZipArchive;
 
 const TEST_KEY_NAME: &str = "test_key";
 const TEST_CONTAINER_NAME: &str = "hello-0.0.2.npk";
@@ -15,36 +21,198 @@ uid: 100
 gid: 1
 env:
   HELLO: north";
-const TEST_MANIFEST_UNPACKED: &str = "name: hello
-version: 0.0.2
-init: /hello
-env:
-  HELLO: north
-uid: 100
-gid: 1
-";
 
-fn tmpdir() -> TempDir {
-    TempDir::new().expect("failed to create tempdir")
+struct Fixture {
+    manifest_path: PathBuf,
+    manifest: Manifest,
+    root: PathBuf,
+    dir: PathBuf,
+    tmpdir: TempDir,
+    key_prv: PathBuf,
 }
 
-fn create(dest: &Path, manifest_name: Option<&str>) {
-    let src = tmpdir();
-    let key_dir = tmpdir();
-    let manifest = create_test_manifest(src.path(), manifest_name);
-    let (_, prv_key) = generate_test_key(key_dir.path());
-    npk::pack(&manifest, src.path(), dest, Some(&prv_key)).expect("Pack NPK");
+impl Default for Fixture {
+    fn default() -> Self {
+        let tmpdir = tmpdir();
+        let dir = tmpdir.path().to_path_buf();
+        let root = root(tmpdir.path()).expect("create root");
+        let manifest_path = tmpdir.path().join(MANIFEST_NAME);
+        fs::write(&manifest_path, TEST_MANIFEST).expect("write manifest");
+        let manifest = Manifest::from_str(TEST_MANIFEST).expect("parse manifest");
+        let (_, key_prv) = generate_test_key(tmpdir.path());
+        Self {
+            manifest_path,
+            manifest,
+            root,
+            dir,
+            tmpdir,
+            key_prv,
+        }
+    }
 }
 
-fn create_test_manifest(dest: &Path, manifest_name: Option<&str>) -> PathBuf {
-    let manifest = dest
-        .join(manifest_name.unwrap_or("manifest"))
-        .with_extension("yaml");
-    File::create(&manifest)
-        .expect("Create test manifest file")
-        .write_all(TEST_MANIFEST.as_ref())
-        .expect("Write test manifest");
-    manifest
+#[test]
+fn pack_with_manifest_file() -> Result<()> {
+    let fixture = Fixture::default();
+
+    let npk = NpkBuilder::default()
+        .manifest_path(&fixture.manifest_path)
+        .root(&fixture.root, None)
+        .to_dir(fixture.tmpdir.path())?
+        .0;
+
+    assert!(fixture.dir.join(TEST_CONTAINER_NAME).exists());
+    assert_test_manifest(&npk)?;
+    assert_root(&npk)?;
+
+    Ok(())
+}
+
+#[test]
+fn pack_without_key() -> Result<()> {
+    let fixture = Fixture::default();
+
+    let npk = NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, None)
+        .to_dir(fixture.tmpdir.path())?
+        .0;
+
+    assert!(fixture.dir.join(TEST_CONTAINER_NAME).exists());
+    assert_test_manifest(&npk)?;
+    assert_root(&npk)?;
+
+    Ok(())
+}
+
+#[test]
+fn pack_with_key() -> Result<()> {
+    let fixture = Fixture::default();
+
+    let npk = NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, None)
+        .key(&fixture.key_prv)
+        .to_dir(&fixture.dir)?
+        .0;
+
+    assert!(fixture.dir.join(TEST_CONTAINER_NAME).exists());
+    assert_test_manifest(&npk)?;
+    assert_root(&npk)?;
+
+    Ok(())
+}
+
+#[test]
+fn pack_with_compression_none() -> Result<()> {
+    pack_with_compression(Compression::None)
+}
+
+#[test]
+fn pack_with_compression_gzip() -> Result<()> {
+    pack_with_compression(Compression::Gzip)
+}
+
+#[test]
+fn pack_with_compression_lzma() -> Result<()> {
+    pack_with_compression(Compression::Lzma)
+}
+
+#[test]
+fn pack_with_compression_lzo() -> Result<()> {
+    pack_with_compression(Compression::Lzo)
+}
+
+#[test]
+fn pack_with_compression_xz() -> Result<()> {
+    pack_with_compression(Compression::Xz)
+}
+
+#[test]
+fn pack_with_compression_zstd() -> Result<()> {
+    pack_with_compression(Compression::Zstd)
+}
+
+#[test]
+fn pack_with_fs_image() -> Result<()> {
+    let fixture = Fixture::default();
+
+    // Pack a npk in order to obtain a fs image.
+    // Do not use a key here.
+    let npk = NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, None)
+        .to_dir(&fixture.dir)?
+        .0;
+
+    // Get fs image from npk.
+    let mut zip = ZipArchive::new(fs::File::open(&npk)?)?;
+    let mut fs_img_zip = zip.by_name(FS_IMG_NAME)?;
+    let fs_img_path = fixture.dir.join(FS_IMG_NAME);
+    let mut fs_img = fs::File::create(&fs_img_path)?;
+    io::copy(&mut fs_img_zip, &mut fs_img)?;
+
+    NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .fsimage(&fs_img_path)
+        .to_file(&npk)?;
+
+    assert!(npk.exists());
+    assert_test_manifest(&npk)?;
+    assert_root(&npk)?;
+
+    Ok(())
+}
+
+#[test]
+fn pack_with_manifest_root_and_fsimage_should_fail() -> Result<()> {
+    let fixture = Fixture::default();
+    let result = NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, None)
+        .fsimage(&fixture.root)
+        .to_dir(&fixture.dir);
+
+    assert!(result.is_err());
+
+    Ok(())
+}
+
+#[test]
+fn pack_to_file() -> Result<()> {
+    let fixture = Fixture::default();
+    let npk = fixture.dir.join("test.npk");
+
+    NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, None)
+        .key(&fixture.key_prv)
+        .to_file(&npk)?;
+
+    assert!(npk.exists());
+    assert_test_manifest(&npk)?;
+    assert_root(&npk)?;
+
+    Ok(())
+}
+
+#[test]
+fn pack_to_writer() -> Result<()> {
+    let fixture = Fixture::default();
+    let npk_path = fixture.dir.join("test.nkp");
+    let npk = fs::File::create(&npk_path)?;
+
+    NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, None)
+        .key(&fixture.key_prv)
+        .to_writer(npk)?;
+
+    assert!(npk_path.exists());
+    assert_test_manifest(&npk_path)?;
+    assert_root(&npk_path)?;
+
+    Ok(())
 }
 
 fn generate_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
@@ -56,74 +224,55 @@ fn generate_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
     (pub_key, prv_key)
 }
 
-#[test]
-fn pack() {
-    let dest = tmpdir();
-    create(dest.path(), None);
+fn tmpdir() -> TempDir {
+    TempDir::new().expect("failed to create tempdir")
 }
 
-#[test]
-fn pack_with_manifest() {
-    let dest = tmpdir();
-    create(dest.path(), Some("different_manifest_name"));
+fn root(tmpdir: &Path) -> Result<PathBuf> {
+    let root = tmpdir.join("root");
+    fs::create_dir_all(&root)?;
+    fs::create_dir(root.join("bin"))?;
+    fs::create_dir(root.join("etc"))?;
+    fs::create_dir(root.join("lib"))?;
+    fs::File::create(root.join("foo"))?;
+    fs::File::create(root.join("etc").join("hosts"))?;
+    Ok(root)
 }
 
-#[test]
-fn pack_missing_manifest() {
-    let src = tmpdir();
-    let dest = tmpdir();
-    let key_dir = tmpdir();
-    let manifest = Path::new("invalid");
-    let (_pub_key, prv_key) = generate_test_key(key_dir.path());
-    npk::pack(manifest, src.path(), dest.path(), Some(&prv_key)).expect_err("invalid manifest");
+fn assert_root(npk: &Path) -> Result<()> {
+    let tmpdir = tmpdir();
+    npk::unpack(npk, tmpdir.path())?;
+    let root = tmpdir.path().join("root");
+    assert!(root.join("bin").is_dir());
+    assert!(root.join("etc").is_dir());
+    assert!(root.join("lib").is_dir());
+    assert!(root.join("foo").is_file());
+    assert!(root.join("etc").join("hosts").is_file());
+    Ok(())
 }
 
-#[test]
-fn pack_file_as_destination() {
-    let tmp = tmpdir();
-    let dest = tmp.path().join("file.npk");
-    create(dest.as_path(), None);
+fn pack_with_compression(compression: Compression) -> Result<()> {
+    let fixture = Fixture::default();
+    let squashfs_options = npk::SquashfsOptions {
+        compression,
+        ..Default::default()
+    };
+
+    NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, Some(&squashfs_options))
+        .key(&fixture.key_prv)
+        .to_dir(&fixture.dir)?;
+
+    assert!(fixture.dir.join(TEST_CONTAINER_NAME).exists());
+    Ok(())
 }
 
-#[test]
-fn pack_invalid_key() {
-    let src = tmpdir();
-    let dest = tmpdir();
-    let manifest = create_test_manifest(src.path(), None);
-    let private = Path::new("invalid");
-    npk::pack(&manifest, src.path(), dest.path(), Some(private)).expect_err("invalid key dir");
-}
-
-#[test]
-fn unpack() {
-    let npk_dest = tmpdir();
-    create(npk_dest.path(), None);
-    let npk = npk_dest.path().join(TEST_CONTAINER_NAME);
-    assert!(npk.exists());
-    let unpack_dest = tmpdir();
-    npk::unpack(&npk, unpack_dest.path()).expect("Unpack NPK");
-    let manifest = unpack_dest.path().join("manifest").with_extension("yaml");
-    assert!(manifest.exists());
-    let manifest = fs::read_to_string(&manifest).expect("failed to parse manifest");
-
-    assert_eq!(TEST_MANIFEST_UNPACKED, manifest);
-}
-
-#[test]
-fn generate_key_pair() {
-    let dest = tmpdir();
-    generate_test_key(dest.path());
-}
-
-#[test]
-fn generate_key_pair_no_dest() {
-    npk::generate_key(TEST_KEY_NAME, Path::new("invalid")).expect_err("invalid key dir");
-}
-
-#[test]
-fn do_not_overwrite_keys() -> Result<(), anyhow::Error> {
-    let dest = tmpdir();
-    npk::generate_key(TEST_KEY_NAME, dest.path()).expect("Generate keys");
-    npk::generate_key(TEST_KEY_NAME, dest.path()).expect_err("Cannot overwrite keys");
+fn assert_test_manifest(npk: &Path) -> Result<()> {
+    let tmpdir = tmpdir();
+    npk::unpack(npk, tmpdir.path())?;
+    let test_manifest = Manifest::from_str(TEST_MANIFEST)?;
+    let manifest = Manifest::from_reader(fs::File::open(tmpdir.path().join(MANIFEST_NAME))?)?;
+    assert_eq!(manifest, test_manifest);
     Ok(())
 }

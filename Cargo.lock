@@ -1699,6 +1699,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
+ "zip",
 ]
 
 [[package]]

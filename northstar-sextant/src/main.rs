@@ -122,17 +122,18 @@ fn main() -> Result<()> {
                 let tempdir = tempfile::tempdir()?;
                 (tempdir.path().to_owned(), Some(tempdir))
             };
+            let squashfs_options = &SquashfsOptions {
+                compression: compression.into(),
+                mksquashfs,
+                block_size,
+            };
 
             pack::pack(
                 &manifest_path,
                 &root,
                 &out,
                 key.as_deref(),
-                SquashfsOptions {
-                    compression: compression.into(),
-                    mksquashfs,
-                    block_size,
-                },
+                squashfs_options,
                 clones,
             )?
         }

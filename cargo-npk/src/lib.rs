@@ -19,7 +19,7 @@ use std::path::Path;
 use anyhow::Result;
 use cargo_subcommand::{Profile, Subcommand};
 use clap::Parser;
-use northstar_runtime::npk::npk::{pack_with_manifest, SquashfsOptions};
+use northstar_runtime::npk::npk::{NpkBuilder, SquashfsOptions};
 
 use crate::metadata::Metadata;
 
@@ -156,6 +156,13 @@ fn pack(
         cmd.build_dir(target)
     };
 
+    let builder = NpkBuilder::default().root(&root, Some(&squashfs_opts));
+    let builder = if let Some(key) = key {
+        builder.key(key)
+    } else {
+        builder
+    };
+
     if let Some(clones) = clones {
         let name = northstar_manifest.name.clone();
         let num = clones.to_string().chars().count();
@@ -164,16 +171,16 @@ fn pack(
             manifest.name = format!("{name}-{n:0num$}")
                 .try_into()
                 .context("failed to parse name")?;
-            let npk = pack_with_manifest(&manifest, &root, &out, key, Some(&squashfs_opts))?;
-            let npk_size = human_bytes(fs::metadata(&npk)?.len() as f64);
+            let (npk, npk_size) = builder.clone().manifest(&manifest).to_dir(&out)?;
+            let npk_size = human_bytes(npk_size as f64);
             let msg = format!("{} [{}, {}]", npk.display(), npk_size, compression);
             log("Packed", &msg)?;
         }
         let duration = format_duration(time::Duration::from_secs(start.elapsed().as_secs()));
         log("Finished", &format!("{clones} clones in {duration}"))?;
     } else {
-        let npk = pack_with_manifest(northstar_manifest, &root, &out, key, Some(&squashfs_opts))?;
-        let npk_size = human_bytes(fs::metadata(&npk)?.len() as f64);
+        let (npk, npk_size) = builder.manifest(northstar_manifest).to_dir(&out)?;
+        let npk_size = human_bytes(npk_size as f64);
         let duration = format_duration(time::Duration::from_secs(start.elapsed().as_secs()));
         let msg = format!(
             "{} [{}, {}] in {}",
