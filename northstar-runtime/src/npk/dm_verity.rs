@@ -7,7 +7,7 @@ use std::{
     io::{Read, SeekFrom::Start, Write},
 };
 
-use std::{io::Seek, path::Path};
+use std::io::Seek;
 use uuid::Uuid;
 
 pub const SHA256_SIZE: usize = 32;
@@ -122,11 +122,14 @@ impl VerityHeader {
 /// and a dm-verity hash_tree
 /// <https://gitlab.com/cryptsetup/cryptsetup/-/wikis/DMVerity#hash-tree>
 /// to the given file.
-pub fn append_dm_verity_block(fsimg: &Path, fsimg_size: u64) -> Result<Sha256Digest> {
+pub fn append_dm_verity_block<I: Read + Write + Seek>(
+    mut fsimg: I,
+    fsimg_size: u64,
+) -> Result<Sha256Digest> {
     let (level_offsets, tree_size) =
         calculate_hash_tree_level_offsets(fsimg_size as usize, BLOCK_SIZE, SHA256_SIZE);
     let (salt, root_hash, hash_tree) =
-        generate_hash_tree(fsimg, fsimg_size, &level_offsets, tree_size)?;
+        generate_hash_tree(&mut fsimg, fsimg_size, &level_offsets, tree_size)?;
     append_superblock_and_hashtree(fsimg, fsimg_size, &salt, &hash_tree)?;
     Ok(root_hash)
 }
@@ -169,8 +172,8 @@ fn calculate_hash_tree_level_offsets(
     (level_offsets, tree_size)
 }
 
-fn generate_hash_tree(
-    fsimg: &Path,
+fn generate_hash_tree<R: Read + Seek>(
+    mut fsimg: R,
     image_size: u64,
     level_offsets: &[usize],
     tree_size: usize,
@@ -178,8 +181,6 @@ fn generate_hash_tree(
     // For a description of the overall hash tree generation logic see
     // https://source.android.com/security/verifiedboot/dm-verity#hash-tree
 
-    let mut fsimg = &std::fs::File::open(fsimg)
-        .with_context(|| format!("failed to open {}", &fsimg.display()))?;
     let mut hashes: Vec<[u8; SHA256_SIZE]> = vec![];
     let mut level_num = 0;
     let mut level_size = image_size;
@@ -257,17 +258,12 @@ fn generate_hash_tree(
     Ok((salt, root_hash, hash_tree))
 }
 
-fn append_superblock_and_hashtree(
-    fsimg: &Path,
+fn append_superblock_and_hashtree<W: Write + Seek>(
+    mut fsimg: W,
     fsimg_size: u64,
     salt: &Salt,
     hash_tree: &[u8],
 ) -> Result<()> {
-    let mut fsimg = std::fs::OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open(fsimg)
-        .with_context(|| format!("failed to open {}", &fsimg.display()))?;
     let mut uuid = [0u8; 16];
     uuid.copy_from_slice(
         hex::decode(Uuid::new_v4().to_string().replace('-', ""))

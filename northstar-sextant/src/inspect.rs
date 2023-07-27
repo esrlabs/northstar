@@ -106,7 +106,7 @@ fn print_squashfs(fsimg_path: &Path, unsquashfs: &Path) -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::inspect;
-    use northstar_runtime::npk::npk::{generate_key, pack};
+    use northstar_runtime::npk::npk::{generate_key, NpkBuilder};
     use std::{
         fs::File,
         io::Write,
@@ -139,8 +139,13 @@ mounts:
         let key_dir = create_tmp_dir();
         let manifest = create_test_manifest(src.path());
         let (_pub_key, prv_key) = gen_test_key(key_dir.path());
-        pack(&manifest, src.path(), dest, Some(&prv_key)).expect("Pack NPK");
-        dest.join("hello-0.0.2.npk")
+        NpkBuilder::default()
+            .manifest_path(&manifest)
+            .root(src.path(), None)
+            .key(&prv_key)
+            .to_dir(dest)
+            .expect("failed to pack npk")
+            .0
     }
 
     fn create_test_manifest(src: &Path) -> PathBuf {

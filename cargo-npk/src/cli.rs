@@ -35,6 +35,7 @@ pub enum ColorChoice {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Compression {
+    None,
     Gzip,
     Lzma,
     Lzo,
@@ -45,6 +46,7 @@ pub enum Compression {
 impl From<Compression> for NpkCompressionAlgorithm {
     fn from(c: Compression) -> Self {
         match c {
+            Compression::None => NpkCompressionAlgorithm::None,
             Compression::Gzip => NpkCompressionAlgorithm::Gzip,
             Compression::Lzma => NpkCompressionAlgorithm::Lzma,
             Compression::Lzo => NpkCompressionAlgorithm::Lzo,

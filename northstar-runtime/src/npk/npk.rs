@@ -64,6 +64,27 @@ pub struct Meta {
     pub version: Version,
 }
 
+/// Squashfs Options
+#[derive(Clone, Debug)]
+pub struct SquashfsOptions {
+    /// Path to mksquashfs executable
+    pub mksquashfs: PathBuf,
+    /// The compression algorithm used (default gzip)
+    pub compression: Compression,
+    /// Size of the blocks of data compressed separately
+    pub block_size: Option<u32>,
+}
+
+impl Default for SquashfsOptions {
+    fn default() -> Self {
+        SquashfsOptions {
+            compression: Compression::Gzip,
+            block_size: None,
+            mksquashfs: PathBuf::from(MKSQUASHFS),
+        }
+    }
+}
+
 /// NPK Hashes
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Hashes {
@@ -75,6 +96,17 @@ pub struct Hashes {
     pub fs_verity_hash: String,
     /// Offset of the verity block within the fs image
     pub fs_verity_offset: u64,
+}
+
+impl Hashes {
+    /// Read hashes from `reader`.
+    pub fn from_reader<R: Read>(mut reader: R) -> Result<Hashes, Error> {
+        let mut buf = String::new();
+        reader
+            .read_to_string(&mut buf)
+            .context("failed to read hashes")?;
+        Hashes::from_str(&buf)
+    }
 }
 
 impl FromStr for Hashes {
@@ -332,54 +364,12 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature> {
         .context("failed to parse signature ed25519 format")
 }
 
-struct Builder<'a> {
-    root: &'a Path,
-    manifest: &'a Manifest,
-    key: Option<&'a Path>,
-    squashfs_options: SquashfsOptions,
-}
-
-impl<'a> Builder<'a> {
-    fn new(root: &'a Path, manifest: &'a Manifest) -> Builder<'a> {
-        Builder {
-            root,
-            manifest,
-            key: None,
-            squashfs_options: SquashfsOptions::default(),
-        }
-    }
-
-    fn key(mut self, key: &'a Path) -> Builder<'a> {
-        self.key = Some(key);
-        self
-    }
-
-    fn squashfs_opts(mut self, opts: &'a SquashfsOptions) -> Builder<'a> {
-        self.squashfs_options = opts.clone();
-        self
-    }
-
-    fn build<W: Write + Seek>(&self, writer: W) -> Result<()> {
-        // Create squashfs image
-        let tmp = tempfile::TempDir::new().context("failed to create temporary directory")?;
-        let meta = &Meta { version: VERSION };
-        let fsimg = tmp.path().join(FS_IMG_NAME);
-        create_squashfs_img(self.manifest, self.root, &fsimg, &self.squashfs_options)?;
-
-        // Sign and write NPK
-        if let Some(key) = &self.key {
-            let signature = signature(key, meta, &fsimg, self.manifest)?;
-            write_npk(writer, meta, self.manifest, &fsimg, Some(&signature))
-        } else {
-            write_npk(writer, meta, self.manifest, &fsimg, None)
-        }
-    }
-}
-
 /// Squashfs compression algorithm
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[allow(missing_docs)]
 pub enum Compression {
+    None,
+    #[default]
     Gzip,
     Lzma,
     Lzo,
@@ -390,6 +380,7 @@ pub enum Compression {
 impl fmt::Display for Compression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Compression::None => write!(f, "none"),
             Compression::Gzip => write!(f, "gzip"),
             Compression::Lzma => write!(f, "lzma"),
             Compression::Lzo => write!(f, "lzo"),
@@ -414,104 +405,181 @@ impl FromStr for Compression {
     }
 }
 
-/// Squashfs Options
-#[derive(Clone, Debug)]
-pub struct SquashfsOptions {
-    /// Path to mksquashfs executable
-    pub mksquashfs: PathBuf,
-    /// The compression algorithm used (default gzip)
-    pub compression: Compression,
-    /// Size of the blocks of data compressed separately
-    pub block_size: Option<u32>,
+#[derive(Clone, Debug, Default)]
+enum NpkBuilderManifest<'a> {
+    #[default]
+    None,
+    Manifest(Manifest),
+    ManifestPath(&'a Path),
 }
 
-impl Default for SquashfsOptions {
-    fn default() -> Self {
-        SquashfsOptions {
-            compression: Compression::Gzip,
-            block_size: None,
-            mksquashfs: PathBuf::from(MKSQUASHFS),
+/// Pack npks.
+#[derive(Clone, Debug, Default)]
+pub struct NpkBuilder<'a> {
+    manifest: NpkBuilderManifest<'a>,
+    root: Option<&'a Path>,
+    fsimage: Option<&'a Path>,
+    squashfs_options: Option<&'a SquashfsOptions>,
+    key: Option<&'a Path>,
+}
+
+impl<'a> NpkBuilder<'a> {
+    /// Set the manifest.
+    pub fn manifest(mut self, manifest: &Manifest) -> NpkBuilder<'a> {
+        self.manifest = NpkBuilderManifest::Manifest(manifest.clone());
+        self
+    }
+
+    /// Set the manifest path.
+    pub fn manifest_path(mut self, manifest: &'a Path) -> NpkBuilder<'a> {
+        self.manifest = NpkBuilderManifest::ManifestPath(manifest);
+        self
+    }
+
+    /// Set root directory.
+    pub fn root(
+        mut self,
+        root: &'a Path,
+        squashfs_options: Option<&'a SquashfsOptions>,
+    ) -> NpkBuilder<'a> {
+        self.root = Some(root);
+        self.squashfs_options = squashfs_options;
+        self
+    }
+
+    /// Use existing plain `fsimage` as file system image.
+    pub fn fsimage(mut self, fsimage: &'a Path) -> NpkBuilder<'a> {
+        self.fsimage = Some(fsimage);
+        self
+    }
+
+    /// Use key for signing.
+    pub fn key(mut self, key: &'a Path) -> NpkBuilder<'a> {
+        self.key = Some(key);
+        self
+    }
+
+    /// Write npk to `file`.
+    pub fn to_file(self, file: &Path) -> Result<u64, Error> {
+        let file = fs::File::create(file)
+            .with_context(|| format!("failed to create {}", file.display()))?;
+        self.to_writer(file)
+    }
+
+    /// Write npk to `dir` with the filename `{name}-{version}.npk` with the values
+    /// from the manifest.
+    pub fn to_dir(self, dir: &Path) -> Result<(PathBuf, u64), Error> {
+        let mut me = self;
+        // Append filename from manifest if only a directory path was given.
+        // Otherwise use the given filename.
+        if Path::is_dir(dir) {
+            let manifest = me.get_manifest()?;
+            let mut npk_path = dir.to_path_buf();
+            npk_path.push(format!("{}-{}.", &manifest.name, &manifest.version));
+            npk_path.set_extension(NPK_EXT);
+            me.to_file(&npk_path)
+                .map(|size| (npk_path.to_owned(), size))
+        } else {
+            Err(anyhow!("dir must be a directory").into())
         }
     }
-}
 
-/// Create an NPK for the northstar runtime.
-/// northstar-sextant collects the artifacts in a given container directory, creates and signs the necessary metadata
-/// and packs the results into a zipped NPK file.
-///
-/// # Arguments
-/// * `manifest` - Path to the container's manifest file
-/// * `root` - Path to the container's root directory
-/// * `out` - Target directory or filename of the packed NPK
-/// * `key` - Path to the key used to sign the package
-///
-/// # Example
-///
-/// To build the 'hello' example container:
-///
-/// northstar-sextant pack \
-/// --manifest examples/hello/manifest.yaml \
-/// --root examples/hello/root \
-/// --out target/northstar/repository \
-/// --key examples/keys/northstar.key \
-pub fn pack(
-    manifest: &Path,
-    root: &Path,
-    out: &Path,
-    key: Option<&Path>,
-) -> Result<PathBuf, Error> {
-    pack_with(manifest, root, out, key, &SquashfsOptions::default())
-}
+    /// Write npk to `writer`.
+    pub fn to_writer<W: Write + Seek>(self, writer: W) -> Result<u64, Error> {
+        let mut me = self;
 
-/// Create an NPK with special `squashfs` options
-///
-/// Returns the path to the created NPK.
-///
-/// # Arguments
-/// * `manifest` - Path to the container's manifest file
-/// * `root` - Path to the container's root directory
-/// * `out` - Target directory or filename of the packed NPK
-/// * `key` - Path to the key used to sign the package
-/// * `squashfs_opts` - Options for `mksquashfs`
-///
-pub fn pack_with(
-    manifest: &Path,
-    root: &Path,
-    out: &Path,
-    key: Option<&Path>,
-    squashfs_opts: &SquashfsOptions,
-) -> Result<PathBuf, Error> {
-    let manifest = read_manifest(manifest)?;
-    pack_with_manifest(&manifest, root, out, key, squashfs_opts)
-}
+        const META: Meta = Meta { version: VERSION };
+        let fsimage = me.fsimage;
+        let root = me.root;
+        let squashfs_options = me.squashfs_options.cloned().unwrap_or_default();
+        let manifest = me.get_manifest()?;
 
-/// Create an NPK.
-/// Returns the path to the created NPK.
-pub fn pack_with_manifest(
-    manifest: &Manifest,
-    root: &Path,
-    out: &Path,
-    key: Option<&Path>,
-    squashfs_opts: &SquashfsOptions,
-) -> Result<PathBuf, Error> {
-    let name = manifest.name.clone();
-    let version = manifest.version.clone();
-    let mut builder = Builder::new(root, manifest);
-    if let Some(key) = key {
-        builder = builder.key(key);
+        // Create zip.
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let mut zip = zip::ZipWriter::new(writer);
+
+        // Write meta data to zip comment.
+        let meta_str = serde_yaml::to_string(&META).context("failed to serialize meta")?;
+        zip.set_comment(meta_str);
+
+        // Add manifest.
+        let manifest_str = manifest.to_string();
+        zip.start_file(MANIFEST_NAME, options)
+            .context("failed to write manifest to NPK")?;
+        zip.write_all(manifest_str.as_bytes())
+            .context("failed to write manifest to NPK")?;
+
+        let (fsimage, fsimage_size, fsimage_tmp) = match (root, fsimage) {
+            (Some(_), Some(_)) => {
+                return Err(anyhow!("root and fsimage are mutually exclusive")).map_err(Into::into);
+            }
+            (Some(root), None) => {
+                // Create squashfs image.
+                let fsimage =
+                    tempfile::NamedTempFile::new().context("failed to create tempfile")?;
+                let fsimage_size = mksquashfs(manifest, root, fsimage.path(), &squashfs_options)?;
+                (fsimage.path().to_owned(), fsimage_size, Some(fsimage))
+            }
+            (None, Some(fsimage)) => {
+                let fsimage_size = fs::metadata(fsimage)
+                    .with_context(|| format!("failed to get metadata of {}", fsimage.display()))?
+                    .len();
+                (fsimage.to_path_buf(), fsimage_size, None)
+            }
+            (None, None) => return Err(anyhow!("missing root or fsimage")).map_err(Into::into),
+        };
+
+        let mut fsimage = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .append(true)
+            .open(fsimage)
+            .context("failed to open fsimage")?;
+
+        if let Some(key) = me.key {
+            let signature = signature(key, &META, &mut fsimage, fsimage_size, &manifest_str)?;
+            zip.start_file(SIGNATURE_NAME, options)
+                .context("failed to add signature file")?;
+            zip.write_all(signature.as_bytes())
+                .context("failed to write signature to NPK")?;
+        }
+
+        // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
+        // 'extra data' to inflate the header of the ZIP file.
+        // See chapter 4.3.6 of APPNOTE.TXT
+        // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
+        zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
+            .context("failed to create aligned zip-file")?;
+        fsimage
+            .seek(SeekFrom::Start(0))
+            .context("failed to seek to start of fs.img")?;
+        io::copy(&mut fsimage, &mut zip)
+            .context("failed to write the filesystem image to the archive")?;
+        drop(fsimage_tmp);
+
+        let mut zip = zip.finish().context("failed to flush zip")?;
+        let zip_size = zip
+            .seek(SeekFrom::End(0))
+            .context("failed to seek to end of zip")?;
+
+        Ok(zip_size)
     }
-    builder = builder.squashfs_opts(squashfs_opts);
 
-    let mut dest = out.to_path_buf();
-    // Append filename from manifest if only a directory path was given
-    if Path::is_dir(out) {
-        dest.push(format!("{}-{}.", &name, &version));
-        dest.set_extension(NPK_EXT);
+    fn get_manifest(&mut self) -> Result<&Manifest, Error> {
+        match self.manifest {
+            NpkBuilderManifest::None => Err(anyhow!("missing manifest").into()),
+            NpkBuilderManifest::Manifest(ref manifest) => Ok(manifest),
+            NpkBuilderManifest::ManifestPath(path) => {
+                let file = fs::File::open(path)
+                    .with_context(|| format!("failed to open {}", path.display()))?;
+                let manifest = Manifest::from_reader(&file)
+                    .with_context(|| format!("failed to parse {}", path.display()))?;
+                self.manifest = NpkBuilderManifest::Manifest(manifest);
+                self.get_manifest()
+            }
+        }
     }
-    let npk = fs::File::create(&dest)
-        .with_context(|| format!("failed to create NPK: '{}'", &dest.display()))?;
-    builder.build(npk)?;
-    Ok(dest)
 }
 
 /// Extract the npk content to `out`
@@ -520,12 +588,28 @@ pub fn unpack(npk: &Path, out: &Path) -> Result<(), Error> {
 }
 
 /// Extract the npk content to `out` with a give unsquashfs binary
-pub fn unpack_with(npk: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
-    let mut zip = open(npk)?;
+pub fn unpack_with(path: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Error> {
+    // Open zip archive.
+    let npk =
+        fs::File::open(path).with_context(|| format!("failed to open {}", &path.display()))?;
+    let mut zip = ZipArchive::new(BufReader::new(npk))
+        .with_context(|| format!("failed to parse ZIP format: {}", &path.display()))?;
+
+    // Extract zip archive.
     zip.extract(out)
-        .with_context(|| format!("failed to extract NPK to '{}'", &out.display()))?;
+        .with_context(|| format!("failed to extract NPK to {}", &out.display()))?;
+
+    // Unpack squashfs image.
     let fsimg = out.join(FS_IMG_NAME);
-    unpack_squashfs(&fsimg, out, unsquashfs)?;
+    let root = out.join("root");
+
+    let mut cmd = Command::new(unsquashfs);
+    cmd.arg("-dest")
+        .arg(&root.display().to_string())
+        .arg(&fsimg.display().to_string());
+    cmd.output().context("failed to unsquashfs")?;
+    fs::remove_file(&fsimg).with_context(|| format!("failed to remove {}", &fsimg.display()))?;
+
     Ok(())
 }
 
@@ -533,18 +617,10 @@ pub fn unpack_with(npk: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Erro
 pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     fn assume_non_existing(path: &Path) -> anyhow::Result<()> {
         if path.exists() {
-            bail!("file '{}' already exists", &path.display())
+            bail!("file {} already exists", &path.display())
         } else {
             Ok(())
         }
-    }
-
-    fn write(data: &[u8], path: &Path) -> Result<(), Error> {
-        let mut file = fs::File::create(path)
-            .with_context(|| format!("failed to create '{}'", path.display()))?;
-        file.write_all(data)
-            .with_context(|| format!("failed to write to '{}'", &path.display()))?;
-        Ok(())
     }
 
     let mut secret_key_bytes = [0u8; 32];
@@ -559,16 +635,10 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     assume_non_existing(&public_key_file)?;
     assume_non_existing(&secret_key_file)?;
 
-    write(&secret_key.to_bytes(), &secret_key_file)?;
-    write(&public_key.to_bytes(), &public_key_file)?;
+    fs::write(&secret_key_file, secret_key.to_bytes()).context("failed to write secret key")?;
+    fs::write(&public_key_file, public_key.to_bytes()).context("failed to write public key")?;
 
     Ok(())
-}
-
-fn read_manifest(path: &Path) -> Result<Manifest> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open '{}'", &path.display()))?;
-    Manifest::from_reader(&file).with_context(|| format!("failed to parse '{}'", &path.display()))
 }
 
 fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
@@ -617,16 +687,17 @@ fn hashes_yaml(
 }
 
 /// Try to construct the signature yaml file
-fn signature(key: &Path, meta: &Meta, fsimg: &Path, manifest: &Manifest) -> Result<String, Error> {
+fn signature<I: Read + Write + Seek>(
+    key: &Path,
+    meta: &Meta,
+    fsimg: I,
+    fsimg_size: u64,
+    manifest: &str,
+) -> Result<String, Error> {
     let meta_hash =
         Sha256::digest(serde_yaml::to_string(&meta).context("failed to encode metadata")?);
-    let manifest_hash = Sha256::digest(manifest.to_string().as_bytes());
+    let manifest_hash = Sha256::digest(manifest.as_bytes());
 
-    // The size of the fs image is the offset of the verity block. The verity block
-    // is appended to the fs.img
-    let fsimg_size = fs::metadata(fsimg)
-        .with_context(|| format!("failed to read file size: '{}'", &fsimg.display()))?
-        .len();
     // Calculate verity root hash
     let fsimg_hash: &[u8] = &append_dm_verity_block(fsimg, fsimg_size)
         .context("failed to calculate verity root hash")?;
@@ -742,18 +813,18 @@ fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
     Ok(pseudo_file_entries)
 }
 
-fn create_squashfs_img(
+fn mksquashfs(
     manifest: &Manifest,
     root: &Path,
     image: &Path,
     squashfs_opts: &SquashfsOptions,
-) -> Result<()> {
+) -> Result<u64> {
     let pseudo_files = pseudo_files(manifest)?;
     let mksquashfs = &squashfs_opts.mksquashfs;
 
     // Check root
     if !root.exists() {
-        bail!("Root directory '{}' does not exist", &root.display());
+        bail!("root directory {} does not exist", &root.display());
     }
 
     // Check mksquashfs version
@@ -774,7 +845,7 @@ fn create_squashfs_img(
         .unwrap_or_default();
     let minor = major_minor.next().unwrap_or_default();
     let minor = minor.parse::<u64>().unwrap_or_else(|_| {
-        // remove trailing subversion if present (e.g. 4.4-e0485802)
+        // Remove trailing subversion if present (e.g. 4.4-e0485802)
         minor
             .split(|c: char| !c.is_numeric())
             .next()
@@ -802,9 +873,8 @@ fn create_squashfs_img(
     let mut cmd = Command::new(mksquashfs);
     cmd.arg(&root.display().to_string())
         .arg(&image.display().to_string())
+        .arg("-noappend")
         .arg("-no-progress")
-        .arg("-comp")
-        .arg(squashfs_opts.compression.to_string())
         .arg("-info")
         .arg("-force-uid")
         .arg(manifest.uid.to_string())
@@ -812,83 +882,32 @@ fn create_squashfs_img(
         .arg(manifest.gid.to_string())
         .arg("-pf")
         .arg(pseudo_files.path());
+
     if let Some(block_size) = squashfs_opts.block_size {
         cmd.arg("-b").arg(format!("{block_size}"));
     }
-    cmd.output()
-        .with_context(|| format!("failed to execute '{}'", mksquashfs.display()))?;
-    if !image.exists() {
-        bail!(
-            "'{}' failed to create '{}'",
-            mksquashfs.display(),
-            &image.display()
-        );
+
+    match &squashfs_opts.compression {
+        Compression::None => {
+            cmd.args(["-noI", "-noD", "-noF", "-noX", "-no-fragments"]);
+        }
+        compression => {
+            cmd.arg("-comp").arg(compression.to_string());
+        }
     }
 
-    Ok(())
-}
-
-fn unpack_squashfs(image: &Path, out: &Path, unsquashfs: &Path) -> Result<()> {
-    let squashfs_root = out.join("squashfs-root");
-
-    if !image.exists() {
-        bail!("Squashfs image '{}' does not exist", &image.display());
-    }
-    let mut cmd = Command::new(unsquashfs);
-    cmd.arg("-dest")
-        .arg(&squashfs_root.display().to_string())
-        .arg(&image.display().to_string());
-
-    cmd.output()
-        .with_context(|| format!("Error while executing '{}'", unsquashfs.display(),))?;
-
-    Ok(())
-}
-
-fn write_npk<W: Write + Seek>(
-    npk: W,
-    meta: &Meta,
-    manifest: &Manifest,
-    fsimg: &Path,
-    signature: Option<&str>,
-) -> Result<()> {
-    let mut fsimg =
-        fs::File::open(fsimg).with_context(|| format!("failed to open '{}'", &fsimg.display()))?;
-    let options =
-        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
-    let manifest_string =
-        serde_yaml::to_string(&manifest).context("failed to serialize manifest")?;
-    let meta_string = serde_yaml::to_string(&meta).context("failed to serialize meta")?;
-
-    let mut zip = zip::ZipWriter::new(npk);
-    zip.set_comment(&meta_string);
-
-    if let Some(signature) = signature {
-        zip.start_file(SIGNATURE_NAME, options)?;
-        zip.write_all(signature.as_bytes())
-            .context("failed to write signature to NPK")?;
+    match cmd.output() {
+        Ok(output) if !output.status.success() => {
+            return Err(anyhow!("mksquashfs failed with {:?}", output.status))
+        }
+        Ok(_) => (),
+        Err(e) => return Err(anyhow!("mksquashfs failed: {e}")),
     }
 
-    zip.start_file(MANIFEST_NAME, options)
-        .context("failed to write manifest to NPK")?;
-    zip.write_all(manifest_string.as_bytes())
-        .context("failed to convert manifest to NPK")?;
+    let image_size = image
+        .metadata()
+        .context("failed to read image metadata")?
+        .len();
 
-    // We need to ensure that the fs.img start at an offset of 4096 so we add empty (zeros) ZIP
-    // 'extra data' to inflate the header of the ZIP file.
-    // See chapter 4.3.6 of APPNOTE.TXT
-    // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
-    zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
-        .context("Could create aligned zip-file")?;
-    io::copy(&mut fsimg, &mut zip)
-        .context("failed to write the filesystem image to the archive")?;
-    Ok(())
-}
-
-/// Open a Zip file
-fn open(path: &Path) -> Result<Zip<BufReader<fs::File>>> {
-    let file =
-        fs::File::open(path).with_context(|| format!("failed to open '{}'", &path.display()))?;
-    ZipArchive::new(BufReader::new(file))
-        .with_context(|| format!("failed to parse ZIP format: '{}'", &path.display()))
+    Ok(image_size)
 }
