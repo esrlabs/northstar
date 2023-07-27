@@ -1625,6 +1625,7 @@ dependencies = [
  "proptest",
  "rand_core 0.6.4",
  "rlimit",
+ "rstest",
  "semver",
  "serde",
  "serde_json",
@@ -2121,12 +2122,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5996294f19bd3aae0453a862ad728f60e6600695733dd5df01da90c54363a3c"
 
 [[package]]
+name = "relative-path"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4bf2521270932c3c7bed1a59151222bd7643c79310f2916f01925e1e16255698"
+
+[[package]]
 name = "rlimit"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8a29d87a652dc4d43c586328706bb5cdff211f3f39a530f240b53f7221dab8e"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "rstest"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b96577ca10cb3eade7b337eb46520108a67ca2818a24d0b63f41fd62bc9651c"
+dependencies = [
+ "rstest_macros",
+ "rustc_version",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "225e674cf31712b8bb15fdbca3ec0c1b9d825c5a24407ff2b7e005fb6a29ba03"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 2.0.15",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -2140,6 +2174,15 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rustc_version"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
+dependencies = [
+ "semver",
+]
 
 [[package]]
 name = "rustix"

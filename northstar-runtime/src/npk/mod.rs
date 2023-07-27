@@ -17,3 +17,6 @@ pub const VERSION: Version = Version::new(
     pkg_version_minor!(),
     pkg_version_patch!(),
 );
+
+#[cfg(test)]
+mod tests;

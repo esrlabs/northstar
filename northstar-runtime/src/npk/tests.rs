@@ -1,8 +1,9 @@
-use anyhow::Result;
-use northstar_runtime::npk::{
+use crate::npk::{
     manifest::Manifest,
     npk::{self, Compression, NpkBuilder, FS_IMG_NAME, MANIFEST_NAME},
 };
+use anyhow::Result;
+use rstest::{fixture, rstest};
 use std::{
     fs::{self},
     io,
@@ -31,30 +32,27 @@ struct Fixture {
     key_prv: PathBuf,
 }
 
-impl Default for Fixture {
-    fn default() -> Self {
-        let tmpdir = tmpdir();
-        let dir = tmpdir.path().to_path_buf();
-        let root = root(tmpdir.path()).expect("create root");
-        let manifest_path = tmpdir.path().join(MANIFEST_NAME);
-        fs::write(&manifest_path, TEST_MANIFEST).expect("write manifest");
-        let manifest = Manifest::from_str(TEST_MANIFEST).expect("parse manifest");
-        let (_, key_prv) = generate_test_key(tmpdir.path());
-        Self {
-            manifest_path,
-            manifest,
-            root,
-            dir,
-            tmpdir,
-            key_prv,
-        }
+#[fixture]
+fn fixture() -> Fixture {
+    let tmpdir = TempDir::new().expect("failed to create tempdir");
+    let dir = tmpdir.path().to_path_buf();
+    let root = root(tmpdir.path()).expect("create root");
+    let manifest_path = tmpdir.path().join(MANIFEST_NAME);
+    fs::write(&manifest_path, TEST_MANIFEST).expect("write manifest");
+    let manifest = Manifest::from_str(TEST_MANIFEST).expect("parse manifest");
+    let (_, key_prv) = generate_test_key(tmpdir.path());
+    Fixture {
+        manifest_path,
+        manifest,
+        root,
+        dir,
+        tmpdir,
+        key_prv,
     }
 }
 
-#[test]
-fn pack_with_manifest_file() -> Result<()> {
-    let fixture = Fixture::default();
-
+#[rstest]
+fn pack_with_manifest_file(fixture: Fixture) -> Result<()> {
     let npk = NpkBuilder::default()
         .manifest_path(&fixture.manifest_path)
         .root(&fixture.root, None)
@@ -68,10 +66,8 @@ fn pack_with_manifest_file() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn pack_without_key() -> Result<()> {
-    let fixture = Fixture::default();
-
+#[rstest]
+fn pack_without_key(fixture: Fixture) -> Result<()> {
     let npk = NpkBuilder::default()
         .manifest(&fixture.manifest)
         .root(&fixture.root, None)
@@ -85,10 +81,8 @@ fn pack_without_key() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn pack_with_key() -> Result<()> {
-    let fixture = Fixture::default();
-
+#[rstest]
+fn pack_with_key(fixture: Fixture) -> Result<()> {
     let npk = NpkBuilder::default()
         .manifest(&fixture.manifest)
         .root(&fixture.root, None)
@@ -103,40 +97,36 @@ fn pack_with_key() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn pack_with_compression_none() -> Result<()> {
-    pack_with_compression(Compression::None)
+#[rstest]
+fn pack_with_compression_none(
+    #[values(
+        Compression::None,
+        Compression::Gzip,
+        Compression::Lzma,
+        Compression::Lzo,
+        Compression::Xz,
+        Compression::Zstd
+    )]
+    compression: Compression,
+    fixture: Fixture,
+) -> Result<()> {
+    let squashfs_options = npk::SquashfsOptions {
+        compression,
+        ..Default::default()
+    };
+
+    NpkBuilder::default()
+        .manifest(&fixture.manifest)
+        .root(&fixture.root, Some(&squashfs_options))
+        .key(&fixture.key_prv)
+        .to_dir(&fixture.dir)?;
+
+    assert!(fixture.dir.join(TEST_CONTAINER_NAME).exists());
+    Ok(())
 }
 
-#[test]
-fn pack_with_compression_gzip() -> Result<()> {
-    pack_with_compression(Compression::Gzip)
-}
-
-#[test]
-fn pack_with_compression_lzma() -> Result<()> {
-    pack_with_compression(Compression::Lzma)
-}
-
-#[test]
-fn pack_with_compression_lzo() -> Result<()> {
-    pack_with_compression(Compression::Lzo)
-}
-
-#[test]
-fn pack_with_compression_xz() -> Result<()> {
-    pack_with_compression(Compression::Xz)
-}
-
-#[test]
-fn pack_with_compression_zstd() -> Result<()> {
-    pack_with_compression(Compression::Zstd)
-}
-
-#[test]
-fn pack_with_fs_image() -> Result<()> {
-    let fixture = Fixture::default();
-
+#[rstest]
+fn pack_with_fs_image(fixture: Fixture) -> Result<()> {
     // Pack a npk in order to obtain a fs image.
     // Do not use a key here.
     let npk = NpkBuilder::default()
@@ -164,9 +154,8 @@ fn pack_with_fs_image() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn pack_with_manifest_root_and_fsimage_should_fail() -> Result<()> {
-    let fixture = Fixture::default();
+#[rstest]
+fn pack_with_manifest_root_and_fsimage_should_fail(fixture: Fixture) -> Result<()> {
     let result = NpkBuilder::default()
         .manifest(&fixture.manifest)
         .root(&fixture.root, None)
@@ -178,9 +167,8 @@ fn pack_with_manifest_root_and_fsimage_should_fail() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn pack_to_file() -> Result<()> {
-    let fixture = Fixture::default();
+#[rstest]
+fn pack_to_file(fixture: Fixture) -> Result<()> {
     let npk = fixture.dir.join("test.npk");
 
     NpkBuilder::default()
@@ -196,9 +184,8 @@ fn pack_to_file() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn pack_to_writer() -> Result<()> {
-    let fixture = Fixture::default();
+#[rstest]
+fn pack_to_writer(fixture: Fixture) -> Result<()> {
     let npk_path = fixture.dir.join("test.nkp");
     let npk = fs::File::create(&npk_path)?;
 
@@ -224,10 +211,6 @@ fn generate_test_key(key_dir: &Path) -> (PathBuf, PathBuf) {
     (pub_key, prv_key)
 }
 
-fn tmpdir() -> TempDir {
-    TempDir::new().expect("failed to create tempdir")
-}
-
 fn root(tmpdir: &Path) -> Result<PathBuf> {
     let root = tmpdir.join("root");
     fs::create_dir_all(&root)?;
@@ -240,7 +223,7 @@ fn root(tmpdir: &Path) -> Result<PathBuf> {
 }
 
 fn assert_root(npk: &Path) -> Result<()> {
-    let tmpdir = tmpdir();
+    let tmpdir = TempDir::new()?;
     npk::unpack(npk, tmpdir.path())?;
     let root = tmpdir.path().join("root");
     assert!(root.join("bin").is_dir());
@@ -251,25 +234,8 @@ fn assert_root(npk: &Path) -> Result<()> {
     Ok(())
 }
 
-fn pack_with_compression(compression: Compression) -> Result<()> {
-    let fixture = Fixture::default();
-    let squashfs_options = npk::SquashfsOptions {
-        compression,
-        ..Default::default()
-    };
-
-    NpkBuilder::default()
-        .manifest(&fixture.manifest)
-        .root(&fixture.root, Some(&squashfs_options))
-        .key(&fixture.key_prv)
-        .to_dir(&fixture.dir)?;
-
-    assert!(fixture.dir.join(TEST_CONTAINER_NAME).exists());
-    Ok(())
-}
-
 fn assert_test_manifest(npk: &Path) -> Result<()> {
-    let tmpdir = tmpdir();
+    let tmpdir = TempDir::new()?;
     npk::unpack(npk, tmpdir.path())?;
     let test_manifest = Manifest::from_str(TEST_MANIFEST)?;
     let manifest = Manifest::from_reader(fs::File::open(tmpdir.path().join(MANIFEST_NAME))?)?;
