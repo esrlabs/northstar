@@ -12,7 +12,7 @@ repository = "https://github.com/esrlabs/northstar"
 anyhow = { version = "1.0.71", features = ["backtrace"] }
 base64 = "0.21.2"
 clap = { version = "4.2.7", features = ["derive"] }
-clap_complete = "4.2.1"
+clap_complete = "4.3.2"
 futures = { version = "0.3.27", default-features = false }
 humantime = "2.1.0"
 itertools = "0.10.5"
