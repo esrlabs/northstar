@@ -25,4 +25,4 @@ serde = { version = "1.0.164", features = ["derive"] }
 time = { version = "0.3.20", features = ["formatting", "macros", "serde"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-android-logd-logger = "0.4.1"
+android-logd-logger = "0.4.2"
