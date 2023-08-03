@@ -1,5 +1,5 @@
 use nix::{
-    libc::{EXIT_FAILURE, EXIT_SUCCESS},
+    libc::EXIT_SUCCESS,
     sys::{self, signal::Signal},
 };
 use serde::{Deserialize, Serialize};
@@ -30,12 +30,19 @@ impl From<ExitCode> for ExitStatus {
 impl ExitStatus {
     /// Exit success
     pub const SUCCESS: ExitCode = EXIT_SUCCESS;
-    /// Exit failure
-    pub const FAILURE: ExitCode = EXIT_FAILURE;
 
-    /// Returns true if the exist status is success
+    /// Was termination successful? Signal termination is not considered a success,
+    /// and success is defined as a zero exit status.
     pub fn success(&self) -> bool {
         matches!(self, ExitStatus::Exit(code) if *code == Self::SUCCESS)
+    }
+
+    /// Returns the exit code of the process, if any.
+    pub fn code(&self) -> Option<ExitCode> {
+        match self {
+            ExitStatus::Exit(code) => Some(*code),
+            ExitStatus::Signalled(_) => None,
+        }
     }
 }
 

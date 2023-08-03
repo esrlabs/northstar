@@ -309,6 +309,34 @@ pub enum ExitStatus {
     },
 }
 
+impl ExitStatus {
+    /// Exit success
+    pub const SUCCESS: ExitCode = 0;
+
+    /// Was termination successful? Signal termination is not considered a success,
+    /// and success is defined as a zero exit status.
+    pub fn success(&self) -> bool {
+        matches!(self, ExitStatus::Exit { code } if *code == Self::SUCCESS)
+    }
+
+    /// Returns the exit code of the process, if any.
+    pub fn code(&self) -> Option<ExitCode> {
+        match self {
+            ExitStatus::Exit { code } => Some(*code),
+            ExitStatus::Signalled { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExitStatus::Exit { code } => write!(f, "Exit({code})"),
+            ExitStatus::Signalled { signal } => write!(f, "Signalled({signal})"),
+        }
+    }
+}
+
 /// API error
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
