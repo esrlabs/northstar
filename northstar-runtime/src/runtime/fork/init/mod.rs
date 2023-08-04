@@ -82,6 +82,16 @@ impl Init {
         console: Option<OwnedFd>,
         sockets: Vec<OwnedFd>,
     ) -> ! {
+        let (path, args, env) = match stream.recv() {
+            Ok(Some(Message::Exec { path, args, env })) => (path, args, env),
+            Ok(None) => {
+                info!("Channel closed. Exiting...");
+                std::process::exit(0);
+            }
+            Ok(_) => unimplemented!("Unimplemented message"),
+            Err(e) => panic!("failed to receive message: {e}"),
+        };
+
         // Become a subreaper
         set_child_subreaper(true);
 
@@ -125,118 +135,106 @@ impl Init {
         // Apply resource limits
         self.set_rlimits();
 
-        loop {
-            match stream.recv() {
-                Ok(Some(Message::Exec { path, args, env })) => {
-                    // The init process got adopted by the forker after the trampoline exited. It is
-                    // safe to set the parent death signal now.
-                    util::set_parent_death_signal(Signal::SIGKILL);
+        // The init process got adopted by the forker after the trampoline exited. It is
+        // safe to set the parent death signal now.
+        util::set_parent_death_signal(Signal::SIGKILL);
 
-                    let path = CString::from(path);
-                    let args: Vec<_> = args.into_iter().map_into::<CString>().collect();
-                    let env: Vec<_> = {
-                        let env = env.into_iter().map_into::<CString>();
+        let path = CString::from(path);
+        let args: Vec<_> = args.into_iter().map_into::<CString>().collect();
+        let env: Vec<_> = {
+            let env = env.into_iter().map_into::<CString>();
 
-                        // Console fd env variable (if present).
-                        let console = console
-                            .as_ref()
-                            .map(AsRawFd::as_raw_fd)
-                            .map(|fd| format!("NORTHSTAR_CONSOLE={fd}"))
-                            .map(|var| unsafe { NonNulString::from_string_unchecked(var) })
-                            .into_iter()
-                            .map(Into::into);
+            // Console fd env variable (if present).
+            let console = console
+                .as_ref()
+                .map(AsRawFd::as_raw_fd)
+                .map(|fd| format!("NORTHSTAR_CONSOLE={fd}"))
+                .map(|var| unsafe { NonNulString::from_string_unchecked(var) })
+                .into_iter()
+                .map(Into::into);
 
-                        // Set socket env variables.
-                        let sockets = self.sockets.iter().zip(&sockets).map(|(name, fd)| {
-                            let fd = fd.as_raw_fd();
-                            let var = format!("NORTHSTAR_SOCKET_{name}={fd}");
-                            let var = unsafe { NonNulString::from_string_unchecked(var) };
-                            var.into()
-                        });
+            // Set socket env variables.
+            let sockets = self.sockets.iter().zip(&sockets).map(|(name, fd)| {
+                let fd = fd.as_raw_fd();
+                let var = format!("NORTHSTAR_SOCKET_{name}={fd}");
+                let var = unsafe { NonNulString::from_string_unchecked(var) };
+                var.into()
+            });
 
-                        env.chain(console).chain(sockets).collect()
-                    };
+            env.chain(console).chain(sockets).collect()
+        };
 
-                    // Start new process inside the container
-                    let pid = match unsafe { fork().expect("failed to fork") } {
-                        ForkResult::Parent { child } => child.as_raw() as Pid,
-                        ForkResult::Child => {
-                            util::set_parent_death_signal(Signal::SIGKILL);
+        // Start new process inside the container
+        let pid = match unsafe { fork().expect("failed to fork") } {
+            ForkResult::Parent { child } => child.as_raw() as Pid,
+            ForkResult::Child => {
+                util::set_parent_death_signal(Signal::SIGKILL);
 
-                            // Apply scheduling parameters. The parameters shall not be applied to
-                            // the init process and therefore this is done *after* fork.
-                            self.set_scheduler_policy()
-                                .expect("failed to set scheduler policy");
+                // Apply scheduling parameters. The parameters shall not be applied to
+                // the init process and therefore this is done *after* fork.
+                self.set_scheduler_policy()
+                    .expect("failed to set scheduler policy");
 
-                            // Set seccomp filter
-                            if let Some(ref filter) = self.seccomp {
-                                filter.apply().expect("failed to apply seccomp filter.");
-                            }
-
-                            // No new privileges
-                            Self::set_no_new_privs(true);
-
-                            // Capabilities
-                            self.drop_privileges();
-
-                            panic!(
-                                "execve: {:?} {:?}: {:?}",
-                                &path,
-                                &args,
-                                unistd::execve(&path, &args, &env)
-                            )
-                        }
-                    };
-
-                    // Close the console fd. Used in the container binary only.
-                    drop(console);
-
-                    // Close sockets in init.
-                    drop(sockets);
-
-                    // Free some memory.
-                    drop((path, args, env));
-
-                    // Inform the forker that we forked.
-                    stream
-                        .send(&Message::Forked { pid })
-                        .expect("failed to send fork result");
-
-                    // Wait for the child to exit
-                    let exit_status = loop {
-                        debug!("Waiting for child process {} to exit", pid);
-                        match waitpid(Some(unistd::Pid::from_raw(pid as i32)), None) {
-                            Ok(WaitStatus::Exited(_, status)) => {
-                                debug!("Child process {} exited with status code {}", pid, status);
-                                break ExitStatus::Exit(status);
-                            }
-                            Ok(WaitStatus::Signaled(_, status, _)) => {
-                                debug!("Child process {} exited with signal {}", pid, status);
-                                break ExitStatus::Signalled(status as u8);
-                            }
-                            Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
-                                log::warn!("Child process continued or stopped");
-                                continue;
-                            }
-                            Err(nix::Error::EINTR) => continue,
-                            e => panic!("failed to waitpid on {pid}: {e:?}"),
-                        }
-                    };
-
-                    stream
-                        .send(Message::Exit { pid, exit_status })
-                        .expect("channel error");
-
-                    exit(0);
+                // Set seccomp filter
+                if let Some(ref filter) = self.seccomp {
+                    filter.apply().expect("failed to apply seccomp filter.");
                 }
-                Ok(None) => {
-                    info!("Channel closed. Exiting...");
-                    std::process::exit(0);
-                }
-                Ok(_) => unimplemented!("Unimplemented message"),
-                Err(e) => panic!("failed to receive message: {e}"),
+
+                // No new privileges
+                Self::set_no_new_privs(true);
+
+                // Capabilities
+                self.drop_privileges();
+
+                panic!(
+                    "execve: {:?} {:?}: {:?}",
+                    &path,
+                    &args,
+                    unistd::execve(&path, &args, &env)
+                )
             }
-        }
+        };
+
+        // Close the console fd. Used in the container binary only.
+        drop(console);
+
+        // Close sockets in init.
+        drop(sockets);
+
+        // Free some memory.
+        drop((path, args, env));
+
+        // Inform the forker that we forked.
+        stream
+            .send(&Message::Forked { pid })
+            .expect("failed to send fork result");
+
+        // Wait for the child to exit
+        let exit_status = loop {
+            debug!("Waiting for child process {} to exit", pid);
+            match waitpid(Some(unistd::Pid::from_raw(pid as i32)), None) {
+                Ok(WaitStatus::Exited(_, status)) => {
+                    debug!("Child process {} exited with status code {}", pid, status);
+                    break ExitStatus::Exit(status);
+                }
+                Ok(WaitStatus::Signaled(_, status, _)) => {
+                    debug!("Child process {} exited with signal {}", pid, status);
+                    break ExitStatus::Signalled(status as u8);
+                }
+                Ok(WaitStatus::Continued(_)) | Ok(WaitStatus::Stopped(_, _)) => {
+                    log::warn!("Child process continued or stopped");
+                    continue;
+                }
+                Err(nix::Error::EINTR) => continue,
+                e => panic!("failed to waitpid on {pid}: {e:?}"),
+            }
+        };
+
+        stream
+            .send(Message::Exit { pid, exit_status })
+            .expect("channel error");
+
+        exit(0);
     }
 
     /// Set uid/gid
