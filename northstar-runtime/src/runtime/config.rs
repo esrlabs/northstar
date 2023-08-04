@@ -11,7 +11,10 @@ use nix::{sys::stat, unistd};
 use serde::{de::Error as SerdeError, Deserialize, Deserializer};
 use url::Url;
 
-use crate::{common::non_nul_string::NonNulString, runtime::repository::RepositoryId};
+use crate::{
+    common::non_nul_string::NonNulString, npk::manifest::console::Permissions,
+    runtime::repository::RepositoryId,
+};
 
 /// Runtime configuration
 #[derive(Clone, Debug, Deserialize)]
@@ -44,10 +47,22 @@ pub struct Config {
     pub debug: Option<Debug>,
 }
 
+/// Globally accessible console.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ConsoleGlobal {
+    /// Bind globally accesible console to this address.
+    #[serde(deserialize_with = "console_url")]
+    pub bind: Url,
+    /// Permissions
+    pub permissions: Permissions,
+    /// Console options
+    pub options: Option<ConsoleOptions>,
+}
+
 /// Console Quality of Service
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Console {
+pub struct ConsoleOptions {
     /// Token validity duration.
     #[serde(with = "humantime_serde", default = "default_token_validity")]
     pub token_validity: time::Duration,
@@ -68,7 +83,7 @@ pub struct Console {
     pub npk_stream_timeout: time::Duration,
 }
 
-impl Default for Console {
+impl Default for ConsoleOptions {
     fn default() -> Self {
         Self {
             token_validity: default_token_validity(),
@@ -78,6 +93,16 @@ impl Default for Console {
             npk_stream_timeout: default_npk_stream_timeout(),
         }
     }
+}
+
+/// Console Quality of Service
+#[derive(Clone, Default, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Console {
+    /// Globally accessible console.
+    pub global: Option<ConsoleGlobal>,
+    /// Options for console connections with containers.
+    pub options: Option<ConsoleOptions>,
 }
 
 /// Repository type
@@ -116,10 +141,6 @@ pub struct Repository {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Debug {
-    /// Console configuration
-    #[serde(deserialize_with = "console")]
-    pub console: Url,
-
     /// Commands to run before the container is started.
     //  <CONTAINER> is replaced with the container name.
     //  <PID> is replaced with the container init pid.
@@ -170,7 +191,7 @@ fn is_rw(path: &Path) -> bool {
 }
 
 /// Validate the console url schemes are all "tcp" or "unix"
-fn console<'de, D>(deserializer: D) -> Result<Url, D::Error>
+fn console_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -234,15 +255,15 @@ const fn default_max_request_size() -> u64 {
 
 #[test]
 #[allow(clippy::unwrap_used)]
-fn console_url() {
+fn validate_console_url() {
     let config = r#"
 data_dir = "target/northstar/data"
 run_dir = "target/northstar/run"
 socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
-
-[debug]
-console = "tcp://localhost:4200"
+[console.global]
+bind = "tcp://localhost:4200"
+permissions = "full"
 "#;
 
     toml::from_str::<Config>(config).unwrap();
@@ -253,9 +274,9 @@ data_dir = "target/northstar/data"
 run_dir = "target/northstar/run"
 socket_dir = "target/northstar/sockets"
 cgroup = "northstar"
-
-[debug]
-console = "http://localhost:4200"
+[console.global]
+bind = "http://localhost:4200"
+permissions = "full"
 "#;
 
     assert!(toml::from_str::<Config>(config).is_err());

@@ -9,11 +9,11 @@ use std::{collections::HashSet, fmt};
 use strum::{EnumCount as _, IntoEnumIterator};
 use strum_macros::{EnumCount, EnumIter};
 
-/// Console Quality of Service
+/// Console permissions.
 #[skip_serializing_none]
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Configuration {
+pub struct Console {
     /// Permissions
     pub permissions: Permissions,
 }
@@ -75,9 +75,14 @@ impl fmt::Display for Permission {
 pub struct Permissions(HashSet<Permission>);
 
 impl Permissions {
-    /// Create a new `Console` with all permissions given
+    /// Create a new `Console` with all permissions.
     pub fn full() -> Permissions {
         Permissions(HashSet::from_iter(Permission::iter()))
+    }
+
+    /// Create a new `Console` without permissions.
+    pub fn empty() -> Permissions {
+        Permissions(HashSet::new())
     }
 }
 

@@ -462,7 +462,7 @@ impl State {
         let stop = CancellationToken::new();
 
         // We send the fd to the forker so that it can pass it to the init
-        let console_fd = if let Some(configuration) = manifest.console.clone() {
+        let console_fd = if let Some(contianer_configuration) = manifest.console.clone() {
             let peer = Peer::Container(container.clone());
             let (runtime_stream, container_stream) =
                 StdUnixStream::pair().expect("failed to create socketpair");
@@ -477,18 +477,21 @@ impl State {
             let events_tx = self.events_tx.clone();
             let stop = stop.clone();
             let container = Some(container.clone());
-            let configuration = {
-                crate::runtime::console::Configuration {
-                    container: configuration,
-                    runtime: self.config.console.clone(),
-                }
-            };
+            let options = self
+                .config
+                .console
+                .options
+                .clone()
+                .unwrap_or_default()
+                .into();
+            let permissions = contianer_configuration.permissions.clone().into();
             let connection = Console::connection(
                 runtime,
                 peer,
                 stop,
                 container,
-                configuration,
+                options,
+                permissions,
                 events_tx,
                 notifications,
                 None,
