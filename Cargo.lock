@@ -1598,6 +1598,7 @@ dependencies = [
  "cgroups-rs",
  "ed25519-dalek",
  "futures",
+ "heck 0.4.1",
  "hex",
  "hmac",
  "humanize-rs",

@@ -3,9 +3,9 @@ data_dir = "/data/northstar/data"
 socket_dir = "/dev/socket/northstar"
 cgroup = "northstar"
 
-# Debug TCP console on localhost with full access
-[debug]
-console = "tcp://localhost:4200"
+[console.global]
+bind = "tcp://localhost:4200"
+permissions = "full"
 
 [repositories.system]
 key = "/system/etc/northstar/system.pub"

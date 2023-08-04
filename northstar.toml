@@ -13,7 +13,7 @@ notification_buffer_size = 64
 # Loop device timeout
 loop_device_timeout = "5s"
 
-[console]
+[console.options]
 # Token validity
 token_validity = "1m"
 # Limits the number of requests processed per second
@@ -25,9 +25,14 @@ max_npk_install_size = "100MB"
 # NPK stream timeout 
 npk_stream_timeout = "5s"
 
+[console.global]
+# Url
+bind = "tcp://localhost:4200"
+# Permissions
+permissions = "full"
+
 # Debug TCP console on localhost
 [debug]
-console = "tcp://localhost:4200"
 # Start a set of commands after a container is started.
 # <PID> is replaced with the init PID of the container.
 # <CONTAINER> is replaced with the container name.

@@ -7,20 +7,21 @@ use nanoid::nanoid;
 use northstar_runtime::{
     api::model::{Container, ExitStatus, Notification},
     common::non_nul_string::NonNulString,
+    npk::manifest::console::Permissions,
     runtime::{
-        config::{self},
+        config::{self, Console, ConsoleGlobal},
         Runtime as Northstar,
     },
 };
 use std::{
     convert::{TryFrom, TryInto},
-    fs,
+    env, fs,
 };
 use tempfile::TempDir;
 use tokio::{fs::remove_file, net::UnixStream, pin, select, time};
 
 pub fn console_url() -> url::Url {
-    let console = std::env::temp_dir().join(format!("northstar-{}-full", std::process::id()));
+    let console = env::temp_dir().join(format!("northstar-{}-full", std::process::id()));
     url::Url::parse(&format!("unix://{}", console.display())).unwrap()
 }
 
@@ -124,11 +125,17 @@ impl Runtime {
             event_buffer_size: 128,
             notification_buffer_size: 128,
             loop_device_timeout: time::Duration::from_secs(10),
-            console: config::Console::default(),
             cgroup: NonNulString::try_from(format!("northstar-{}", nanoid!())).unwrap(),
             repositories,
+            console: Console {
+                global: Some(ConsoleGlobal {
+                    bind: console_url(),
+                    permissions: Permissions::full(),
+                    options: None,
+                }),
+                ..Default::default()
+            },
             debug: Some(config::Debug {
-                console: console_url(),
                 commands: vec!["sudo strace -c -p <PID>".into()],
             }),
         };

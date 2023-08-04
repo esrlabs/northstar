@@ -31,12 +31,13 @@ use tokio::{
 use tokio_util::{either::Either, io::ReaderStream, sync::CancellationToken};
 use url::Url;
 
-pub use crate::npk::manifest::console::{
-    Configuration as ContainerConfiguration, Permission, Permissions,
-};
-use crate::runtime::config::Console as RuntimeConfiguration;
+pub use options::Options;
+use permissions::Permission;
+pub use permissions::Permissions;
 
 mod listener;
+mod options;
+mod permissions;
 mod throttle;
 
 // Request from the main loop to the console
@@ -44,15 +45,6 @@ mod throttle;
 pub(crate) enum Request {
     Request(model::Request),
     Install(RepositoryId, mpsc::Receiver<Bytes>),
-}
-
-/// Console configuration.
-#[derive(Clone, Debug)]
-pub(crate) struct Configuration {
-    /// Container specific console configuration.
-    pub container: ContainerConfiguration,
-    /// Runtime global configuration.
-    pub runtime: RuntimeConfiguration,
 }
 
 /// A console is responsible for monitoring and serving incoming client connections
@@ -83,13 +75,16 @@ impl Console {
 
     /// Spawn a task that listens on `url` for new connections. Spawn a task for
     /// each client
-    pub(super) async fn listen(&mut self, url: &Url, configuration: &Configuration) -> Result<()> {
+    pub(super) async fn listen(
+        &mut self,
+        url: &Url,
+        options: Options,
+        permissions: Permissions,
+    ) -> Result<()> {
         let event_tx = self.event_tx.clone();
         let notification_tx = self.notification_tx.clone();
-        let configuration = configuration.clone();
         // Stop token for self *and* the connections
         let stop = self.stop.clone();
-        let permissions = &configuration.container.permissions;
 
         debug!("Starting console on {url} with permissions \"{permissions}\"",);
         let listener = Listener::new(url)
@@ -103,7 +98,8 @@ impl Console {
                     event_tx,
                     notification_tx,
                     stop,
-                    configuration,
+                    options,
+                    permissions,
                 )
                 .await
             }),
@@ -113,7 +109,8 @@ impl Console {
                     event_tx,
                     notification_tx,
                     stop,
-                    configuration,
+                    options,
+                    permissions,
                 )
                 .await
             }),
@@ -137,12 +134,12 @@ impl Console {
         peer: Peer,
         stop: CancellationToken,
         container: Option<Container>,
-        configuration: Configuration,
+        options: Options,
+        permissions: Permissions,
         event_tx: EventTx,
         mut notification_rx: broadcast::Receiver<(Container, ContainerEvent)>,
         timeout: Option<time::Duration>,
     ) -> Result<()> {
-        let permissions = &configuration.container.permissions;
         if let Some(container) = &container {
             debug!(
                 "Container {} connected with permissions {}",
@@ -153,11 +150,11 @@ impl Console {
         }
 
         // Get a framed stream and sink interface.
-        let max_request_size = configuration.runtime.max_request_size;
+        let max_request_size = options.max_request_size;
         let stream = api::codec::framed_with_max_length(stream, max_request_size.try_into()?);
 
         // Limit requests per second
-        let max_requests_per_sec = configuration.runtime.max_requests_per_sec;
+        let max_requests_per_sec = options.max_requests_per_sec;
         const SECOND: time::Duration = time::Duration::from_secs(1);
         let mut stream = throttle::Throttle::new(stream, max_requests_per_sec, SECOND);
 
@@ -232,10 +229,9 @@ impl Console {
         }
 
         // Looks good - send ConnectAck
-        let connect_ack = model::ConnectAck {
-            configuration: configuration.container.clone(),
+        let message = model::Message::ConnectAck {
+            connect_ack: model::ConnectAck,
         };
-        let message = model::Message::ConnectAck { connect_ack };
         if let Err(e) = stream.send(message).await {
             warn!("{}: Connection error: {}", peer, e);
             return Ok(());
@@ -284,7 +280,7 @@ impl Console {
                     match item {
                         Some(Ok(model::Message::Request { request })) => {
                             trace!("{}: --> {:?}", peer, request);
-                            let response = match process_request(&peer, &mut stream, &stop, &configuration, &event_tx, request).await {
+                            let response = match process_request(&peer, &mut stream, &stop, &options, &permissions, &event_tx, request).await {
                                 Ok(response) => response,
                                 Err(e) => {
                                     warn!("Failed to process request: {}", e);
@@ -329,7 +325,8 @@ async fn process_request<S>(
     peer: &Peer,
     stream: &mut Framed<S>,
     stop: &CancellationToken,
-    configuration: &Configuration,
+    options: &Options,
+    permissions: &Permissions,
     event_loop: &EventTx,
     request: model::Request,
 ) -> Result<model::Message>
@@ -357,7 +354,6 @@ where
         model::Request::Uninstall { .. } => Permission::Uninstall,
     };
 
-    let permissions = &configuration.container.permissions;
     if !permissions.contains(&required_permission) {
         return Ok(model::Message::Response {
             response: model::Response::PermissionDenied(request),
@@ -386,7 +382,7 @@ where
             );
 
             // Check the installation request size
-            let max_install_stream_size = configuration.runtime.max_npk_install_size;
+            let max_install_stream_size = options.max_npk_install_size;
             if size > max_install_stream_size {
                 bail!("npk size too large");
             }
@@ -414,7 +410,7 @@ where
 
             // If the connections breaks: just break. If the receiver is dropped: just break.
             let mut take = ReaderStream::with_capacity(stream.get_mut().take(size), 1024 * 1024);
-            let timeout = configuration.runtime.npk_stream_timeout;
+            let timeout = options.npk_stream_timeout;
             while let Some(buf) = time::timeout(timeout, take.next())
                 .await
                 .context("npk stream timeout")?
@@ -435,7 +431,7 @@ where
                 target,
                 hex::encode(&shared)
             );
-            let token_validity = configuration.runtime.token_validity;
+            let token_validity = options.token_validity;
             let token: Vec<u8> =
                 Token::new(token_validity, user, target.as_ref().as_bytes(), shared).into();
             let token = api::model::Token::from(token);
@@ -459,7 +455,7 @@ where
                 hex::encode(&shared)
             );
             // The token has a valid length - verified by serde::deserialize
-            let token_validity = configuration.runtime.token_validity;
+            let token_validity = options.token_validity;
             let token = Token::from((token_validity, token.as_ref().to_vec()));
             let result = token
                 .verify(user.as_ref().as_bytes(), target, &shared)
@@ -501,7 +497,8 @@ async fn serve<C, S, A>(
     event_tx: EventTx,
     notification_tx: NotificationTx,
     stop: CancellationToken,
-    configuration: Configuration,
+    options: Options,
+    permissions: Permissions,
 ) where
     C: Stream<Item = Result<(S, A), io::Error>> + Unpin,
     S: AsyncWrite + AsyncRead + Unpin + Send + 'static,
@@ -523,7 +520,8 @@ async fn serve<C, S, A>(
                             client.into(),
                             stop.clone(),
                             None,
-                            configuration.clone(),
+                            options.clone(),
+                            permissions.clone(),
                             event_tx.clone(),
                             notification_tx.subscribe(),
                             Some(time::Duration::from_secs(10)),

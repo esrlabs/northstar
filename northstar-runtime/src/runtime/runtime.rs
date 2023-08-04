@@ -3,7 +3,7 @@ use crate::{
     runtime::{
         cgroups,
         config::Config,
-        console::{self, Configuration, Permissions},
+        console,
         events::{ContainerEvent, Event},
         exit_status::ExitStatus,
         fork,
@@ -113,7 +113,7 @@ impl Runtime {
 
 /// Main loop
 async fn run(
-    config: Config,
+    mut config: Config,
     token: CancellationToken,
     forker: (Pid, Streams),
 ) -> anyhow::Result<()> {
@@ -144,17 +144,14 @@ async fn run(
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(config.event_buffer_size);
     let (notification_tx, _) = sync::broadcast::channel(config.notification_buffer_size);
 
-    // Initialize the console if configured
-    let console = if let Some(url) = config.debug.as_ref().map(|d| &d.console) {
+    // Initialize the console if bind address configured.
+    let console = if let Some(global) = config.console.global.take() {
         let mut console = console::Console::new(event_tx.clone(), notification_tx.clone());
-        // Default debug console configuration with full access and no limits.
-        let configuration = Configuration {
-            container: crate::npk::manifest::console::Configuration {
-                permissions: Permissions::full(),
-            },
-            runtime: config.console.clone(),
-        };
-        console.listen(url, &configuration).await?;
+        let options = global.options.unwrap_or_default();
+        let permissions = global.permissions;
+        console
+            .listen(&global.bind, options.into(), permissions.into())
+            .await?;
         Some(console)
     } else {
         None

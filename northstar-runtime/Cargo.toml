@@ -24,6 +24,7 @@ caps = { version = "0.5.5", optional = true }
 cgroups-rs = { version = "0.3.2", features = ["serde"], optional = true }
 ed25519-dalek = { version = "1.0.1", optional = true }
 futures = { version = "0.3.27", default-features = true, optional = true }
+heck = { version = "0.4.1", optional = true }
 hex = { version = "0.4.3", optional = true }
 hmac = { version = "0.12.1", features = ["reset"], optional = true }
 humanize-rs = { version = "0.1.5", optional = true }
@@ -69,7 +70,7 @@ zip = { version = "0.6.6", default-features = false, optional = true }
 api = ["bytes", "futures", "npk", "pkg-version", "serde_json", "tokio", "tokio-util"]
 npk = ["base64", "byteorder", "ed25519-dalek", "hex", "humanize-rs", "itertools", "pkg-version", "rand_core", "seccomp", "serde_json", "serde_plain", "serde_with", "serde_yaml", "sha2", "strum", "strum_macros", "tempfile", "toml", "uuid", "zeroize", "zip"]
 rexec = ["nix", "memfd"]
-runtime = ["api", "async-stream", "async-trait", "bincode", "bytesize", "caps", "cgroups-rs", "ed25519-dalek", "futures", "hex", "hmac", "humantime", "humantime-serde", "inotify", "itertools", "lazy_static", "libc", "loopdev", "memfd", "memoffset", "nanoid", "nix", "npk", "rlimit", "serde_plain", "tempfile", "tokio", "tokio-eventfd", "tokio-util", "url", "umask"]
+runtime = ["api", "async-stream", "async-trait", "bincode", "bytesize", "caps", "cgroups-rs", "ed25519-dalek", "futures", "heck", "hex", "hmac", "humantime", "humantime-serde", "inotify", "itertools", "lazy_static", "libc", "loopdev", "memfd", "memoffset", "nanoid", "nix", "npk", "rlimit", "serde_plain", "tempfile", "tokio", "tokio-eventfd", "tokio-util", "url", "umask"]
 seccomp = ["bindgen", "caps", "lazy_static", "memoffset", "nix", "npk"]
 
 [dev-dependencies]

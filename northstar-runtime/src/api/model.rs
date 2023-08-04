@@ -3,10 +3,6 @@ use std::collections::{HashMap, HashSet};
 
 /// Container name
 pub type Name = crate::common::name::Name;
-/// Console configuration
-pub type ConsoleConfiguration = crate::npk::manifest::console::Configuration;
-/// Console permission entity
-pub type ConsolePermission = crate::npk::manifest::console::Permission;
 /// Container identification
 pub type Container = crate::common::container::Container;
 /// Container exit code
@@ -87,9 +83,7 @@ pub struct Connect {
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
-pub struct ConnectAck {
-    pub configuration: ConsoleConfiguration,
-}
+pub struct ConnectAck;
 
 /// Connection nack
 #[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]

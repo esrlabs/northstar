@@ -92,7 +92,7 @@ pub struct Manifest {
     /// Container version
     pub version: Version,
     /// Pass a console fd number in NORTHSTAR_CONSOLE
-    pub console: Option<console::Configuration>,
+    pub console: Option<console::Console>,
     /// Path to init
     #[validate(length(min = 1, max = 4096))]
     pub init: Option<NonNulString>,
