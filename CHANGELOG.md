@@ -1,4 +1,59 @@
-# 0.8.2 (Unreleased)
+# 0.8.3 (Unreleased)
+
+# 0.8.2 (August 4th, 2023)
+
+## Changed
+
+- runtime Setup init process properties after exec request ([#1009])
+- runtime Extend ExitStatus with success ([#1010])
+- runtime Cleanup of npk packing and tests ([#998])
+
+## Dependencies
+
+- deps Bump serde_yaml to 0.9.25 ([#1004])
+- deps Bump proc-macro2 to 1.0.66 ([#1008])
+- deps Bump android-logd-logger to 0.4.2 ([#1007])
+- deps Bump validator to 0.16.1 ([#1006])
+- deps Bump clap_complete to 4.3.2 ([#1005])
+- deps Bump sha2 to 0.10.7 ([#1003])
+- deps Bump rlimit to 0.10.1 ([#1002])
+- deps Bump itertools to 0.11.0 ([#1001])
+- deps Bump memoffset to 0.9.0 ([#1000])
+- deps Bump syn to 2.0.16 ([#999])
+- deps Bump toml to 0.7.6 ([#997])
+- deps Bump uuid to 1.4.1 ([#996])
+- deps Bump tokio to 1.29.1 ([#995])
+- deps Bump bitflags to 2.3.3 ([#994])
+- deps Bump serde to 1.0.164 ([#992])
+- deps Bump log to 0.4.19 ([#991])
+- deps Bump console to 0.15.7 ([#987])
+- deps Bump proptest to 1.2.0 ([#986])
+- deps Bump zip to 0.6.6 ([#983])
+- deps Bump base64 from 0.21.0 to 0.21.2 ([#981])
+
+[#1000]: https://github.com/esrlabs/northstar/pull/1000
+[#1001]: https://github.com/esrlabs/northstar/pull/1001
+[#1002]: https://github.com/esrlabs/northstar/pull/1002
+[#1003]: https://github.com/esrlabs/northstar/pull/1003
+[#1004]: https://github.com/esrlabs/northstar/pull/1004
+[#1005]: https://github.com/esrlabs/northstar/pull/1005
+[#1006]: https://github.com/esrlabs/northstar/pull/1006
+[#1007]: https://github.com/esrlabs/northstar/pull/1007
+[#1008]: https://github.com/esrlabs/northstar/pull/1008
+[#1009]: https://github.com/esrlabs/northstar/pull/1009
+[#1010]: https://github.com/esrlabs/northstar/pull/1010
+[#981]: https://github.com/esrlabs/northstar/pull/981
+[#983]: https://github.com/esrlabs/northstar/pull/983
+[#986]: https://github.com/esrlabs/northstar/pull/986
+[#987]: https://github.com/esrlabs/northstar/pull/987
+[#991]: https://github.com/esrlabs/northstar/pull/991
+[#992]: https://github.com/esrlabs/northstar/pull/992
+[#994]: https://github.com/esrlabs/northstar/pull/994
+[#995]: https://github.com/esrlabs/northstar/pull/995
+[#996]: https://github.com/esrlabs/northstar/pull/996
+[#997]: https://github.com/esrlabs/northstar/pull/997
+[#998]: https://github.com/esrlabs/northstar/pull/998
+[#999]: https://github.com/esrlabs/northstar/pull/999
 
 # 0.8.1 (May 10th, 2023)
 

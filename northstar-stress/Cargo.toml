@@ -1,6 +1,6 @@
 [package]
 name = "northstar-stress"
-version = "0.8.2-pre"
+version = "0.8.2"
 authors = ["ESRLabs"]
 edition = "2021"
 license = "Apache-2.0"
