@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use northstar_runtime::npk::{
     manifest::Manifest,
     npk::{NpkBuilder, SquashfsOptions},
@@ -23,6 +23,9 @@ pub(crate) fn pack(
 
     // Create npk clones with the number appended to the name
     if let Some(clones) = clones {
+        if !out.is_dir() {
+            bail!("output path must be a directory when creating clones")
+        }
         let reader = fs::File::open(manifest).context("failed to open manifest")?;
         let mut manifest = Manifest::from_reader(reader).context("failed to read manifest")?;
         // Only clone non-resource containers
@@ -38,8 +41,10 @@ pub(crate) fn pack(
         } else {
             builder.manifest(&manifest).to_dir(out)?;
         }
-    } else {
+    } else if out.is_dir() {
         builder.manifest_path(manifest).to_dir(out)?;
+    } else {
+        builder.manifest_path(manifest).to_file(out)?;
     }
 
     Ok(())
