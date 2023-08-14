@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as Base64, Engine as _};
-use ed25519_dalek::{Keypair, PublicKey, SecretKey, Signer, SECRET_KEY_LENGTH};
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey, SECRET_KEY_LENGTH};
 use itertools::Itertools;
 use rand_core::{OsRng, RngCore};
 use semver::Comparator;
@@ -26,7 +26,6 @@ use std::{
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
-use zeroize::Zeroize;
 use zip::ZipArchive;
 
 use super::VERSION;
@@ -166,7 +165,7 @@ pub struct Npk<R> {
 
 impl<R: Read + Seek> Npk<R> {
     /// Read a npk from `reader`
-    pub fn from_reader(reader: R, key: Option<&PublicKey>) -> Result<Self, Error> {
+    pub fn from_reader(reader: R, key: Option<&VerifyingKey>) -> Result<Self, Error> {
         let mut zip = Zip::new(reader).context("archive error")?;
 
         // Check npk format version against `VERSION`.
@@ -233,7 +232,7 @@ impl<R: Read + Seek> Npk<R> {
     /// Load manifest from `npk`
     pub fn from_path(
         npk: &Path,
-        key: Option<&PublicKey>,
+        key: Option<&VerifyingKey>,
     ) -> Result<Npk<BufReader<fs::File>>, Error> {
         let npk_file =
             fs::File::open(npk).with_context(|| format!("failed to open {}", npk.display()))?;
@@ -298,7 +297,7 @@ fn meta<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result<Met
     serde_yaml::from_slice(zip.comment()).context("comment malformed")
 }
 
-fn hashes<R: Read + Seek>(zip: &mut Zip<R>, key: &PublicKey) -> Result<Hashes, Error> {
+fn hashes<R: Read + Seek>(zip: &mut Zip<R>, key: &VerifyingKey) -> Result<Hashes, Error> {
     // Read the signature file from the zip
     let signature_content = read_to_string(zip, SIGNATURE_NAME)?;
 
@@ -360,7 +359,7 @@ fn decode_signature(s: &str) -> Result<ed25519_dalek::Signature> {
         .decode(de.signature)
         .context("failed to decode signature base 64 format")?;
 
-    ed25519_dalek::Signature::from_bytes(&signature)
+    ed25519_dalek::Signature::from_slice(&signature)
         .context("failed to parse signature ed25519 format")
 }
 
@@ -625,9 +624,8 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
 
     let mut secret_key_bytes = [0u8; 32];
     OsRng.fill_bytes(&mut secret_key_bytes);
-
-    let secret_key = secret_key(secret_key_bytes)?;
-    let public_key = ed25519_dalek::PublicKey::from(&secret_key);
+    let secret_key = SigningKey::from_bytes(&secret_key_bytes);
+    let public_key = ed25519_dalek::VerifyingKey::from(&secret_key);
 
     let secret_key_file = out.join(name).with_extension("key");
     let public_key_file = out.join(name).with_extension("pub");
@@ -641,28 +639,15 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_keypair(key_file: &Path) -> Result<Keypair, Error> {
+fn read_keypair(key_file: &Path) -> Result<SigningKey, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     fs::File::open(key_file)
         .with_context(|| format!("failed to open '{}'", &key_file.display()))?
         .read_exact(&mut secret_key_bytes)
         .with_context(|| format!("failed to read key data from '{}'", &key_file.display()))?;
 
-    let secret_key = secret_key(secret_key_bytes)?;
-    let public_key = PublicKey::from(&secret_key);
-
-    Ok(Keypair {
-        secret: secret_key,
-        public: public_key,
-    })
-}
-
-/// Derive an Ed25519 SecretKey. The provided data is zeroized afterwards.
-fn secret_key(mut bytes: [u8; SECRET_KEY_LENGTH]) -> Result<SecretKey> {
-    let secret_key =
-        SecretKey::from_bytes(bytes.as_slice()).context("failed to read secret key")?;
-    bytes.zeroize(); // Destroy original private key material
-    Ok(secret_key)
+    let signing_key = SigningKey::from_bytes(&secret_key_bytes);
+    Ok(signing_key)
 }
 
 /// Generate the signatures yaml file
@@ -707,7 +692,7 @@ fn signature<I: Read + Write + Seek>(
 
     let key_pair = read_keypair(key)?;
     let signature = key_pair.sign(hashes_yaml.as_bytes());
-    let signature_base64 = Base64.encode(signature);
+    let signature_base64 = Base64.encode(signature.to_bytes());
     let signature_yaml = { format!("{}---\nsignature: {}", &hashes_yaml, &signature_base64) };
 
     Ok(signature_yaml)
