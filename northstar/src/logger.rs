@@ -11,6 +11,7 @@ pub fn init() {
 /// Initialize the logger. To synchronize the log output of the different process, the records
 /// are sent via a unix datagram socket to a thread that prints the log records.
 #[cfg(not(target_os = "android"))]
+#[allow(clippy::print_with_newline)]
 pub fn init() {
     use console::{style, Color};
     use log::{Level, Log};
@@ -98,8 +99,8 @@ pub fn init() {
             target_size = target_size.max(record.target.len());
 
             let tgid = style("⬤").fg(record.tgid.color());
-            println!(
-                "{timestamp} {target:>s$} {tgid}  {level:<5}: {message}",
+            print!(
+                "{timestamp} {target:>s$} {tgid}  {level:<5}: {message}\n",
                 s = target_size
             );
         }
