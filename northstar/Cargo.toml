@@ -1,6 +1,6 @@
 [package]
 name = "northstar"
-version = "0.8.3-pre"
+version = "0.8.3"
 authors = ["ESRLabs"]
 description = "Northstar is an container runtime for Linux targetting embedded systems"
 edition = "2021"
@@ -14,7 +14,7 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 clap = { version = "4.2.7", features = ["derive"] }
 log = "0.4.19"
 nix = { version = "0.26.2", default-features = false, features = ["sched", "mount"] }
-northstar-runtime = { version = "^0.8.3-pre", path = "../northstar-runtime", features = ["runtime", "rexec"] }
+northstar-runtime = { version = "^0.8.3", path = "../northstar-runtime", features = ["runtime", "rexec"] }
 tokio = { version = "1.29.1", features = ["rt-multi-thread", "macros", "signal"] }
 toml = "0.7.6"
 

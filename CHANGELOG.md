@@ -1,4 +1,19 @@
-# 0.8.3 (Unreleased)
+# 0.8.4 (unreleased)
+
+# 0.8.3 (August 22th, 2023)
+
+## Changed
+
+- runtime: Fix sextant out location handling ([#1012])
+- examples: Write message and newline in one string ([#1014])
+
+## Dependencies
+
+- deps Bump ed25519-dalek from 1.0.1 to 2.0.0 ([#1013])
+
+[#1012]: https://github.com/esrlabs/northstar/pull/1012
+[#1013]: https://github.com/esrlabs/northstar/pull/1013
+[#1014]: https://github.com/esrlabs/northstar/pull/1014
 
 # 0.8.2 (August 4th, 2023)
 

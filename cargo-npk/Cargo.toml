@@ -1,6 +1,6 @@
 [package]
 name = "cargo-npk"
-version = "0.8.3-pre"
+version = "0.8.3"
 edition = "2021"
 license = "Apache-2.0"
 description = "Northstar is an container runtime for Linux targetting embedded systems"
@@ -16,7 +16,7 @@ cargo_metadata = "0.15.3"
 clap = { version = "4.2.7", features = ["derive"] }
 human_bytes = "0.4.2"
 humantime = "2.1.0"
-northstar-runtime = { version = "^0.8.3-pre", path = "../northstar-runtime", features = ["npk"] }
+northstar-runtime = { version = "^0.8.3", path = "../northstar-runtime", features = ["npk"] }
 serde = { version = "1.0.164", features = ["derive"] }
 tempfile = "3.5.0"
 termcolor = "1.2.0"
