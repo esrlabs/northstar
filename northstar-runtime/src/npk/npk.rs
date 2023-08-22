@@ -639,7 +639,7 @@ pub fn generate_key(name: &str, out: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn read_keypair(key_file: &Path) -> Result<SigningKey, Error> {
+fn read_signing_key(key_file: &Path) -> Result<SigningKey, Error> {
     let mut secret_key_bytes = [0u8; SECRET_KEY_LENGTH];
     fs::File::open(key_file)
         .with_context(|| format!("failed to open '{}'", &key_file.display()))?
@@ -690,8 +690,8 @@ fn signature<I: Read + Write + Seek>(
     // Format the signatures.yaml
     let hashes_yaml = hashes_yaml(&meta_hash, &manifest_hash, fsimg_hash, fsimg_size);
 
-    let key_pair = read_keypair(key)?;
-    let signature = key_pair.sign(hashes_yaml.as_bytes());
+    let key = read_signing_key(key)?;
+    let signature = key.sign(hashes_yaml.as_bytes());
     let signature_base64 = Base64.encode(signature.to_bytes());
     let signature_yaml = { format!("{}---\nsignature: {}", &hashes_yaml, &signature_base64) };
 
