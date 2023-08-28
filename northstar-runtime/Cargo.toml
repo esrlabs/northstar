@@ -1,14 +1,13 @@
 [package]
 name = "northstar-runtime"
-version = "0.8.4-pre"
-authors = ["ESRLabs"]
 build = "build.rs"
-description = "Northstar is an container runtime for Linux targetting embedded systems"
-edition = "2021"
-license = "Apache-2.0"
-readme = "../README.md"
-repository = "https://github.com/esrlabs/northstar"
-rust-version = "1.65.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 anyhow = { version = "1.0.71", features = ["backtrace"] }
