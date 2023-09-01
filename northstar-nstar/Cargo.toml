@@ -10,7 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = { version = "1.0.71", features = ["backtrace"] }
-base64 = "0.21.2"
+base64 = "0.21.3"
 clap = { version = "4.2.7", features = ["derive"] }
 clap_complete = "4.3.2"
 futures = { version = "0.3.27", default-features = false }
