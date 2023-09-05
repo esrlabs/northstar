@@ -151,7 +151,7 @@ async fn container_uses_correct_uid_multiple() -> Result<()> {
         client.install(&test_container, "mem").await?;
         client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
         assume(&format!("getuid: {uid}"), 5).await?;
-        client.stop(&TEST_CONTAINER, 5).await?;
+        client.stop(TEST_CONTAINER, 5).await?;
         client.uninstall_test_container().await?;
     }
     Ok(())
@@ -167,7 +167,7 @@ async fn container_uses_correct_gid() -> Result<()> {
         client.install(&test_container, "mem").await?;
         client.start_with_args(TEST_CONTAINER, ["inspect"]).await?;
         assume(&format!("getgid: {gid}"), 5).await?;
-        client.stop(&TEST_CONTAINER, 5).await?;
+        client.stop(TEST_CONTAINER, 5).await?;
         client.uninstall_test_container().await?;
     }
     Ok(())

@@ -1,11 +1,11 @@
-const FERRIS: &str = r#"
+const FERRIS: &str = r"
         \
          \
             _~^~^~_
         \) /  o o  \ (/
           '_   -   _'
           / '-----' \
-"#;
+";
 
 fn main() -> std::io::Result<()> {
     for arg in std::env::args().skip(1) {

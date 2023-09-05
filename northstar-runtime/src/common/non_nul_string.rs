@@ -186,10 +186,7 @@ fn deserialize() {
         serde_json::from_str::<NonNulString>("\"hello\""),
         Ok(n) if n == NonNulString::try_from("hello").unwrap()
     ));
-    assert!(matches!(
-        serde_json::from_str::<NonNulString>("\"a\0\""),
-        Err(_)
-    ));
+    assert!(serde_json::from_str::<NonNulString>("\"a\0\"").is_err());
 }
 
 #[test]

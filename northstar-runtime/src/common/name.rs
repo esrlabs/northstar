@@ -157,7 +157,7 @@ fn deserialize() {
         serde_json::from_str::<Name>("\"a\""),
         Ok(n) if n == Name::try_from("a").unwrap()
     ));
-    assert!(matches!(serde_json::from_str::<Name>("\"a\0\""), Err(_)));
+    assert!(serde_json::from_str::<Name>("\"a\0\"").is_err());
 }
 
 #[test]
