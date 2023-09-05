@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     convert::TryInto,
+    env,
     iter::empty,
     os::unix::prelude::FromRawFd,
     path::Path,
@@ -8,8 +9,7 @@ use std::{
     task::Poll,
 };
 
-use anyhow::{anyhow, Context, Result};
-use error::RequestError;
+use error::Error;
 use futures::{SinkExt, Stream, StreamExt};
 use northstar_runtime::{
     api::{
@@ -25,7 +25,6 @@ use northstar_runtime::{
 use tokio::{
     fs,
     io::{self, AsyncRead, AsyncWrite, BufWriter},
-    time,
 };
 
 /// Client errors
@@ -42,13 +41,12 @@ const BUFFER_SIZE: usize = 1024 * 1024;
 ///
 /// ```no_run
 /// use futures::StreamExt;
-/// use tokio::time::Duration;
 /// use northstar_client::Client;
 /// use northstar_client::model::Version;
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
-///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
 ///     client.start("hello:0.0.1").await.expect("failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
@@ -60,8 +58,6 @@ pub struct Client<T> {
     connection: codec::Framed<T>,
     /// Buffer notifications received during request response communication
     notifications: Option<VecDeque<Notification>>,
-    /// Flag if the client is stopped
-    fused: bool,
 }
 
 /// Northstar console connection
@@ -85,7 +81,7 @@ pub type Connection<T> = codec::Framed<T>;
 pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
     io: T,
     subscribe_notifications: bool,
-) -> Result<Connection<T>, error::ConnectionError> {
+) -> Result<Connection<T>, Error> {
     let mut connection = codec::framed(io);
 
     // Send connect message
@@ -96,23 +92,19 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
                 subscribe_notifications,
             },
         })
-        .await
-        .context("failed to send connection request")?;
+        .await?;
 
     // Wait for conack
     let message = connection
         .next()
         .await
-        .ok_or_else(|| anyhow!("connection closed"))?
-        .context("failed to read connection response")?;
+        .ok_or_else(|| Error::ConnectionClosed)??;
 
     match message {
         Message::ConnectAck { .. } => Ok(connection),
         Message::ConnectNack { connect_nack } => match connect_nack {
-            ConnectNack::InvalidProtocolVersion { .. } => {
-                Err(anyhow!("incompatible connection protocol version").into())
-            }
-            ConnectNack::PermissionDenied => Err(anyhow!("permission denied").into()),
+            ConnectNack::InvalidProtocolVersion { .. } => Err(Error::ProtocolVersion),
+            ConnectNack::PermissionDenied => Err(Error::PermissionDenied),
         },
         _ => unreachable!("expecting connect ack or connect nack"),
     }
@@ -126,22 +118,17 @@ impl Client<tokio::net::UnixStream> {
     /// An `Err` is returned if the `NORTHSTAR_CONSOLE` environment variable is not set or has an
     /// invalid file descriptor for the unix socket.
     ///
-    pub async fn from_env(
-        notifications: Option<usize>,
-        timeout: time::Duration,
-    ) -> Result<Self, error::FromEnvError> {
-        let fd = std::env::var("NORTHSTAR_CONSOLE")
-            .context("variable missing or invalid encoding")?
+    pub async fn from_env(notifications: Option<usize>) -> Result<Self, Error> {
+        let fd = env::var("NORTHSTAR_CONSOLE")
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "missing env variable"))?
             .parse::<i32>()
-            .context("not a valid file descriptor")?;
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid env variable"))?;
 
         let std = unsafe { std::os::unix::net::UnixStream::from_raw_fd(fd) };
-        std.set_nonblocking(true)
-            .context("invalid file descriptor")?;
+        std.set_nonblocking(true)?;
 
-        let io =
-            tokio::net::UnixStream::from_std(std).context("failed to register file in tokio")?;
-        let client = Client::new(io, notifications, timeout).await?;
+        let io = tokio::net::UnixStream::from_std(std)?;
+        let client = Client::new(io, notifications).await?;
         Ok(client)
     }
 }
@@ -160,17 +147,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// In addition to the errors that can happen when trying to [`connect`], an `Err` is returned
     /// if the connection establishment times out.
     ///
-    pub async fn new(
-        io: T,
-        notifications: Option<usize>,
-        timeout: time::Duration,
-    ) -> Result<Client<T>, error::ClientError> {
-        let connection = time::timeout(timeout, connect(io, notifications.is_some())).await??;
+    pub async fn new(io: T, notifications: Option<usize>) -> Result<Client<T>, Error> {
+        let connection = connect(io, notifications.is_some()).await?;
 
         Ok(Client {
             connection,
             notifications: notifications.map(VecDeque::with_capacity),
-            fused: false,
         })
     }
 
@@ -183,39 +165,25 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use tokio::time::Duration;
     /// # use northstar_client::Client;
     /// # use northstar_client::model::Request::List;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let response = client.request(List).await.expect("failed to request container list");
     /// println!("{:?}", response);
     /// # }
     /// ```
-    pub async fn request(&mut self, request: Request) -> Result<Response, error::RequestError> {
-        self.fused()?;
-
+    pub async fn request(&mut self, request: Request) -> Result<Response, Error> {
         let message = Message::Request { request };
-        self.connection
-            .send(message)
-            .await
-            .context("failed to send request")
-            .map_err(|e| {
-                self.fuse();
-                e
-            })?;
+        self.connection.send(message).await?;
         loop {
-            let message = self.connection.next().await.ok_or_else(|| {
-                self.fuse();
-                anyhow!("connection stopped")
-            })?;
-
-            let message = message.context("failed to receive response").map_err(|e| {
-                self.fuse();
-                e
-            })?;
+            let message = self
+                .connection
+                .next()
+                .await
+                .ok_or_else(|| Error::ConnectionClosed)??;
 
             match message {
                 Message::Response { response } => break Ok(response),
@@ -229,20 +197,19 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use tokio::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let ident = client.ident().await.expect("failed to identity");
     /// println!("{}", ident);
     /// # }
     /// ```
-    pub async fn ident(&mut self) -> Result<Container, error::RequestError> {
+    pub async fn ident(&mut self) -> Result<Container, Error> {
         match self.request(Request::Ident).await? {
             Response::Ident(container) => Ok(container),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on ident should be ident"),
         }
     }
@@ -251,20 +218,19 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use tokio::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let containers = client.list().await.expect("failed to request container list");
     /// println!("{:#?}", containers);
     /// # }
     /// ```
-    pub async fn list(&mut self) -> Result<Vec<Container>, error::RequestError> {
+    pub async fn list(&mut self) -> Result<Vec<Container>, Error> {
         match self.request(Request::List).await? {
             Response::List(containers) => Ok(containers),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on containers should be containers"),
         }
     }
@@ -273,20 +239,19 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use tokio::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let repositories = client.repositories().await.expect("failed to request repository list");
     /// println!("{:#?}", repositories);
     /// # }
     /// ```
-    pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, error::RequestError> {
+    pub async fn repositories(&mut self) -> Result<HashSet<RepositoryId>, Error> {
         match self.request(Request::Repositories).await? {
             Response::Repositories(repositories) => Ok(repositories),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on repositories should be ok or error"),
         }
     }
@@ -295,18 +260,17 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.start("hello:0.0.1").await.expect("failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn start<C>(&mut self, container: C) -> Result<(), error::RequestError>
+    pub async fn start<C>(&mut self, container: C) -> Result<(), Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
@@ -318,13 +282,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// # use std::collections::HashMap;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.start_with_args("hello:0.0.1", ["--foo"]).await.expect("failed to start \"hello --foor\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
@@ -334,7 +297,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         &mut self,
         container: C,
         args: impl IntoIterator<Item = A>,
-    ) -> Result<(), error::RequestError>
+    ) -> Result<(), Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
@@ -348,13 +311,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// # use std::collections::HashMap;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let mut env = HashMap::new();
     /// env.insert("FOO", "blah");
     /// client.start_with_args_env("hello:0.0.1", ["--dump", "-v"], env).await.expect("failed to start \"hello\"");
@@ -367,28 +329,33 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         container: C,
         args: impl IntoIterator<Item = A>,
         env: impl IntoIterator<Item = (A, A)>,
-    ) -> Result<(), error::RequestError>
+    ) -> Result<(), Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
         A: TryInto<NonNulString>,
         A::Error: std::error::Error + Send + Sync + 'static,
     {
-        let container = container.try_into().context("invalid container")?;
+        let container = container
+            .try_into()
+            .map_err(|e| Error::InvalidArgument(e.to_string()))?;
 
         let mut args_converted = vec![];
         for arg in args {
-            args_converted.push(arg.try_into().context("invalid argument")?);
+            args_converted.push(
+                arg.try_into()
+                    .map_err(|e| Error::InvalidArgument(format!("invalid argument: {e}")))?,
+            );
         }
 
         let mut env_converted = HashMap::new();
         for (key, value) in env {
             let key = key
                 .try_into()
-                .context("invalid environment variable name")?;
+                .map_err(|e| Error::InvalidArgument(format!("invalid argument: {e}")))?;
             let value = value
                 .try_into()
-                .context("invalid environment variable value")?;
+                .map_err(|e| Error::InvalidArgument(format!("invalid argument: {e}")))?;
             env_converted.insert(key, value);
         }
 
@@ -402,10 +369,8 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 
         match self.request(request).await? {
             Response::Start(model::StartResult::Ok { .. }) => Ok(()),
-            Response::Start(model::StartResult::Error { error, .. }) => {
-                Err(RequestError::Runtime(error))
-            }
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::Start(model::StartResult::Error { error, .. }) => Err(Error::Runtime(error)),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on start should be ok or error"),
         }
     }
@@ -414,29 +379,28 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use tokio::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.kill("hello:0.0.1", 15).await.expect("failed to start \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn kill<C>(&mut self, container: C, signal: i32) -> Result<(), error::RequestError>
+    pub async fn kill<C>(&mut self, container: C, signal: i32) -> Result<(), Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
     {
-        let container = container.try_into().context("invalid container")?;
+        let container = container
+            .try_into()
+            .map_err(|e| Error::InvalidArgument(e.to_string()))?;
         match self.request(Request::Kill { container, signal }).await? {
             Response::Kill(model::KillResult::Ok { .. }) => Ok(()),
-            Response::Kill(model::KillResult::Error { error, .. }) => {
-                Err(RequestError::Runtime(error))
-            }
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::Kill(model::KillResult::Error { error, .. }) => Err(Error::Runtime(error)),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on kill should be ok or error"),
         }
     }
@@ -445,29 +409,18 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use northstar_client::Client;
-    /// # use std::time::Duration;
     /// # use std::path::Path;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let npk = Path::new("test.npk");
     /// client.install_file(npk, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
     /// # }
     /// ```
-    pub async fn install_file(
-        &mut self,
-        npk: &Path,
-        repository: &str,
-    ) -> Result<Container, error::RequestError> {
-        let file = fs::File::open(npk)
-            .await
-            .with_context(|| format!("failed to open NPK {}", npk.display()))?;
-        let size = file
-            .metadata()
-            .await
-            .with_context(|| format!("failed to read {} metadata", npk.display()))?
-            .len();
+    pub async fn install_file(&mut self, npk: &Path, repository: &str) -> Result<Container, Error> {
+        let file = fs::File::open(npk).await?;
+        let size = file.metadata().await?.len();
 
         self.install(file, size, repository).await
     }
@@ -476,13 +429,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use northstar_client::Client;
-    /// # use std::time::Duration;
     /// # use std::path::Path;
     /// # use tokio::fs;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let npk = fs::File::open("test.npk").await.expect("failed to open \"test.npk\"");
     /// let size = npk.metadata().await.unwrap().len();
     /// client.install(npk, size, "default").await.expect("failed to install \"test.npk\" into repository \"default\"");
@@ -493,56 +445,34 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         npk: impl AsyncRead + Unpin,
         size: u64,
         repository: &str,
-    ) -> Result<Container, error::RequestError> {
-        self.fused()?;
+    ) -> Result<Container, Error> {
         let request = Request::Install {
             repository: repository.into(),
             size,
         };
         let message = Message::Request { request };
-        self.connection
-            .send(message)
-            .await
-            .context("connection stopped")
-            .map_err(|e| {
-                self.fuse();
-                e
-            })?;
-
-        self.connection
-            .flush()
-            .await
-            .context("failed to flush connection")?;
+        self.connection.send(message).await?;
+        self.connection.flush().await?;
         debug_assert!(self.connection.write_buffer().is_empty());
 
         let mut reader = io::BufReader::with_capacity(BUFFER_SIZE, npk);
         let mut writer = BufWriter::with_capacity(BUFFER_SIZE, self.connection.get_mut());
-        io::copy_buf(&mut reader, &mut writer)
-            .await
-            .map_err(|e| {
-                self.fuse();
-                e
-            })
-            .context("failed to send npk")?;
+        io::copy_buf(&mut reader, &mut writer).await?;
 
         loop {
-            let message = self.connection.next().await.ok_or_else(|| {
-                self.fuse();
-                anyhow!("connection stopped")
-            })?;
-
-            let message = message.context("failed to receive response").map_err(|e| {
-                self.fuse();
-                e
-            })?;
+            let message = self
+                .connection
+                .next()
+                .await
+                .ok_or_else(|| Error::ConnectionClosed)??;
 
             match message {
                 Message::Response { response } => match response {
                     Response::Install(InstallResult::Ok { container }) => break Ok(container),
                     Response::Install(InstallResult::Error { error }) => {
-                        break Err(error::RequestError::Runtime(error))
+                        break Err(Error::Runtime(error))
                     }
-                    Response::PermissionDenied(_) => break Err(RequestError::PermissionDenied),
+                    Response::PermissionDenied(_) => break Err(Error::PermissionDenied),
                     _ => unreachable!("response on install should be container or error"),
                 },
                 Message::Notification { notification } => self.push_notification(notification)?,
@@ -555,33 +485,30 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// ```no_run
     /// # use futures::StreamExt;
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.uninstall("hello:0.0.1", false).await.expect("failed to uninstall \"hello\"");
     /// // Print stop notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn uninstall<C>(
-        &mut self,
-        container: C,
-        wipe: bool,
-    ) -> Result<(), error::RequestError>
+    pub async fn uninstall<C>(&mut self, container: C, wipe: bool) -> Result<(), Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
     {
-        let container = container.try_into().context("invalid container")?;
+        let container = container
+            .try_into()
+            .map_err(|e| Error::InvalidArgument(format!("invalid container: {e}")))?;
         match self.request(Request::Uninstall { container, wipe }).await? {
             Response::Uninstall(model::UninstallResult::Ok { .. }) => Ok(()),
             Response::Uninstall(model::UninstallResult::Error { error, .. }) => {
-                Err(RequestError::Runtime(error))
+                Err(Error::Runtime(error))
             }
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on uninstall should be ok or error"),
         }
     }
@@ -594,16 +521,15 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Mount a container
     /// ```no_run
     /// # use northstar_client::Client;
-    /// # use std::time::Duration;
     /// # use std::convert::TryInto;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.mount("test:0.0.1").await.expect("failed to mount");
     /// # }
     /// ```
-    pub async fn mount<C>(&mut self, container: C) -> Result<MountResult, error::RequestError>
+    pub async fn mount<C>(&mut self, container: C) -> Result<MountResult, Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
@@ -616,36 +542,33 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Mount a list of containers
     /// ```no_run
     /// # use northstar_client::Client;
-    /// # use std::time::Duration;
     /// # use northstar_client::model::Version;
     /// # use std::path::Path;
     /// # use std::convert::TryInto;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.mount_all(vec!("hello-world:0.0.1", "cpueater:0.0.1")).await.expect("failed to mount");
     /// # }
     /// ```
-    pub async fn mount_all<C, I>(
-        &mut self,
-        containers: I,
-    ) -> Result<Vec<MountResult>, error::RequestError>
+    pub async fn mount_all<C, I>(&mut self, containers: I) -> Result<Vec<MountResult>, Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
         I: 'a + IntoIterator<Item = C>,
     {
-        self.fused()?;
         let mut result = vec![];
         for container in containers.into_iter() {
-            let container = container.try_into().context("invalid container")?;
+            let container = container
+                .try_into()
+                .map_err(|e| Error::InvalidArgument(format!("invalid container: {e}")))?;
             result.push(container);
         }
 
         match self.request(Request::Mount { containers: result }).await? {
             Response::Mount(result) => Ok(result),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on umount_all should be mount"),
         }
     }
@@ -653,16 +576,15 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Umount a mounted container
     ///
     /// ```no_run
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.umount("hello:0.0.1").await.expect("failed to unmount \"hello:0.0.1\"");
     /// # }
     /// ```
-    pub async fn umount<C>(&mut self, container: C) -> Result<UmountResult, error::RequestError>
+    pub async fn umount<C>(&mut self, container: C) -> Result<UmountResult, Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
@@ -675,36 +597,32 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Umount a list of mounted containers
     ///
     /// ```no_run
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main(flavor = "current_thread")]
     /// # async fn main() {
-    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// client.umount_all(vec!("hello:0.0.1", "cpueater:0.0.1")).await.expect("failed to unmount \"hello:0.0.1\" and \"cpueater:0.0.1\"");
     /// # }
     /// ```
-    pub async fn umount_all<C, I>(
-        &mut self,
-        containers: I,
-    ) -> Result<Vec<UmountResult>, error::RequestError>
+    pub async fn umount_all<C, I>(&mut self, containers: I) -> Result<Vec<UmountResult>, Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
         I: 'a + IntoIterator<Item = C>,
     {
-        self.fused()?;
-
         let containers = containers.into_iter();
         let mut result = Vec::with_capacity(containers.size_hint().0);
         for container in containers {
-            let container = container.try_into().context("invalid container")?;
+            let container = container
+                .try_into()
+                .map_err(|e| Error::InvalidArgument(format!("invalid container: {e}")))?;
             result.push(container);
         }
 
         match self.request(Request::Umount { containers: result }).await? {
             Response::Umount(result) => Ok(result),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on umount should be umount"),
         }
     }
@@ -712,28 +630,29 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// Gather container statistics
     ///
     /// ```no_run
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// println!("{:?}", client.inspect("hello:0.0.1").await.unwrap());
     /// # }
     /// ```
-    pub async fn inspect<C>(&mut self, container: C) -> Result<ContainerData, error::RequestError>
+    pub async fn inspect<C>(&mut self, container: C) -> Result<ContainerData, Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
     {
-        let container = container.try_into().context("invalid container")?;
+        let container = container
+            .try_into()
+            .map_err(|e| Error::InvalidArgument(format!("invalid container: {e}")))?;
         match self.request(Request::Inspect { container }).await? {
             Response::Inspect(InspectResult::Ok { container: _, data }) => Ok(*data),
             Response::Inspect(InspectResult::Error {
                 container: _,
                 error,
-            }) => Err(error::RequestError::Runtime(error)),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            }) => Err(Error::Runtime(error)),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on container_stats should be a container_stats"),
         }
     }
@@ -747,33 +666,30 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// purpose, e.g. "mqtt".
     ///
     /// ```no_run
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// println!("{:?}", client.create_token("webserver", "http").await.unwrap());
     /// # }
     /// ```
-    pub async fn create_token<R, S>(
-        &mut self,
-        target: R,
-        shared: S,
-    ) -> Result<Token, error::RequestError>
+    pub async fn create_token<R, S>(&mut self, target: R, shared: S) -> Result<Token, Error>
     where
         R: TryInto<Name>,
         R::Error: std::error::Error + Send + Sync + 'static,
         S: AsRef<[u8]>,
     {
-        let target = target.try_into().context("invalid target container name")?;
+        let target = target
+            .try_into()
+            .map_err(|e| Error::InvalidArgument(format!("invalid target container name: {e}")))?;
         let shared = shared.as_ref().to_vec();
         match self
             .request(Request::TokenCreate { target, shared })
             .await?
         {
             Response::Token(token) => Ok(token),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on token should be a token reponse created"),
         }
     }
@@ -787,13 +703,12 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// the value used when the the token is created.
     ///
     /// ```no_run
-    /// # use std::time::Duration;
     /// # use northstar_client::Client;
     /// # use northstar_client::model::VerificationResult;
     /// #
     /// # #[tokio::main]
     /// # async fn main() {
-    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+    /// # let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let token = client.create_token("hello", "#noafd").await.unwrap(); // token can only verified by container `hello`
     /// assert_eq!(client.verify_token(&token, "hello", "#noafd").await.unwrap(), VerificationResult::Ok);
     /// assert_eq!(client.verify_token(&token, "hello", "").await.unwrap(), VerificationResult::Ok);
@@ -804,7 +719,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         token: &Token,
         user: R,
         shared: S,
-    ) -> Result<VerificationResult, error::RequestError>
+    ) -> Result<VerificationResult, Error>
     where
         R: TryInto<Name>,
         R::Error: std::error::Error + Send + Sync + 'static,
@@ -812,7 +727,9 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     {
         let token = token.clone();
         let shared = shared.as_ref().to_vec();
-        let user = user.try_into().context("invalid user container name")?;
+        let user = user
+            .try_into()
+            .map_err(|e| Error::InvalidArgument(format!("invalid user container name: {e}")))?;
         match self
             .request(Request::TokenVerify {
                 token,
@@ -822,35 +739,20 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
             .await?
         {
             Response::TokenVerification(result) => Ok(result),
-            Response::PermissionDenied(_) => Err(RequestError::PermissionDenied),
+            Response::PermissionDenied(_) => Err(Error::PermissionDenied),
             _ => unreachable!("response on token verification should be a token verification"),
         }
     }
 
     /// Store a notification in the notification queue
-    fn push_notification(&mut self, notification: Notification) -> Result<(), error::RequestError> {
+    fn push_notification(&mut self, notification: Notification) -> Result<(), Error> {
         if let Some(notifications) = &mut self.notifications {
             if notifications.len() == notifications.capacity() {
-                self.fuse();
-                Err(error::RequestError::LaggedNotifications)
+                Err(Error::LaggedNotifications)
             } else {
                 notifications.push_back(notification);
                 Ok(())
             }
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Set the fused flag
-    fn fuse(&mut self) {
-        self.fused = true;
-    }
-
-    /// Return Error::Stopped if the client is fused
-    fn fused(&self) -> Result<()> {
-        if self.fused {
-            Err(anyhow!("connection stopped"))
         } else {
             Ok(())
         }
@@ -861,12 +763,11 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
 ///
 /// ```no_run
 /// use futures::StreamExt;
-/// use std::time::Duration;
 /// # use northstar_client::Client;
 ///
 /// # #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
-///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None, Duration::from_secs(10)).await.unwrap();
+///     let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
 ///     client.start("hello:0.0.1").await.expect("failed to start \"hello\"");
 ///     while let Some(notification) = client.next().await {
 ///         println!("{:?}", notification);
@@ -880,10 +781,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for Client<T> {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        if self.fused {
-            return Poll::Ready(None);
-        }
-
         if let Some(n) = self.notifications.as_mut().and_then(|n| n.pop_front()) {
             Poll::Ready(Some(Ok(n)))
         } else {

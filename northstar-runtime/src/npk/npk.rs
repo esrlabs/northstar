@@ -187,7 +187,7 @@ impl<R: Read + Seek> Npk<R> {
             None
         };
 
-        let meta = meta(&mut zip, hashes.as_ref())?;
+        let meta = meta(&zip, hashes.as_ref())?;
         let version = &meta.version;
         if !version_request.matches(&(version.into())) {
             return Err(anyhow!(
@@ -281,7 +281,7 @@ impl AsRawFd for Npk<BufReader<fs::File>> {
     }
 }
 
-fn meta<R: Read + Seek>(zip: &mut Zip<R>, hashes: Option<&Hashes>) -> Result<Meta> {
+fn meta<R: Read + Seek>(zip: &Zip<R>, hashes: Option<&Hashes>) -> Result<Meta> {
     let content = zip.comment();
     if let Some(Hashes { meta_hash, .. }) = &hashes {
         let expected_hash = hex::decode(meta_hash).context("failed to parse manifest hash")?;

@@ -8,7 +8,7 @@ use northstar_runtime::api::{
     model::{self, Container},
 };
 use northstar_tests::runtime_test;
-use tokio::{net::UnixStream, time::Duration};
+use tokio::net::UnixStream;
 
 // Connect with exact version
 #[runtime_test]
@@ -97,9 +97,8 @@ async fn api_version_minor_version_low() -> Result<()> {
 /// Expect the connection to be closed if a request with a too long line is sent.
 #[runtime_test]
 async fn too_long_line() -> Result<()> {
-    let timeout = Duration::from_secs(10);
     let io = UnixStream::connect(&northstar_tests::runtime::console_url().path()).await?;
-    let mut client = northstar_client::Client::new(io, None, timeout).await?;
+    let mut client = northstar_client::Client::new(io, None).await?;
 
     // The default json line limit is 512K
     let container = Container::try_from("hello-world:0.0.1").unwrap();
@@ -114,9 +113,8 @@ async fn too_long_line() -> Result<()> {
 /// Invalid install request
 #[runtime_test]
 async fn npk_size_limit_violation() -> Result<()> {
-    let timeout = Duration::from_secs(10);
     let io = UnixStream::connect(&northstar_tests::runtime::console_url().path()).await?;
-    let mut client = northstar_client::Client::new(io, None, timeout).await?;
+    let mut client = northstar_client::Client::new(io, None).await?;
 
     match client
         .request(model::Request::Install {

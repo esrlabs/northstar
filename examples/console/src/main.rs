@@ -20,7 +20,7 @@ use tokio::time;
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Instantiate client and start connect sequence
-    let mut client = Client::from_env(None, Duration::from_secs(5)).await?;
+    let mut client = Client::from_env(None).await?;
 
     // Request the identity of this container
     let ident = client.ident().await?;

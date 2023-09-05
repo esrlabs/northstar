@@ -110,21 +110,7 @@ impl<'de> Deserialize<'de> for Version {
 
 impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.major > other.major {
-            Some(Ordering::Greater)
-        } else if self.major < other.major {
-            Some(Ordering::Less)
-        } else if self.minor > other.minor {
-            Some(Ordering::Greater)
-        } else if self.minor < other.minor {
-            Some(Ordering::Less)
-        } else if self.patch > other.patch {
-            Some(Ordering::Greater)
-        } else if self.patch < other.patch {
-            Some(Ordering::Less)
-        } else {
-            Some(Ordering::Equal)
-        }
+        Some(self.cmp(other))
     }
 }
 

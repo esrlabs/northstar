@@ -22,7 +22,7 @@ const TEXT: &str = "yay!";
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Connect to the runtime via NORTHSTAR_CONSOLE...
-    let mut client = Client::from_env(None, Duration::from_secs(5)).await?;
+    let mut client = Client::from_env(None).await?;
 
     // Create a token that can be used to verify `shared`. Note that there's
     // no `user` argument here. The runtime know from which container the request
