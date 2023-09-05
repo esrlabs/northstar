@@ -7,7 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = { version = "1.0.71", features = ["backtrace"] }
-tokio = { version = "1.29.1", features = ["macros", "rt", "net"] }
+tokio = { version = "1.32.0", features = ["macros", "rt", "net"] }
 northstar-client = { path = "../../northstar-client" }
 
 [package.metadata.npk]
