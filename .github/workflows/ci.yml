@@ -51,6 +51,7 @@ jobs:
         command: check ${{ matrix.checks }}
 
   clippy:
+    permissions: write-all
     name: Clippy
     runs-on: ubuntu-latest
     steps:
