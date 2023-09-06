@@ -250,7 +250,7 @@ async fn main() -> Result<()> {
         Either::Right(io)
     };
 
-    let mut client = Client::new(io, notifications, opt.timeout).await?;
+    let mut client = tokio::time::timeout(opt.timeout, Client::new(io, notifications)).await??;
 
     match opt.command {
         Subcommand::Ident => {

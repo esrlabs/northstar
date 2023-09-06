@@ -189,8 +189,7 @@ impl Client {
         let io = UnixStream::connect(url.path())
             .await
             .expect("failed to connect to console");
-        let client =
-            northstar_client::Client::new(io, Some(1000), time::Duration::from_secs(30)).await?;
+        let client = northstar_client::Client::new(io, Some(1000)).await?;
         // Wait until a successful connection
         logger::assume("Client .* connected", 5u64).await?;
 
@@ -202,7 +201,7 @@ impl Client {
         let io = UnixStream::connect(console_url().path())
             .await
             .context("failed to connect to console")?;
-        northstar_client::Client::new(io, Some(1000), time::Duration::from_secs(30))
+        northstar_client::Client::new(io, Some(1000))
             .await
             .context("failed to create client")
     }

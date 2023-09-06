@@ -332,7 +332,7 @@ impl std::fmt::Display for ExitStatus {
 }
 
 /// API error
-#[derive(Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Eq, thiserror::Error, PartialEq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(missing_docs)]
 pub enum Error {
@@ -385,6 +385,12 @@ pub enum Error {
     Unexpected {
         error: String,
     },
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl Serialize for Token {

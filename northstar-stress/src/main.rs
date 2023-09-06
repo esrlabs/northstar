@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
 async fn start_stop(opt: &Opt) -> Result<()> {
     // Get a list of installed applications
     debug!("Getting list of startable containers");
-    let mut client = Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
+    let mut client = Client::new(io(&opt.url).await?, None).await?;
     let mut containers: Vec<Container> = Vec::new();
     for container in client.list().await? {
         let data = Client::inspect(&mut client, container.clone()).await?;
@@ -185,8 +185,7 @@ async fn start_stop(opt: &Opt) -> Result<()> {
 
         debug!("Spawning task for {}", container);
         let task = task::spawn(async move {
-            let mut client =
-                Client::new(io(&url).await?, None, time::Duration::from_secs(10)).await?;
+            let mut client = Client::new(io(&url).await?, None).await?;
             start_barrier.wait().await;
 
             info!(
@@ -288,8 +287,7 @@ async fn start_stop(opt: &Opt) -> Result<()> {
 
 /// Install and uninstall an npk in a loop
 async fn install_uninstall(opt: &Opt) -> Result<()> {
-    let connect_timeout = time::Duration::from_secs(30);
-    let mut client = Client::new(io(&opt.url).await?, Some(10), connect_timeout).await?;
+    let mut client = Client::new(io(&opt.url).await?, Some(10)).await?;
 
     let timeout = opt
         .duration
@@ -332,7 +330,7 @@ async fn install_uninstall(opt: &Opt) -> Result<()> {
 /// Monkey testing: randmon action on random container
 async fn monkey(opt: &Opt) -> Result<()> {
     debug!("Getting list of containers");
-    let mut client = Client::new(io(&opt.url).await?, None, time::Duration::from_secs(30)).await?;
+    let mut client = Client::new(io(&opt.url).await?, None).await?;
 
     let containers = client.list().await?;
     let mut rng = rand::thread_rng();

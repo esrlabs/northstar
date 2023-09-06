@@ -444,9 +444,9 @@ mod install {
             .install(TEST_CONTAINER_NPK.as_slice(), size, "whooha")
             .await
         {
-            Err(northstar_client::error::RequestError::Runtime(
-                model::Error::InvalidRepository { .. },
-            )) => Ok(()),
+            Err(northstar_client::error::Error::Runtime(model::Error::InvalidRepository {
+                ..
+            })) => Ok(()),
             e => panic!("Unexpected response: {e:?}"),
         }
     }
