@@ -10,7 +10,7 @@ use std::{
 };
 
 use anyhow::Result;
-use nix::sys::socket::{AddressFamily, SockFlag, SockType};
+use socket2::{Domain, SockAddr, Socket, Type};
 
 const DATA: &[u8] = b"Hello!";
 const ITERATIONS: usize = 10;
@@ -45,16 +45,10 @@ fn connect(socket: &str) -> Result<()> {
             }
         }
         "seq-packet" => {
-            let socket = nix::sys::socket::socket(
-                AddressFamily::Unix,
-                SockType::SeqPacket,
-                SockFlag::empty(),
-                None,
-            )?;
-            let datagram = unsafe { UnixDatagram::from_raw_fd(socket) };
-            datagram.connect(path)?;
+            let socket = Socket::new(Domain::UNIX, Type::SEQPACKET, None)?;
+            socket.connect(&SockAddr::unix(&path)?)?;
             for _ in 0..ITERATIONS {
-                datagram.send(DATA)?;
+                socket.send(DATA)?;
             }
         }
         "stream" => {

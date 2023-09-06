@@ -2524,6 +2524,7 @@ dependencies = [
  "caps",
  "clap 4.2.7",
  "nix 0.26.2",
+ "socket2",
 ]
 
 [[package]]
