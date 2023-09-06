@@ -8,6 +8,7 @@ use northstar_tests::{
     logger::assume,
     runtime_test,
 };
+use tokio::time;
 
 // Test a good and bad log assumption
 #[runtime_test]
@@ -254,8 +255,14 @@ async fn start_stop_and_container_shall_not_leak_file_descriptors() -> Result<()
     client.uninstall_test_resource().await?;
 
     // Compare the list of fds before and after the RT run.
+    for _ in 0..10 {
+        let after = fds()?;
+        if before == after {
+            return client.shutdown().await;
+        }
+        time::sleep(time::Duration::from_millis(100)).await;
+    }
     assert_eq!(before, fds()?);
-
     client.shutdown().await
 }
 
