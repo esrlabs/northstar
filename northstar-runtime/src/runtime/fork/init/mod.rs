@@ -371,8 +371,7 @@ impl Init {
                         .open(&path)
                         .expect("failed to open netns");
                     debug!("Trying to attach to network namespace \"{}\"", namespace);
-                    sched::setns(handle.as_raw_fd(), CloneFlags::CLONE_NEWNET)
-                        .expect("failed to enter netns");
+                    sched::setns(handle, CloneFlags::CLONE_NEWNET).expect("failed to enter netns");
                 } else {
                     warn!("Failed to attach to network namespace \"{}\"", namespace);
                 }
@@ -591,8 +590,7 @@ impl Mount {
             self.source.as_ref(),
             &self.target,
             self.fstype.as_deref(),
-            // Safe because flags is private and only set in Mount::new via MsFlags::bits
-            unsafe { mount::MsFlags::from_bits_unchecked(self.flags) },
+            mount::MsFlags::from_bits_truncate(self.flags),
             self.data.as_deref(),
         )
         .expect(&self.error_msg);

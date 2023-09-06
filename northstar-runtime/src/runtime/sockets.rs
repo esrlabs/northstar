@@ -80,17 +80,17 @@ pub(crate) async fn open(
 
         if descriptor.passcred == Some(true) {
             debug!("Setting SO_PASSCRED on socket {name}");
-            socket::setsockopt(socket, sockopt::PassCred, &true)
+            socket::setsockopt(&socket, sockopt::PassCred, &true)
                 .context("failed to set SO_PASSCRED")?;
         }
 
         let addr = UnixAddr::new(&path).context("invalid unix path")?;
         debug!("Binding socket {name} ({ty})",);
-        socket::bind(socket, &addr).context("failed to bind")?;
+        socket::bind(socket.as_raw_fd(), &addr).context("failed to bind")?;
 
         // Streaming and seqpacket sockets need to be listened on.
         if matches!(ty, Type::Stream | Type::SeqPacket) {
-            socket::listen(socket, 100).context("failed to listen")?;
+            socket::listen(&socket, 100).context("failed to listen")?;
         }
 
         debug!(
@@ -108,14 +108,13 @@ pub(crate) async fn open(
                 descriptor.gid.map(|d| d.to_string()).unwrap_or("-".into()),
             );
             fchown(
-                socket,
+                socket.as_raw_fd(),
                 descriptor.uid.map(Uid::from_raw),
                 descriptor.gid.map(Gid::from_raw),
             )
             .context("failed to set socket ownership")?;
         }
 
-        let socket = unsafe { OwnedFd::from_raw_fd(socket) };
         fds.push(socket);
     }
 
