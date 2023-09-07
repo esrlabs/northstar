@@ -27,7 +27,7 @@ npk_stream_timeout = "5s"
 
 [console.global]
 # Url
-bind = "tcp://localhost:4200"
+bind = "unix+abstract://northstar"
 # Permissions
 permissions = "full"
 

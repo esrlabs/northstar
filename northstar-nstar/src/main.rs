@@ -11,11 +11,20 @@ use northstar_client::{
     model::{Container, Token},
     Client, Name, VERSION,
 };
-use std::{collections::HashMap, convert::TryFrom, path::PathBuf, process};
+use std::{
+    collections::HashMap,
+    convert::TryFrom,
+    os::{
+        linux::net::SocketAddrExt,
+        unix::net::{SocketAddr, UnixStream as StdUnixStream},
+    },
+    path::PathBuf,
+    process,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, UnixStream},
-    time,
+    task, time,
 };
 use tokio_util::either::Either;
 use trace::Trace;
@@ -26,7 +35,7 @@ mod seccomp;
 mod trace;
 
 /// Default nstar address
-const DEFAULT_HOST: &str = "tcp://localhost:4200";
+const DEFAULT_HOST: &str = "unix+abstract://northstar";
 
 /// About string for CLI
 fn about() -> &'static str {
@@ -232,6 +241,17 @@ async fn main() -> Result<()> {
             let stream = time::timeout(timeout, UnixStream::connect(opt.url.path()))
                 .await
                 .context("failed to connect")??;
+            Either::Right(stream)
+        }
+        "unix+abstract" => {
+            let addr = SocketAddr::from_abstract_name(opt.url.path())?;
+            let stream = time::timeout(
+                timeout,
+                task::spawn_blocking(move || StdUnixStream::connect_addr(&addr)),
+            )
+            .await?
+            .context("failed to connect")??;
+            let stream = UnixStream::from_std(stream)?;
             Either::Right(stream)
         }
         _ => return Err(anyhow!("invalid url")),

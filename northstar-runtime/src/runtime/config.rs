@@ -196,8 +196,10 @@ where
     D: Deserializer<'de>,
 {
     let url = Url::deserialize(deserializer)?;
-    if url.scheme() != "tcp" && url.scheme() != "unix" {
-        Err(D::Error::custom("console scheme must be tcp or unix"))
+    if url.scheme() != "tcp" && url.scheme() != "unix" && url.scheme() != "unix+abstract" {
+        Err(D::Error::custom(
+            "console scheme must be tcp, unix or unix+abstract",
+        ))
     } else {
         Ok(url)
     }
@@ -280,6 +282,22 @@ permissions = "full"
 "#;
 
     assert!(toml::from_str::<Config>(config).is_err());
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn validate_console_url_abstract() {
+    let config = r#"
+data_dir = "target/northstar/data"
+run_dir = "target/northstar/run"
+socket_dir = "target/northstar/sockets"
+cgroup = "northstar"
+[console.global]
+bind = "unix+abstract://northstar"
+permissions = "full"
+"#;
+
+    toml::from_str::<Config>(config).unwrap();
 }
 
 #[test]

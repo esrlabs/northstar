@@ -14,7 +14,16 @@ use northstar_client::{
     Client,
 };
 use rand::{thread_rng, Rng};
-use std::{path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{
+    os::{
+        linux::net::SocketAddrExt,
+        unix::net::{SocketAddr, UnixStream as StdUnixStream},
+    },
+    path::PathBuf,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpStream, UnixStream},
@@ -76,7 +85,7 @@ impl Distribution<MonkeyAction> for Standard {
 #[command(author, version, about, long_about = None)]
 struct Opt {
     /// Runtime address
-    #[arg(short, long, default_value = "tcp://localhost:4200")]
+    #[arg(short, long, default_value = "unix+abstract://northstar")]
     url: url::Url,
 
     /// Duration to run the test for in seconds
@@ -125,6 +134,18 @@ async fn io(url: &Url) -> Result<Box<dyn N + Sync>> {
             let stream = time::timeout(timeout, UnixStream::connect(url.path()))
                 .await
                 .context("failed to connect")??;
+            Ok(Box::new(stream) as Box<dyn N + Sync>)
+        }
+        "unix+abstract" => {
+            let addr = SocketAddr::from_abstract_name(url.path())?;
+            let stream = time::timeout(
+                timeout,
+                task::spawn_blocking(move || StdUnixStream::connect_addr(&addr)),
+            )
+            .await?
+            .context("failed to connect")??;
+            stream.set_nonblocking(true)?;
+            let stream = UnixStream::from_std(stream)?;
             Ok(Box::new(stream) as Box<dyn N + Sync>)
         }
         _ => Err(anyhow!("invalid url")),
