@@ -1,6 +1,8 @@
 use heck::ToSnakeCase;
 use itertools::Itertools;
 use std::{collections::HashSet, fmt};
+use strum::EnumCount as _;
+use strum_macros::EnumCount;
 
 use crate::npk::manifest::console::{
     Permission as ManifestPermission, Permissions as ManifestPermissions,
@@ -19,11 +21,16 @@ impl Permissions {
 
 impl fmt::Display for Permissions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.iter().sorted().format(", "))
+        if self.0.len() == Permission::COUNT {
+            write!(f, "full")
+        } else {
+            let permissions = self.0.iter().format(", ");
+            write!(f, "{permissions}")
+        }
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, EnumCount, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub enum Permission {
     /// Identification
     Ident,
