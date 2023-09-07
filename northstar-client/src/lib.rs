@@ -140,13 +140,6 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     ///
     /// * `io` - Connection medium (e.g. Unix or TCP socket)
     /// * `notifications` - Optional buffer size for receiving notifications
-    /// * `timeout` - Timeout of connection establishment
-    ///
-    /// # Errors
-    ///
-    /// In addition to the errors that can happen when trying to [`connect`], an `Err` is returned
-    /// if the connection establishment times out.
-    ///
     pub async fn new(io: T, notifications: Option<usize>) -> Result<Client<T>, Error> {
         let connection = connect(io, notifications.is_some()).await?;
 

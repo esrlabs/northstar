@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
 use log::debug;
+use std::os::{
+    linux::net::SocketAddrExt,
+    unix::net::{SocketAddr, UnixListener as StdUnixListener},
+};
 use tokio::{
     fs, io,
     net::{TcpListener, UnixListener},
@@ -40,6 +44,16 @@ impl Listener {
                 let listener = UnixListener::bind(&path)?;
 
                 debug!("Started console on {}", path.display());
+                Listener::Unix(listener)
+            }
+            "unix+abstract" => {
+                let name = url.path();
+                let addr = SocketAddr::from_abstract_name(name)?;
+                let listener = StdUnixListener::bind_addr(&addr)?;
+                listener.set_nonblocking(true)?;
+                let listener = UnixListener::from_std(listener)?;
+
+                debug!("Started console on {}", name);
                 Listener::Unix(listener)
             }
             _ => unreachable!(),

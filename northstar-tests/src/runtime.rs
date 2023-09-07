@@ -4,8 +4,13 @@ use super::{containers::*, logger};
 use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use nanoid::nanoid;
+use nix::sys::signal::Signal::SIGTERM;
+use northstar_client::Connection;
 use northstar_runtime::{
-    api::model::{Container, ExitStatus, Notification},
+    api::{
+        codec::framed,
+        model::{Container, ExitStatus, Notification},
+    },
     common::non_nul_string::NonNulString,
     npk::manifest::console::Permissions,
     runtime::{
@@ -14,15 +19,26 @@ use northstar_runtime::{
     },
 };
 use std::{
-    convert::{TryFrom, TryInto},
-    env, fs,
+    convert::TryFrom,
+    fs,
+    os::{
+        linux::net::SocketAddrExt,
+        unix::net::{SocketAddr, UnixStream as StdUnixStream},
+    },
 };
 use tempfile::TempDir;
-use tokio::{fs::remove_file, net::UnixStream, pin, select, time};
+use tokio::{
+    net::{self, UnixStream},
+    pin, select, task, time,
+};
+use url::Url;
 
-pub fn console_url() -> url::Url {
-    let console = env::temp_dir().join(format!("northstar-{}-full", std::process::id()));
-    url::Url::parse(&format!("unix://{}", console.display())).unwrap()
+pub fn console_url() -> Url {
+    Url::parse(&format!(
+        "unix+abstract://northstar-{}-full",
+        std::process::id()
+    ))
+    .unwrap()
 }
 
 pub enum Runtime {
@@ -158,8 +174,11 @@ impl Runtime {
     }
 
     pub async fn shutdown(self) -> Result<()> {
-        drop(self);
-        remove_file(console_url().path()).await?;
+        if let Runtime::Started(runtime, tmpdir) = self {
+            runtime.shutdown().await?;
+            logger::assume("Shutdown complete", 5u64).await?;
+            tmpdir.close()?;
+        }
         Ok(())
     }
 }
@@ -183,47 +202,52 @@ impl std::ops::DerefMut for Client {
 }
 
 impl Client {
-    /// Launches an instance of Northstar
-    pub async fn connect(url: &url::Url) -> Result<Client> {
-        // Connect to the runtime
-        let io = UnixStream::connect(url.path())
-            .await
-            .expect("failed to connect to console");
-        let client = northstar_client::Client::new(io, Some(1000)).await?;
+    /// Connect stream.
+    pub async fn stream(url: &Url) -> Result<net::UnixStream> {
+        let addr = SocketAddr::from_abstract_name(url.path())?;
+        let stream = task::spawn_blocking(move || StdUnixStream::connect_addr(&addr)).await??;
+        stream.set_nonblocking(true)?;
+        let stream = net::UnixStream::from_std(stream)?;
+        Ok(stream)
+    }
+
+    /// Framed connection.
+    pub async fn framed(url: &Url) -> Result<Connection<UnixStream>> {
+        let stream = Self::stream(url).await?;
+        Ok(framed(stream))
+    }
+
+    /// Connect a northstar client instance.
+    pub async fn connect(url: &Url) -> Result<Client> {
+        let stream = Self::stream(url).await?;
+        let client = northstar_client::Client::new(stream, Some(1000)).await?;
+
         // Wait until a successful connection
         logger::assume("Client .* connected", 5u64).await?;
 
         Ok(Client { client })
     }
 
-    /// Connect a new client instance to the runtime
-    pub async fn client(&self) -> Result<northstar_client::Client<UnixStream>> {
-        let io = UnixStream::connect(console_url().path())
-            .await
-            .context("failed to connect to console")?;
-        northstar_client::Client::new(io, Some(1000))
-            .await
-            .context("failed to create client")
-    }
-
+    /// Stop a container.
     pub async fn stop(&mut self, container: &str, timeout: u64) -> Result<()> {
-        self.client.kill(container, 15).await?;
-        let container: Container = container.try_into()?;
-        self.assume_notification(
-            |n| n == &Notification::Exit(container.clone(), ExitStatus::Signalled { signal: 15 }),
+        self.client.kill(container, SIGTERM as i32).await?;
+        self.assume_exit(
+            container,
+            ExitStatus::Signalled {
+                signal: SIGTERM as u32,
+            },
             timeout,
         )
-        .await?;
-        Ok(())
+        .await
     }
 
+    /// Shutdown the runtime.
     pub async fn shutdown(&mut self) -> Result<()> {
         self.client.shutdown().await;
-        logger::assume("Shutdown complete", 5u64).await?;
-        Ok(())
+        logger::assume("Shutdown complete", 5u64).await
     }
 
-    // Install a npk from a buffer
+    // Install a npk from a buffer.
     pub async fn install(&mut self, npk: &[u8], repository: &str) -> Result<()> {
         self.client
             .install(npk, npk.len() as u64, repository)
@@ -231,7 +255,7 @@ impl Client {
         Ok(())
     }
 
-    /// Install the test container and wait for the notification
+    /// Install the test container and wait for the notification.
     pub async fn install_test_container(&mut self) -> Result<()> {
         self.install(&TEST_CONTAINER_NPK, "mem")
             .await
@@ -242,7 +266,7 @@ impl Client {
             .context("failed to wait for test container install notification")
     }
 
-    /// Uninstall the test container and wait for the notification
+    /// Uninstall the test container and wait for the notification.
     pub async fn uninstall_test_container(&mut self) -> Result<()> {
         self.client
             .uninstall("test-container:0.0.1", true)
@@ -253,7 +277,7 @@ impl Client {
             .context("failed to wait for test container uninstall notification")
     }
 
-    /// Install the test resource and wait for the notification
+    /// Install the test resource and wait for the notification.
     pub async fn install_test_resource(&mut self) -> Result<()> {
         self.install(&TEST_RESOURCE_NPK, "mem")
             .await
@@ -263,7 +287,7 @@ impl Client {
             .context("failed to wait for test resource install notification")
     }
 
-    /// Uninstall the test resource and wait for the notification
+    /// Uninstall the test resource and wait for the notification.
     pub async fn uninstall_test_resource(&mut self) -> Result<()> {
         self.client
             .uninstall("test-resource:0.0.1", true)

@@ -17,21 +17,31 @@ Example:
 ## Connecting to the runtime
 
 The console can be connected via two different approaches. For debugging
-purposes (and ***only for debugging purposes***) the runtime configuration
-allows to configure system wide accessible unix or tcp socket that exposes the
-runtime's console. This is done by the `debug.console` setting in the runtime
-configuration. The scheme of the url must be either `tcp` or `unix`.
+purposes the runtime configuration allows to configure system wide accessible
+unix or tcp socket that exposes the runtime's console. This is done by the
+`console.global` setting in the runtime configuration. The scheme of the url must
+be either `tcp`, `unix` or `unix+abstract`.
 
 ```toml
-[debug.console]
-console = "tcp://localhost:4200"
+[console.global]
+bind = "tcp://localhost:4200"
+permissions = "full"
 ```
 
 or
 
 ```toml
-[debug.console]
-console = "unix:///tmp/northstar"
+[console.global]
+bind = "unix:///tmp/northstar"
+permissions = "full"
+```
+
+or
+
+```toml
+[console.global]
+bind = "unix+abstract://northstar"
+permissions = "full"
 ```
 
 Debugging console listeners shall ***never*** be enabled in production. The
