@@ -5,13 +5,13 @@ use crate::{
     runtime::{
         devicemapper::{self, verity::DmVerityHashAlgorithm},
         key::PublicKey,
+        loopdev,
         repository::Npk,
     },
 };
 use anyhow::{anyhow, bail, Context, Result};
 use futures::{Future, FutureExt};
 use log::{debug, info, warn};
-use loopdev::LoopDevice;
 use nix::libc::{EAGAIN, EBUSY, ENOENT};
 use std::{
     fs, io,
@@ -53,7 +53,7 @@ impl LoopControl {
     }
 
     /// Finds and opens the next available loop device.
-    pub fn next_free(&mut self) -> io::Result<LoopDevice> {
+    pub fn next_free(&mut self) -> io::Result<loopdev::LoopDevice> {
         loop {
             match self.loop_control.next_free() {
                 Ok(loopdevice) => return Ok(loopdevice),
@@ -297,7 +297,7 @@ fn losetup(
     offset: u64,
     size: u64,
     timeout: time::Duration,
-) -> Result<(LoopDevice, PathBuf)> {
+) -> Result<(loopdev::LoopDevice, PathBuf)> {
     let start = Instant::now();
 
     // Acquire a loop device and attach the backing file. This operation is racy because

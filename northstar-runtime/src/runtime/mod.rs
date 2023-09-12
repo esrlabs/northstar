@@ -10,6 +10,8 @@ mod fork;
 mod io;
 mod ipc;
 mod key;
+#[allow(unused)]
+mod loopdev;
 mod mount;
 mod persistence;
 mod repository;
