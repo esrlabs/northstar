@@ -19,6 +19,7 @@ Northstar is an embedded container runtime prototype for Linux.
     - [Processes](#processes)
     - [Comparison](#comparison)
   - [Quickstart](#quickstart)
+  - [SquashFS tools](#squashfs-tools)
   - [Configuration](#configuration)
     - [Repositories](#repositories)
   - [Console](#console)
@@ -124,8 +125,7 @@ Install build dependencies on Debian based distributions by running
 sudo apt-get install build-essential libclang1 squashfs-tools
 ```
 
-The `squashfs-tools` package is required in version **4.1** or higher. The
-recommended version is `Squashfs-tools 4.5.1 released (17th March 2022)`.
+The `squashfs-tools` package is required in version **4.1** or higher.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
@@ -162,6 +162,29 @@ cargo build --release --bin northstar-nstar
 
 `northstar-nstar` is developement tool and not considered for any production
 usecase. See [console](./doc/console.md) for details why.
+
+## SquashFS tools
+
+Sadly `northstar-sextant` relies on a `mksquashfs` binary available on the host.
+Here's a recipe to build a `mksquashfs` binary from source with `gzip` support only:
+
+```sh
+git clone https://github.com/plougher/squashfs-tools.git
+cd squashfs-tools/squashfs-tools
+git checkout 4.6.1
+sudo make install
+```
+
+For different compression algorithms, install the corresponding dependencies
+(Debian based distributions):
+
+```sh
+sudo apt install help2man libz-dev liblzo2-dev liblz4-dev libzstd-dev
+git clone https://github.com/plougher/squashfs-tools.git
+cd squashfs-tools/squashfs-tools
+git checkout 4.6.1
+sudo CONFIG=1 LZO_SUPPORT=1 LZ4_SUPPORT=1 ZSTD_SUPPORT=1 XZ_SUPPORT=1 make -j $(nproc) install
+```
 
 ## Configuration
 
