@@ -481,7 +481,7 @@ impl State {
                 .clone()
                 .unwrap_or_default()
                 .into();
-            let permissions = contianer_configuration.permissions.clone().into();
+            let permissions = contianer_configuration.permissions.into();
             let connection = Console::connection(
                 runtime,
                 peer,

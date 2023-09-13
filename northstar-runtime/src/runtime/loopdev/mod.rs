@@ -377,7 +377,7 @@ impl LoopDevice {
             ioctl(
                 self.device.as_raw_fd() as c_int,
                 LOOP_SET_DIRECT_IO as IoctlRequest,
-                if direct_io { 1 } else { 0 },
+                i32::from(direct_io),
             )
         })?;
         Ok(())

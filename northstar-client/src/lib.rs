@@ -95,10 +95,7 @@ pub async fn connect<T: AsyncRead + AsyncWrite + Unpin>(
         .await?;
 
     // Wait for conack
-    let message = connection
-        .next()
-        .await
-        .ok_or_else(|| Error::ConnectionClosed)??;
+    let message = connection.next().await.ok_or(Error::ConnectionClosed)??;
 
     match message {
         Message::ConnectAck { .. } => Ok(connection),
@@ -183,7 +180,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
                 .connection
                 .next()
                 .await
-                .ok_or_else(|| Error::ConnectionClosed)??;
+                .ok_or(Error::ConnectionClosed)??;
 
             match message {
                 Message::Response { response } => break Ok(response),
@@ -464,7 +461,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
                 .connection
                 .next()
                 .await
-                .ok_or_else(|| Error::ConnectionClosed)??;
+                .ok_or(Error::ConnectionClosed)??;
 
             match message {
                 Message::Response { response } => match response {
