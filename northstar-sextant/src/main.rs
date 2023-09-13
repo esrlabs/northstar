@@ -19,7 +19,6 @@ enum Compression {
     None,
     #[default]
     Gzip,
-    Lzma,
     Lzo,
     Xz,
     Zstd,
@@ -30,7 +29,6 @@ impl From<Compression> for NpkCompression {
         match c {
             Compression::None => NpkCompression::None,
             Compression::Gzip => NpkCompression::Gzip,
-            Compression::Lzma => NpkCompression::Lzma,
             Compression::Lzo => NpkCompression::Lzo,
             Compression::Xz => NpkCompression::Xz,
             Compression::Zstd => NpkCompression::Zstd,

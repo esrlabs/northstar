@@ -1,7 +1,5 @@
 [build]
 pre-build = [
     # Bindgen dependencies
-    "apt-get update && apt-get install --assume-yes --no-install-recommends libclang-dev libz-dev",
-    # SquashFS tools
-    "git clone https://github.com/plougher/squashfs-tools.git && cd squashfs-tools/squashfs-tools && git checkout 4.5.1 && make -j $(nproc) install && cd ../../ && rm -r squashfs-tools",
+    "apt-get update && apt-get install --assume-yes --no-install-recommends libclang-dev",
 ]

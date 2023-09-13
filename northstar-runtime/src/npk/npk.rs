@@ -370,7 +370,6 @@ pub enum Compression {
     None,
     #[default]
     Gzip,
-    Lzma,
     Lzo,
     Xz,
     Zstd,
@@ -381,7 +380,6 @@ impl fmt::Display for Compression {
         match self {
             Compression::None => write!(f, "none"),
             Compression::Gzip => write!(f, "gzip"),
-            Compression::Lzma => write!(f, "lzma"),
             Compression::Lzo => write!(f, "lzo"),
             Compression::Xz => write!(f, "xz"),
             Compression::Zstd => write!(f, "zstd"),
@@ -395,7 +393,6 @@ impl FromStr for Compression {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "gzip" => Ok(Compression::Gzip),
-            "lzma" => Ok(Compression::Lzma),
             "lzo" => Ok(Compression::Lzo),
             "xz" => Ok(Compression::Xz),
             "zstd" => Ok(Compression::Zstd),

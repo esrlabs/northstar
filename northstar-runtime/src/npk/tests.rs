@@ -98,11 +98,10 @@ fn pack_with_key(fixture: Fixture) -> Result<()> {
 }
 
 #[rstest]
-fn pack_with_compression_none(
+fn pack_with_compression(
     #[values(
         Compression::None,
         Compression::Gzip,
-        Compression::Lzma,
         Compression::Lzo,
         Compression::Xz,
         Compression::Zstd
