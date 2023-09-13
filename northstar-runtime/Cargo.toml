@@ -27,14 +27,12 @@ heck = { version = "0.4.1", optional = true }
 hex = { version = "0.4.3", optional = true }
 hmac = { version = "0.12.1", features = ["reset"], optional = true }
 humanize-rs = { version = "0.1.5", optional = true }
-humantime = { version = "2.1.0", optional = true }
 humantime-serde = { version = "1.1.1", optional = true }
 inotify = { version = "0.10.0", features = ["stream"], optional = true }
 itertools = { version = "0.11.0", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 libc = { version = "0.2.140", optional = true }
 log = { version = "0.4.19", features = [ "serde", "max_level_trace", "release_max_level_debug"] }
-loopdev = { version = "0.4.0", optional = true }
 memchr = "2.6.2"
 memfd = { version = "0.6.2", optional = true }
 memoffset = { version = "0.9.0", optional = true }
@@ -69,11 +67,11 @@ zip = { version = "0.6.6", default-features = false, optional = true }
 api = ["bytes", "futures", "npk", "pkg-version", "serde_json", "tokio", "tokio-util"]
 npk = ["base64", "byteorder", "ed25519-dalek", "hex", "humanize-rs", "itertools", "pkg-version", "rand_core", "seccomp", "serde_json", "serde_plain", "serde_with", "serde_yaml", "sha2", "strum", "strum_macros", "tempfile", "toml", "uuid", "zeroize", "zip"]
 rexec = ["nix", "memfd"]
-runtime = ["api", "async-stream", "async-trait", "bincode", "bytesize", "caps", "cgroups-rs", "ed25519-dalek", "futures", "heck", "hex", "hmac", "humantime", "humantime-serde", "inotify", "itertools", "lazy_static", "libc", "loopdev", "memfd", "memoffset", "nanoid", "nix", "npk", "rlimit", "serde_plain", "tempfile", "tokio", "tokio-eventfd", "tokio-util", "url", "umask"]
+runtime = ["api", "async-stream", "async-trait", "bincode", "bindgen", "bytesize", "caps", "cgroups-rs", "ed25519-dalek", "futures", "heck", "hex", "hmac", "humantime-serde", "inotify", "itertools", "lazy_static", "libc", "memfd", "memoffset", "nanoid", "nix", "npk", "rlimit", "serde_plain", "tempfile", "tokio", "tokio-eventfd", "tokio-util", "url", "umask"]
 seccomp = ["bindgen", "caps", "lazy_static", "memoffset", "nix", "npk"]
 
 [dev-dependencies]
-anyhow = { version = "1.0.71", features = ["backtrace"] }
+anyhow = "1.0.71"
 memfd = "0.6.2"
 proptest = "1.2.0"
 rstest = { version = "0.18.1", default-features = false }
@@ -83,7 +81,7 @@ tokio-test = "0.4.2"
 toml = "0.7.6"
 
 [build-dependencies]
-anyhow = { version = "1.0.71", features = ["backtrace"] }
+anyhow = "1.0.71"
 bindgen = { version = "0.65.1", default-features = false, features = ["runtime"], optional = true }
 
 [package.metadata.docs.rs]

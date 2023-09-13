@@ -41,7 +41,7 @@ pub fn init() {
             let target = record
                 .target()
                 .strip_prefix("northstar_runtime::")
-                .unwrap_or(record.target());
+                .unwrap_or_else(|| record.target());
             let tgid = std::process::id();
             let args = record.args().to_string();
 

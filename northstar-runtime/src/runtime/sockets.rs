@@ -104,8 +104,14 @@ pub(crate) async fn open(
         if descriptor.uid.is_some() || descriptor.gid.is_some() {
             debug!(
                 "Setting socket ownership {}:{} on {name}",
-                descriptor.uid.map(|d| d.to_string()).unwrap_or("-".into()),
-                descriptor.gid.map(|d| d.to_string()).unwrap_or("-".into()),
+                descriptor
+                    .uid
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                descriptor
+                    .gid
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "-".into()),
             );
             fchown(
                 socket.as_raw_fd(),

@@ -31,7 +31,6 @@ use futures::{
     future::{join_all, ready, Either},
     Future, Stream, StreamExt, TryFutureExt,
 };
-use humantime::format_duration;
 use itertools::Itertools;
 use log::{debug, error, info, warn};
 use nix::sys::signal::Signal;
@@ -264,19 +263,17 @@ impl State {
             self.mount_all(&to_mount).await;
         }
 
-        for (container, autostart) in &autostarts {
-            info!("Autostarting {} ({:?})", container, autostart);
-            if let Err(e) = self.start(container, &[], &HashMap::with_capacity(0)).await {
-                Self::warn_autostart_failure(container, autostart, e)?
+        if !autostarts.is_empty() {
+            for (container, autostart) in &autostarts {
+                info!("Autostarting {} ({:?})", container, autostart);
+                if let Err(e) = self.start(container, &[], &HashMap::with_capacity(0)).await {
+                    Self::warn_autostart_failure(container, autostart, e)?
+                }
             }
+            let duration = start.elapsed();
+            let containers = autostarts.len();
+            info!("Successfully started {containers} container(s) in {duration:?}",);
         }
-
-        let duration = start.elapsed();
-        info!(
-            "Successfully started {} container(s) in {}",
-            autostarts.len(),
-            format_duration(duration)
-        );
 
         Ok(())
     }
@@ -484,7 +481,7 @@ impl State {
                 .clone()
                 .unwrap_or_default()
                 .into();
-            let permissions = contianer_configuration.permissions.clone().into();
+            let permissions = contianer_configuration.permissions.into();
             let connection = Console::connection(
                 runtime,
                 peer,
@@ -806,17 +803,13 @@ impl State {
                 let duration = process.started.elapsed();
                 if is_critical {
                     error!(
-                        "Critical process {} exited after {} with status {}",
-                        container,
-                        format_duration(duration),
-                        exit_status,
+                        "Critical process {} exited after {:?} with status {}",
+                        container, duration, exit_status,
                     );
                 } else {
                     info!(
-                        "Process {} exited after {} with status {}",
-                        container,
-                        format_duration(duration),
-                        exit_status,
+                        "Process {} exited after {:?} with status {}",
+                        container, duration, exit_status,
                     );
                 }
 
@@ -1045,7 +1038,7 @@ impl State {
                 Ok(root) => {
                     let state = self.state_mut(container).expect("Internal error");
                     state.root = Some(root);
-                    info!("Mounted {}", container);
+                    info!("Mounted {container}");
                     result.push(Ok(container.clone()));
                 }
                 Err(e) => {
@@ -1055,14 +1048,13 @@ impl State {
             }
         }
 
-        let duration = start.elapsed();
         if result.iter().any(|e| e.is_err()) {
-            warn!("Mount operation failed after {}", format_duration(duration));
+            warn!("Mount operation failed");
         } else {
             info!(
-                "Successfully mounted {} container(s) in {}",
+                "Successfully mounted {} container(s) in {:?}",
                 result.len(),
-                format_duration(duration)
+                start.elapsed()
             );
         }
         result
@@ -1163,16 +1155,10 @@ impl State {
 
         let duration = start.elapsed();
         if result.iter().any(|e| e.is_err()) {
-            warn!(
-                "Umount operation failed after {}",
-                format_duration(duration)
-            );
+            warn!("Umount operation failed after {duration:?}",);
         } else {
-            info!(
-                "Successfully umounted {} container(s) in {}",
-                result.len(),
-                format_duration(duration)
-            );
+            let containers = result.len();
+            info!("Successfully umounted {containers} container(s) in {duration:?}",);
         }
         result
     }

@@ -69,7 +69,7 @@ impl Channel {
         match self.command.recv().await.ok()?? {
             SerdeMessage::CreateRequest { init } => {
                 let mut num_fds = 3;
-                num_fds += if init.console { 1 } else { 0 };
+                num_fds += usize::from(init.console);
                 num_fds += init.sockets.len();
                 let fds = self
                     .socket
