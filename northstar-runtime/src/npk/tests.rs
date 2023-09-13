@@ -102,7 +102,6 @@ fn pack_with_compression_none(
     #[values(
         Compression::None,
         Compression::Gzip,
-        Compression::Lzma,
         Compression::Lzo,
         Compression::Xz,
         Compression::Zstd

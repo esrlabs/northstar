@@ -37,7 +37,6 @@ pub enum ColorChoice {
 pub enum Compression {
     None,
     Gzip,
-    Lzma,
     Lzo,
     Xz,
     Zstd,
@@ -48,7 +47,6 @@ impl From<Compression> for NpkCompressionAlgorithm {
         match c {
             Compression::None => NpkCompressionAlgorithm::None,
             Compression::Gzip => NpkCompressionAlgorithm::Gzip,
-            Compression::Lzma => NpkCompressionAlgorithm::Lzma,
             Compression::Lzo => NpkCompressionAlgorithm::Lzo,
             Compression::Xz => NpkCompressionAlgorithm::Xz,
             Compression::Zstd => NpkCompressionAlgorithm::Zstd,
