@@ -156,3 +156,11 @@ fn sockets() -> Result<()> {
     assume("Received Hello!", 5).await?;
     Ok(())
 }
+
+// Sockets
+#[runtime_test]
+fn custom() -> Result<()> {
+    client.install(&EXAMPLE_CUSTOM_NPK, "mem").await?;
+    client.start(EXAMPLE_CUSTOM).await?;
+    assume("hello again", 5).await
+}

@@ -45,6 +45,7 @@ rm -f ${TARGET_DIR}/*.npk
 ${CARGO_NPK_PACK} -p console
 ${CARGO_NPK_PACK} -p cpueater
 ${CARGO_NPK_PACK} -p crashing
+${CARGO_NPK_PACK} -p custom
 ${CARGO_NPK_PACK} -p hello-resource
 ${CARGO_NPK_PACK} -p hello-world
 ${CARGO_NPK_PACK} -p inspect

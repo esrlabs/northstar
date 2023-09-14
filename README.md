@@ -32,6 +32,7 @@ Northstar is an embedded container runtime prototype for Linux.
     - [Mounts](#mounts)
     - [Seccomp](#seccomp)
     - [Capabilities](#capabilities)
+    - [Custom](#custom)
   - [Roadmap](#roadmap)
   - [Questions and Help](#questions-and-help)
   - [Contributing](#contributing)
@@ -423,6 +424,19 @@ Example capability setting in a manifest:
 ```yaml
 capabilities: [ CAP_NET_RAW, CAP_NET_ADMIN ]
 ```
+
+### Custom
+
+The Northstar manifest format allow an integrator to add custom fields to the
+manifest in the `custom` field e.g:
+
+```yaml
+custom:
+  something: "hello"
+```
+
+The manifest can be received via a [console](./doc/console.md) connection and
+the `ìnspect` command.
 
 ## Roadmap
 

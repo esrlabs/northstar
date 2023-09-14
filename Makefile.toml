@@ -9,6 +9,7 @@ dependencies = [
     "console",
     "cpueater",
     "crashing",
+    "custom",
     "ferris",
     "hello-ferris",
     "hello-resource",
@@ -45,6 +46,10 @@ args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--compression", "none", "-
 [tasks.crashing]
 command = "cargo"
 args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "crashing" ]
+
+[tasks.custom]
+command = "cargo"
+args = [ "run", "--bin", "cargo-npk", "npk", "pack", "--out", "target/northstar/repository", "--key", "examples/northstar.key", "-p", "custom" ]
 
 [tasks.ferris]
 script = [

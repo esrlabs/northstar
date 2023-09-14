@@ -31,6 +31,7 @@ macro_rules! npk {
 pub const EXAMPLE_CONSOLE: &str = "console:0.0.1";
 pub const EXAMPLE_CPUEATER: &str = "cpueater:0.0.1";
 pub const EXAMPLE_CRASHING: &str = "crashing:0.0.1";
+pub const EXAMPLE_CUSTOM: &str = "custom:0.0.1";
 pub const EXAMPLE_FERRIS: &str = "ferris:0.0.1";
 pub const EXAMPLE_HELLO_FERRIS: &str = "hello-ferris:0.0.1";
 pub const EXAMPLE_HELLO_RESOURCE: &str = "hello-resource:0.0.1";
@@ -56,6 +57,8 @@ lazy_static! {
         npk!("../target/northstar/repository/cpueater-0.0.1.npk");
     pub static ref EXAMPLE_CRASHING_NPK: Vec<u8> =
         npk!("../target/northstar/repository/crashing-0.0.1.npk");
+    pub static ref EXAMPLE_CUSTOM_NPK: Vec<u8> =
+        npk!("../target/northstar/repository/custom-0.0.1.npk");
     pub static ref EXAMPLE_FERRIS_NPK: Vec<u8> =
         npk!("../target/northstar/repository/ferris-0.0.1.npk");
     pub static ref EXAMPLE_HELLO_FERRIS_NPK: Vec<u8> =
