@@ -66,4 +66,7 @@ pub(crate) struct MemoryEvent {
     /// The number of processes belonging to this cgroup
     /// killed by any kind of OOM killer.
     pub oom_kill: Option<u64>,
+    /// The number of times the entire cgroup has been kill
+    /// by any kind of OOM killler.
+    pub oom_group_kill: Option<u64>,
 }

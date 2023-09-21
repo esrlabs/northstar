@@ -377,6 +377,7 @@ fn parse_cgroups_event(s: &str) -> CGroupEvent {
             Some("max") => event.max = value,
             Some("oom") => event.oom = value,
             Some("oom_kill") => event.oom_kill = value,
+            Some("oom_group_kill") => event.oom_group_kill = value,
             Some(_) | None => panic!("invalid content of memory.events"),
         }
     }
