@@ -14,6 +14,7 @@ members = [
   "examples/console",
   "examples/cpueater",
   "examples/crashing",
+  "examples/custom",
   "examples/ferris",
   "examples/hello-resource",
   "examples/hello-world",

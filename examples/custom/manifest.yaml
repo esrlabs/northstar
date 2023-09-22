@@ -1,0 +1,27 @@
+name: custom
+version: 0.0.1
+init: /custom
+uid: 1000
+gid: 1000
+io:
+  stdout: pipe
+  stderr: pipe
+console:
+  permissions: [ident, notifications, inspect, list]
+mounts:
+  /dev:
+    type: dev
+  /proc:
+    type: proc
+  /lib:
+    type: bind
+    host: /lib
+  /lib64:
+    type: bind
+    host: /lib64
+# The custom sections allows to bundle arbitrary data with the manifest.
+# The data is accessible from any container with the inspect permission
+# from the runtime.
+custom:
+  properties:
+    hello: again

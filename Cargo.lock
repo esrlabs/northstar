@@ -656,6 +656,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "northstar-client",
+ "tokio",
+]
+
+[[package]]
 name = "cxx"
 version = "1.0.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
