@@ -77,7 +77,7 @@ proptest = "1.2.0"
 rstest = { version = "0.18.1", default-features = false }
 serde_json = "1.0.95"
 tokio = { version = "1.32.0", features = ["test-util"] }
-tokio-test = "0.4.2"
+tokio-test = "0.4.3"
 toml = "0.7.6"
 
 [build-dependencies]
