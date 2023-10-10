@@ -27,7 +27,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Cargo fmt --check
         uses: actions-rs/cargo@v1
         with:
@@ -45,7 +45,7 @@ jobs:
     # Prevent sudden announcement of a new advisory from failing ci:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: EmbarkStudios/cargo-deny-action@v1
       with:
         command: check ${{ matrix.checks }}
@@ -65,7 +65,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Clippy
         uses: actions-rs/clippy-check@v1
         with:
@@ -88,7 +88,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Check
         uses: actions-rs/cargo@v1
         with:
@@ -109,7 +109,7 @@ jobs:
       - name: Install cargo-hack
         uses: taiki-e/install-action@cargo-hack
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Hack
         run: cargo hack --feature-powerset check
 
@@ -129,7 +129,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install nextest
         uses: taiki-e/install-action@nextest
       - name: Build containers
@@ -152,7 +152,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Build Documentation
         run: cargo doc --no-deps -p northstar --all-features
 
@@ -161,7 +161,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Lint markdown
       uses: docker://avtodev/markdown-lint:v1
       with:
@@ -188,7 +188,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Cross
         run: cargo install --git https://github.com/cross-rs/cross.git --rev 99b8069 cross
       - name: Build
@@ -213,7 +213,7 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install northstar-nstar
         run: cargo install --path northstar-nstar
       - name: Install northstar-sextant
@@ -244,6 +244,6 @@ jobs:
   #     - name: Cross
   #       run: cargo install cross
   #     - name: Checkout
-  #       uses: actions/checkout@v3
+  #       uses: actions/checkout@v4
   #     - name: Examples
   #       run: ./examples/build.sh --target ${{ matrix.target }}
