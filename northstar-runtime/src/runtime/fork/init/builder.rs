@@ -46,6 +46,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         .map(Into::into)
         .sorted()
         .collect();
+    let selinux = manifest.selinux.clone();
 
     Ok(Init {
         container,
@@ -61,6 +62,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         seccomp,
         console,
         sockets,
+        selinux,
     })
 }
 

@@ -125,7 +125,11 @@ impl MountControl {
         let fsimg_offset = npk.fsimg_offset();
         let container = npk.manifest().container();
         let verity_header = npk.verity_header().cloned();
-        let selinux_context = npk.manifest().selinux.as_ref().map(|s| s.context.clone());
+        let selinux_context = npk
+            .manifest()
+            .selinux
+            .as_ref()
+            .and_then(|s| s.mount_context.clone());
         let hashes = npk.hashes().cloned();
         let lo_timeout = self.lo_timeout;
 
@@ -261,9 +265,9 @@ fn mount(
         device.display(),
         target.display(),
     );
-    let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
+    const FLAGS: MountFlags = MountFlags::MS_RDONLY;
+    const FSTYPE: Option<&str> = Some(FS_TYPE);
     let source = Some(&device);
-    let fstype = Some(FS_TYPE);
     let data = if let Some(selinux_context) = selinux_context {
         if Path::new("/sys/fs/selinux/enforce").exists() {
             Some(format!("{}{}", "context=", selinux_context.as_str()))
@@ -275,7 +279,7 @@ fn mount(
         None
     };
     let data = data.as_deref();
-    let mount_result = nix::mount::mount(source, target, fstype, flags, data);
+    let mount_result = nix::mount::mount(source, target, FSTYPE, FLAGS, data);
 
     if let Err(ref e) = mount_result {
         warn!("Failed to mount: {}", e);

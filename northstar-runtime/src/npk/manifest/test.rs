@@ -206,7 +206,7 @@ fn invalid_gid_zero() -> Result<()> {
 #[test]
 fn invalid_selinux_context() -> Result<()> {
     let manifest =
-        "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1\ngid: 1\nselinux:\n    context: fo@o";
+        "name: hello\nversion: 0.0.0\ninit: /binary\nuid: 1\ngid: 1\nselinux:\n    mount_context: fo@o";
     assert!(Manifest::from_str(manifest).is_err());
     Ok(())
 }
