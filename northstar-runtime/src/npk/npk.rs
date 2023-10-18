@@ -743,31 +743,43 @@ fn write_pseudo_files<W: io::Write>(manifest: &Manifest, out: &mut W) -> Result<
                 // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
                 pseudo_dir(out, target.as_ref(), 755, uid, gid)?;
 
-                // Create chardevs
-                for (dev, major, minor) in &[
-                    ("full", 1, 7),
-                    ("null", 1, 3),
-                    ("random", 1, 8),
-                    ("tty", 5, 0),
-                    ("urandom", 1, 9),
-                    ("zero", 1, 5),
+                const XATTR_SECURITY_SELINUX: &str = "security.selinux";
+
+                // Create chardevs with security context.
+                for (dev, major, minor, security) in &[
+                    ("full", 1, 7, "u:object_r:null_device:s0"),
+                    ("null", 1, 3, "u:object_r:full_device:s0"),
+                    ("random", 1, 8, "u:object_r:full_device:s0"),
+                    ("tty", 5, 0, "u:object_r:owntty_device:s0"),
+                    ("urandom", 1, 9, "u:object_r:random_device:s0"),
+                    ("zero", 1, 5, "u:object_r:zero_device:s0"),
                 ] {
                     let target: &Path = target.as_ref();
                     let target = target.join(dev).display().to_string();
                     writeln!(out, "{target} c 666 {uid} {gid} {major} {minor}",)?;
+                    writeln!(out, "{target} x {XATTR_SECURITY_SELINUX}={security}",)?;
                 }
 
-                // Link fds
-                writeln!(out, "/proc/self/fd d 777 {uid} {gid}")?;
-                for (link, name) in &[
-                    ("/proc/self/fd", "fd"),
-                    ("/proc/self/fd/0", "stdin"),
-                    ("/proc/self/fd/1", "stdout"),
-                    ("/proc/self/fd/2", "stderr"),
-                ] {
-                    let target: &Path = target.as_ref();
-                    let target = target.join(name).display().to_string();
-                    writeln!(out, "{target} s 777 {uid} {gid} {link}")?;
+                if manifest
+                    .mounts
+                    .iter()
+                    .any(|m| matches!(m, (target, Mount::Proc {}) if target.as_str() == "/proc"))
+                {
+                    // Link fds
+                    writeln!(out, "/proc/self/fd d 777 {uid} {gid}")?;
+                    for (link, name, security) in &[
+                        ("/proc/self/fd", "fd", "u:r:su:s0"),
+                        ("/proc/self/fd/0", "stdin", "u:r:su:s0"),
+                        ("/proc/self/fd/1", "stdout", "u:r:su:s0"),
+                        ("/proc/self/fd/2", "stderr", "u:r:su:s0"),
+                    ] {
+                        let target: &Path = target.as_ref();
+                        let target = target.join(name).display().to_string();
+                        writeln!(out, "{target} s 777 {uid} {gid} {link}")?;
+
+                        // Set security xattr if provided.
+                        writeln!(out, "{target} x {XATTR_SECURITY_SELINUX}={security}",)?;
+                    }
                 }
             }
         }
