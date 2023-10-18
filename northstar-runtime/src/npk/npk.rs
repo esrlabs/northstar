@@ -3,7 +3,7 @@ use crate::{
     npk::{
         dm_verity::{append_dm_verity_block, VerityHeader, BLOCK_SIZE},
         manifest::{
-            mount::{Bind, Mount, MountOption},
+            mount::{Bind, Mount},
             Manifest,
         },
     },
@@ -695,113 +695,94 @@ fn signature<I: Read + Write + Seek>(
     Ok(signature_yaml)
 }
 
+/// Add pseudo files directives (directory) for `dir` to `w`.
+fn pseudo_dir<W: io::Write>(w: &mut W, dir: &Path, mode: u16, uid: u16, gid: u16) -> Result<()> {
+    // Each directory level needs to be passed to mksquashfs e.g:
+    // /dev d 755 x x x
+    // /dev/block d 755 x x x
+    let mut p = PathBuf::from("/");
+    for d in dir.iter().skip(1) {
+        p.push(d);
+        let dir = p.display();
+        writeln!(w, "{dir} d {mode} {uid} {gid}")?;
+    }
+    Ok(())
+}
+
 /// Returns a temporary file with all the pseudo file definitions
-fn pseudo_files(manifest: &Manifest) -> Result<NamedTempFile, Error> {
+fn write_pseudo_files<W: io::Write>(manifest: &Manifest, out: &mut W) -> Result<()> {
     let uid = manifest.uid;
     let gid = manifest.gid;
 
-    let pseudo_directory = |dir: &Path, mode: u16| -> Vec<String> {
-        let mut pseudos = Vec::new();
-        // Each directory level needs to be passed to mksquashfs e.g:
-        // /dev d 755 x x x
-        // /dev/block d 755 x x x
-        let mut p = PathBuf::from("/");
-        for d in dir.iter().skip(1) {
-            p.push(d);
-            pseudos.push(format!("{} d {} {} {}", p.display(), mode, uid, gid));
-        }
-        pseudos
-    };
-
     // Create mountpoints as pseudofiles/dirs
-    let pseudos = manifest
-        .mounts
-        .iter()
-        .sorted_by(|(a, _), (b, _)| a.cmp(b))
-        .flat_map(|(target, mount)| {
-            match mount {
-                Mount::Bind(Bind { options: flags, .. }) => {
-                    let mode = if flags.contains(&MountOption::Rw) {
-                        755
-                    } else {
-                        555
-                    };
-                    pseudo_directory(target.as_ref(), mode)
+    for (target, mount) in manifest.mounts.iter().sorted_by(|(a, _), (b, _)| a.cmp(b)) {
+        match mount {
+            Mount::Bind(Bind { options: flags, .. }) => {
+                let mode = if flags.is_rw() { 755 } else { 555 };
+                pseudo_dir(out, target.as_ref(), mode, uid, gid)?;
+            }
+            Mount::Persist => pseudo_dir(out, target.as_ref(), 755, uid, gid)?,
+            Mount::Proc | Mount::Sysfs => pseudo_dir(out, target.as_ref(), 444, uid, gid)?,
+            Mount::Resource { .. } => pseudo_dir(out, target.as_ref(), 555, uid, gid)?,
+            Mount::Sockets => pseudo_dir(out, target.as_ref(), 755, uid, gid)?,
+            Mount::Tmpfs { .. } => pseudo_dir(out, target.as_ref(), 755, uid, gid)?,
+            Mount::Dev => {
+                // Create a minimal set of chardevs:
+                // └─ dev
+                //     ├── fd -> /proc/self/fd
+                //     ├── full
+                //     ├── null
+                //     ├── random
+                //     ├── stderr -> /proc/self/fd/2
+                //     ├── stdin -> /proc/self/fd/0
+                //     ├── stdout -> /proc/self/fd/1
+                //     ├── tty
+                //     ├── urandom
+                //     └── zero
+
+                // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
+                pseudo_dir(out, target.as_ref(), 755, uid, gid)?;
+
+                // Create chardevs
+                for (dev, major, minor) in &[
+                    ("full", 1, 7),
+                    ("null", 1, 3),
+                    ("random", 1, 8),
+                    ("tty", 5, 0),
+                    ("urandom", 1, 9),
+                    ("zero", 1, 5),
+                ] {
+                    let target: &Path = target.as_ref();
+                    let target = target.join(dev).display().to_string();
+                    writeln!(out, "{target} c 666 {uid} {gid} {major} {minor}",)?;
                 }
-                Mount::Persist => pseudo_directory(target.as_ref(), 755),
-                Mount::Proc | Mount::Sysfs => pseudo_directory(target.as_ref(), 444),
-                Mount::Resource { .. } => pseudo_directory(target.as_ref(), 555),
-                Mount::Sockets => pseudo_directory(target.as_ref(), 755),
-                Mount::Tmpfs { .. } => pseudo_directory(target.as_ref(), 755),
-                Mount::Dev => {
-                    // Create a minimal set of chardevs:
-                    // └─ dev
-                    //     ├── fd -> /proc/self/fd
-                    //     ├── full
-                    //     ├── null
-                    //     ├── random
-                    //     ├── stderr -> /proc/self/fd/2
-                    //     ├── stdin -> /proc/self/fd/0
-                    //     ├── stdout -> /proc/self/fd/1
-                    //     ├── tty
-                    //     ├── urandom
-                    //     └── zero
 
-                    // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
-                    let mut pseudos = pseudo_directory(target.as_ref(), 755);
-
-                    // Create chardevs
-                    for (dev, major, minor) in &[
-                        ("full", 1, 7),
-                        ("null", 1, 3),
-                        ("random", 1, 8),
-                        ("tty", 5, 0),
-                        ("urandom", 1, 9),
-                        ("zero", 1, 5),
-                    ] {
-                        let target: &Path = target.as_ref();
-                        let target = target.join(dev).display().to_string();
-                        pseudos.push(format!(
-                            "{} c {} {} {} {} {}",
-                            target, 666, uid, gid, major, minor
-                        ));
-                    }
-
-                    // Link fds
-                    pseudos.push(format!("/proc/self/fd d 777 {uid} {gid}"));
-                    for (link, name) in &[
-                        ("/proc/self/fd", "fd"),
-                        ("/proc/self/fd/0", "stdin"),
-                        ("/proc/self/fd/1", "stdout"),
-                        ("/proc/self/fd/2", "stderr"),
-                    ] {
-                        let target: &Path = target.as_ref();
-                        let target = target.join(name).display().to_string();
-                        pseudos.push(format!("{} s {} {} {} {}", target, 777, uid, gid, link,));
-                    }
-                    pseudos
+                // Link fds
+                writeln!(out, "/proc/self/fd d 777 {uid} {gid}")?;
+                for (link, name) in &[
+                    ("/proc/self/fd", "fd"),
+                    ("/proc/self/fd/0", "stdin"),
+                    ("/proc/self/fd/1", "stdout"),
+                    ("/proc/self/fd/2", "stderr"),
+                ] {
+                    let target: &Path = target.as_ref();
+                    let target = target.join(name).display().to_string();
+                    writeln!(out, "{target} s 777 {uid} {gid} {link}")?;
                 }
             }
-        })
-        .collect::<Vec<String>>();
+        }
+    }
 
-    let mut pseudo_file_entries =
-        NamedTempFile::new().context("failed to create temporary file")?;
-
-    pseudos.iter().try_for_each(|l| {
-        writeln!(pseudo_file_entries, "{l}").context("failed to create pseudo files")
-    })?;
-
-    Ok(pseudo_file_entries)
+    Ok(())
 }
 
+/// Run mksquashfs to create image.
 fn mksquashfs(
     manifest: &Manifest,
     root: &Path,
     image: &Path,
     squashfs_opts: &SquashfsOptions,
 ) -> Result<u64> {
-    let pseudo_files = pseudo_files(manifest)?;
     let mksquashfs = &squashfs_opts.mksquashfs;
 
     // Check root
@@ -851,6 +832,10 @@ fn mksquashfs(
         );
     }
 
+    // Format pseudo files.
+    let mut pseudo_files = NamedTempFile::new().context("failed to create temporary file")?;
+    write_pseudo_files(manifest, &mut pseudo_files)?;
+
     // Run mksquashfs to create image
     let mut cmd = Command::new(mksquashfs);
     cmd.arg(&root.display().to_string())
@@ -892,4 +877,30 @@ fn mksquashfs(
         .len();
 
     Ok(image_size)
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::Path;
+
+    use crate::npk::npk::pseudo_dir;
+
+    /// Test that the pseudo_dir function formats the output correctly.
+    #[test]
+    fn pseudo_dir_format() {
+        let mut out = Vec::new();
+        pseudo_dir(&mut out, Path::new("/dev/block"), 755, 0, 0).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "/dev d 755 0 0\n/dev/block d 755 0 0\n"
+        )
+    }
+
+    /// Tests that the pseudo_dir function formats the output correctly when uid and gid are set.
+    #[test]
+    fn pseudo_dir_format_uid_gid() {
+        let mut out = Vec::new();
+        pseudo_dir(&mut out, Path::new("/dev"), 755, 20, 30).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "/dev d 755 20 30\n")
+    }
 }
