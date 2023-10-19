@@ -1,4 +1,78 @@
-# 0.8.4 (unreleased)
+# 0.9.1 (unreleased)
+
+# 0.9.0 (October 19th, 2023)
+
+## Changed
+
+- runtime Extend SELinux support [#1032]
+- ci Add doc tests to CI [#1047]
+- ci Add a GH actions to install squashfs tools from source [#1046]
+- examples Add manifest custom section example [#1033]
+- fix Add oom_group_kill cgroup event type [#1031]
+- fix Improve loop device setup [#951]
+- tooling Remove lzma support and add notes about squashfs tools [#1030]
+- tests Retry fds collection in fd leak test
+- ci Grant write-all permission to clippy job
+- client Consolidate client error types [#1028]
+- tests Use socket2 for seqpacket in test-container
+- cargo Fix log dependency
+- chore Clippy fixes
+- cargo Specify workspace resolver
+- cargo Move workspace metadata to workspace manifest [#1016]
+- chore Rename read_keypair function [#1015]
+
+## Dependencies
+
+- deps Bump rustix from 0.37.13 to 0.37.25 ([#1045])
+- deps Bump termcolor from 1.2.0 to 1.3.0 ([#1036])
+- deps Bump async-trait from 0.1.68 to 0.1.73 ([#1035])
+- deps Bump strum_macros from 0.24.3 to 0.25.2 ([#1042])
+- deps Bump actions/checkout from 3 to 4 ([#1044])
+- deps Bump tokio-test from 0.4.2 to 0.4.3 ([#1043])
+- deps Bump socket2 from 0.5.3 to 0.5.4 ([#1041])
+- deps Bump url from 2.3.1 to 2.4.1 ([#1040])
+- deps Bump semver from 1.0.18 to 1.0.19 ([#1039])
+- deps Bump libc from 0.2.147 to 0.2.148 ([#1038])
+- deps Bump strum from 0.24.1 to 0.25.0 ([#1037])
+- deps Bump base64 from 0.21.3 to 0.21.4 ([#1034])
+- deps Bump nix from 0.26.2 to 0.27.1 ([#1020])
+- deps Bump memchr from 2.5.0 to 2.6.2 ([#1023])
+- deps Bump semver from 1.0.17 to 1.0.18 ([#1019])
+- deps Bump bitflags from 2.3.3 to 2.4.0 ([#1026])
+- deps Bump base64 from 0.21.2 to 0.21.3 ([#1025])
+- deps Bump colored from 2.0.0 to 2.0.4 ([#1022])
+- deps Bump tokio from 1.29.1 to 1.32.0 ([#1021])
+- deps Bump Swatinem/rust-cache from 1 to 2 ([#1017])
+
+[#1015]: https://github.com/esrlabs/northstar/pull/1015
+[#1017]: https://github.com/esrlabs/northstar/pull/1017
+[#1019]: https://github.com/esrlabs/northstar/pull/1019
+[#1020]: https://github.com/esrlabs/northstar/pull/1020
+[#1021]: https://github.com/esrlabs/northstar/pull/1021
+[#1022]: https://github.com/esrlabs/northstar/pull/1022
+[#1023]: https://github.com/esrlabs/northstar/pull/1023
+[#1025]: https://github.com/esrlabs/northstar/pull/1025
+[#1026]: https://github.com/esrlabs/northstar/pull/1026
+[#1028]: https://github.com/esrlabs/northstar/pull/1028
+[#1030]: https://github.com/esrlabs/northstar/pull/1030
+[#1031]: https://github.com/esrlabs/northstar/pull/1031
+[#1032]: https://github.com/esrlabs/northstar/pull/1032
+[#1033]: https://github.com/esrlabs/northstar/pull/1033
+[#1034]: https://github.com/esrlabs/northstar/pull/1034
+[#1035]: https://github.com/esrlabs/northstar/pull/1035
+[#1036]: https://github.com/esrlabs/northstar/pull/1036
+[#1037]: https://github.com/esrlabs/northstar/pull/1037
+[#1038]: https://github.com/esrlabs/northstar/pull/1038
+[#1039]: https://github.com/esrlabs/northstar/pull/1039
+[#1040]: https://github.com/esrlabs/northstar/pull/1040
+[#1041]: https://github.com/esrlabs/northstar/pull/1041
+[#1042]: https://github.com/esrlabs/northstar/pull/1042
+[#1043]: https://github.com/esrlabs/northstar/pull/1043
+[#1044]: https://github.com/esrlabs/northstar/pull/1044
+[#1045]: https://github.com/esrlabs/northstar/pull/1045
+[#1046]: https://github.com/esrlabs/northstar/pull/1046
+[#1047]: https://github.com/esrlabs/northstar/pull/1047
+[#951]: https://github.com/esrlabs/northstar/pull/0951
 
 # 0.8.3 (August 22th, 2023)
 
