@@ -115,6 +115,7 @@ impl MountControl {
         npk: &Npk,
         target: &Path,
         key: Option<&PublicKey>,
+        selinux: bool,
     ) -> impl Future<Output = Result<()>> {
         let dm = self.dm.clone();
         let lc = self.lc.clone();
@@ -147,7 +148,7 @@ impl MountControl {
                 lo_timeout,
             };
             debug!("Mounting {container}");
-            mount(dm, lc, mount_info).map(drop)
+            mount(dm, lc, mount_info, selinux).map(drop)
         })
         .map(|r| match r {
             Ok(r) => r,
@@ -180,6 +181,7 @@ fn mount(
     dm: Arc<devicemapper::DeviceMapper>,
     lc: Arc<Mutex<LoopControl>>,
     mount_info: Mount,
+    selinux: bool,
 ) -> Result<()> {
     let Mount {
         container,
@@ -268,16 +270,10 @@ fn mount(
     const FLAGS: MountFlags = MountFlags::MS_RDONLY;
     const FSTYPE: Option<&str> = Some(FS_TYPE);
     let source = Some(&device);
-    let data = if let Some(selinux_context) = selinux_context {
-        if Path::new("/sys/fs/selinux/enforce").exists() {
-            Some(format!("{}{}", "context=", selinux_context.as_str()))
-        } else {
-            warn!("Failed to determine SELinux status of host system. SELinux is disabled.");
-            None
-        }
-    } else {
-        None
-    };
+    let data = selinux
+        .then_some(())
+        .and(selinux_context)
+        .map(|context| format!("context={}", context.as_str()));
     let data = data.as_deref();
     let mount_result = nix::mount::mount(source, target, FSTYPE, FLAGS, data);
 

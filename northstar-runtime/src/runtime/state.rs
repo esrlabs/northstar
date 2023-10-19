@@ -40,7 +40,7 @@ use std::{
     fmt::Debug,
     iter::{once, FromIterator},
     os::unix::{net::UnixStream as StdUnixStream, prelude::OwnedFd},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
@@ -65,6 +65,8 @@ pub(super) struct State {
     forker: Forker,
     containers: HashMap<Container, ContainerState>,
     repositories: HashMap<RepositoryId, Repository>,
+    /// Is SELinux enabled on the host.
+    selinux_enabled: bool,
 }
 
 #[derive(Debug, Default)]
@@ -116,6 +118,7 @@ impl State {
     ) -> Result<State> {
         let repositories = HashMap::new();
         let containers = HashMap::new();
+        let selinux_enabled = is_selinux_enabled();
         let mount_control = Arc::new(
             MountControl::new(config.loop_device_timeout)
                 .await
@@ -130,6 +133,7 @@ impl State {
             config,
             forker,
             mount_control,
+            selinux_enabled,
         };
 
         // Initialize repositories. This populates self.containers and self.repositories
@@ -308,7 +312,7 @@ impl State {
         let root = self.config.run_dir.join(container.to_string());
         let mount_control = self.mount_control.clone();
         mount_control
-            .mount(npk, &root, key.as_ref())
+            .mount(npk, &root, key.as_ref(), self.selinux_enabled)
             .map_ok(|_| root)
     }
 
@@ -525,7 +529,14 @@ impl State {
         let pid = self
             .forker
             .create(
-                container, config, &manifest, io, console_fd, socket_fds, containers,
+                container,
+                config,
+                &manifest,
+                io,
+                console_fd,
+                socket_fds,
+                containers,
+                self.selinux_enabled,
             )
             .await?;
 
@@ -1241,6 +1252,16 @@ impl State {
             .get(repository)
             .ok_or_else(|| Error::InvalidRepository(repository.into()))
     }
+}
+
+/// Returns true if SELinux is enabled on the host system.
+fn is_selinux_enabled() -> bool {
+    let enabled = Path::new("/sys/fs/selinux/enforce").exists();
+    debug!(
+        "SELinux is {}",
+        if enabled { "enabled" } else { "disabled" }
+    );
+    enabled
 }
 
 #[test]

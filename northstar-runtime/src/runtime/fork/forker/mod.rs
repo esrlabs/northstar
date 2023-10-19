@@ -114,11 +114,12 @@ impl Forker {
         console: Option<OwnedFd>,
         sockets: Vec<OwnedFd>,
         containers: I,
+        selinux: bool,
     ) -> Result<Pid, Error> {
         debug_assert_eq!(manifest.console.is_some(), console.is_some());
 
         // Request
-        let init = init::build(config, manifest, containers).await?;
+        let init = init::build(config, manifest, containers, selinux).await?;
         let request = Message::CreateRequest {
             init,
             io,
