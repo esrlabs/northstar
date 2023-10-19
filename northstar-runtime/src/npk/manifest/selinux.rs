@@ -5,6 +5,7 @@ use crate::common::non_nul_string::NonNulString;
 
 /// SELinux configuration
 #[derive(Clone, Eq, PartialEq, Debug, Validate, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Selinux {
     /// Default SE label (mount option context=...).
     #[validate(custom = "validate_context")]
@@ -58,4 +59,16 @@ fn validate_context_with_space() {
 #[test]
 fn validate_invalid_empty_context() {
     assert!(validate_context("").is_err());
+}
+
+#[test]
+fn deserialize_unknown_field() {
+    serde_json::from_str::<Selinux>(
+        "{
+        \"mount_context\": \"system_u:object_r:container_file_t:s0\",
+        \"exec\": \"system_u:object_r:container_file_t:s0\",
+        \"unknown\": \"system_u:object_r:container_file_t:s0\"
+    }",
+    )
+    .expect_err("unknown field should not be deserialized");
 }
