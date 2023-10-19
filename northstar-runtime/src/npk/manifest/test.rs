@@ -308,7 +308,7 @@ mounts:
     version: '>=1.0.0'
     dir: bin/foo
 ";
-    Manifest::from_str(manifest).unwrap();
+    Manifest::from_str(manifest).expect("failed to parse manifest");
 }
 
 /// Resource mount with absolute dir
@@ -322,7 +322,7 @@ mounts:
     version: '>=1.0.0'
     dir: /bin/foo
 ";
-    Manifest::from_str(manifest).unwrap();
+    Manifest::from_str(manifest).expect("failed to parse manifest");
 }
 
 #[test]
@@ -343,7 +343,7 @@ mounts:
     size: 100GB
 ";
     let mountpoint = |s| -> NonNulString { unsafe { NonNulString::from_str_unchecked(s) } };
-    let manifest = Manifest::from_str(manifest).unwrap();
+    let manifest = Manifest::from_str(manifest).expect("failed to parse manifest");
     assert_eq!(
         manifest.mounts.get(&mountpoint("/a")),
         Some(&Mount::Tmpfs(Tmpfs { size: 100 }))
@@ -388,7 +388,7 @@ mounts:
     dir: /
     options: rw,noexec,nosuid
 ";
-    Manifest::from_str(manifest).unwrap();
+    Manifest::from_str(manifest).expect("failed to parse manifest");
 }
 
 const ROUNDTRIP_MANIFEST: &str = "

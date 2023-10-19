@@ -917,9 +917,9 @@ mod test {
     #[test]
     fn pseudo_dir_format() {
         let mut out = Vec::new();
-        pseudo_dir(&mut out, Path::new("/dev/block"), 755, 0, 0).unwrap();
+        pseudo_dir(&mut out, Path::new("/dev/block"), 755, 0, 0).expect("failed to format");
         assert_eq!(
-            String::from_utf8(out).unwrap(),
+            String::from_utf8(out).expect("invalid string"),
             "/dev d 755 0 0\n/dev/block d 755 0 0\n"
         )
     }
@@ -928,7 +928,10 @@ mod test {
     #[test]
     fn pseudo_dir_format_uid_gid() {
         let mut out = Vec::new();
-        pseudo_dir(&mut out, Path::new("/dev"), 755, 20, 30).unwrap();
-        assert_eq!(String::from_utf8(out).unwrap(), "/dev d 755 20 30\n")
+        pseudo_dir(&mut out, Path::new("/dev"), 755, 20, 30).expect("failed to format");
+        assert_eq!(
+            String::from_utf8(out).expect("invalid string"),
+            "/dev d 755 20 30\n"
+        )
     }
 }
