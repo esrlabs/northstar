@@ -139,6 +139,8 @@ jobs:
         with:
           command: nextest
           args: run
+      - name: Doc tests
+        run: cargo test --doc
 
   doc:
     name: Documentation
