@@ -47,7 +47,7 @@ pub const NPK_EXT: &str = "npk";
 /// Minimum mksquashfs major version supported
 const MKSQUASHFS_MAJOR_VERSION_MIN: u64 = 4;
 /// Minimum mksquashfs minor version supported
-const MKSQUASHFS_MINOR_VERSION_MIN: u64 = 1;
+const MKSQUASHFS_MINOR_VERSION_MIN: u64 = 6;
 
 type Zip<R> = ZipArchive<R>;
 
