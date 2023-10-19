@@ -21,10 +21,9 @@ use std::{
     io::{self, BufReader, Read, Seek, SeekFrom, Write},
     os::unix::io::{AsRawFd, RawFd},
     path::{Path, PathBuf},
-    process::Command,
+    process::{self, Command},
     str::FromStr,
 };
-use tempfile::NamedTempFile;
 use thiserror::Error;
 use zip::ZipArchive;
 
@@ -710,22 +709,24 @@ fn pseudo_dir<W: io::Write>(w: &mut W, dir: &Path, mode: u16, uid: u16, gid: u16
 }
 
 /// Returns a temporary file with all the pseudo file definitions
-fn write_pseudo_files<W: io::Write>(manifest: &Manifest, out: &mut W) -> Result<()> {
+fn pseudo_files(manifest: &Manifest) -> Result<Vec<u8>> {
     let uid = manifest.uid;
     let gid = manifest.gid;
+
+    let mut out = Vec::new();
 
     // Create mountpoints as pseudofiles/dirs
     for (target, mount) in manifest.mounts.iter().sorted_by(|(a, _), (b, _)| a.cmp(b)) {
         match mount {
             Mount::Bind(Bind { options: flags, .. }) => {
                 let mode = if flags.is_rw() { 755 } else { 555 };
-                pseudo_dir(out, target.as_ref(), mode, uid, gid)?;
+                pseudo_dir(&mut out, target.as_ref(), mode, uid, gid)?;
             }
-            Mount::Persist => pseudo_dir(out, target.as_ref(), 755, uid, gid)?,
-            Mount::Proc | Mount::Sysfs => pseudo_dir(out, target.as_ref(), 444, uid, gid)?,
-            Mount::Resource { .. } => pseudo_dir(out, target.as_ref(), 555, uid, gid)?,
-            Mount::Sockets => pseudo_dir(out, target.as_ref(), 755, uid, gid)?,
-            Mount::Tmpfs { .. } => pseudo_dir(out, target.as_ref(), 755, uid, gid)?,
+            Mount::Persist => pseudo_dir(&mut out, target.as_ref(), 755, uid, gid)?,
+            Mount::Proc | Mount::Sysfs => pseudo_dir(&mut out, target.as_ref(), 444, uid, gid)?,
+            Mount::Resource { .. } => pseudo_dir(&mut out, target.as_ref(), 555, uid, gid)?,
+            Mount::Sockets => pseudo_dir(&mut out, target.as_ref(), 755, uid, gid)?,
+            Mount::Tmpfs { .. } => pseudo_dir(&mut out, target.as_ref(), 755, uid, gid)?,
             Mount::Dev => {
                 // Create a minimal set of chardevs:
                 // └─ dev
@@ -741,7 +742,7 @@ fn write_pseudo_files<W: io::Write>(manifest: &Manifest, out: &mut W) -> Result<
                 //     └── zero
 
                 // Create /dev pseudo dir. This is needed in order to create pseudo chardev file in /dev
-                pseudo_dir(out, target.as_ref(), 755, uid, gid)?;
+                pseudo_dir(&mut out, target.as_ref(), 755, uid, gid)?;
 
                 const XATTR_SECURITY_SELINUX: &str = "security.selinux";
 
@@ -785,7 +786,7 @@ fn write_pseudo_files<W: io::Write>(manifest: &Manifest, out: &mut W) -> Result<
         }
     }
 
-    Ok(())
+    Ok(out)
 }
 
 /// Run mksquashfs to create image.
@@ -844,13 +845,15 @@ fn mksquashfs(
         );
     }
 
-    // Format pseudo files.
-    let mut pseudo_files = NamedTempFile::new().context("failed to create temporary file")?;
-    write_pseudo_files(manifest, &mut pseudo_files)?;
+    // Format pseudo files defintion.
+    let pseudo_files = pseudo_files(manifest)?;
 
     // Run mksquashfs to create image
     let mut cmd = Command::new(mksquashfs);
-    cmd.arg(&root.display().to_string())
+    cmd.stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .stdin(process::Stdio::piped())
+        .arg(&root.display().to_string())
         .arg(&image.display().to_string())
         .arg("-noappend")
         .arg("-no-progress")
@@ -859,8 +862,7 @@ fn mksquashfs(
         .arg(manifest.uid.to_string())
         .arg("-force-gid")
         .arg(manifest.gid.to_string())
-        .arg("-pf")
-        .arg(pseudo_files.path());
+        .args(["-pf", "-"]); // Read pseudofile definition from stdin.
 
     if let Some(block_size) = squashfs_opts.block_size {
         cmd.arg("-b").arg(format!("{block_size}"));
@@ -875,9 +877,23 @@ fn mksquashfs(
         }
     }
 
-    match cmd.output() {
+    // Spawn mksqushshfs - will wait for input in stdin.
+    let mut child = cmd.spawn()?;
+
+    // Write pseudofile definition to stdin of mksquashfs.
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("failed to open stdin"))?;
+    stdin.write_all(&pseudo_files)?;
+    // Close stdin to signal EOF to mksquashfs.
+    drop(stdin);
+
+    match child.wait_with_output() {
         Ok(output) if !output.status.success() => {
-            return Err(anyhow!("mksquashfs failed with {:?}", output.status))
+            io::copy(&mut output.stdout.as_slice(), &mut io::stdout())?;
+            io::copy(&mut output.stderr.as_slice(), &mut io::stderr())?;
+            return Err(anyhow!("mksquashfs failed with {:?}", output.status));
         }
         Ok(_) => (),
         Err(e) => return Err(anyhow!("mksquashfs failed: {e}")),
