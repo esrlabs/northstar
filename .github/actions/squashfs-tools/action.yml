@@ -1,0 +1,15 @@
+name: SquashFS Tools
+description: Install squashfs-tools.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: SquashFS Tools
+      shell: bash
+      run: |
+          sudo apt install help2man libz-dev liblzo2-dev liblz4-dev libzstd-dev
+          git clone https://github.com/plougher/squashfs-tools.git
+          cd squashfs-tools/squashfs-tools
+          git checkout 4.6.1
+          sudo CONFIG=1 LZO_SUPPORT=1 LZ4_SUPPORT=1 ZSTD_SUPPORT=1 XZ_SUPPORT=1 INSTALL_PREFIX=/usr make install
+          mksquashfs -version
