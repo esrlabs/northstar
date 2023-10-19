@@ -141,6 +141,8 @@ jobs:
         with:
           command: nextest
           args: run
+      - name: Doc tests
+        run: cargo test --doc
 
   doc:
     name: Documentation
@@ -156,7 +158,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Build Documentation
-        run: cargo doc --no-deps -p northstar --all-features
+        run: |
+          cargo doc --no-deps -p northstar-runtime --all-features
+          cargo doc --no-deps -p northstar-client --all-features
 
   md:
     name: Lint markdown files

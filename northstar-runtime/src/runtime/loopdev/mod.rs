@@ -5,38 +5,7 @@
 //! Setup and control loop devices.
 //!
 //! Provides rust interface with similar functionality to the Linux utility `losetup`.
-//!
-//! # Examples
-//!
-//! Default options:
-//!
-//! ```no_run
-//! use loopdev::LoopControl;
-//! let lc = LoopControl::open().unwrap();
-//! let ld = lc.next_free().unwrap();
-//!
-//! println!("{}", ld.path().unwrap().display());
-//!
-//! ld.attach_file("disk.img").unwrap();
-//! // ...
-//! ld.detach().unwrap();
-//! ```
-//!
-//! Custom options:
-//!
-//! ```no_run
-//! # use loopdev::LoopControl;
-//! # let lc = LoopControl::open().unwrap();
-//! # let ld = lc.next_free().unwrap();
-//! #
-//! ld.with()
-//!     .part_scan(true)
-//!     .offset(512 * 1024 * 1024) // 512 MiB
-//!     .size_limit(1024 * 1024 * 1024) // 1GiB
-//!     .attach("disk.img").unwrap();
-//! // ...
-//! ld.detach().unwrap();
-//! ```
+
 use bindings::{
     loop_info64, LOOP_CLR_FD, LOOP_CTL_ADD, LOOP_CTL_GET_FREE, LOOP_SET_CAPACITY,
     LOOP_SET_DIRECT_IO, LOOP_SET_FD, LOOP_SET_STATUS64, LO_FLAGS_AUTOCLEAR, LO_FLAGS_PARTSCAN,
@@ -95,15 +64,6 @@ impl LoopControl {
 
     /// Finds and opens the next available loop device.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use loopdev::LoopControl;
-    /// let lc = LoopControl::open().unwrap();
-    /// let ld = lc.next_free().unwrap();
-    /// println!("{}", ld.path().unwrap().display());
-    /// ```
-    ///
     /// # Errors
     ///
     /// This function will return an error for various reasons when opening
@@ -121,15 +81,6 @@ impl LoopControl {
     }
 
     /// Add and opens a new loop device.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use loopdev::LoopControl;
-    /// let lc = LoopControl::open().unwrap();
-    /// let ld = lc.add(1).unwrap();
-    /// println!("{}", ld.path().unwrap().display());
-    /// ```
     ///
     /// # Errors
     ///
@@ -194,17 +145,6 @@ impl LoopDevice {
     }
 
     /// Attach the loop device to a file with given options.
-    ///
-    /// # Examples
-    ///
-    /// Attach the device to a file.
-    ///
-    /// ```no_run
-    /// use loopdev::LoopDevice;
-    /// let mut ld = LoopDevice::open("/dev/loop0").unwrap();
-    /// ld.with().part_scan(true).attach("disk.img").unwrap();
-    /// # ld.detach().unwrap();
-    /// ```
     pub fn with(&self) -> AttachOptions<'_> {
         AttachOptions {
             device: self,
@@ -214,17 +154,6 @@ impl LoopDevice {
     }
 
     /// Attach the loop device to a file that maps to the whole file.
-    ///
-    /// # Examples
-    ///
-    /// Attach the device to a file.
-    ///
-    /// ```no_run
-    /// use loopdev::LoopDevice;
-    /// let ld = LoopDevice::open("/dev/loop0").unwrap();
-    /// ld.attach_file("disk.img").unwrap();
-    /// # ld.detach().unwrap();
-    /// ```
     ///
     /// # Errors
     ///
@@ -324,15 +253,6 @@ impl LoopDevice {
     /// gets closed. This happens when `LoopDev` goes out of scope so you should ensure the `LoopDev`
     /// lives for a short a time as possible.
     ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use loopdev::LoopDevice;
-    /// let ld = LoopDevice::open("/dev/loop0").unwrap();
-    /// # ld.attach_file("disk.img").unwrap();
-    /// ld.detach().unwrap();
-    /// ```
-    ///
     /// # Errors
     ///
     /// This function will return an error for various reasons when calling the
@@ -385,33 +305,6 @@ impl LoopDevice {
 }
 
 /// Used to set options when attaching a device. Created with [`LoopDevice::with`()].
-///
-/// # Examples
-///
-/// Enable partition scanning on attach:
-///
-/// ```no_run
-/// use loopdev::LoopDevice;
-/// let mut ld = LoopDevice::open("/dev/loop0").unwrap();
-/// ld.with()
-///     .part_scan(true)
-///     .attach("disk.img")
-///     .unwrap();
-/// # ld.detach().unwrap();
-/// ```
-///
-/// A 1MiB slice of the file located at 1KiB into the file.
-///
-/// ```no_run
-/// use loopdev::LoopDevice;
-/// let mut ld = LoopDevice::open("/dev/loop0").unwrap();
-/// ld.with()
-///     .offset(1024*1024)
-///     .size_limit(1024*1024*1024)
-///     .attach("disk.img")
-///     .unwrap();
-/// # ld.detach().unwrap();
-/// ```
 #[must_use]
 pub struct AttachOptions<'d> {
     device: &'d LoopDevice,
