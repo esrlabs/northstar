@@ -16,8 +16,8 @@ clap_complete = "4.3.2"
 futures = { version = "0.3.27", default-features = false }
 humantime = "2.1.0"
 itertools = "0.11.0"
-northstar-client = { version = "^0.9.0", path = "../northstar-client" }
-northstar-runtime = { version = "^0.9.0", path = "../northstar-runtime", features = ["seccomp"] }
+northstar-client = { version = "^0.9.1-pre", path = "../northstar-client" }
+northstar-runtime = { version = "^0.9.1-pre", path = "../northstar-runtime", features = ["seccomp"] }
 pin-project-lite = "0.2.9"
 prettytable-rs = "0.10.0"
 regex = "1.7.3"
