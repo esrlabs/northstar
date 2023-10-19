@@ -154,7 +154,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Build Documentation
-        run: cargo doc --no-deps -p northstar --all-features
+        run: |
+          cargo doc --no-deps -p northstar-runtime --all-features
+          cargo doc --no-deps -p northstar-client --all-features
 
   md:
     name: Lint markdown files
