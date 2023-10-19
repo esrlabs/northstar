@@ -115,6 +115,7 @@ impl MountControl {
         npk: &Npk,
         target: &Path,
         key: Option<&PublicKey>,
+        selinux: bool,
     ) -> impl Future<Output = Result<()>> {
         let dm = self.dm.clone();
         let lc = self.lc.clone();
@@ -125,7 +126,11 @@ impl MountControl {
         let fsimg_offset = npk.fsimg_offset();
         let container = npk.manifest().container();
         let verity_header = npk.verity_header().cloned();
-        let selinux_context = npk.manifest().selinux.as_ref().map(|s| s.context.clone());
+        let selinux_context = npk
+            .manifest()
+            .selinux
+            .as_ref()
+            .and_then(|s| s.mount_context.clone());
         let hashes = npk.hashes().cloned();
         let lo_timeout = self.lo_timeout;
 
@@ -143,7 +148,7 @@ impl MountControl {
                 lo_timeout,
             };
             debug!("Mounting {container}");
-            mount(dm, lc, mount_info).map(drop)
+            mount(dm, lc, mount_info, selinux).map(drop)
         })
         .map(|r| match r {
             Ok(r) => r,
@@ -176,6 +181,7 @@ fn mount(
     dm: Arc<devicemapper::DeviceMapper>,
     lc: Arc<Mutex<LoopControl>>,
     mount_info: Mount,
+    selinux: bool,
 ) -> Result<()> {
     let Mount {
         container,
@@ -262,20 +268,14 @@ fn mount(
         target.display(),
     );
     let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
+    const FSTYPE: Option<&str> = Some(FS_TYPE);
     let source = Some(&device);
-    let fstype = Some(FS_TYPE);
-    let data = if let Some(selinux_context) = selinux_context {
-        if Path::new("/sys/fs/selinux/enforce").exists() {
-            Some(format!("{}{}", "context=", selinux_context.as_str()))
-        } else {
-            warn!("Failed to determine SELinux status of host system. SELinux is disabled.");
-            None
-        }
-    } else {
-        None
-    };
+    let data = selinux
+        .then_some(())
+        .and(selinux_context)
+        .map(|context| format!("context={}", context.as_str()));
     let data = data.as_deref();
-    let mount_result = nix::mount::mount(source, target, fstype, flags, data);
+    let mount_result = nix::mount::mount(source, target, FSTYPE, flags, data);
 
     if let Err(ref e) = mount_result {
         warn!("Failed to mount: {}", e);

@@ -132,6 +132,13 @@ impl fmt::Display for MountOption {
 #[derive(Default, Clone, Eq, PartialEq, Debug)]
 pub struct MountOptions(HashSet<MountOption>);
 
+impl MountOptions {
+    /// Check if the options container the rw flag.
+    pub fn is_rw(&self) -> bool {
+        self.contains(&MountOption::Rw)
+    }
+}
+
 impl std::ops::Deref for MountOptions {
     type Target = HashSet<MountOption>;
 

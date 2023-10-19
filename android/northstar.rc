@@ -156,7 +156,7 @@ on post-fs-data
 service northstar /system/bin/logwrapper -- /system/bin/northstar --disable-mount-namespace -c /system/etc/northstar.toml
     class main
     setenv ANDROID_DNS_MODE local
-    seclabel u:r:native:s0
+    seclabel u:r:northstar:s0
     user system
     group system inet shell
     devmode

@@ -25,6 +25,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
     config: &Config,
     manifest: &Manifest,
     containers: I,
+    selinux: bool,
 ) -> Result<Init, Error> {
     let container = manifest.container();
     let root = config.run_dir.join(container.to_string());
@@ -46,6 +47,10 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         .map(Into::into)
         .sorted()
         .collect();
+    let selinux = selinux
+        .then_some(())
+        .and(manifest.selinux.as_ref())
+        .cloned();
 
     Ok(Init {
         container,
@@ -61,6 +66,7 @@ pub async fn build<'a, I: Iterator<Item = &'a Container> + Clone>(
         seccomp,
         console,
         sockets,
+        selinux,
     })
 }
 

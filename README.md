@@ -126,7 +126,7 @@ Install build dependencies on Debian based distributions by running
 sudo apt-get install build-essential libclang1 squashfs-tools
 ```
 
-The `squashfs-tools` package is required in version **4.1** or higher.
+The `squashfs-tools` package is required in version **4.6** or higher.
 
 Northstar comes with a set of [examples](./examples) that demonstrate most of
 the Northstar features. Building the example binaries and packing its
@@ -184,7 +184,7 @@ sudo apt install help2man libz-dev liblzo2-dev liblz4-dev libzstd-dev
 git clone https://github.com/plougher/squashfs-tools.git
 cd squashfs-tools/squashfs-tools
 git checkout 4.6.1
-sudo CONFIG=1 LZO_SUPPORT=1 LZ4_SUPPORT=1 ZSTD_SUPPORT=1 XZ_SUPPORT=1 make -j $(nproc) install
+sudo CONFIG=1 LZO_SUPPORT=1 LZ4_SUPPORT=1 ZSTD_SUPPORT=1 XZ_SUPPORT=1 XATTR_SUPPORT=1 make -j $(nproc) install
 ```
 
 ## Configuration

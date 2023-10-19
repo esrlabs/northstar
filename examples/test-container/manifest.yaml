@@ -61,7 +61,8 @@ seccomp:
     clone: any # Needed for socket tests.
     clone3: any # Needed for socket tests.
 selinux:
-  context: unconfined_u:object_r:user_home_t:s0
+  mount_context: unconfined_u:object_r:user_home_t:s0
+  exec: unconfined_u:object_r:test_container_t:s0
 sockets:
   datagram:
     type: datagram

@@ -5,6 +5,7 @@ use crate::{
         network::Network,
         rlimit::{RLimitResource, RLimitValue},
         sched::{Policy, Sched},
+        selinux::Selinux,
     },
     runtime::{
         exit_status::ExitStatus,
@@ -35,7 +36,8 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     ffi::{c_int, CString},
-    io,
+    fs,
+    io::{self, Write},
     os::unix::prelude::{AsRawFd, OwnedFd},
     path::{Path, PathBuf},
     process::exit,
@@ -73,6 +75,7 @@ pub struct Init {
     pub seccomp: Option<AllowList>,
     pub console: bool,
     pub sockets: Vec<String>,
+    pub selinux: Option<Selinux>,
 }
 
 impl Init {
@@ -88,12 +91,24 @@ impl Init {
                 info!("Channel closed. Exiting...");
                 std::process::exit(0);
             }
-            Ok(_) => unimplemented!("Unimplemented message"),
+            Ok(_) => unreachable!("unimplemented message"),
             Err(e) => panic!("failed to receive message: {e}"),
         };
 
         // Become a subreaper
         set_child_subreaper(true);
+
+        // SE context transition
+        if let Some(context) = self.selinux.as_ref().and_then(|s| s.exec.as_ref()) {
+            debug!("Setting SELinux context to {}", context);
+            let mut exec = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/proc/thread-self/attr/exec")
+                .expect("failed to open SELinux context file");
+            exec.write_all(context.as_bytes())
+                .expect("failed to write SELinux context");
+        }
 
         // Set the process name to init. This process inherited the process name
         // from the runtime
@@ -365,7 +380,7 @@ impl Init {
                 let path = Path::new("/var/run/netns").join(namespace);
 
                 if path.exists() {
-                    let handle = std::fs::OpenOptions::new()
+                    let handle = fs::OpenOptions::new()
                         .read(true)
                         .write(false)
                         .open(&path)
