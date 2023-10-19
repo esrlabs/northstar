@@ -267,7 +267,7 @@ fn mount(
         device.display(),
         target.display(),
     );
-    const FLAGS: MountFlags = MountFlags::MS_RDONLY;
+    let flags = MountFlags::MS_RDONLY | MountFlags::MS_NOSUID;
     const FSTYPE: Option<&str> = Some(FS_TYPE);
     let source = Some(&device);
     let data = selinux
@@ -275,7 +275,7 @@ fn mount(
         .and(selinux_context)
         .map(|context| format!("context={}", context.as_str()));
     let data = data.as_deref();
-    let mount_result = nix::mount::mount(source, target, FSTYPE, FLAGS, data);
+    let mount_result = nix::mount::mount(source, target, FSTYPE, flags, data);
 
     if let Err(ref e) = mount_result {
         warn!("Failed to mount: {}", e);
