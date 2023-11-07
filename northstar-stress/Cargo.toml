@@ -12,7 +12,7 @@ rust-version.workspace = true
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 clap = { version = "4.2.7", features = ["derive"] }
 env_logger = "0.10.0"
-futures = { version = "0.3.27", default-features = false }
+futures = { version = "0.3.29", default-features = false }
 humantime = "2.1.0"
 log = "0.4.19"
 northstar-client = { path = "../northstar-client" }
