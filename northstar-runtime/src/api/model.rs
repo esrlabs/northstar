@@ -119,6 +119,7 @@ pub enum Request {
     Shutdown,
     Start {
         container: Container,
+        init: Option<NonNulString>,
         arguments: Vec<NonNulString>,
         environment: HashMap<NonNulString, NonNulString>,
     },

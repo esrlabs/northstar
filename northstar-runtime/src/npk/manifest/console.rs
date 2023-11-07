@@ -42,8 +42,8 @@ pub enum Permission {
     Shutdown,
     /// Start a container
     Start,
-    /// Start a container with extra args and env
-    StartWithArgsAndEnv,
+    /// Start a container with custom init, args and env
+    StartCommand,
     /// Token creation
     TokenCreate,
     /// Token verification

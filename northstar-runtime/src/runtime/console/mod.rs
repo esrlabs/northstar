@@ -318,7 +318,7 @@ impl Console {
 ///
 /// # Errors
 ///
-/// If the streamed NPK is not valid and parseable a `Error::Npk(..)` is returned.
+/// If the streamed NPK is not valid and parsable a `Error::Npk(..)` is returned.
 /// If the event loop is closed due to shutdown, this function will return `Error::EventLoopClosed`.
 ///
 async fn process_request<S>(
@@ -343,11 +343,12 @@ where
         model::Request::Repositories => Permission::Repositories,
         model::Request::Shutdown => Permission::Shutdown,
         model::Request::Start {
+            init,
             arguments,
             environment,
             ..
-        } if arguments.is_empty() && environment.is_empty() => Permission::Start,
-        model::Request::Start { .. } => Permission::StartWithArgsAndEnv,
+        } if init.is_none() && arguments.is_empty() && environment.is_empty() => Permission::Start,
+        model::Request::Start { .. } => Permission::StartCommand,
         model::Request::TokenCreate { .. } => Permission::TokenCreate,
         model::Request::TokenVerify { .. } => Permission::TokenVerification,
         model::Request::Umount { .. } => Permission::Umount,

@@ -272,39 +272,16 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
     {
-        self.start_with_args(container, empty::<&str>()).await
+        self.start_command(
+            container,
+            Option::<&str>::None,
+            empty::<&str>(),
+            empty::<(&str, &str)>(),
+        )
+        .await
     }
 
-    /// Start container name and pass args
-    ///
-    /// ```no_run
-    /// # use futures::StreamExt;
-    /// # use northstar_client::Client;
-    /// # use std::collections::HashMap;
-    /// #
-    /// # #[tokio::main(flavor = "current_thread")]
-    /// # async fn main() {
-    /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
-    /// client.start_with_args("hello:0.0.1", ["--foo"]).await.expect("failed to start \"hello --foor\"");
-    /// // Print start notification
-    /// println!("{:#?}", client.next().await);
-    /// # }
-    /// ```
-    pub async fn start_with_args<C, A>(
-        &mut self,
-        container: C,
-        args: impl IntoIterator<Item = A>,
-    ) -> Result<(), Error>
-    where
-        C: TryInto<Container>,
-        C::Error: std::error::Error + Send + Sync + 'static,
-        A: TryInto<NonNulString>,
-        A::Error: std::error::Error + Send + Sync + 'static,
-    {
-        self.start_with_args_env(container, args, empty()).await
-    }
-
-    /// Start container name and pass args and set additional env variables
+    /// Start container name and pass init, arguments and set additional env variables.
     ///
     /// ```no_run
     /// # use futures::StreamExt;
@@ -316,26 +293,40 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
     /// #   let mut client = Client::new(tokio::net::TcpStream::connect("localhost:4200").await.unwrap(), None).await.unwrap();
     /// let mut env = HashMap::new();
     /// env.insert("FOO", "blah");
-    /// client.start_with_args_env("hello:0.0.1", ["--dump", "-v"], env).await.expect("failed to start \"hello\"");
+    /// client.start_command("hello:0.0.1", Some("/bin/hello"), ["--dump", "-v"], env).await.expect("failed to start \"hello\"");
     /// // Print start notification
     /// println!("{:#?}", client.next().await);
     /// # }
     /// ```
-    pub async fn start_with_args_env<C, A>(
+    pub async fn start_command<C, A, E, K>(
         &mut self,
         container: C,
+        init: Option<A>,
         args: impl IntoIterator<Item = A>,
-        env: impl IntoIterator<Item = (A, A)>,
+        env: impl IntoIterator<Item = (E, K)>,
     ) -> Result<(), Error>
     where
         C: TryInto<Container>,
         C::Error: std::error::Error + Send + Sync + 'static,
         A: TryInto<NonNulString>,
         A::Error: std::error::Error + Send + Sync + 'static,
+        E: TryInto<NonNulString>,
+        E::Error: std::error::Error + Send + Sync + 'static,
+        K: TryInto<NonNulString>,
+        K::Error: std::error::Error + Send + Sync + 'static,
     {
         let container = container
             .try_into()
             .map_err(|e| Error::InvalidArgument(e.to_string()))?;
+
+        let init = if let Some(init) = init {
+            Some(
+                init.try_into()
+                    .map_err(|e| Error::InvalidArgument(format!("invalid init: {e}")))?,
+            )
+        } else {
+            None
+        };
 
         let mut args_converted = vec![];
         for arg in args {
@@ -360,6 +351,7 @@ impl<'a, T: AsyncRead + AsyncWrite + Unpin> Client<T> {
         let environment = env_converted;
         let request = Request::Start {
             container,
+            init,
             arguments,
             environment,
         };

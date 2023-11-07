@@ -15,7 +15,7 @@ use northstar_runtime::{
 };
 use std::{
     convert::{TryFrom, TryInto},
-    env, fs,
+    env, fs, iter,
 };
 use tempfile::TempDir;
 use tokio::{fs::remove_file, net::UnixStream, pin, select, time};
@@ -204,6 +204,19 @@ impl Client {
         northstar_client::Client::new(io, Some(1000))
             .await
             .context("failed to create client")
+    }
+
+    /// Start a container with arguments.
+    pub async fn start_with_args<I: IntoIterator<Item = S>, S: ToString>(
+        &mut self,
+        container: &str,
+        args: I,
+    ) -> Result<()> {
+        let args = args.into_iter().map(|s| s.to_string());
+        self.client
+            .start_command(container, None, args, iter::empty::<(&str, &str)>())
+            .await?;
+        Ok(())
     }
 
     pub async fn stop(&mut self, container: &str, timeout: u64) -> Result<()> {
