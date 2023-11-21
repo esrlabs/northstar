@@ -270,7 +270,10 @@ impl State {
         if !autostarts.is_empty() {
             for (container, autostart) in &autostarts {
                 info!("Autostarting {} ({:?})", container, autostart);
-                if let Err(e) = self.start(container, &[], &HashMap::with_capacity(0)).await {
+                if let Err(e) = self
+                    .start(container, None, &[], &HashMap::with_capacity(0))
+                    .await
+                {
                     Self::warn_autostart_failure(container, autostart, e)?
                 }
             }
@@ -352,6 +355,7 @@ impl State {
     pub(super) async fn start(
         &mut self,
         container: &Container,
+        init: Option<NonNulString>,
         args_extra: &[NonNulString],
         env_extra: &HashMap<NonNulString, NonNulString>,
     ) -> Result<(), Error> {
@@ -395,10 +399,19 @@ impl State {
         let manifest = self.manifest(container)?.clone();
 
         // Check if the container is not a resource
-        let init = manifest.init.clone().ok_or_else(|| {
-            warn!("Container {} is a resource", container);
-            Error::StartContainerResource(container.clone())
-        })?;
+        let init = if let Some(init) = init {
+            // Replace the string <INIT> with the init from the manifest.
+            if let Some(ref i) = manifest.init {
+                unsafe { NonNulString::from_string_unchecked(init.replace("<INIT>", i)) }
+            } else {
+                init
+            }
+        } else {
+            manifest.init.clone().ok_or_else(|| {
+                warn!("Container {} is a resource", container);
+                Error::StartContainerResource(container.clone())
+            })?
+        };
 
         // Containers that need to be mounted before container can be started
         let mut need_mount = HashSet::new();
@@ -920,10 +933,14 @@ impl State {
                     }
                     model::Request::Start {
                         container,
+                        init,
                         arguments,
                         environment,
                     } => {
-                        let result = match self.start(container, arguments, environment).await {
+                        let result = match self
+                            .start(container, init.clone(), arguments, environment)
+                            .await
+                        {
                             Ok(_) => model::StartResult::Ok {
                                 container: container.clone(),
                             },

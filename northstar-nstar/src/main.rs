@@ -7,6 +7,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as Base64, Engine as _};
 use clap::{self, Parser};
 use futures::StreamExt;
+use itertools::Itertools;
 use northstar_client::{
     model::{Container, Token},
     Client, Name, VERSION,
@@ -59,12 +60,10 @@ enum Subcommand {
         /// Container name and optional version
         #[arg(value_name = "name[:version]")]
         container: String,
-        /// Command line arguments
-        #[arg(short, long)]
-        args: Option<Vec<String>>,
-        /// Environment variables in KEY=VALUE format
-        #[arg(short, long)]
-        env: Option<Vec<String>>,
+        /// Container cmdline. If not specified, the container's init, args and env are used.
+        /// <INIT> is replaced with the containers init from the manifest. e.g northstar-nstar start hello-world:0.0.1 DEBUG=1 <INIT> -v
+        #[arg(trailing_var_arg = true)]
+        command: Option<Vec<String>>,
     },
     /// Stop a container
     Kill {
@@ -292,24 +291,40 @@ async fn main() -> Result<()> {
                 pretty::umounts(&result);
             }
         }
-        Subcommand::Start {
-            container,
-            args,
-            env,
-        } => {
+        Subcommand::Start { container, command } => {
             let container = resolve_container(&container, &mut client).await?;
-            let args = args.unwrap_or_default();
-            let env = env.unwrap_or_default();
-            let env = env
-                .iter()
-                .map(|s| s.split_once('=').expect("invalid env. use key=value"))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect::<Vec<_>>();
+
+            let mut env = HashMap::new();
+            let mut init = None;
+            let mut args = Vec::new();
+
+            if let Some(command) = command {
+                // env
+                env.extend(
+                    command
+                        .iter()
+                        .take_while(|s| s.contains('='))
+                        .map(|s| s.split_once('=').expect("invalid env. use key=value"))
+                        .map(|(k, v)| (k.to_string(), v.to_string())),
+                );
+                // Take init if present. Default to non to allow just setting env.
+                init = command.get(env.len()).cloned();
+
+                // Everything else is args.
+                args.extend(command.iter().skip(env.len() + 1).cloned());
+            }
+
             client
-                .start_with_args_env(container.clone(), args, env)
+                .start_command(container.clone(), init.clone(), args.clone(), env.clone())
                 .await?;
             if !opt.json {
-                println!("started {container}");
+                let env = env.iter().map(|(k, v)| format!("{}={}", k, v)).format(" ");
+                println!(
+                    "started {container} {} {} {}",
+                    env,
+                    init.unwrap_or_default(),
+                    args.iter().format(" ")
+                );
             }
         }
         Subcommand::Kill { container, signal } => {

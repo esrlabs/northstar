@@ -45,8 +45,8 @@ pub enum Permission {
     Shutdown,
     /// Start a container
     Start,
-    /// Start a container with extra args and env
-    StartWithArgsAndEnv,
+    /// Start a container with custom init, args and env
+    StartCommand,
     /// Token creation
     TokenCreate,
     /// Token verification
@@ -83,7 +83,7 @@ impl From<crate::npk::manifest::console::Permission> for Permission {
             ManifestPermission::Repositories => Permission::Repositories,
             ManifestPermission::Shutdown => Permission::Shutdown,
             ManifestPermission::Start => Permission::Start,
-            ManifestPermission::StartWithArgsAndEnv => Permission::StartWithArgsAndEnv,
+            ManifestPermission::StartCommand => Permission::StartCommand,
             ManifestPermission::TokenCreate => Permission::TokenCreate,
             ManifestPermission::TokenVerification => Permission::TokenVerification,
             ManifestPermission::Umount => Permission::Umount,
