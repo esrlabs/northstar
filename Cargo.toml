@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.9.1"
+version = "0.9.2-pre"
 authors = ["ESRLabs"]
 description = "Northstar is an container runtime for Linux targetting embedded systems"
 edition = "2021"
