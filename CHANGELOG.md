@@ -1,4 +1,35 @@
-# 0.9.1 (unreleased)
+# 0.9.2 (unreleased)
+
+# 0.9.1 (November 29th, 2023)
+
+## Changed
+
+- runtime Allow custom init on start command [#1059]
+
+## Dependencies
+
+- deps Bump base64 from 0.21.4 to 0.21.5 [#1052]
+- deps Bump tempfile from 3.5.0 to 3.8.1 [#1054]
+- deps Bump futures from 0.3.28 to 0.3.29 [#1058]
+- deps Bump byteorder from 1.4.3 to 1.5.0 [#1051]
+- deps Bump semver from 1.0.19 to 1.0.20 [#1057]
+- deps Bump regex from 1.8.1 to 1.10.2 [#1056]
+- deps Bump anyhow from 1.0.71 to 1.0.75 [#1055]
+- deps Bump strum_macros from 0.25.2 to 0.25.3 [#1053]
+- deps Bump serde_plain from 1.0.1 to 1.0.2 [#1050]
+- deps Create CODE_OF_CONDUCT.md [#1048]
+
+[#1048]: https://github.com/esrlabs/northstar/pull/1048
+[#1050]: https://github.com/esrlabs/northstar/pull/1050
+[#1051]: https://github.com/esrlabs/northstar/pull/1051
+[#1052]: https://github.com/esrlabs/northstar/pull/1052
+[#1053]: https://github.com/esrlabs/northstar/pull/1053
+[#1054]: https://github.com/esrlabs/northstar/pull/1054
+[#1055]: https://github.com/esrlabs/northstar/pull/1055
+[#1056]: https://github.com/esrlabs/northstar/pull/1056
+[#1057]: https://github.com/esrlabs/northstar/pull/1057
+[#1058]: https://github.com/esrlabs/northstar/pull/1048
+[#1059]: https://github.com/esrlabs/northstar/pull/1059
 
 # 0.9.0 (October 19th, 2023)
 

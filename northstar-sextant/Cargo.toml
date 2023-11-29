@@ -13,6 +13,6 @@ anyhow = { version = "1.0.75", features = ["backtrace"] }
 clap = { version = "4.2.7", features = ["derive"] }
 colored = "2.0.4"
 env_logger = "0.10.0"
-northstar-runtime = { version = "^0.9.1-pre", path = "../northstar-runtime", features = ["npk"] }
+northstar-runtime = { version = "^0.9.1", path = "../northstar-runtime", features = ["npk"] }
 tempfile = "3.8.1"
 zip = { version = "0.6.6", default-features = false }
