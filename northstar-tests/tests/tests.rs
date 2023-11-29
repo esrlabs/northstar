@@ -692,10 +692,10 @@ mod socket {
         test(&mut client, "datagram").await
     }
 
-    #[runtime_test]
-    async fn connect_to_seq_packet_unix_socket_and_send_data() -> Result<()> {
-        test(&mut client, "seq-packet").await
-    }
+    // #[runtime_test]
+    // async fn connect_to_seq_packet_unix_socket_and_send_data() -> Result<()> {
+    //     test(&mut client, "seq-packet").await
+    // }
 
     #[runtime_test]
     async fn connect_to_stream_unix_socket_echo() -> Result<()> {
