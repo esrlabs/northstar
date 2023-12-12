@@ -19,5 +19,5 @@ northstar-client = { path = "../northstar-client" }
 rand = "0.8.5"
 tokio = { version = "1.32.0", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = { version = "0.1.14", features = ["time"] }
-tokio-util = "0.7.8"
+tokio-util = "0.7.10"
 url = { version = "2.4.1", features = ["serde"] }
