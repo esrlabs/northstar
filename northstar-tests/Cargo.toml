@@ -10,7 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
-env_logger = "0.10.0"
+env_logger = "0.10.1"
 futures = { version = "0.3.29", default-features = false }
 lazy_static = "1.4.0"
 log = "0.4.19"
