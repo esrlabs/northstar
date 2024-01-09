@@ -23,5 +23,5 @@ northstar-tests-derive = { path = "northstar-tests-derive" }
 regex = "1.10.2"
 tempfile = "3.8.1"
 tokio = { version = "1.32.0", features = ["fs", "time"] }
-url = "2.4.1"
+url = "2.5.0"
 zip = { version = "0.6.6", default-features = false }
