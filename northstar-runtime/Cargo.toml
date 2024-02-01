@@ -10,7 +10,7 @@ description.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-anyhow = { version = "1.0.75", features = ["backtrace"] }
+anyhow = { version = "1.0.79", features = ["backtrace"] }
 async-stream = { version = "0.3.4", optional = true }
 async-trait = { version = "0.1.76", optional = true }
 base64 = { version = "0.21.5", optional = true }
@@ -71,7 +71,7 @@ runtime = ["api", "async-stream", "async-trait", "bincode", "bindgen", "bytesize
 seccomp = ["bindgen", "caps", "lazy_static", "memoffset", "nix", "npk"]
 
 [dev-dependencies]
-anyhow = "1.0.75"
+anyhow = "1.0.79"
 memfd = "0.6.2"
 proptest = "1.4.0"
 rstest = { version = "0.18.1", default-features = false }
@@ -80,7 +80,7 @@ tokio = { version = "1.32.0", features = ["test-util"] }
 toml = "0.8.8"
 
 [build-dependencies]
-anyhow = "1.0.75"
+anyhow = "1.0.79"
 bindgen = { version = "0.65.1", default-features = false, features = ["runtime"], optional = true }
 
 [package.metadata.docs.rs]
