@@ -6,7 +6,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-anyhow = { version = "1.0.75", features = ["backtrace"] }
+anyhow = { version = "1.0.80", features = ["backtrace"] }
 caps = "0.5.5"
 clap = { version = "4.2.7", features = ["derive"] }
 nix = { version = "0.27.1", default-features = false, features = ["process", "user"] }
