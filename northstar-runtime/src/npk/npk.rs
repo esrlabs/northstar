@@ -527,7 +527,6 @@ impl<'a> NpkBuilder<'a> {
 
         let mut fsimage = fs::OpenOptions::new()
             .read(true)
-            .write(true)
             .append(true)
             .open(fsimage)
             .context("failed to open fsimage")?;
