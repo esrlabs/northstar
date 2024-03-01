@@ -13,7 +13,7 @@ anyhow = { version = "1.0.75", features = ["backtrace"] }
 env_logger = "0.10.2"
 futures = { version = "0.3.29", default-features = false }
 lazy_static = "1.4.0"
-log = "0.4.19"
+log = "0.4.21"
 memfd = "0.6.2"
 nanoid = "0.4.0"
 nix = { version = "0.27.1", features = ["sched"], default-features = false }
