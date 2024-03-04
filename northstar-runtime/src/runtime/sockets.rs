@@ -4,7 +4,7 @@ use log::debug;
 use nix::{
     sys::{
         socket,
-        socket::{sockopt, AddressFamily, SockFlag, SockType, UnixAddr},
+        socket::{sockopt, AddressFamily, Backlog, SockFlag, SockType, UnixAddr},
     },
     unistd::{fchown, Gid, Uid},
 };
@@ -90,7 +90,7 @@ pub(crate) async fn open(
 
         // Streaming and seqpacket sockets need to be listened on.
         if matches!(ty, Type::Stream | Type::SeqPacket) {
-            socket::listen(&socket, 100).context("failed to listen")?;
+            socket::listen(&socket, Backlog::MAXCONN).context("failed to listen")?;
         }
 
         debug!(
