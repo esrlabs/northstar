@@ -196,9 +196,15 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.5"
+version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35636a1494ede3b646cc98f74f8e62c773a38a659ebc777a2cf26b9b74171df9"
+checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
+
+[[package]]
+name = "base64"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
 
 [[package]]
 name = "base64ct"
@@ -1555,7 +1561,7 @@ name = "northstar-nstar"
 version = "0.9.2-pre"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.0",
  "clap 4.2.7",
  "clap_complete",
  "futures",
@@ -1580,7 +1586,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "base64",
+ "base64 0.22.0",
  "bincode",
  "bindgen",
  "bitflags 2.4.2",
@@ -2279,7 +2285,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f02d8aa6e3c385bf084924f660ce2a3a6bd333ba55b35e8590b321f35d88513"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -2609,7 +2615,7 @@ name = "token-client"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.0",
  "futures",
  "northstar-client",
  "tokio",
@@ -2621,7 +2627,7 @@ name = "token-server"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.0",
  "northstar-client",
  "tokio",
 ]
