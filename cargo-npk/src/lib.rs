@@ -94,7 +94,7 @@ fn pack(
 
     let target = cmd.target().unwrap_or_else(|| cmd.host_triple());
 
-    if cmd.artifacts().len() > 1 {
+    if cmd.artifacts().count() > 1 {
         bail!("crates with multiple artifacts are unsupported");
     }
 
@@ -237,7 +237,7 @@ fn build(subcommand: &Subcommand, target: &str, use_cross: bool) -> Result<PathB
         bail!("failed to run cargo");
     }
 
-    let artifact = subcommand.artifacts().first().expect("missing artifact");
+    let artifact = subcommand.artifacts().next().expect("missing artifact");
     let executable = subcommand.artifact(
         artifact,
         if subcommand.target() == Some(subcommand.host_triple()) {
