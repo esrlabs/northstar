@@ -32,21 +32,19 @@ impl<T: AsRawFd> RawFdExt for T {
 #[allow(clippy::unwrap_used)]
 fn non_blocking() {
     let (a, b) = nix::unistd::pipe().unwrap();
-    nix::unistd::close(b).unwrap();
+    drop(b);
 
-    let opt = unsafe { nix::libc::fcntl(a, nix::libc::F_GETFL) };
+    let opt = unsafe { nix::libc::fcntl(a.as_raw_fd(), nix::libc::F_GETFL) };
     assert!((dbg!(opt) & nix::libc::O_NONBLOCK) == 0);
     assert!(!a.is_nonblocking().unwrap());
 
     a.set_nonblocking(true).unwrap();
-    let opt = unsafe { nix::libc::fcntl(a, nix::libc::F_GETFL) };
+    let opt = unsafe { nix::libc::fcntl(a.as_raw_fd(), nix::libc::F_GETFL) };
     assert!((dbg!(opt) & nix::libc::O_NONBLOCK) != 0);
     assert!(a.is_nonblocking().unwrap());
 
     a.set_nonblocking(false).unwrap();
-    let opt = unsafe { nix::libc::fcntl(a, nix::libc::F_GETFL) };
+    let opt = unsafe { nix::libc::fcntl(a.as_raw_fd(), nix::libc::F_GETFL) };
     assert!((dbg!(opt) & nix::libc::O_NONBLOCK) == 0);
     assert!(!a.is_nonblocking().unwrap());
-
-    nix::unistd::close(a).unwrap();
 }

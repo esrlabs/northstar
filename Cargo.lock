@@ -390,6 +390,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
+
+[[package]]
 name = "cgroups-rs"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1264,7 +1270,7 @@ name = "inspect"
 version = "0.0.1"
 dependencies = [
  "caps",
- "nix 0.27.1",
+ "nix 0.28.0",
 ]
 
 [[package]]
@@ -1337,9 +1343,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.150"
+version = "0.2.153"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89d92a4743f9a61002fae18374ed11e7973f530cb3a3255fb354818118b2203c"
+checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
 
 [[package]]
 name = "libloading"
@@ -1501,12 +1507,13 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.27.1"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
 dependencies = [
  "bitflags 2.4.2",
  "cfg-if",
+ "cfg_aliases",
  "libc",
  "memoffset",
 ]
@@ -1531,7 +1538,7 @@ dependencies = [
  "clap 4.2.7",
  "console 0.15.7",
  "log",
- "nix 0.27.1",
+ "nix 0.28.0",
  "northstar-runtime",
  "serde",
  "time",
@@ -1605,7 +1612,7 @@ dependencies = [
  "memfd",
  "memoffset",
  "nanoid",
- "nix 0.27.1",
+ "nix 0.28.0",
  "pkg-version",
  "proptest",
  "rand_core",
@@ -1676,7 +1683,7 @@ dependencies = [
  "log",
  "memfd",
  "nanoid",
- "nix 0.27.1",
+ "nix 0.28.0",
  "northstar-client",
  "northstar-runtime",
  "northstar-tests-derive",
@@ -2517,7 +2524,7 @@ dependencies = [
  "anyhow",
  "caps",
  "clap 4.2.7",
- "nix 0.27.1",
+ "nix 0.28.0",
  "socket2",
 ]
 
