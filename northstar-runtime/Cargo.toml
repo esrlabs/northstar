@@ -48,8 +48,8 @@ serde_plain = { version = "1.0.2", optional = true }
 serde_with = { version = "3.0.0", optional = true }
 serde_yaml = { version = "0.9.30", optional = true }
 sha2 = { version = "0.10.8", optional = true }
-strum = { version = "0.25.0", optional = true }
-strum_macros = { version = "0.25.3", optional = true }
+strum = { version = "0.26.1", optional = true }
+strum_macros = { version = "0.26.1", optional = true }
 tempfile = { version = "3.8.1", optional = true }
 thiserror = "1.0.56"
 tokio = { version = "1.32.0", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "sync", "time", "net"], optional = true }
