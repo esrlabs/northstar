@@ -14,7 +14,7 @@ env_logger = "0.10.2"
 futures = { version = "0.3.29", default-features = false }
 lazy_static = "1.4.0"
 log = "0.4.21"
-memfd = "0.6.2"
+memfd = "0.6.4"
 nanoid = "0.4.0"
 nix = { version = "0.28.0", features = ["sched"], default-features = false }
 northstar-client = { path = "../northstar-client" }
