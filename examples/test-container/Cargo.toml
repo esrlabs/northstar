@@ -10,7 +10,7 @@ anyhow = { version = "1.0.80", features = ["backtrace"] }
 caps = "0.5.5"
 clap = { version = "4.2.7", features = ["derive"] }
 nix = { version = "0.28.0", default-features = false, features = ["process", "user"] }
-socket2 = { version = "0.5.5", features = ["all"] }
+socket2 = { version = "0.5.6", features = ["all"] }
 
 [package.metadata.npk]
 manifest = "manifest.yaml"
