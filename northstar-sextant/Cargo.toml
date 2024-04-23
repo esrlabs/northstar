@@ -10,7 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow = { version = "1.0.80", features = ["backtrace"] }
-clap = { version = "4.2.7", features = ["derive"] }
+clap = { version = "4.5.4", features = ["derive"] }
 colored = "2.1.0"
 env_logger = "0.10.2"
 northstar-runtime = { version = "^0.9.2-pre", path = "../northstar-runtime", features = ["npk"] }
