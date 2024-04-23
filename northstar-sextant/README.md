@@ -22,7 +22,7 @@ For example, the following command packs the `hello-world` example container:
 
 ```bash
 $ target/debug/northstar-sextant pack \
---manifest examples/container/hello-world/manifest.yaml \
+--manifest-path examples/container/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --out target/northstar/repository
 ```
@@ -43,7 +43,7 @@ private key has to be provided:
 
 ```bash
 $ target/debug/northstar-sextant pack \
---manifest examples/container/hello-world/manifest.yaml \
+--manifest-path examples/container/hello-world/manifest.yaml \
 --root target/release/hello-world \
 --key ./examples/keys/northstar.key \
 --out target/northstar/repository
