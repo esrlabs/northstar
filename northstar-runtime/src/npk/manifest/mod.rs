@@ -198,16 +198,6 @@ impl FromStr for Manifest {
     }
 }
 
-impl ToString for Manifest {
-    #[allow(clippy::unwrap_used)]
-    fn to_string(&self) -> String {
-        // A `Manifest` is convertible to `String` as long as its implementation of `Serialize` does
-        // not return an error. This should never happen for the types that we use in `Manifest` so
-        // we can safely use .unwrap() here.
-        serde_yaml::to_string(self).expect("failed to serialize manifest")
-    }
-}
-
 /// Validate manifest.
 fn validate(manifest: &Manifest) -> Result<(), ValidationError> {
     // Most optionals in the manifest are not valid for a resource container

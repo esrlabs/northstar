@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt, str::FromStr};
+use std::{
+    cmp::Ordering,
+    fmt::{self, Display},
+    str::FromStr,
+};
 use thiserror::Error;
 
 /// Parsing error
@@ -164,9 +168,9 @@ impl FromStr for VersionReq {
     }
 }
 
-impl ToString for VersionReq {
-    fn to_string(&self) -> String {
-        self.inner.to_string()
+impl Display for VersionReq {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner)
     }
 }
 

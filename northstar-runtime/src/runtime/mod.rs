@@ -1,6 +1,7 @@
 mod cgroups;
 mod console;
 mod debug;
+#[allow(unused)]
 mod devicemapper;
 mod env;
 mod error;

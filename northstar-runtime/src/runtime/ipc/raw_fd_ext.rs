@@ -3,6 +3,7 @@ use std::{io, io::Result, os::unix::prelude::AsRawFd};
 
 pub trait RawFdExt: AsRawFd {
     /// Returns true of self is set to non-blocking.
+    #[allow(unused)]
     fn is_nonblocking(&self) -> Result<bool>;
 
     /// Set non-blocking mode.
