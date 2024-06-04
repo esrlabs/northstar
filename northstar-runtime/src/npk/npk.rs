@@ -603,8 +603,8 @@ pub fn unpack_with(path: &Path, out: &Path, unsquashfs: &Path) -> Result<(), Err
 
     let mut cmd = Command::new(unsquashfs);
     cmd.arg("-dest")
-        .arg(&root.display().to_string())
-        .arg(&fsimg.display().to_string());
+        .arg(root.display().to_string())
+        .arg(fsimg.display().to_string());
     cmd.output().context("failed to unsquashfs")?;
     fs::remove_file(&fsimg).with_context(|| format!("failed to remove {}", &fsimg.display()))?;
 
@@ -856,8 +856,8 @@ fn mksquashfs(
     cmd.stdout(process::Stdio::piped())
         .stderr(process::Stdio::piped())
         .stdin(process::Stdio::piped())
-        .arg(&root.display().to_string())
-        .arg(&image.display().to_string())
+        .arg(root.display().to_string())
+        .arg(image.display().to_string())
         .arg("-noappend")
         .arg("-no-progress")
         .arg("-info")

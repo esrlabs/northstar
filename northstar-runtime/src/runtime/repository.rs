@@ -18,7 +18,7 @@ use std::{
     fmt,
     future::ready,
     io::BufReader,
-    os::unix::prelude::{AsRawFd, FromRawFd, IntoRawFd},
+    os::unix::prelude::{FromRawFd, IntoRawFd},
     path::{Path, PathBuf},
 };
 use tokio::{
@@ -293,7 +293,7 @@ impl Repository for MemRepository {
         let fd = opts.create(nanoid!()).context("failed to create memfd")?;
 
         // Write buffer to the memfd
-        let mut file = unsafe { fs::File::from_raw_fd(fd.as_raw_fd()) };
+        let mut file = unsafe { fs::File::from_raw_fd(fd.into_raw_fd()) };
         file.set_nonblocking(true)
             .context("failed to set nonblocking")?;
 
@@ -307,26 +307,28 @@ impl Repository for MemRepository {
         // Check repository capacity limit
         if let Some(size) = self.capacity_size {
             if self.containers.values().map(|a| a.1).sum::<u64>() + npk_size >= size {
+                info!("C1");
+
                 bail!("repository capacity limit reached");
             }
         }
-
         // Seal the memfd
         let seals = memfd::SealsHashSet::from_iter([
             memfd::FileSeal::SealGrow,
             memfd::FileSeal::SealShrink,
             memfd::FileSeal::SealWrite,
         ]);
+        // Move the fd into the MemFd to avoid two owned references to the fd.
+        let fd = unsafe { memfd::Memfd::from_raw_fd(file.into_std().await.into_raw_fd()) };
         fd.add_seals(&seals)
             .and_then(|_| fd.add_seal(memfd::FileSeal::SealSeal))
             .context("failed to add memfd seals")?;
 
-        // Forget fd - it's owned by file
-        fd.into_raw_fd();
-
-        file.set_nonblocking(false)
+        // The memfd is no longer needed - move it into a File that is used for the Npk
+        fd.as_file()
+            .set_nonblocking(false)
             .context("failed to set blocking")?;
-        let file = BufReader::new(file.into_std().await);
+        let file = BufReader::new(fd.into_file());
 
         // Load npk
         debug!("Loading memfd as npk");

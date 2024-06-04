@@ -78,7 +78,7 @@ jobs:
       matrix:
         rust:
           - stable
-          - 1.73.0
+          - 1.74.0
     steps:
       - uses: actions-rs/toolchain@v1
         with:
