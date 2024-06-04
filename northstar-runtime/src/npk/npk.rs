@@ -499,7 +499,8 @@ impl<'a> NpkBuilder<'a> {
         zip.set_comment(meta_str);
 
         // Add manifest.
-        let manifest_str = manifest.to_string();
+        let manifest_str =
+            serde_yaml::to_string(manifest).context("failed to serialize manifest")?;
         zip.start_file(MANIFEST_NAME, options)
             .context("failed to write manifest to NPK")?;
         zip.write_all(manifest_str.as_bytes())
