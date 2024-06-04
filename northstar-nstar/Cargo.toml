@@ -11,7 +11,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow = { version = "1.0.80", features = ["backtrace"] }
 base64 = "0.22.0"
-clap = { version = "4.2.7", features = ["derive"] }
+clap = { version = "4.4.18", features = ["derive"] }
 clap_complete = "4.3.2"
 futures = { version = "0.3.29", default-features = false }
 humantime = "2.1.0"
