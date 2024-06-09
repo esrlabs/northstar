@@ -33,7 +33,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0483169d5fac0887f85c2fa8fecfe08669791712d8260de1a6ec30630a62932f"
 dependencies = [
  "bytes",
- "env_logger",
+ "env_logger 0.10.2",
  "lazy_static",
  "libc",
  "log",
@@ -827,16 +827,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
+name = "env_filter"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f2c92ceda6ceec50f43169f9ee8424fe2db276791afde7b2cd8bc084cb376ab"
+dependencies = [
+ "log",
+ "regex",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
 dependencies = [
- "humantime",
- "is-terminal",
  "log",
  "regex",
- "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "env_filter",
+ "humantime",
+ "log",
 ]
 
 [[package]]
@@ -1727,7 +1747,7 @@ dependencies = [
  "anyhow",
  "clap 4.5.20",
  "colored",
- "env_logger",
+ "env_logger 0.11.5",
  "northstar-runtime",
  "tempfile",
  "zip",
@@ -1739,7 +1759,7 @@ version = "0.9.3-pre"
 dependencies = [
  "anyhow",
  "clap 4.5.20",
- "env_logger",
+ "env_logger 0.11.5",
  "futures",
  "humantime",
  "log",
@@ -1756,7 +1776,7 @@ name = "northstar-tests"
 version = "0.9.3-pre"
 dependencies = [
  "anyhow",
- "env_logger",
+ "env_logger 0.11.5",
  "futures",
  "lazy_static",
  "log",
