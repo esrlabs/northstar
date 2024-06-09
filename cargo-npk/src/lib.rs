@@ -23,6 +23,8 @@ use northstar_runtime::npk::npk::{NpkBuilder, SquashfsOptions};
 
 use crate::metadata::Metadata;
 
+use is_terminal::IsTerminal;
+
 mod cli;
 mod metadata;
 
@@ -307,7 +309,7 @@ fn stdout(choice: ColorChoice) -> StandardStream {
         ColorChoice::Always => termcolor::ColorChoice::Always,
         ColorChoice::Never => termcolor::ColorChoice::AlwaysAnsi,
         ColorChoice::Auto => {
-            if atty::is(atty::Stream::Stdout) {
+            if std::io::stdout().is_terminal() {
                 termcolor::ColorChoice::Auto
             } else {
                 termcolor::ColorChoice::Never
