@@ -65,7 +65,7 @@ impl Display for Compression {
 #[group(skip)]
 #[allow(clippy::large_enum_variant)]
 pub enum NpkSubCommand {
-    /// Compile the current package and create an apk
+    /// Compile the current package and create a npk
     Pack {
         #[clap(flatten)]
         args: Args,
@@ -91,6 +91,6 @@ pub enum NpkSubCommand {
         #[clap(long("out"))]
         out: Option<PathBuf>,
     },
-    /// Print the version of cargo-apk
+    /// Print the version of cargo-npk
     Version,
 }
