@@ -36,7 +36,7 @@ pub enum Policy {
 #[serde(rename_all = "snake_case")]
 pub struct Sched {
     /// Scheduling policy.
-    #[validate(custom = "validate_policy")]
+    #[validate(custom(function = "validate_policy"))]
     pub policy: Policy,
 }
 
