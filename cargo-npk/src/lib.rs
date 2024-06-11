@@ -23,7 +23,7 @@ use northstar_runtime::npk::npk::{NpkBuilder, SquashfsOptions};
 
 use crate::metadata::Metadata;
 
-use is_terminal::IsTerminal;
+use std::io::IsTerminal;
 
 mod cli;
 mod metadata;
