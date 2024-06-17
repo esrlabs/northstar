@@ -319,10 +319,11 @@ impl MemoryMonitor {
         // This task stops when the main loop receiver closes
         let task = {
             let stop = token.clone();
-            let mut inotify = Inotify::init().expect("Error while initializing inotify instance");
+            let inotify = Inotify::init().expect("Error while initializing inotify instance");
 
             inotify
-                .add_watch(&path, WatchMask::MODIFY)
+                .watches()
+                .add(&path, WatchMask::MODIFY)
                 .expect("failed to add file watch");
 
             task::spawn(async move {
@@ -330,7 +331,7 @@ impl MemoryMonitor {
 
                 let mut buffer = [0; 1024];
                 let mut stream = inotify
-                    .event_stream(&mut buffer)
+                    .into_event_stream(&mut buffer)
                     .expect("failed to initialize inotify event stream");
 
                 'outer: loop {
