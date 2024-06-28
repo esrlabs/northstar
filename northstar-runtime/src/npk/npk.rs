@@ -490,8 +490,8 @@ impl<'a> NpkBuilder<'a> {
         let manifest = me.get_manifest()?;
 
         // Create zip.
-        let options =
-            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         let mut zip = zip::ZipWriter::new(writer);
 
         // Write meta data to zip comment.
@@ -544,7 +544,10 @@ impl<'a> NpkBuilder<'a> {
         // 'extra data' to inflate the header of the ZIP file.
         // See chapter 4.3.6 of APPNOTE.TXT
         // (https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
-        zip.start_file_aligned(FS_IMG_NAME, options, BLOCK_SIZE as u16)
+        let options_aligned = zip::write::SimpleFileOptions::default()
+            .with_alignment(BLOCK_SIZE as u16)
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file(FS_IMG_NAME, options_aligned)
             .context("failed to create aligned zip-file")?;
         fsimage
             .seek(SeekFrom::Start(0))

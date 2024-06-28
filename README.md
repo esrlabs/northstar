@@ -109,7 +109,7 @@ subsystems and features:
 ## Quickstart
 
 Northstar is written in [Rust](https://www.rust-lang.org). The minimum supported
-Rust version (MSRV) is *1.70.0*. Rust is best installed and managed by the rustup
+Rust version (MSRV) is *1.73.0*. Rust is best installed and managed by the rustup
 tool. Rust has a 6-week rapid release process and supports a great number of
 platforms, so there are many builds of Rust available at any time. rustup
 manages these builds in a consistent way on every platform that Rust supports,
