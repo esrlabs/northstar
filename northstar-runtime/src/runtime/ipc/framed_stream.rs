@@ -67,7 +67,7 @@ impl FramedUnixStream {
 
         let message =
             recvmsg::<SockaddrIn6>(fd, iov, control_message_buffer, FLAGS).map_err(os_err)?;
-        recv_control_msg::<T>(message.cmsgs().next(), num)
+        recv_control_msg::<T>(message.cmsgs()?.next(), num)
     }
 
     /// Into UnixStream
