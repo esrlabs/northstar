@@ -195,12 +195,6 @@ dependencies = [
 
 [[package]]
 name = "base64"
-version = "0.21.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
-
-[[package]]
-name = "base64"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
@@ -324,7 +318,6 @@ name = "cargo-npk"
 version = "0.9.2-pre"
 dependencies = [
  "anyhow",
- "atty",
  "cargo-subcommand",
  "cargo_metadata",
  "clap 4.4.18",
@@ -361,9 +354,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.15.4"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eee4243f1f26fc7a42710e7439c149e2b10b05472f88090acce52632f231a73a"
+checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
  "cargo-platform",
@@ -1232,6 +1225,7 @@ checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.5",
+ "serde",
 ]
 
 [[package]]
@@ -1552,7 +1546,7 @@ name = "northstar-nstar"
 version = "0.9.2-pre"
 dependencies = [
  "anyhow",
- "base64 0.22.0",
+ "base64",
  "clap 4.4.18",
  "clap_complete",
  "futures",
@@ -1577,7 +1571,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "base64 0.22.0",
+ "base64",
  "bincode",
  "bindgen",
  "bitflags 2.4.2",
@@ -2263,15 +2257,17 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.0.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f02d8aa6e3c385bf084924f660ce2a3a6bd333ba55b35e8590b321f35d88513"
+checksum = "0ad483d2ab0149d5a5ebcd9972a3852711e0153d863bf5a5d0391d28883c4a20"
 dependencies = [
- "base64 0.21.7",
+ "base64",
  "chrono",
  "hex",
  "indexmap 1.9.3",
+ "indexmap 2.2.6",
  "serde",
+ "serde_derive",
  "serde_json",
  "serde_with_macros",
  "time",
@@ -2279,9 +2275,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.0.0"
+version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc7d5d3932fb12ce722ee5e64dd38c504efba37567f0c402f6ca728c3b8b070"
+checksum = "65569b702f41443e8bc8bbb1c5779bd0450bbe723b56198980e80ec45780bce2"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -2598,7 +2594,7 @@ name = "token-client"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64 0.22.0",
+ "base64",
  "futures",
  "northstar-client",
  "tokio",
@@ -2610,7 +2606,7 @@ name = "token-server"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64 0.22.0",
+ "base64",
  "northstar-client",
  "tokio",
 ]
