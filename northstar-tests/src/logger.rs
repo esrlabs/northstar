@@ -37,7 +37,7 @@ pub fn init() {
         .format(|buf, record| {
             let elapsed = START.elapsed();
             let timestamp = format!("{}.{:06}s", elapsed.as_secs(), elapsed.subsec_micros());
-            let level = buf.default_styled_level(record.metadata().level());
+            let level = buf.default_level_style(record.metadata().level());
             let target = record
                 .target()
                 .strip_prefix("northstar_runtime::")
