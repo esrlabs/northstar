@@ -8,10 +8,10 @@ use crate::common::non_nul_string::NonNulString;
 #[serde(deny_unknown_fields)]
 pub struct Selinux {
     /// Default SE label (mount option context=...).
-    #[validate(custom = "validate_context")]
+    #[validate(custom(function = "validate_context"))]
     pub mount_context: Option<NonNulString>,
     /// SE context for the execve call from init.
-    #[validate(custom = "validate_context")]
+    #[validate(custom(function = "validate_context"))]
     pub exec: Option<NonNulString>,
 }
 
