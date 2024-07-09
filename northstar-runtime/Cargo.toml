@@ -73,7 +73,7 @@ seccomp = ["bindgen", "caps", "lazy_static", "memoffset", "nix", "npk"]
 [dev-dependencies]
 anyhow = "1.0.80"
 memfd = "0.6.4"
-proptest = "1.4.0"
+proptest = "1.5.0"
 rstest = { version = "0.21.0", default-features = false }
 serde_json = "1.0.108"
 tokio = { version = "1.32.0", features = ["test-util"] }
