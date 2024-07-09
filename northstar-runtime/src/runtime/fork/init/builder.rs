@@ -9,7 +9,7 @@ use crate::{
     seccomp,
 };
 use itertools::Itertools;
-use log::warn;
+use log::{debug, warn};
 use nix::mount::MsFlags;
 use std::{
     ffi::{c_void, CString},
@@ -157,7 +157,7 @@ async fn prepare_mounts<'a, I: Iterator<Item = &'a Container> + Clone>(
 }
 
 fn proc(root: &Path, target: &Path) -> Mount {
-    log::debug!(
+    debug!(
         "Adding proc on {} with options ro, nosuid, noexec and nodev",
         target.display()
     );
@@ -169,7 +169,7 @@ fn proc(root: &Path, target: &Path) -> Mount {
 }
 
 fn sysfs(root: &Path, target: &Path) -> Mount {
-    log::debug!(
+    debug!(
         "Adding sysfs on {} with options ro, nosuid, noexec and nodev",
         target.display()
     );
@@ -181,7 +181,7 @@ fn sysfs(root: &Path, target: &Path) -> Mount {
 }
 
 fn sockets(socket_dir: &Path, root: &Path, target: &Path) -> Mount {
-    log::debug!("Adding sockets on {}", target.display());
+    debug!("Adding sockets on {}", target.display());
     let target = root.join_strip(target);
     Mount::new(
         Some(socket_dir.to_owned()),
@@ -196,21 +196,12 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) 
     if host.exists() {
         let rw = options.contains(&mount::MountOption::Rw);
         let mut mounts = Vec::with_capacity(if rw { 2 } else { 1 });
-        if options.is_empty() {
-            log::debug!(
-                "Adding {} on {} with flags {}",
-                host.display(),
-                target.display(),
-                options
-            );
-        } else {
-            log::debug!(
-                "Adding {} on {} with flags {}",
-                host.display(),
-                target.display(),
-                options
-            );
-        }
+        debug!(
+            "Adding {} on {} with flags {}",
+            host.display(),
+            target.display(),
+            options
+        );
         let source = host.to_owned();
         let target = root.join_strip(target);
         let mut flags = options_to_flags(options);
@@ -224,7 +215,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) 
         ));
 
         if !rw {
-            log::debug!(
+            debug!(
                 "Adding read only remount of {} on {}",
                 host.display(),
                 target.display()
@@ -235,7 +226,7 @@ fn bind(root: &Path, target: &Path, host: &Path, options: &mount::MountOptions) 
         }
         mounts
     } else {
-        log::debug!(
+        debug!(
             "Skipping bind mount of nonexistent source {} to {}",
             host.display(),
             target.display()
@@ -254,7 +245,7 @@ async fn persist(
     // upgrades with persistent data migration
     let source = config.data_dir.join(manifest.name.as_ref());
 
-    log::debug!(
+    debug!(
         "Adding {} on {} with options nodev, nosuid and noexec",
         source.display(),
         target.display(),
@@ -296,7 +287,7 @@ fn resource(
         src
     };
 
-    log::debug!(
+    debug!(
         "Mounting {} on {} with {}",
         src.display(),
         target.display(),
@@ -315,7 +306,7 @@ fn resource(
 }
 
 fn tmpfs(root: &Path, target: &Path, size: u64) -> Mount {
-    log::debug!(
+    debug!(
         "Mounting tmpfs with size {} on {}",
         bytesize::ByteSize::b(size),
         target.display()
