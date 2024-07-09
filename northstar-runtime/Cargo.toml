@@ -61,7 +61,7 @@ url = { version = "2.5.0", features = ["serde"], optional = true }
 uuid = { version = "1.9.1", features = ["v4"], optional = true }
 validator = { version = "0.16.1", features = ["derive"] }
 zeroize = { version = "1.8.1", optional = true }
-zip = { version = "0.6.6", default-features = false, optional = true }
+zip = { version = "2.1.3", default-features = false, optional = true }
 
 [features]
 api = ["bytes", "futures", "npk", "pkg-version", "serde_json", "tokio", "tokio-util"]
