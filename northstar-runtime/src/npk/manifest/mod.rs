@@ -101,7 +101,7 @@ pub struct Manifest {
     pub args: Vec<NonNulString>,
     /// Environment passed to container
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    #[validate(custom = "validate_env")]
+    #[validate(custom(function = "validate_env"))]
     pub env: HashMap<NonNulString, NonNulString>,
     /// UID
     #[validate(range(min = 1, message = "uid must be greater than 0"))]
@@ -110,7 +110,7 @@ pub struct Manifest {
     #[validate(range(min = 1, message = "gid must be greater than 0"))]
     pub gid: u16,
     /// Scheduling parameter.
-    #[validate]
+    #[validate(nested)]
     pub sched: Option<sched::Sched>,
     /// List of bind mounts and resources
     #[serde(
@@ -118,20 +118,20 @@ pub struct Manifest {
         skip_serializing_if = "HashMap::is_empty",
         deserialize_with = "maps_duplicate_key_is_error::deserialize"
     )]
-    #[validate(custom = "mount::validate")]
+    #[validate(custom(function = "mount::validate"))]
     pub mounts: HashMap<mount::MountPoint, mount::Mount>,
     /// Autostart this container upon northstar startup
     pub autostart: Option<autostart::Autostart>,
     /// CGroup configuration
     pub cgroups: Option<self::cgroups::CGroups>,
     /// Network configuration. Unshare the network if omitted.
-    #[validate(custom = "network::validate")]
+    #[validate(custom(function = "network::validate"))]
     pub network: Option<Network>,
     /// Seccomp configuration
-    #[validate(custom = "seccomp::validate")]
+    #[validate(custom(function = "seccomp::validate"))]
     pub seccomp: Option<Seccomp>,
     /// SELinux configuration
-    #[validate]
+    #[validate(nested)]
     pub selinux: Option<selinux::Selinux>,
     /// Capabilities
     #[serde(
@@ -146,7 +146,7 @@ pub struct Manifest {
         skip_serializing_if = "HashSet::is_empty",
         deserialize_with = "sets_duplicate_value_is_error::deserialize"
     )]
-    #[validate(custom = "validate_suppl_groups")]
+    #[validate(custom(function = "validate_suppl_groups"))]
     pub suppl_groups: HashSet<NonNulString>,
     /// Resource limits
     #[serde(
