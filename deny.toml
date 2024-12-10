@@ -75,6 +75,8 @@ ignore = [
     #{ crate = "a-crate-that-is-yanked@0.1.1", reason = "you can specify why you are ignoring the yanked crate" },
     { id = "RUSTSEC-2021-0139", reason = "ansi_term is needed for now by mini-redis for the redis example" },
     { id = "RUSTSEC-2021-0145", reason = "atty is needed for now by mini-redis for the redis example" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is needed for now by mini-redis for the redis example" },
+    { id = "RUSTSEC-2024-0375", reason = "atty is needed for now by mini-redis for the redis example" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
@@ -101,6 +103,7 @@ allow = [
     "MIT",
     "MIT-0",
     "MPL-2.0",
+    "Unicode-3.0",
     "Unicode-DFS-2016",
 ]
 # The confidence threshold for detecting a license from license text.
