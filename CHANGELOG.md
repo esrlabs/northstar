@@ -1,9 +1,10 @@
-# 0.9.2 (unreleased)
+# 0.9.2
 
 ## Dependencies
 
 - deps Bump url from 2.5.0 to 2.5.4 [#1161]
 - deps Bump validator from 0.16.1 to 0.19.0 [#1161]
+- and bump a lot of other dependencies
 
 [#1161]: https://github.com/esrlabs/northstar/pull/1161
 
