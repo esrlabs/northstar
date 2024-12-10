@@ -152,7 +152,7 @@ fn calculate_hash_tree_level_offsets(
     let mut rem_size = image_size;
 
     while rem_size > block_size {
-        let num_blocks = (rem_size + block_size - 1) / block_size;
+        let num_blocks = rem_size.div_ceil(block_size);
         let level_size = round_up_to_multiple(num_blocks * digest_size, block_size);
 
         level_sizes.push(level_size);

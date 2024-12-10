@@ -174,7 +174,7 @@ impl<'de> Deserialize<'de> for MountOptions {
         D: Deserializer<'de>,
     {
         struct MountOptionsVisitor;
-        impl<'de> Visitor<'de> for MountOptionsVisitor {
+        impl Visitor<'_> for MountOptionsVisitor {
             type Value = MountOptions;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -205,7 +205,7 @@ impl<'de> Deserialize<'de> for MountOptions {
 fn deserialize_tmpfs_size<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
     struct SizeVisitor;
 
-    impl<'de> Visitor<'de> for SizeVisitor {
+    impl Visitor<'_> for SizeVisitor {
         type Value = u64;
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a number of bytes or a string with the size (e.g. 25M)")

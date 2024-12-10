@@ -134,7 +134,7 @@ impl<'de> Deserialize<'de> for NonNulString {
     {
         struct Visitor;
 
-        impl<'de> serde::de::Visitor<'de> for Visitor {
+        impl serde::de::Visitor<'_> for Visitor {
             type Value = NonNulString;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

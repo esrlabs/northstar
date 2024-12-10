@@ -66,7 +66,7 @@ impl DmVerityTarget {
     }
 }
 
-impl<'a> Default for DmVerityTargetBuilder<'a> {
+impl Default for DmVerityTargetBuilder<'_> {
     fn default() -> Self {
         DmVerityTargetBuilder {
             version: DmVerityVersion::V1,
